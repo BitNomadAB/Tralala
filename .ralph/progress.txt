@@ -1,0 +1,385 @@
+# Ralph progress log
+
+Append-only. Newest entries at the bottom. Never rewrite history; correct mistakes with a new entry.
+
+Format:
+
+```
+## <UTC timestamp> — <story id or "baseline"> — <outcome>
+- What changed
+- Validation run and result
+- Follow-ups / blockers
+```
+
+## 2026-10-30T14:40:00Z — baseline — repository established
+- Created `AGENTS.md`, `.ralph/prd.json` (45 stories), `docs/`, Docker files and the monorepo layout.
+- Backend: FastAPI factory, registry + per-board SQLite storage, migrations, services, REST v1,
+  auth (session + bearer), scopes, idempotency, activity log, search, export/import, backups.
+- Frontend: React 19 + Vite + Tailwind v4, TanStack Query, dnd-kit board, card dialog, settings,
+  theme provider, safe Markdown renderer, WebMCP adapter and contextual tool registration.
+- Validation: `pytest` 38 passed; `ruff check app` clean; `vitest` 15 passed; `tsc --noEmit` clean;
+  `vite build` succeeded.
+- Manual browser verification (Chrome, dev servers): login, create board (5 default lists),
+  create card, edit description/priority (version 1 → 2), Markdown preview, drag card Todo → In
+  Progress, reload persistence, theme switch, credential creation, agent REST workflow
+  (create/move/search with FTS5, 403 on missing scope).
+
+## 2026-10-30T14:40:00Z — KAN-045 — left pending
+- Critical journeys were verified manually in a browser, but no automated Playwright suite exists.
+- Follow-up: add `frontend/e2e` Playwright project covering login, board creation, card CRUD,
+  drag-and-drop persistence, archive/restore, backup/restore and token scopes.
+
+## 2026-10-30T15:10:00Z ? KAN-045 ? automated E2E acceptance suite landed
+- Found the machine's Playwright 1.62.1 (npx cache) and Chromium 151; added
+  `scripts/run-playwright.mjs` to locate any local install, link it into `frontend/node_modules`
+  for ESM resolution and install browsers only when missing.
+- Added `frontend/playwright.config.ts` plus specs under `frontend/e2e`: auth, board/card CRUD,
+  search filter, card archive, drag-and-drop persistence, list reorder, board archive/restore,
+  export + backup/restore + validation, theme persistence, token issuance/revocation, agent scope
+  enforcement with audit trail, and Markdown XSS safety.
+- E2E stack is isolated (backend :8077 with `frontend/e2e/.data`, Vite :5273) and started by
+  Playwright `webServer`.
+- Frontend package management moved from npm to pnpm (pnpm-lock.yaml, corepack in Docker).
+- Validation: `pnpm test:e2e` 14 passed; `pnpm test` 15 passed; `pnpm build` ok; backend pytest 38
+  passed and ruff clean (re-run after the pnpm switch).
+
+## 2026-10-30T16:45:00Z ? KAN-046..KAN-050 ? hardening from ATAM, Cynefin and FMEA
+- Installed the BitNomadAB/Skills skill set into the local agent skills folder and ran ATAM,
+  Cynefin and FMEA against this repository. Reports:
+  `analysis/atam-architecture-analysis/2026-10-30-ai-native-kanban-mvp-architecture.md`,
+  `analysis/cynefin-context-analysis/2026-10-30-next-investment-decision.md`,
+  `analysis/fmea/2026-10-30-ai-native-kanban-platform.md` (all pass the skill report checks).
+- Implemented the agreed adjustments: per-install session secret with no insecure default,
+  exclusive restore guarded by a per-board lock plus backup pre-verification, ISO 8601 due-date
+  validation and normalized filters, Idempotency-Key on bulk creation, board-creation idempotency
+  reservation, transfer finalize fallback that archives the source card, truthful FTS5 capability
+  in /meta, 8 MiB body limit aligned with nginx, and the single-process deployment constraint
+  documented in AGENTS.md, README and docs.
+- Added `backend/tests/test_hardening.py` plus bulk/transfer tests; progress tracked as
+  KAN-046..KAN-050 (done) and KAN-051..KAN-054 (pending decisions).
+
+## 2026-10-30T17:05:00Z ? KAN-055..KAN-059 ? anti-reverse-engineering hardening
+- Ran the Anti-Reverse-Engineering Analysis skill (installed locally) on the whole repository.
+  Built the production bundle and ran `scan_build.py`: 0 SECRET, 0 LEAK, 1 REVIEW (React Router's
+  internal `http://localhost` constant). Report:
+  `analysis/anti-reverse-engineering-analysis/2026-10-30-self-hosted-web-client-and-rest-api.md`.
+- Implemented every finding: random bootstrap password when unset/placeholder, no server paths or
+  driver text in responses, session-required docs and metadata endpoints, uniform password hashing,
+  `Cache-Control: no-store`, `WWW-Authenticate: Bearer`, sanitized request ids, no server banners,
+  and a client build guard wired into `pnpm build` (it caught server env var names in the login
+  screen, now removed).
+- Validation: 61 backend tests, 15 frontend unit tests, 14 Playwright journeys, build with guard.
+
+## 2026-10-30T17:55:00Z ? KAN-060..KAN-064 ? Alembic schema migration architecture
+- Replaced the hand-rolled `PRAGMA user_version` migrator with two Alembic chains under
+  `backend/migrations` (registry, board) and programmatic control in
+  `app/storage/schema/runner.py`.
+- Baselines reproduce the released schema; `0001` is stamped for databases without
+  `alembic_version`, so existing boards and registries upgrade in place. Registry `0002` rebuilds
+  `boards` with `batch_alter_table` to add `migration_failed` and `schema_revision`; board `0002`
+  adds the completed-card index.
+- Added `MigrationManager`: registry first, then every board eagerly and sequentially at startup,
+  inside the per-board lock; verified pre-migration snapshot, `integrity_check`,
+  `foreign_key_check`, structured JSON events, `migration_failed` state, retry endpoint
+  `POST /boards/{id}/migrate`, and idempotent re-runs. Lazy mode is designed but deferred
+  (KAN-065).
+- New boards and imports initialize/migrate to head before activation; board responses expose
+  `schema_revision`; UI shows the failure state and a retry action.
+- Tests: `tests/test_migrations.py` (11 tests) covers fresh install, legacy adoption with data
+  preservation, failure + resume, unknown revision, eager startup, idempotency, backup pattern and
+  the DDL guard. Full suite: 72 backend tests passing.
+
+## 2026-10-30T18:10:00Z ? docs ? step-by-step installation for Windows, Ubuntu and macOS
+- Rewrote README installation into per-OS sections (winget/venv/Activate.ps1, deadsnakes PPA +
+  NodeSource + corepack, Homebrew keg-only PATH), a Docker alternative, data layout, health and test
+  commands per shell, and troubleshooting.
+- Verified the documented `.env` flow locally: `backend/.env` with KANBAN_DATA_DIR/../data, data at
+  the repository root, login with the configured bootstrap password, health 200.
+- All 19 bash blocks pass `bash -n`; Windows commands match the ones used in this repository.
+
+## 2026-10-30T19:05:00Z ? feature ? reusable board templates
+- Registry `0003_board_templates` stores template name (unique, case-insensitive), custom
+  description, ordered list names and labels as JSON in `registry.sqlite`.
+- `TemplateService` + `/templates` CRUD and `POST /boards/{id}/templates`; `POST /boards` accepts
+  `template_id` and lets payload `description`/`lists` win. Unknown templates fail with 422 before
+  the board row is reserved, so Idempotency-Key retries stay safe.
+- UI: template dropdown (blank by default) with list preview in the New board dialog, Settings card
+  to create/edit/delete templates, Save as template on the board page, WebMCP
+  `list_board_templates` and `template_id` on `create_board`.
+- Tests: tests/test_templates.py (10), registry head assertion in test_migrations.py, Playwright
+  templates.spec.ts (3). Full suite: 82 backend, 15 vitest, 17 Playwright.
+
+## 2026-10-30T19:14:00Z - KAN-069 - template list and dedicated editor page
+- Settings now renders templates as a scrollable list (max-h-72) with an Edit button and a delete
+  action on the right.
+- Edit navigates to /settings/templates/{id}: a full editor for name, description, ordered list rows
+  (add, move up/down, remove) and label rows (name + color), with Save, Cancel and Delete. New
+  template uses the same page at /settings/templates/new.
+- Playwright templates.spec.ts updated for the navigation flow (exact label selectors). Suite: 17
+  passing; vitest 15; guarded build clean.
+
+## 2026-10-30T19:36:00Z - KAN-071..KAN-075 - agent discussion foundation
+- Registry `0004_agent_foundation`: `role_templates` (name unique, description, system_prompt,
+  default_system_prompt factory copy, built_in, builtin_key) and `agents` (unique name, role
+  reference, prompt override, connection type/url/model, encrypted api key + hint, sampling limits,
+  enabled, last test). Nine built-in roles seeded idempotently at startup.
+- `RoleTemplateService`: list/get/create/update/duplicate/restore-defaults/delete. Built-ins cannot
+  be deleted; custom deletion nulls the agents' reference and leaves history intact.
+- `AgentService`: CRUD, duplicate (never clones credentials), enable/disable, endpoint validation,
+  connection probe (OpenAI `/models`, A2A agent card) and the architecture seam:
+  `effective_role` (live template) vs `role_snapshot` (immutable copy with provenance + SHA-256).
+- `core/secrets.py` seals provider keys with Fernet/HKDF from the install secret; responses expose
+  only `has_api_key` and a hint. New dependency: `cryptography` (see docs/decisions/0001).
+- UI: Settings now has Role templates (scrollable list + editor at /settings/roles/{id}) and AI
+  agents (scrollable list with enable toggle + editor at /settings/agents/{id}, random name,
+  connection test, masked key).
+- Tests: tests/test_agent_config.py (17) covering seeding, CRUD, restore, unique names, secret
+  secrecy, snapshot immutability, override precedence, template deletion, SSRF rejections, probe
+  recording; Playwright e2e/agents.spec.ts (3). Suite: 99 backend, 15 vitest, 20 Playwright.
+- Remaining story in the spec: discussion schema/services, forum UI, orchestration, SSE, A2A
+  execution and WebMCP tools (KAN-076..KAN-078).
+
+## 2026-10-30T20:20:00Z - attachments and ticket assignment (backend)
+- Board migration `0003_card_assignment_attachments`: assignment columns on `cards`
+  (assignee_actor_id/type/name, assigned_at, assigned_by_actor_id, index) added with plain
+  ADD COLUMN so the FTS5 triggers survive; `attachments` table (card/discussion/message references,
+  original + stored filename, content_type, size, sha256, uploader, created_at, deleted_at) with
+  indexes and a context CHECK.
+- `AttachmentService`: extension allowlist, magic-byte/content validation, per-file and per-board
+  limits, sanitized filenames, UUID storage under data/boards/{uuid}/attachments, sha256, soft
+  delete + file cleanup, activity entries.
+- REST: list/upload/get/download/delete under /boards/{board_id}/attachments (raw body upload with
+  card_id + filename query params to avoid a multipart dependency), secure headers on download.
+- Assignment: CardUpdate.assignee_actor_id / clear_assignee validating human actors and enabled
+  agents, denormalised display name, `assignee=me|<id>|unassigned` card filter, activity entries.
+- Tests: tests/test_attachments.py (6) plus legacy-board fixture updated to strip the new columns;
+  suite now 105 backend tests, ruff clean.
+- TODO next: card dialog UI (drag & drop, assignee dropdown), clipboard screenshots BLOB table,
+  discussion attachments, mentions/agent replies, escalation, and export/import/transfer of files.
+
+## 2026-10-30T20:55:00Z - KAN-080 - discussion run control
+- Board revision `0005_discussion_run_control`: `discussion_runs` (status, autonomy, rounds
+  requested/completed, token budget, time budget, stop reason, starter, timestamps),
+  `discussion_rounds` (one row per executed round with answers/failures/repeats/tokens/elapsed) and
+  plain columns on the existing tables (`round_count`, `run_state`, `tokens_used`, `elapsed_ms` on
+  the thread; `round_number` + `content_sha256` on messages; `round_number` on votes). Everything is
+  `op.add_column`, so the `cards` FTS5 triggers are untouched.
+- `Orchestrator` is now the round engine: it executes one pass over the participants, records
+  message + vote only when the position changes, hashes every answer, and reports answers, repeats,
+  failures, tokens, elapsed time and whether the round was interrupted or hit a budget.
+- `RunService` owns the loop and the control plane: `POST .../start` (inline single round),
+  `POST .../runs` (202, always background), `GET .../runs[/{run_id}]`,
+  `POST .../runs/{run_id}/pause|resume|stop`. The run row is the control channel - pause/stop are
+  plain updates that the loop checks between participant calls and between rounds - and work runs on
+  an in-process `ThreadPoolExecutor`, so no new infrastructure is involved.
+- Termination rules: consensus, requested rounds used up, every participant failed, only repeated
+  answers (`no_progress`), token budget after an answer, time budget after a round. One active run
+  per thread; review is refused with `409` while a run is running or paused.
+- UI: `RunPanel` in the discussion detail shows run state, round counters (`Rounds n · this run a/b`),
+  tokens, elapsed time, pause/resume/stop and the per-round table, plus a "Run discussion" dialog for
+  rounds and budgets. The panel polls every 1.5 s while a run is running. The board selector now asks
+  for 200 boards instead of the default page.
+- Tests: tests/test_run_control.py (10) covers inline runs, autonomous rounds, consensus stop,
+  duplicate guard, token budget, time budget, pause/resume, stop + blocked transitions, single active
+  run and input validation; Playwright e2e/discussions.spec.ts (1). Suite: 124 backend, ruff clean,
+  15 vitest, 21 Playwright, guarded build clean.
+- Next: KAN-081 - SSE for discussion activity (persist first, publish second, catch up on reconnect).
+
+## 2026-10-30T21:25:00Z - KAN-081 - SSE for discussion activity
+- Board revision `0006_discussion_events`: `discussion_events` (autoincrement `seq`, thread FK,
+  type, payload_json, actor columns, created_at) with an index on `(discussion_id, seq)`.
+- `EventService` records the event in the *same* transaction as the change and only then fans out to
+  in-process subscriber queues; queues are bounded and drop their oldest entry instead of blocking a
+  worker. Recorded types: run_started, agent_started, message_created, vote_recorded,
+  agent_completed, agent_failed, round_completed, consensus_proposed, discussion_status_changed,
+  run_finished, human_review_completed.
+- `GET .../discussions/{id}/events` streams `text/event-stream` with `id:`/`event:`/`data:` frames and
+  a 15 s keep-alive, replaying everything after `Last-Event-ID` (or `?after=`) first; it subscribes
+  before the replay and drops already-seen sequence numbers so nothing slips between the two steps.
+  `GET .../events/history?after=&limit=` serves the same log as JSON.
+- UI: `useDiscussionEvents` opens an `EventSource` per selected thread, coalesces bursts (120 ms) and
+  invalidates the discussion queries; a `live` badge shows the open connection and polling only runs
+  when the stream is unavailable. Fixed the `useBoards` filter key type that rejected `limit`.
+- Tests: tests/test_events.py (6) - published event order equals the stored order, failure events,
+  replay after a sequence, human activity, SSE framing over HTTP and 404 for unknown threads.
+  Suite: 130 backend, ruff clean, 15 vitest, 21 Playwright, guarded build clean.
+- Next: KAN-082 - @agent mentions in ticket comments.
+
+## 2026-10-30T21:55:00Z - KAN-082 - agent mentions in ticket comments
+- Board revision `0007_comment_mentions`: `comment_mention_jobs` (one row per comment and agent,
+  status, attempts, error, `response_comment_id`, role snapshot JSON, tokens, requester, timestamps)
+  with a unique `(comment_id, agent_id)` index, and `card_events` (autoincrement `seq`, ticket FK,
+  payload JSON) for the ticket event stream.
+- `CommentService` saves the comment first, then `MentionService.queue()` resolves mentions against
+  enabled agents (`@[Agent Name]` canonical, bare `@Name` matches an enabled name exactly; e-mails
+  are ignored) and queues at most five jobs. Work runs on an in-process ThreadPoolExecutor, like
+  discussion runs; the job row is the status channel.
+- The worker snapshots the role at enqueue, builds context from the ticket (title, description,
+  list, priority, due, status, labels), checklists and items, attachment metadata and the 20 most
+  recent comments, calls `runtime.call_agent`, and writes the answer as a normal agent-authored
+  comment. Retry only accepts failed jobs with no answer, so a comment is never duplicated.
+- `EventService` now serves two scopes (discussion and card) with one publish path; the shared SSE
+  helper `api/v1/streaming.py` backs both endpoints. Ticket events: `agent_started`,
+  `agent_completed`, `agent_failed`, with `Last-Event-ID` replay and a JSON history endpoint.
+- API: `GET .../cards/{card_id}/mentions`, `POST .../mentions/{job_id}/retry` (202),
+  `GET .../cards/{card_id}/events[/history]`.
+- UI: the comment composer completes `@` with an agent listbox (keyboard and mouse), the dialog
+  shows mention jobs with status/error and a Retry action, and a live badge marks the open ticket
+  stream. Ticket comment ordering is now `created_at, rowid` so same-second comments keep insertion
+  order.
+- Tests: tests/test_mentions.py (7) covers parsing, the answered thread, context contents, failed
+  retry without duplicates, ignored disabled mentions, event order/replay/SSE and 404s. Suite: 137
+  backend, ruff clean, 19 vitest, 22 Playwright, guarded build clean.
+- Docs updated: api.md, database.md, architecture.md. Next: KAN-083 escalation from a comment.
+
+## 2026-10-30T22:35:00Z - KAN-090 - board-first Discussions navigation
+- `GET /discussions/overview` returns one entry per board with `discussion_count`, `open_count` and
+  the board's newest `last_activity_at`, aggregated per board database (a board mid-repair still
+  appears with zeros). Ordering is newest activity first, then board name; boards without threads
+  stay reachable at the end.
+- The Discussions page now renders boards as the first level and loads threads only for the
+  selected board, with an `All boards` back action. The old `useBoards({limit: 200})` call (which
+  loaded every board plus list/card counts) is gone from this page.
+- Freshness: the overview refetches on page open, after creating a discussion, when returning to
+  the board list, and every 30 s while visible. It is deliberately not invalidated on every thread
+  event, because one overview request touches every board database.
+- Stabilised discussions.spec.ts: the offline agent now has a 5 s timeout and the round-counter
+  assertions allow 30 s, because a refused local port can take ~7.7 s on this host (SYN retries) and
+  raced the 10 s default. Verified 3/3 green runs.
+- Tests: tests/test_discussions.py board-overview ordering and auth, Playwright discussions.spec.ts
+  asserts the newest board is the first entrance. Suite: 139 backend, ruff clean, 19 vitest, 22
+  Playwright, guarded build clean.
+- Docs updated: api.md, architecture.md.
+
+## 2026-10-30T22:58:00Z - KAN-091 - automatic answers to human discussion messages
+- `DiscussionService.add_message` now requests one background round after the message commits:
+  always in `roundtable`/`autonomous` threads, and in `manual` threads when the text contains
+  `@agents` (word-boundary, e-mail safe) or a participant's display name. Only human actors
+  trigger, so agent-authored messages cannot loop.
+- The run is started with `background=True, rounds=1`; a thread that is already running or closed
+  keeps the message and the POST never fails because no run could start (`409`/`422` swallowed).
+- UI: the reply placeholder is mode-aware ("participants answer automatically" vs "mention @agents
+  to make the participants answer") plus a manual-mode hint under the form; the mode labels in the
+  create dialog describe the behaviour.
+- Tests: test_run_control.py covers roundtable, autonomous, `@agents`, participant-name and the
+  idle manual/closed cases; discussions.spec.ts asserts the placeholder and that an `@agents`
+  message advances the round counter without pressing Run round. Suite: 144 backend, ruff clean,
+  19 vitest, 22 Playwright, guarded build clean.
+- Docs updated: api.md, architecture.md.
+
+## 2026-10-30T23:20:00Z - KAN-092 - recovery, auto_run feedback and overview scope
+- Ran the four analysis skills against the current code (ATAM, Cynefin, FMEA and
+  anti-reverse-engineering). Reports are under `analysis/` (dated 2026-10-30) and all pass their
+  report checks. The ARE report was corrected after the analysis found that API tokens cannot carry
+  discussion scopes yet (`schemas/auth.py:9-11`), so its overview finding is LOW rather than MEDIUM.
+- Startup reconciliation (decision 0002): `Services.initialize` now calls `recover_async_work`.
+  `RunService.recover` fails runs left `running`/`paused` with `stop_reason=process_restart` and
+  resets the thread `run_state`; `MentionService.recover` fails `running` jobs (retryable) and
+  resubmits `queued` ones. A crashed process no longer leaves a thread that refuses runs or review.
+- `DiscussionService.add_message` returns `auto_run` (`started`, `already_running`,
+  `thread_closed`, `no_participants`, null) and the reply area shows a toast explaining a skipped
+  automatic answer.
+- `GET /discussions/overview` now requires `boards:read` in addition to `discussions:read`.
+- Tests: test_async_recovery.py (2), test_run_control.py auto_run assertions incl. an active run via
+  threading events, test_discussions.py overview scope. Suite: 148 backend, ruff clean, 19 vitest,
+  22 Playwright, guarded build clean. Dev backend restarted; the local thread is idle and usable.
+
+## 2026-10-30T23:32:00Z - KAN-093 - low-severity exposure findings
+- `GET /agents/directory` returns enabled agents with `id`, `name` and role only. `AgentService.directory`
+  backs it; the card dialog now uses this projection (`keys.agentDirectory`), so no endpoint, model,
+  credential hint or test message reaches a card view. The full `/agents` stays for Settings.
+- Ticket mention events no longer duplicate comment text: `agent_completed` dropped `content`,
+  `agent_failed` dropped `mentioned_content`, and `_messages` no longer returns the source text to
+  the worker. Payloads now carry `job_id`, `comment_id`, `agent_id`, `agent_name`, the response id,
+  token count and duration (plus `error` on failure).
+- Tests: test_agent_config.py checks the directory allowlist, absence of the secret/base URL and
+  401; test_mentions.py asserts the exact payload key set. The mentions E2E types the agent name
+  so accumulated E2E agents cannot push the target out of the first suggestions.
+- Validation: 149 backend, ruff clean, 19 vitest, 22 Playwright, guarded build clean.
+
+## 2026-10-30T23:45:00Z - KAN-094 - rename the product to Tralala
+- Brand: UI logo and page title, login heading, README, AGENTS intro, OpenAPI title/description and
+  the Ralph prompt now say Tralala. Descriptive "kanban board" wording stays.
+- Technical identifiers renamed without compatibility: `TRALALA_*` env prefix (config, .env.example,
+  Compose, Playwright, docs, Ralph harness), cookies `tralala_session`/`tralala_csrf`, browser key
+  `tralala-theme`, event `tralala:unauthorized`, logger names `tralala*`, token prefix `trl_`,
+  package names, Docker user and the `tralala-data` volume.
+- Intentional exceptions, recorded in `docs/decisions/0006-product-rename-tralala.md`: the HKDF
+  material in `core/secrets.py` stays as shipped (renaming it would make every sealed provider key
+  undecryptable), and historical analysis reports, released migrations and `.ralph/progress.txt`
+  keep the old name. The repository/remote name MyBoards is unchanged.
+- Validation: 149 backend, ruff clean, 19 vitest, 22 Playwright, guarded build clean. Dev backend
+  restarted with `TRALALA_*` and the existing data directory; login verified and the session cookie
+  is `tralala_session`. Users are signed out once by the cookie rename, as accepted.
+
+## 2026-10-31T00:22:00Z - brand - logo mark says AI
+- The header logo badge shows "AI" next to "Tralala" again (it had been reduced to "T" in the rename).
+  Typecheck and guarded build pass; verified in the running UI.
+
+## 2026-10-31T01:40:00Z - security - accounts, sessions and key hygiene (KAN-095)
+- Roles stay simple on purpose: `admin` holds every scope, `member` every scope except `users:admin`.
+  `has_scope` is now explicit, so a session's authority comes only from its role.
+- Sessions are registry rows (`0005_accounts_and_sessions`). Logout, password change, role change and
+  disabling an account revoke them; expiry is enforced on both the cookie and the row, and expired
+  rows are purged at startup. Added `POST /auth/password`, `/users` CRUD with reset password, and
+  last-admin protection (`409`).
+- Sign-in is throttled per username and client address with exponential backoff; `X-Forwarded-For`
+  is only trusted with `TRALALA_TRUST_PROXY_HEADERS=true`.
+- API tokens default to 90 days, can be rotated in one step, and never receive `credentials:admin`
+  or `users:admin`; discussion and agent scopes are now allowed on tokens. The board activity feed
+  also requires `cards:read`.
+- Weak or short `TRALALA_SECRET_KEY` values are replaced by a per-install secret; the first admin
+  password is written to `<data>/.bootstrap-password` instead of the log; unhandled exceptions log
+  the type only. `TRALALA_PREVIOUS_SECRET_KEY` re-seals stored provider keys at startup.
+- Frontend: Settings gains the password form, the admin-only Users card and token rotation.
+- Docs: decisions/0007, api.md, database.md, architecture.md, README, .env.example.
+
+## 2026-10-31T01:12:00Z - security - global API keys are admin-only
+- `member` now lacks `credentials:admin` as well as `users:admin`: only an administrator issues,
+  rotates and revokes the installation-wide bearer tokens. Members keep boards, agents and
+  discussions exactly as before.
+- The Settings credentials card and its create/rotate dialogs render only for administrators, and
+  the credentials query is disabled for members so it never fires a 403.
+- Tests: `test_only_admin_manages_global_keys` plus a credentials 403 assertion in the member test.
+
+## 2026-10-31T01:19:00Z - accounts - 8 character password minimum
+- `TRALALA_PASSWORD_MIN_LENGTH` defaults to 8 and 8 is also the enforced floor; the Settings forms,
+  hints and API docs were aligned. Weak published words and the username itself are still rejected.
+- Test: an 8-character password creates a user; the 5-character password still returns 422.
+
+## 2026-10-31T01:30:00Z - ui - theme kits (KAN-096)
+- Added `data-theme-kit` next to `data-theme`: CareNomad (midnight navy, periwinkle) and MatchMap
+  (ink blue, ember orange), each with its own dark and light palette as semantic CSS variables.
+- `AmbientBackground` renders one breathing grid layer, a drifting glow wash, three colour fields and
+  eight stars; the styles and timings are per kit and every animation is disabled under
+  `prefers-reduced-motion`.
+- The wordmark carries a pulse dot: CareNomad breathes over 5.2s, MatchMap does a 2.8s pin breathe
+  with a halo ping. Typography, layout and markup are untouched and no web fonts are loaded.
+- Settings shows kit swatches plus the existing dark/light/system group; both choices persist in
+  localStorage. Tests: vitest kit read/apply coverage and an E2E kit switch across reloads.
+
+## 2026-10-31T01:34:00Z - ui - per-account appearance and classic kit (KAN-097)
+- Added the `classic` kit: the original #0b0f14/#f6f7f9 palettes, flat surfaces, no ambient layer
+  and no pulse, so the pre-theme look stays available as a third option.
+- Appearance is now personal: migration 0006 stores `theme_mode`/`theme_kit` on `user_credentials`,
+  `/auth/me` returns them and `GET`/`PUT /auth/preferences` let a signed-in account change them.
+- ThemeProvider adopts the account value on sign-in and saves every change; localStorage remains a
+  first-paint cache only. An account with no stored value starts from CareNomad dark instead of
+  inheriting the browser's previous choice, so one user's theme never shows for another.
+- Tokens cannot set preferences (403). Tests: 171 backend, 22 vitest, E2E account isolation.
+
+## 2026-10-31T01:42:00Z - ui - MatchMap gets its own motion
+- The two kits were only recolouring the same ambient layers. MatchMap now follows the structure of
+  its reference: a dot field instead of a line grid, ten glowing particles twinkling over 6 s
+  (alternate), a three-stop gradient wash that slides over 22 s, and no blurred colour fields or
+  stars. CareNomad keeps its breathing line grid, drifting fields and 5.2 s pulse.
+- AmbientBackground grew an `.ambient-lights` layer that each kit shows or hides; reduced motion
+  covers it too. Verified in the browser: MatchMap paints radial-gradient dots with visible particles
+  and `pin-breathe`, CareNomad paints a line grid with blobs, stars and `pulse-core`.
+
+## 2026-10-31T01:47:00Z - ui - no pulse dot next to the wordmark
+- Removed the pulsing dot from the header brand and the login heading in every kit, together with its
+  `.pulse-dot` styles, the MatchMap pin overrides and the four now-unused keyframes. The ambient
+  motion is untouched, so CareNomad and MatchMap still breathe through the background.
+- Tidied the two comments that had lost their box characters. Build, vitest and the full Playwright
+  suite pass; the header now reads just "AI Tralala".

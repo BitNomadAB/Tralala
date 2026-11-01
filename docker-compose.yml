@@ -1,0 +1,40 @@
+﻿services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      TRALALA_DATA_DIR: /data
+      TRALALA_SECRET_KEY: ${TRALALA_SECRET_KEY:?set TRALALA_SECRET_KEY in .env}
+      TRALALA_BOOTSTRAP_USERNAME: ${TRALALA_BOOTSTRAP_USERNAME:-admin}
+      TRALALA_BOOTSTRAP_PASSWORD: ${TRALALA_BOOTSTRAP_PASSWORD:?set TRALALA_BOOTSTRAP_PASSWORD in .env}
+      TRALALA_COOKIE_SECURE: ${TRALALA_COOKIE_SECURE:-false}
+      TRALALA_CORS_ORIGINS: ""
+      TRALALA_RATE_LIMIT_PER_MINUTE: ${TRALALA_RATE_LIMIT_PER_MINUTE:-600}
+      TRALALA_ENABLE_DOCS: ${TRALALA_ENABLE_DOCS:-true}
+      TRALALA_DOCS_REQUIRE_AUTH: ${TRALALA_DOCS_REQUIRE_AUTH:-true}
+    volumes:
+      - tralala-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "${TRALALA_HTTP_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  tralala-data:

@@ -1,0 +1,1580 @@
+{
+  "project": "Tralala",
+  "spec_version": "1.0",
+  "iteration_rules": {
+    "one_story_per_iteration": true,
+    "max_iterations": 40,
+    "max_retries_per_story": 2
+  },
+  "validation_commands": {
+    "backend_tests": "cd backend && ..\\.venv\\Scripts\\python.exe -m pytest",
+    "backend_lint": "cd backend && ..\\.venv\\Scripts\\python.exe -m ruff check app",
+    "frontend_tests": "cd frontend && npm run test",
+    "frontend_typecheck": "cd frontend && npm run typecheck",
+    "frontend_build": "cd frontend && npm run build",
+    "frontend_e2e": "cd frontend && pnpm test:e2e"
+  },
+  "stories": [
+    {
+      "id": "KAN-001",
+      "priority": 1,
+      "phase": 1,
+      "title": "Initialize repository and development tooling",
+      "description": "Create the monorepo layout, .gitignore, Python venv/pyproject and npm workspace for the frontend.",
+      "acceptance_criteria": [
+        "pytest and vitest can run",
+        "ruff and tsc configured"
+      ],
+      "depends_on": [],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-002",
+      "priority": 2,
+      "phase": 1,
+      "title": "Configure Python/FastAPI application",
+      "description": "Build the FastAPI factory with structured errors, request ids, CORS and settings.",
+      "acceptance_criteria": [
+        "GET /api/v1/health returns ok",
+        "OpenAPI served at /openapi.json and /docs"
+      ],
+      "depends_on": [
+        "KAN-001"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-003",
+      "priority": 3,
+      "phase": 1,
+      "title": "Configure React application",
+      "description": "Scaffold Vite + React 19 + TypeScript + Tailwind with TanStack Query and routing.",
+      "acceptance_criteria": [
+        "npm run build succeeds"
+      ],
+      "depends_on": [
+        "KAN-001"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-004",
+      "priority": 4,
+      "phase": 1,
+      "title": "Implement dark/light themes",
+      "description": "Semantic CSS variables, dark default, manual toggle, system mode and localStorage persistence.",
+      "acceptance_criteria": [
+        "theme unit tests pass",
+        "toggle switches data-theme"
+      ],
+      "depends_on": [
+        "KAN-003"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-005",
+      "priority": 5,
+      "phase": 1,
+      "title": "Create SQLite registry and board storage manager",
+      "description": "Registry database plus per-board engines with WAL, foreign keys, busy timeout and bounded lifetimes.",
+      "acceptance_criteria": [
+        "board creation produces data/boards/{uuid}/board.sqlite",
+        "registry rows track status"
+      ],
+      "depends_on": [
+        "KAN-002"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-006",
+      "priority": 6,
+      "phase": 1,
+      "title": "Add database migration framework",
+      "description": "Versioned SQL migrations tracked with PRAGMA user_version for registry and board databases.",
+      "acceptance_criteria": [
+        "migrations apply idempotently",
+        "schema version reported by validate"
+      ],
+      "depends_on": [
+        "KAN-005"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-007",
+      "priority": 7,
+      "phase": 2,
+      "title": "Create and list boards",
+      "description": "POST/GET /boards with pagination, search, status filter and default lists.",
+      "acceptance_criteria": [
+        "API tests for create/list pass"
+      ],
+      "depends_on": [
+        "KAN-006"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-008",
+      "priority": 8,
+      "phase": 2,
+      "title": "Open board",
+      "description": "GET /boards/{id} plus board view shell with refusal for missing boards.",
+      "acceptance_criteria": [
+        "board view loads name, lists and counts"
+      ],
+      "depends_on": [
+        "KAN-007"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-009",
+      "priority": 9,
+      "phase": 2,
+      "title": "Rename and archive boards",
+      "description": "PATCH rename/description, archive, restore, duplicate, delete with confirmation.",
+      "acceptance_criteria": [
+        "lifecycle tests pass",
+        "delete requires archived + name match"
+      ],
+      "depends_on": [
+        "KAN-007"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-010",
+      "priority": 10,
+      "phase": 2,
+      "title": "Create lists",
+      "description": "POST lists with position allocation.",
+      "acceptance_criteria": [
+        "create list test passes"
+      ],
+      "depends_on": [
+        "KAN-008"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-011",
+      "priority": 11,
+      "phase": 2,
+      "title": "Reorder lists",
+      "description": "POST lists/{id}/move with gap-based positions and normalization.",
+      "acceptance_criteria": [
+        "reorder test asserts order"
+      ],
+      "depends_on": [
+        "KAN-010"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-012",
+      "priority": 12,
+      "phase": 2,
+      "title": "Build dashboard",
+      "description": "Searchable board grid with status badges, counts, create/import and lifecycle actions.",
+      "acceptance_criteria": [
+        "browser verification of dashboard"
+      ],
+      "depends_on": [
+        "KAN-009",
+        "KAN-003"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-013",
+      "priority": 13,
+      "phase": 2,
+      "title": "Build basic Kanban interface",
+      "description": "Horizontal lists with cards, inline add and horizontal scrolling.",
+      "acceptance_criteria": [
+        "browser verification of board view"
+      ],
+      "depends_on": [
+        "KAN-011",
+        "KAN-014"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-014",
+      "priority": 14,
+      "phase": 3,
+      "title": "Create cards",
+      "description": "POST cards with list validation, labels and gap positions.",
+      "acceptance_criteria": [
+        "card creation test passes"
+      ],
+      "depends_on": [
+        "KAN-011"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-015",
+      "priority": 15,
+      "phase": 3,
+      "title": "Edit cards",
+      "description": "PATCH cards with optimistic concurrency and activity logging.",
+      "acceptance_criteria": [
+        "version conflict test returns 409"
+      ],
+      "depends_on": [
+        "KAN-014"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-016",
+      "priority": 16,
+      "phase": 3,
+      "title": "Implement card details",
+      "description": "Dialog with title, Markdown description preview, priority, due date, labels, checklists, comments, history.",
+      "acceptance_criteria": [
+        "browser verification of dialog"
+      ],
+      "depends_on": [
+        "KAN-015"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-017",
+      "priority": 17,
+      "phase": 3,
+      "title": "Move cards",
+      "description": "POST cards/{id}/move across lists with version check and audit entry.",
+      "acceptance_criteria": [
+        "cross-list move test passes"
+      ],
+      "depends_on": [
+        "KAN-014"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-018",
+      "priority": 18,
+      "phase": 3,
+      "title": "Reorder cards",
+      "description": "dnd-kit drag and drop with optimistic update and rollback on failure.",
+      "acceptance_criteria": [
+        "browser drag persists after reload"
+      ],
+      "depends_on": [
+        "KAN-017"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-019",
+      "priority": 19,
+      "phase": 3,
+      "title": "Add priorities",
+      "description": "Priority enum on cards plus UI badges and filtering.",
+      "acceptance_criteria": [
+        "priority filter test passes"
+      ],
+      "depends_on": [
+        "KAN-015"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-020",
+      "priority": 20,
+      "phase": 3,
+      "title": "Add labels",
+      "description": "Board labels, resolution by name or id, card assignment and chips.",
+      "acceptance_criteria": [
+        "label search test passes"
+      ],
+      "depends_on": [
+        "KAN-014"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-021",
+      "priority": 21,
+      "phase": 3,
+      "title": "Add checklists",
+      "description": "Checklists and items with completion tracking and progress counts.",
+      "acceptance_criteria": [
+        "checklist workflow test passes"
+      ],
+      "depends_on": [
+        "KAN-016"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-022",
+      "priority": 22,
+      "phase": 3,
+      "title": "Add comments",
+      "description": "Comments authored by the authenticated actor, editable only by their owner.",
+      "acceptance_criteria": [
+        "comment workflow test passes"
+      ],
+      "depends_on": [
+        "KAN-026"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-023",
+      "priority": 23,
+      "phase": 3,
+      "title": "Add activity feed",
+      "description": "Activity log with actor type, action, entity, request id and change payloads.",
+      "acceptance_criteria": [
+        "activity test distinguishes actors"
+      ],
+      "depends_on": [
+        "KAN-022"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-024",
+      "priority": 24,
+      "phase": 3,
+      "title": "Add search",
+      "description": "Board search with FTS5 (LIKE fallback), filters and global search across boards.",
+      "acceptance_criteria": [
+        "search tests pass",
+        "engine reported in meta"
+      ],
+      "depends_on": [
+        "KAN-020"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-025",
+      "priority": 25,
+      "phase": 4,
+      "title": "Add API credential management",
+      "description": "Create/list/revoke agent tokens; raw tokens returned once, hashes stored.",
+      "acceptance_criteria": [
+        "credential tests pass"
+      ],
+      "depends_on": [
+        "KAN-005"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-026",
+      "priority": 26,
+      "phase": 4,
+      "title": "Implement actor identification",
+      "description": "Session cookie and bearer token resolution into an ActorContext with audit fields.",
+      "acceptance_criteria": [
+        "me endpoint test passes"
+      ],
+      "depends_on": [
+        "KAN-025"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-027",
+      "priority": 27,
+      "phase": 4,
+      "title": "Implement scope authorization",
+      "description": "Scope checks on every endpoint; agents cannot exceed granted scopes.",
+      "acceptance_criteria": [
+        "403 test for missing scope"
+      ],
+      "depends_on": [
+        "KAN-026"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-028",
+      "priority": 28,
+      "phase": 4,
+      "title": "Add concurrency protection",
+      "description": "Integer version per card enforced on patch/move/transfer.",
+      "acceptance_criteria": [
+        "409 conflict test"
+      ],
+      "depends_on": [
+        "KAN-015"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-029",
+      "priority": 29,
+      "phase": 4,
+      "title": "Add idempotency support",
+      "description": "Idempotency-Key replay for board and card creation with payload fingerprinting.",
+      "acceptance_criteria": [
+        "idempotency tests pass"
+      ],
+      "depends_on": [
+        "KAN-026"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-030",
+      "priority": 30,
+      "phase": 4,
+      "title": "Improve OpenAPI documentation",
+      "description": "Documented envelopes, response models, endpoint descriptions and tags.",
+      "acceptance_criteria": [
+        "/openapi.json lists all routes"
+      ],
+      "depends_on": [
+        "KAN-027"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-031",
+      "priority": 31,
+      "phase": 4,
+      "title": "Add structured agent-facing errors",
+      "description": "Machine-readable error envelope with code, retryable flag and validation details.",
+      "acceptance_criteria": [
+        "error envelope test passes"
+      ],
+      "depends_on": [
+        "KAN-030"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-032",
+      "priority": 32,
+      "phase": 5,
+      "title": "Implement WebMCP capability detection",
+      "description": "Feature-detect document.modelContext/navigator.modelContext behind an adapter.",
+      "acceptance_criteria": [
+        "capability tests pass"
+      ],
+      "depends_on": [
+        "KAN-003"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-033",
+      "priority": 33,
+      "phase": 5,
+      "title": "Implement tool registration adapter",
+      "description": "Registry with registerTool, AbortController cleanup and unregisterTool fallback.",
+      "acceptance_criteria": [
+        "registry tests pass"
+      ],
+      "depends_on": [
+        "KAN-032"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-034",
+      "priority": 34,
+      "phase": 5,
+      "title": "Expose dashboard tools",
+      "description": "list_boards, create_board, search_boards, open_board.",
+      "acceptance_criteria": [
+        "tool definition tests pass"
+      ],
+      "depends_on": [
+        "KAN-033"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-035",
+      "priority": 35,
+      "phase": 5,
+      "title": "Expose board tools",
+      "description": "Overview, list/create cards, create list, search and move card.",
+      "acceptance_criteria": [
+        "tool definition tests pass"
+      ],
+      "depends_on": [
+        "KAN-033"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-036",
+      "priority": 36,
+      "phase": 5,
+      "title": "Expose card tools",
+      "description": "Card details, update, comment, checklist item and archive.",
+      "acceptance_criteria": [
+        "tool definition tests pass"
+      ],
+      "depends_on": [
+        "KAN-033"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-037",
+      "priority": 37,
+      "phase": 5,
+      "title": "Add contextual registration tests",
+      "description": "Scope filtering and cleanup on context exit.",
+      "acceptance_criteria": [
+        "webmcp tests pass"
+      ],
+      "depends_on": [
+        "KAN-034",
+        "KAN-035",
+        "KAN-036"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-038",
+      "priority": 38,
+      "phase": 6,
+      "title": "Implement board export",
+      "description": "ZIP archive with manifest and consistent SQLite snapshot.",
+      "acceptance_criteria": [
+        "export/import roundtrip test passes"
+      ],
+      "depends_on": [
+        "KAN-009"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-039",
+      "priority": 39,
+      "phase": 6,
+      "title": "Implement board import",
+      "description": "Validated ZIP import creating a new board and database.",
+      "acceptance_criteria": [
+        "invalid archive rejected, valid archive imported"
+      ],
+      "depends_on": [
+        "KAN-038"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-040",
+      "priority": 40,
+      "phase": 6,
+      "title": "Implement backups",
+      "description": "SQLite online-backup snapshots per board with integrity verification.",
+      "acceptance_criteria": [
+        "backup test passes"
+      ],
+      "depends_on": [
+        "KAN-005"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-041",
+      "priority": 41,
+      "phase": 6,
+      "title": "Implement restore",
+      "description": "Restore a named backup into the board database and re-verify.",
+      "acceptance_criteria": [
+        "restore test passes"
+      ],
+      "depends_on": [
+        "KAN-040"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-042",
+      "priority": 42,
+      "phase": 6,
+      "title": "Add database integrity checks",
+      "description": "PRAGMA integrity_check and foreign_key_check with counts and schema version.",
+      "acceptance_criteria": [
+        "validate endpoint test passes"
+      ],
+      "depends_on": [
+        "KAN-006"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-043",
+      "priority": 43,
+      "phase": 6,
+      "title": "Add Docker deployment",
+      "description": "Dockerfiles and compose file with persistent data volume and pinned versions.",
+      "acceptance_criteria": [
+        "docker compose config parses"
+      ],
+      "depends_on": [
+        "KAN-002",
+        "KAN-003"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-044",
+      "priority": 44,
+      "phase": 6,
+      "title": "Add security regression tests",
+      "description": "CSRF, scope, revoked token, path traversal, oversized payload and rate limit tests.",
+      "acceptance_criteria": [
+        "security tests pass"
+      ],
+      "depends_on": [
+        "KAN-027"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-045",
+      "priority": 45,
+      "phase": 6,
+      "title": "Complete end-to-end acceptance testing",
+      "description": "Automate the critical user journeys with Playwright against a running stack.",
+      "acceptance_criteria": [
+        "Playwright suite covers login, board, card, drag, archive"
+      ],
+      "depends_on": [
+        "KAN-012",
+        "KAN-018",
+        "KAN-041"
+      ],
+      "status": "done",
+      "notes": "Automated with Playwright 1.62.1 (local install reused through scripts/run-playwright.mjs); 14 journeys: auth, board/card CRUD, search, drag-and-drop persistence, list reorder, board lifecycle, export/backup/restore, themes, token issuance/revocation, agent scopes, XSS safety."
+    },
+    {
+      "id": "KAN-046",
+      "priority": 46,
+      "phase": 7,
+      "title": "Generate a per-install session secret",
+      "description": "Never sign sessions with the published default; generate and persist a secret under the data directory when the env var is unset.",
+      "acceptance_criteria": [
+        "forged cookies fail without the local secret file",
+        "explicit secret still wins",
+        "unit tests cover generation and reuse"
+      ],
+      "depends_on": [
+        "KAN-027"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-047",
+      "priority": 47,
+      "phase": 7,
+      "title": "Make backup restore exclusive and pre-verified",
+      "description": "Serialize restore with readers through the per-board lock and refuse a backup that fails its integrity check before overwriting data.",
+      "acceptance_criteria": [
+        "integrity failure leaves the board untouched",
+        "concurrent reader blocks until restore finishes"
+      ],
+      "depends_on": [
+        "KAN-041"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-048",
+      "priority": 48,
+      "phase": 7,
+      "title": "Validate card due dates as ISO 8601",
+      "description": "Reject free-text due dates and normalize accepted values so overdue filters and due sorting stay correct.",
+      "acceptance_criteria": [
+        "invalid due_at and due_before return 422",
+        "date-only input normalizes to midnight UTC"
+      ],
+      "depends_on": [
+        "KAN-015"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-049",
+      "priority": 49,
+      "phase": 7,
+      "title": "Make bulk creation and board creation retry-safe",
+      "description": "Accept Idempotency-Key for bulk card creation and reserve the board id before initialization so retries never duplicate data.",
+      "acceptance_criteria": [
+        "repeated bulk request returns the same cards",
+        "retry during initialization returns 409 creation_in_progress",
+        "recovery returns the existing board"
+      ],
+      "depends_on": [
+        "KAN-029"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-050",
+      "priority": 50,
+      "phase": 7,
+      "title": "Contain partial transfer failures and report capabilities truthfully",
+      "description": "Archive the source card when a cross-board transfer cannot finalize, report real FTS5 support in /meta, align body limits, and document the single-process constraint.",
+      "acceptance_criteria": [
+        "failed finalize leaves one visible card",
+        "meta.fts5 reflects the SQLite build",
+        "nginx and backend limits match"
+      ],
+      "depends_on": [
+        "KAN-017",
+        "KAN-043"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-051",
+      "priority": 51,
+      "phase": 7,
+      "title": "Add retention for activity and idempotency records",
+      "description": "Define and implement pruning for activity_log and idempotency_records once the audit-retention requirement is confirmed.",
+      "acceptance_criteria": [
+        "retention policy documented",
+        "pruning has a test"
+      ],
+      "depends_on": [
+        "KAN-050"
+      ],
+      "status": "pending",
+      "notes": "Pending decision or requirement confirmation."
+    },
+    {
+      "id": "KAN-052",
+      "priority": 52,
+      "phase": 7,
+      "title": "Require a recovery artifact before physical board deletion",
+      "description": "Write an export or verified backup before deleting a board database and its backups, and record the actor in the registry before removal.",
+      "acceptance_criteria": [
+        "deleted board leaves an artifact",
+        "audit entry survives deletion"
+      ],
+      "depends_on": [
+        "KAN-050"
+      ],
+      "status": "pending",
+      "notes": "Pending decision or requirement confirmation."
+    },
+    {
+      "id": "KAN-053",
+      "priority": 53,
+      "phase": 7,
+      "title": "Surface WebMCP registration diagnostics",
+      "description": "Log and display registration failures instead of swallowing them, so operators can tell why tools are missing.",
+      "acceptance_criteria": [
+        "failed registration is visible in logs",
+        "settings badge distinguishes unavailable from failed"
+      ],
+      "depends_on": [
+        "KAN-037"
+      ],
+      "status": "pending",
+      "notes": "Pending decision or requirement confirmation."
+    },
+    {
+      "id": "KAN-054",
+      "priority": 54,
+      "phase": 7,
+      "title": "Measure dashboard listing at 100 boards",
+      "description": "Benchmark the board list with 100 boards and decide whether counts need caching.",
+      "acceptance_criteria": [
+        "measurement recorded",
+        "decision documented in docs/decisions"
+      ],
+      "depends_on": [
+        "KAN-050"
+      ],
+      "status": "pending",
+      "notes": "Pending decision or requirement confirmation."
+    },
+    {
+      "id": "KAN-055",
+      "priority": 55,
+      "phase": 7,
+      "title": "Remove the usable default administrator credential",
+      "description": "Generate and log a random bootstrap password when none (or a placeholder) is configured.",
+      "acceptance_criteria": [
+        "login with admin/admin fails",
+        "generated password notice appears in the log"
+      ],
+      "depends_on": [
+        "KAN-046"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-056",
+      "priority": 56,
+      "phase": 7,
+      "title": "Stop echoing internal details in responses",
+      "description": "Remove server paths from backup responses and driver text from bulk and transfer failures; log details instead.",
+      "acceptance_criteria": [
+        "no data_dir in backup payload",
+        "bulk failures expose only index/code/message",
+        "transfer warnings contain no exception text"
+      ],
+      "depends_on": [
+        "KAN-050"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-057",
+      "priority": 57,
+      "phase": 7,
+      "title": "Require authentication for API documentation and metadata",
+      "description": "Serve /docs and /openapi.json behind the session dependency and protect /meta and /auth/scopes.",
+      "acceptance_criteria": [
+        "unauthenticated docs and metadata return 401",
+        "signed-in clients still get the schema"
+      ],
+      "depends_on": [
+        "KAN-030"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-058",
+      "priority": 58,
+      "phase": 7,
+      "title": "Harden login timing and response headers",
+      "description": "Always perform password hashing, add Cache-Control/WWW-Authenticate, sanitize request ids, and remove server banners.",
+      "acceptance_criteria": [
+        "unknown user and wrong password share status/code",
+        "API responses are no-store",
+        "hostile X-Request-ID is replaced"
+      ],
+      "depends_on": [
+        "KAN-027"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-059",
+      "priority": 59,
+      "phase": 7,
+      "title": "Add a client build guard",
+      "description": "Fail the production build when the bundle contains source maps or server-only strings.",
+      "acceptance_criteria": [
+        "pnpm build runs the guard",
+        "a shipped .map file fails the build"
+      ],
+      "depends_on": [
+        "KAN-003"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-060",
+      "priority": 60,
+      "phase": 8,
+      "title": "Introduce Alembic chains for registry and boards",
+      "description": "Replace hand-rolled SQL migration lists with two Alembic chains (registry, board), baselines matching the released schema, and Alembic version tracking per database.",
+      "acceptance_criteria": [
+        "each database has alembic_version at head",
+        "legacy databases are stamped and upgraded",
+        "registry 0002 rebuilds boards with batch_alter_table"
+      ],
+      "depends_on": [
+        "KAN-006"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-061",
+      "priority": 61,
+      "phase": 8,
+      "title": "Add the central Migration Manager",
+      "description": "Run registry then all boards eagerly before serving requests, with pre-migration snapshots, integrity validation and structured logs.",
+      "acceptance_criteria": [
+        "startup migrates every board sequentially",
+        "a verified backup precedes schema changes",
+        "integrity_check and foreign_key_check run after upgrade",
+        "reports are logged"
+      ],
+      "depends_on": [
+        "KAN-060"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-062",
+      "priority": 62,
+      "phase": 8,
+      "title": "Add migration_failed state and admin retry",
+      "description": "Mark boards whose migration failed, block mutations, keep the backup and expose POST /boards/{id}/migrate for a safe retry.",
+      "acceptance_criteria": [
+        "failed board is migration_failed with backup preserved",
+        "writes return 409 board_migration_failed",
+        "retry restores the board after the cause is fixed"
+      ],
+      "depends_on": [
+        "KAN-061"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-063",
+      "priority": 63,
+      "phase": 8,
+      "title": "Surface migration state in the UI",
+      "description": "Show migration_failed in the dashboard filter, keep failed boards listed, and offer a retry action on the board page.",
+      "acceptance_criteria": [
+        "dashboard lists failed boards without errors",
+        "board page shows the state and a retry button"
+      ],
+      "depends_on": [
+        "KAN-062"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-064",
+      "priority": 64,
+      "phase": 8,
+      "title": "Test migrations end to end",
+      "description": "Cover fresh installs, legacy adoption, upgrade with data preservation, failure and resume, unknown revisions, eager startup, idempotency and the DDL guard.",
+      "acceptance_criteria": [
+        "tests/test_migrations.py covers each case",
+        "application code contains no DDL outside the chain"
+      ],
+      "depends_on": [
+        "KAN-061"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-065",
+      "priority": 65,
+      "phase": 8,
+      "title": "Offer a lazy migration mode",
+      "description": "Make Migration Manager able to migrate a board on first access instead of at startup, behind configuration, without changing the manager API.",
+      "acceptance_criteria": [
+        "startup can skip board migration",
+        "read path migrates the board under its lock",
+        "same backups, validation and failure state"
+      ],
+      "depends_on": [
+        "KAN-064"
+      ],
+      "status": "pending",
+      "notes": "Intentionally deferred; eager mode is the default."
+    },
+    {
+      "id": "KAN-066",
+      "priority": 66,
+      "phase": 9,
+      "title": "Store board templates in the registry",
+      "description": "Add a registry Alembic revision for board_templates (name, custom description, ordered list names, labels) with a case-insensitive unique name.",
+      "acceptance_criteria": [
+        "0003_board_templates revision upgrades legacy registries without touching boards",
+        "tests cover the table on fresh installs and legacy adoption"
+      ],
+      "depends_on": [
+        "KAN-064"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-067",
+      "priority": 67,
+      "phase": 9,
+      "title": "Expose template CRUD and snapshot APIs",
+      "description": "Add GET/POST/PATCH/DELETE /templates plus POST /boards/{id}/templates, and accept template_id on board creation with explicit payload values winning.",
+      "acceptance_criteria": [
+        "creating a board from a template applies description, lists and labels",
+        "unknown template returns 422 before any board row is written",
+        "already used labels keep the template order"
+      ],
+      "depends_on": [
+        "KAN-066"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-068",
+      "priority": 68,
+      "phase": 9,
+      "title": "Pick a template when creating a board",
+      "description": "Add a template dropdown to the New board dialog with a blank default, prefilled description and a list preview.",
+      "acceptance_criteria": [
+        "blank option keeps the default Backlog..Done lists",
+        "selecting a template prefills the description and lists"
+      ],
+      "depends_on": [
+        "KAN-067"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-069",
+      "priority": 69,
+      "phase": 9,
+      "title": "Manage templates in the UI",
+      "description": "Add a Settings card with a scrollable template list (edit and delete on the right), a dedicated editor page per template where name, description, lists and labels are edited and saved, and a Save as template action on the board page.",
+      "acceptance_criteria": [
+        "templates are listed in a scrollable list with edit and delete actions",
+        "edit opens the template instance at /settings/templates/{id} and saving returns to Settings",
+        "a board snapshot captures its lists and labels"
+      ],
+      "depends_on": [
+        "KAN-067"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-070",
+      "priority": 70,
+      "phase": 9,
+      "title": "Test templates end to end",
+      "description": "Cover template CRUD, instantiation, idempotency and the WebMCP bridge in backend tests, plus a Playwright journey for the dropdown flow.",
+      "acceptance_criteria": [
+        "backend template suite passes",
+        "Playwright covers create, edit, delete and board creation from a template"
+      ],
+      "depends_on": [
+        "KAN-068",
+        "KAN-069"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-071",
+      "priority": 71,
+      "phase": 10,
+      "title": "Add role template and agent schema",
+      "description": "Registry Alembic revision 0004 with role_templates (factory prompt copy, built_in, builtin_key) and agents (role reference, encrypted key, connection, limits, last test).",
+      "acceptance_criteria": [
+        "legacy registries upgrade without touching boards",
+        "built-in roles are seeded idempotently on startup"
+      ],
+      "depends_on": [
+        "KAN-070"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-072",
+      "priority": 72,
+      "phase": 10,
+      "title": "Build role template management",
+      "description": "CRUD, duplicate and restore-defaults for role templates with unique names and agent usage counts.",
+      "acceptance_criteria": [
+        "built-ins cannot be deleted but can be customized and restored",
+        "deleting a custom role keeps agents and history intact"
+      ],
+      "depends_on": [
+        "KAN-071"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-073",
+      "priority": 73,
+      "phase": 10,
+      "title": "Build agent management and encrypted credentials",
+      "description": "Agent CRUD/duplicate/delete with role reference, prompt override, endpoint validation, Fernet-sealed API keys and connection tests.",
+      "acceptance_criteria": [
+        "API keys are never returned after submission",
+        "endpoint validation blocks metadata, link-local and credential-bearing URLs",
+        "connection tests persist their result"
+      ],
+      "depends_on": [
+        "KAN-071"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-074",
+      "priority": 74,
+      "phase": 10,
+      "title": "Snapshot the effective role per run",
+      "description": "Provide effective_role and role_snapshot so discussions store the prompt they used, with template provenance and a SHA-256 hash.",
+      "acceptance_criteria": [
+        "earlier snapshots are unchanged after a template edit",
+        "overrides win over the template and are snapshotted too"
+      ],
+      "depends_on": [
+        "KAN-072",
+        "KAN-073"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-075",
+      "priority": 75,
+      "phase": 10,
+      "title": "Add role and agent management UI",
+      "description": "Settings sections listing role templates and agents with edit, duplicate, enable/disable and delete, plus dedicated editor pages and a random name generator.",
+      "acceptance_criteria": [
+        "role prompts can be edited, duplicated and restored from the UI",
+        "agent editor covers connection, role, override and limits",
+        "secrets are never echoed back into the form"
+      ],
+      "depends_on": [
+        "KAN-072",
+        "KAN-073"
+      ],
+      "status": "done",
+      "notes": ""
+    },
+    {
+      "id": "KAN-079",
+      "priority": 76,
+      "phase": 10,
+      "title": "Add discussion schema and services",
+      "description": "Board-side tables for threads, participants (with role snapshots), messages, runs, votes and outcomes, plus the discussion lifecycle service.",
+      "acceptance_criteria": [
+        "a discussion references exactly one existing ticket",
+        "participants store the role snapshot taken at creation"
+      ],
+      "depends_on": [
+        "KAN-074"
+      ],
+      "status": "done",
+      "notes": "Board revision 0004 adds discussion_threads, discussion_participants (role snapshot), discussion_messages, discussion_votes and discussion_outcomes; DiscussionService owns the lifecycle."
+    },
+    {
+      "id": "KAN-077",
+      "priority": 77,
+      "phase": 10,
+      "title": "Add discussion UI and navigation",
+      "description": "Discussions item between Boards and Settings, searchable list, ticket picker and threaded message view.",
+      "acceptance_criteria": [
+        "discussions can be created from a searched ticket",
+        "humans can comment and reply in a thread"
+      ],
+      "depends_on": [
+        "KAN-076"
+      ],
+      "status": "done",
+      "notes": "Discussions nav entry, board picker, thread list, create dialog tied to an existing ticket and a threaded panel with role snapshots."
+    },
+    {
+      "id": "KAN-078",
+      "priority": 78,
+      "phase": 10,
+      "title": "Add agent orchestration and consensus",
+      "description": "Manual, roundtable and autonomous modes with structured votes, limits, SSE updates and human approve/veto/rework.",
+      "acceptance_criteria": [
+        "consensus requires explicit agent agreement",
+        "limits stop runaway loops",
+        "approval never executes ticket changes"
+      ],
+      "depends_on": [
+        "KAN-077"
+      ],
+      "status": "done",
+      "notes": "Orchestrator runs one bounded round per participant, records AGREE/DISAGREE/ABSTAIN votes, proposes consensus only when every participant agrees and leaves approve/veto/rework to a human with an explanation for veto and rework."
+    },
+    {
+      "id": "KAN-080",
+      "priority": 80,
+      "phase": 10,
+      "title": "Add discussion run control",
+      "description": "Run records with round counters, pause/resume/stop, token and time budgets, autonomous multi-round loops and a duplicate-answer guard.",
+      "acceptance_criteria": [
+        "pause and stop take effect between agent calls",
+        "token and time budgets end a run instead of overspending",
+        "repeated answers stop the loop instead of inserting duplicates",
+        "the UI shows round progress, budgets and per-round results"
+      ],
+      "depends_on": [
+        "KAN-078"
+      ],
+      "status": "done",
+      "notes": "Board revision 0005 adds discussion_runs/discussion_rounds plus round counters on the thread. RunService owns the loop and the status transitions; the round engine stores content_sha256 per message for the duplicate guard. Suite: 124 backend, 15 vitest, 21 Playwright."
+    },
+    {
+      "id": "KAN-081",
+      "priority": 81,
+      "phase": 10,
+      "title": "Stream discussion activity over SSE",
+      "description": "Publish message_created, agent_started/completed/failed, vote_recorded, consensus_proposed, discussion_status_changed and human_review_completed; persist before publishing and let the client catch up after a reconnect.",
+      "acceptance_criteria": [
+        "a message is stored before it is published",
+        "a reconnecting client recovers missed messages"
+      ],
+      "depends_on": [
+        "KAN-080"
+      ],
+      "status": "done",
+      "notes": "Board revision 0006 adds discussion_events; every change records its event in the same transaction and only then fans out to in-process subscriber queues. GET .../events streams SSE with Last-Event-ID replay, GET .../events/history serves the same log as JSON. The React page connects with EventSource and invalidates the discussion queries."
+    },
+    {
+      "id": "KAN-082",
+      "priority": 82,
+      "phase": 11,
+      "title": "Mention agents in ticket comments",
+      "description": "@agent mentions in ticket comments with autocomplete, an asynchronous job that resolves the agent, queues a run and publishes events, and a retry that never duplicates comments.",
+      "acceptance_criteria": [
+        "a mentioned agent answers in the ticket thread",
+        "the response includes ticket, labels, checklists and recent comments as context",
+        "a failed call can be retried without duplicating the comment"
+      ],
+      "depends_on": [
+        "KAN-081"
+      ],
+      "status": "done",
+      "notes": "Board revision 0007 adds comment_mention_jobs (unique per comment and agent, role snapshot, response_comment_id) and card_events for the ticket event stream. CommentService saves the comment first, MentionService resolves enabled agents from @[Name] or bare @Name, queues one job per mention on an in-process executor and writes the answer as a normal agent comment. Retry is refused for active or answered jobs, so a retry never duplicates the comment. Ticket SSE publishes agent_started/agent_completed/agent_failed with Last-Event-ID replay; the card dialog completes mentions, shows job states and offers Retry. Suite: 137 backend, 19 vitest, 22 Playwright."
+    },
+    {
+      "id": "KAN-083",
+      "priority": 83,
+      "phase": 11,
+      "title": "Escalate a comment into a discussion",
+      "description": "An agent answer can escalate the ticket into a discussion thread with origin_comment_id and escalation_depth, role-based participant selection, a provisional comment with the discussion link and no automatic execution.",
+      "acceptance_criteria": [
+        "an agent can create a discussion from a comment with origin_comment_id and escalation_depth at most 1",
+        "participants are chosen from role templates and keep their role snapshots",
+        "the ticket receives a provisional answer linking to the discussion",
+        "GET /discussions/{id}/origin returns the source comment and ticket",
+        "escalation never executes or mutates the ticket beyond the provisional comment"
+      ],
+      "depends_on": [
+        "KAN-082"
+      ],
+      "status": "pending",
+      "notes": "Columns origin_comment_id and escalation_depth already exist from board revision 0004."
+    },
+    {
+      "id": "KAN-084",
+      "priority": 84,
+      "phase": 12,
+      "title": "Add attachment UI to the card dialog",
+      "description": "Drag-and-drop upload and listing of ticket attachments in CardDialog, plus the assignee dropdown (Unassigned / Me / enabled agents with role).",
+      "acceptance_criteria": [
+        "an attachment can be dropped on the card dialog and appears in the list",
+        "download and delete work from the dialog",
+        "the assignee dropdown offers Unassigned, Me and enabled agents with their role",
+        "uploads reject disallowed types with a readable error"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "notes": "Attachment and assignment backends already exist (board revision 0003)."
+    },
+    {
+      "id": "KAN-085",
+      "priority": 85,
+      "phase": 12,
+      "title": "Store clipboard screenshots as ticket BLOBs",
+      "description": "Convert pasted images to JPEG in the browser, store them in ticket_screenshots with a BLOB in the board database and stream them from a dedicated endpoint.",
+      "acceptance_criteria": [
+        "a pasted image is converted to JPEG with a white background and quality 0.85",
+        "one upload is performed per paste event",
+        "listings never include the BLOB",
+        "the streaming endpoint serves the image with secure headers"
+      ],
+      "depends_on": [
+        "KAN-084"
+      ],
+      "status": "pending",
+      "notes": "Needs a new board revision for ticket_screenshots."
+    },
+    {
+      "id": "KAN-086",
+      "priority": 86,
+      "phase": 12,
+      "title": "Add discussion attachments and text extraction",
+      "description": "Discussion message attachments plus server-side text extraction (PyMuPDF, python-docx, python-pptx, openpyxl) exposed to agents, with a clear fallback for text-only models.",
+      "acceptance_criteria": [
+        "attachments can be added to a discussion or message and streamed back",
+        "extracted text is available through an agent-facing endpoint",
+        "unsupported or unreadable files report a machine-readable reason",
+        "image attachments tell text-only models that the image cannot be read"
+      ],
+      "depends_on": [
+        "KAN-084"
+      ],
+      "status": "pending",
+      "notes": "New dependencies need a docs/decisions entry."
+    },
+    {
+      "id": "KAN-087",
+      "priority": 87,
+      "phase": 12,
+      "title": "Include attachments in export, import, backup and transfer",
+      "description": "Exports, backups, restores, imports and cross-board transfers must carry attachment files and BLOBs and keep references valid.",
+      "acceptance_criteria": [
+        "export and import round-trip attachments and screenshots",
+        "backup and restore keep attachment files consistent with the database",
+        "a card transferred across boards keeps its attachments",
+        "missing files surface a warning instead of corrupting the archive"
+      ],
+      "depends_on": [
+        "KAN-084"
+      ],
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "KAN-088",
+      "priority": 88,
+      "phase": 13,
+      "title": "Map A2A task states onto runs and messages",
+      "description": "Adapt the A2A protocol to discussion runs and messages while preserving correlation ids in both directions.",
+      "acceptance_criteria": [
+        "an A2A task maps to a run with the same correlation id",
+        "task states map to run states without inventing transitions",
+        "messages carry the remote task and message ids",
+        "failures are reported as agent_failed events"
+      ],
+      "depends_on": [
+        "KAN-082"
+      ],
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "KAN-089",
+      "priority": 89,
+      "phase": 13,
+      "title": "Expose discussion tools to WebMCP",
+      "description": "Register discussion tools (search, read, create, comment, read outcome, run control without approve/veto) through the existing WebMCP adapter.",
+      "acceptance_criteria": [
+        "tools are only registered when the actor has the matching scope",
+        "run control tools never expose approve or veto",
+        "tools call the REST client and never the database",
+        "contextual registration tests cover the discussion page"
+      ],
+      "depends_on": [
+        "KAN-082"
+      ],
+      "status": "pending",
+      "notes": "Tool registry lives in frontend/src/webmcp/tools.ts."
+    },
+    {
+      "id": "KAN-090",
+      "priority": 90,
+      "phase": 11,
+      "title": "Enter discussions through boards ordered by activity",
+      "description": "The Discussions page lists boards first, ordered by the newest discussion activity, and loads only the selected board's threads instead of every thread of every board.",
+      "acceptance_criteria": [
+        "GET /discussions/overview returns one entry per board with discussion count, open count and newest last_activity_at",
+        "boards are ordered by newest discussion activity, ties and boards without threads fall back to name",
+        "selecting a board shows its most recently active threads and a way back to all boards",
+        "the page never fetches every board's threads at once"
+      ],
+      "depends_on": [
+        "KAN-081"
+      ],
+      "status": "done",
+      "notes": "DiscussionService.board_overview aggregates MAX(last_activity_at), discussion_count and open_count per board database (a board mid-repair still appears with zeros). The React page shows the board list with a 30 s refresh while visible, then the selected board's threads; the overview is invalidated on creation and when returning to the list, not on every thread event. Tests: test_discussions.py board overview ordering, Playwright discussions.spec.ts asserts the newest board is first. Suite: 139 backend, 19 vitest, 22 Playwright."
+    },
+    {
+      "id": "KAN-091",
+      "priority": 91,
+      "phase": 11,
+      "title": "Answer human discussion messages automatically",
+      "description": "A human message in a roundtable or autonomous thread starts one background round; in a manual thread an explicit @agents or participant mention does the same, and the reply box says so.",
+      "acceptance_criteria": [
+        "a human message in roundtable/autonomous mode starts exactly one background round",
+        "a manual thread stays idle for plain messages but starts one round for @agents or a participant name",
+        "an active or closed thread keeps the message without failing the request",
+        "the reply placeholder explains how to get an answer in the current mode"
+      ],
+      "depends_on": [
+        "KAN-090",
+        "KAN-082"
+      ],
+      "status": "done",
+      "notes": "DiscussionService._auto_run requests one round after the message commits (background, rounds=1). Explicit triggers reuse extract_mentions from the mention service plus an @agents token. Only human actors trigger; agent-authored messages never loop. UI: mode-aware placeholder and a manual-mode hint. Tests: test_run_control.py (roundtable, autonomous, @agents, participant name, manual/closed stay idle). Suite: 144 backend, 19 vitest, 22 Playwright."
+    },
+    {
+      "id": "KAN-092",
+      "priority": 92,
+      "phase": 11,
+      "title": "Recover interrupted work and explain skipped replies",
+      "description": "Startup reconciliation for runs and mention jobs, an explicit auto_run outcome on discussion messages, and the overview scope aligned with the board list.",
+      "acceptance_criteria": [
+        "a run left running or paused by a restart becomes failed with process_restart and its thread returns to idle",
+        "interrupted mention jobs become failed and retryable, queued mention jobs resume",
+        "a message response reports auto_run as started, already_running, thread_closed, no_participants or null",
+        "the client explains a skipped automatic answer instead of staying silent",
+        "GET /discussions/overview requires boards:read in addition to discussions:read"
+      ],
+      "depends_on": [
+        "KAN-082",
+        "KAN-091"
+      ],
+      "status": "done",
+      "notes": "Follows decision 0002 (explicit recovery states). Services.initialize runs recover_async_work after migrations: RunService.recover fails running/paused runs and resets thread run_state, MentionService.recover fails running jobs and resubmits queued ones. DiscussionService.add_message returns auto_run and the reply area shows a toast for already_running/thread_closed/no_participants. The overview now requires boards:read too (API tokens cannot carry discussion scopes today, so this is defence in depth). Tests: test_async_recovery.py (run recovery, job recovery + retry), test_run_control.py (auto_run outcomes incl. an active run), test_discussions.py (overview scope). Suite: 148 backend, 19 vitest, 22 Playwright."
+    },
+    {
+      "id": "KAN-093",
+      "priority": 93,
+      "phase": 11,
+      "title": "Apply the low-severity exposure findings",
+      "description": "Give mention autocomplete a minimal agent projection and keep ticket event payloads to ids and counters instead of duplicate comment text.",
+      "acceptance_criteria": [
+        "the autocomplete endpoint returns only id, name and role for enabled agents",
+        "no endpoint, model, credential hint or test message reaches the card view",
+        "agent_started/completed/failed payloads carry no comment text",
+        "the card dialog still completes mentions and refreshes after the events"
+      ],
+      "depends_on": [
+        "KAN-082",
+        "KAN-092"
+      ],
+      "status": "done",
+      "notes": "Added GET /agents/directory (AgentService.directory) and switched CardDialog to keys.agentDirectory. Mention events now carry ids, counters and the error only; _messages no longer returns the source text to the worker and _fail lost the mentioned_content parameter. Tests: test_agent_config.py allowlist + secret/endpoint absence + 401, test_mentions.py exact payload key set. The mentions E2E now filters by the agent name so accumulated E2E agents cannot push it out of the first suggestions. Suite: 149 backend, 19 vitest, 22 Playwright."
+    },
+    {
+      "id": "KAN-094",
+      "priority": 94,
+      "phase": 0,
+      "title": "Rename the product to Tralala",
+      "description": "Rename the brand and all technical identifiers without a compatibility layer, keeping frozen credential key material and historical records.",
+      "acceptance_criteria": [
+        "the UI, page title, README, docs and OpenAPI title use Tralala",
+        "environment variables use TRALALA_*, cookies tralala_session/tralala_csrf, theme tralala-theme and tokens trl_",
+        "logger, package, Docker user and volume names are renamed",
+        "stored provider credentials remain decryptable and historical reports keep the old name"
+      ],
+      "depends_on": [],
+      "status": "done",
+      "notes": "Seeded role prompts say Tralala for new installs. docs/decisions/0006 records the breaking changes and the two intentional exceptions: the KDF material in core/secrets.py (renaming it would make sealed keys unreadable) and historical analysis/migration/progress records. The repository name MyBoards is unchanged. Suite: 149 backend, 19 vitest, 22 Playwright; dev backend restarted with TRALALA_* and the old data directory."
+    },
+    {
+      "id": "KAN-095",
+      "priority": 95,
+      "phase": 0,
+      "title": "Accounts, sessions and key hygiene",
+      "description": "Make the private install manageable: revocable server-side sessions, password change and reset, administrator-only user CRUD, sign-in throttling, expiring and rotatable API tokens, and re-sealing of provider keys after a secret rotation.",
+      "acceptance_criteria": [
+        "every signed-in account has the same scopes except users:admin and credentials:admin, which stay with the admin role so only admin manages accounts and installation-wide API keys",
+        "logout, password change, role change and disabling an account revoke stored sessions; expired sessions are purged at startup",
+        "an administrator can create users, change roles, disable accounts and reset passwords, and the last enabled admin cannot be demoted or disabled",
+        "repeated failed sign-ins are throttled per username and client address with retry_after_seconds",
+        "API tokens expire after 90 days by default, can be rotated, and can never hold credentials:admin or users:admin",
+        "provider keys sealed with TRALALA_PREVIOUS_SECRET_KEY are re-sealed with the current secret at startup",
+        "the first admin password is written to <data>/.bootstrap-password instead of the log, and weak session secrets are replaced by a per-install secret",
+        "Settings exposes the password form, the admin-only Users card and token rotation"
+      ],
+      "depends_on": [
+        "KAN-082"
+      ],
+      "status": "done",
+      "notes": "Migration 0005 adds user_credentials.role and the sessions table. core/context.py owns ROLE_SCOPES; has_scope is now explicit so nothing is implicit. New: api/v1/users.py, LoginThrottle, AgentService.reseal_credentials. Docs: decisions/0007, api.md, database.md, architecture.md, README, .env.example. Follow-up: members also lost credentials:admin, so the global API keys are admin-only and the Settings credentials card is hidden for members."
+    },
+    {
+      "id": "KAN-096",
+      "priority": 96,
+      "phase": 0,
+      "title": "Theme kits with light and dark palettes",
+      "description": "Bring the CareNomad and MatchMap visual languages into the app as selectable theme kits, each with a dark and a light palette and its own pulsing CSS motion, without changing the font or layout.",
+      "acceptance_criteria": [
+        "Settings offers a theme kit choice (CareNomad, MatchMap) and the existing dark/light/system mode",
+        "each kit has both a dark and a light palette defined as semantic CSS variables",
+        "the ambient background and the wordmark pulse animate per kit and stop under prefers-reduced-motion",
+        "the font stack, layout and component markup are unchanged and no web fonts are fetched",
+        "the kit choice persists in localStorage and survives a reload"
+      ],
+      "depends_on": [],
+      "status": "done",
+      "notes": "data-theme-kit selects the kit, data-theme the mode. AmbientBackground renders grid, glow, three blobs and stars; CareNomad breathes over 5.2s/16s, MatchMap pings over 2.8s with a 22s wash. docs/decisions/0008 records the scope (colour + motion only). Follow-up: MatchMap no longer recolours CareNomad's ambient layers; it paints a dot field, ten twinkling particles and a sliding gradient wash (22 s), while CareNomad keeps its breathing line grid and drifting fields."
+    },
+    {
+      "id": "KAN-097",
+      "priority": 97,
+      "phase": 0,
+      "title": "Per-account appearance and the classic kit",
+      "description": "Keep the original flat palette as an extra theme kit and store the appearance choice per account so one person's theme never shows for another.",
+      "acceptance_criteria": [
+        "Classic kit reproduces the original palette in both modes and disables the ambient layer and pulse",
+        "theme_mode and theme_kit are stored on the signed-in account and returned by /auth/me",
+        "GET and PUT /auth/preferences work for user sessions only; API tokens are rejected",
+        "a second account on the same browser starts from the default kit instead of inheriting the previous choice",
+        "the preference survives a new login and is validated against the known kits and modes"
+      ],
+      "depends_on": [
+        "KAN-095",
+        "KAN-096"
+      ],
+      "status": "done",
+      "notes": "Migration 0006 adds theme_mode/theme_kit to user_credentials. ThemeProvider applies the account value on sign-in and PATCHes on change; localStorage stays as a first-paint cache. Tests: four backend preference tests, a vitest classic case and an E2E account-isolation check."
+    }
+  ]
+}

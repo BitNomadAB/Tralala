@@ -1,0 +1,213 @@
+﻿# Architecture
+
+## Overview
+
+```
+React UI ──────────────┐
+                      │
+WebMCP ── React ───────┼── FastAPI ── Services ── Repositories/storage
+                      │                              │
+External AI ─ REST ────┘                              ├── registry.sqlite
+                                                      └── boards/{uuid}/board.sqlite
+```
+
+One modular Python monolith. Every interface (React UI, WebMCP adapter, external agents over
+REST) reaches the same service functions; no business rule is duplicated in the frontend or in
+WebMCP tool definitions.
+
+### Backend layers
+
+| Layer | Location | Responsibility |
+| --- | --- | --- |
+| API | `backend/app/api` | HTTP routing, authentication dependency, envelopes, status codes |
+| Services | `backend/app/services` | Business rules, transactions, activity logging, ordering |
+| Storage | `backend/app/storage` | SQLite engines, migrations, registry and per-board databases |
+| Schemas | `backend/app/schemas` | Pydantic v2 request/response validation |
+| Core | `backend/app/core` | Settings, errors, security primitives, actor context, rate limiting |
+
+### Frontend layers
+
+| Layer | Location | Responsibility |
+| --- | --- | --- |
+| App shell | `frontend/src/app` | Router, providers, layout |
+| Features | `frontend/src/features` | Boards, board view, cards, activity, settings, auth |
+| API client | `frontend/src/lib/api.ts` | Typed REST client, envelope unwrapping, CSRF header |
+| WebMCP | `frontend/src/webmcp` | Capability detection, registry adapter, contextual tools |
+| Theme | `frontend/src/themes` | Theme kits (`data-theme-kit`) x dark/light/system over semantic CSS variables |
+
+## Storage model
+
+- `data/registry.sqlite` holds boards, board templates, role templates, agents, actors, credentials
+  and registry-level idempotency records.
+- `data/boards/{uuid}/board.sqlite` holds lists, cards, labels, checklists, comments and activity.
+- `data/backups/{uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite` holds consistent snapshots.
+- `data/exports/` is reserved for future generated exports; the export endpoint streams the archive.
+- `data/.session-secret` holds the generated per-install session secret when `TRALALA_SECRET_KEY` is unset (owner-only permissions); `data/.bootstrap-password` holds a generated first-administrator password until it is deleted.
+
+Board ids are UUIDs validated before any path is constructed, so user input never reaches the
+filesystem. Each board engine is created with `NullPool`, `foreign_keys=ON`, WAL journaling and a
+5 s busy timeout; engines idle longer than `TRALALA_BOARD_IDLE_CLOSE_SECONDS` are disposed, and the
+cache is capped so a host with many boards cannot exhaust file handles.
+
+## Request lifecycle
+
+1. Middleware assigns `X-Request-ID`, enforces the request-size limit and adds security headers.
+2. `get_context` resolves the actor from a bearer token or a signed session cookie (validated
+   against the `sessions` row), enforces CSRF for cookie-authenticated mutations, and applies the
+   per-actor rate limiter. Session scopes come from the account role: `admin` has every scope,
+   `member` every scope except `users:admin`.
+3. The router validates the payload with a strict Pydantic model and calls a service.
+4. The service authorizes the scope, opens exactly one board transaction, mutates state, writes an
+   activity entry and returns a plain dict.
+5. The response is wrapped as `{success, data, request_id, meta}` and validated by the response
+   model.
+
+Board access is guarded by a re-entrant per-board lock shared by `open`, `session`, `reader` and
+`restore`, so a restore is exclusive inside the process.
+
+## Consistency across databases
+
+SQLite has no cross-file transactions, so:
+
+- A request mutates at most one board database.
+- Board creation inserts a `maintenance` registry row, creates the database at the board chain
+  head through Alembic, then flips the row to `active`. Failures set `error`;
+  `BoardService.recover()` repairs rows left in `maintenance` during startup.
+- Schema upgrades are owned by `MigrationManager`: the registry chain runs first, then every board
+  is migrated eagerly and sequentially before requests are served, with a verified pre-migration
+  snapshot and post-migration integrity checks. A failed board is marked `migration_failed` and
+  blocks mutations until `POST /boards/{id}/migrate` succeeds.
+- Cross-board card transfer copies the card (labels, checklists, comments) into the target board
+  first and deletes the source copy second. If deletion fails the source card is archived and the
+  response reports `finalized: false` with a warning, so the card is never visible twice.
+- Board templates are registry rows because they are selected before a board exists. Creating a
+  board with `template_id` resolves the template first (failing with `422` before reserving the
+  idempotency key), then writes the template's lists and labels into the new board database in the
+  same transaction that logs `board.created`.
+- AI roles are split in two on purpose: `role_templates` (shared, editable) and `agents` (identity,
+  connection, sealed credential, template reference or override). Any future discussion persists
+  `AgentService.role_snapshot(...)` so prompt history is reproducible; see
+  [decisions/0001](decisions/0001-role-template-vs-agent-snapshot.md).
+
+## Ordering strategy
+
+Lists and cards use integer `position` values spaced by 1024. Inserts target the midpoint between
+neighbours; when no integer gap remains the scope is normalized to `1024, 2048, …`. This keeps
+reorders O(1) writes in the common case and bounds normalization to rare, list-scoped rewrites.
+
+## Concurrency and idempotency
+
+- Cards carry an integer `version`. Update/move/transfer require the expected version and return
+  `409 version_conflict` with the current version otherwise.
+- `Idempotency-Key` on board/card creation stores a SHA-256 fingerprint plus the response. A replay
+  with the same payload returns the stored response; a different payload returns `409
+  idempotency_key_reused`.
+
+## Discussion runs
+
+A discussion is steered through *runs*. `RunService` writes a `discussion_runs` row, then either
+executes one round inline (a single interactive round) or hands the loop to an in-process
+`ThreadPoolExecutor` (multiple rounds or autonomous mode). The executor holds no state of its own:
+the run row is the control channel, so `pause`, `resume` and `stop` are plain updates that the loop
+observes between participant calls and between rounds. Nothing is queued in a broker, which keeps
+the "one backend process per data directory" rule intact.
+
+- Each round is one pass over the participants and is recorded in `discussion_rounds` with answers,
+  failures, repeats, tokens and wall time. `discussion_threads.round_count` is the monotonic round
+  counter for the whole thread; `discussion_runs.rounds_completed` counts rounds inside one run.
+- Budgets are enforced before a round starts (accumulated time) and after every answer (tokens), so
+  a runaway loop stops instead of spending the whole budget in one round.
+- Duplicate guard: each agent message stores `content_sha256`. When an agent repeats its previous
+  answer the message and vote are not inserted again; a round with only repeats ends the run as
+  `no_progress`.
+- Termination is explicit: `completed` (rounds used up), `completed` with `stop_reason=consensus`,
+  `stopped`, `failed` (every participant errored), `budget_exhausted` or `no_progress`. A run whose
+  round was interrupted by pause/stop still records that partial round, which is why
+  `rounds_completed` can advance once after a pause.
+- Only one run per thread can be active; review decisions are rejected while a run is running or
+  paused.
+- A human message is answered automatically in `roundtable`/`autonomous` threads (one background
+  round per message). A `manual` thread requires an explicit `@agents` (or participant name)
+  mention or an explicit run. The message insert publishes first and the run is requested after it
+  commits; a running or closed thread simply keeps the message.
+- Startup reconciliation follows decision 0002: runs left `running`/`paused` fail with
+  `process_restart`, their thread `run_state` returns to `idle`, interrupted mention jobs fail as
+  retryable and queued ones resume. A crash therefore never leaves a thread that refuses new runs,
+  review or retry.
+
+### Event stream
+
+Every state change also appends a `discussion_events` row with an autoincrementing `seq` in the same
+transaction, and only then fans out to in-process subscriber queues (one per open SSE connection).
+Because the log is written first, a client that reconnects with `Last-Event-ID` replays what it
+missed instead of trusting the socket; the endpoint subscribes *before* it replays and drops
+already-seen sequence numbers, which closes the race between the two steps. Subscriber queues are
+bounded and drop their oldest entry rather than blocking a worker, so a slow reader cannot stall a
+run. Events are hints for the frontend: they invalidate the discussion queries, which refetch the
+authoritative state, and polling remains as a fallback when `EventSource` is unavailable.
+
+The same machinery serves ticket comments through a second scope (`card_events`, streamed by
+`GET /boards/{id}/cards/{card_id}/events`). `EventService` derives the scope from the event row, so
+one publish path covers both streams.
+
+## Discussion navigation
+
+The Discussions page loads one lightweight entry per board (`GET /discussions/overview`) and only
+then the threads of the selected board. The overview aggregates `MAX(last_activity_at)`, the thread
+count and the open count per board database, so ordering follows the newest post or LLM round
+without shipping every thread to the browser. Boards without threads stay reachable, sorted last.
+The overview is refreshed when the page opens, after a discussion is created and when the user
+returns to the board list (plus a 30 s interval while the list is visible); it is not refetched for
+every thread event.
+
+## Ticket mentions
+
+An `@` mention in a ticket comment starts an asynchronous agent reply. `CommentService` saves the
+comment first, `MentionService` resolves the mentioned names against the *enabled* registry agents
+(`@[Agent Name]` is the unambiguous form the composer inserts; a bare `@Name` matches an enabled
+name exactly), and queues one `comment_mention_jobs` row per agent. The job row is the status
+channel (`queued` → `running` → `completed`/`failed`) and work runs on an in-process
+`ThreadPoolExecutor`; no broker is introduced, exactly like discussion runs.
+
+- The job stores a role snapshot at enqueue time, so later role-template edits cannot rewrite what
+  the agent was asked.
+- Context is assembled from the ticket (title, description, list, priority, due date, labels), its
+  checklists and items, attachment metadata and the most recent comments. Attachment bytes are not
+  sent; text extraction is a later increment.
+- A successful answer is written as a normal agent-authored comment in the same thread, and the job
+  records `response_comment_id`. `uq_comment_mentions_once` (one job per comment and agent) plus the
+  guarded answer insert make retry idempotent: a retry can only run a job that failed and never
+  produced an answer, and a completed job refuses a retry with `409`.
+- Each step publishes `agent_started`, `agent_completed` or `agent_failed` on the ticket's event
+  stream; the card dialog refreshes comments and jobs from those hints. Payloads carry ids and
+  counters only, so no comment text is duplicated in the event log.
+- The mention autocomplete reads `GET /agents/directory`, which returns enabled agents with id,
+  name and role only — connection details stay in the Settings view that needs them.
+
+## Search
+
+`cards_fts` (FTS5, external content over `cards`) is created when the runtime supports it; the
+migration layer degrades gracefully and search falls back to `LIKE`. The search response reports
+which engine answered so agents can reason about result quality.
+
+## WebMCP
+
+`getModelContext()` feature-detects `document.modelContext` / `navigator.modelContext`. Each UI
+context registers only its tools through `createRegistry`, which uses an `AbortController` and
+`unregisterTool` (when available) for cleanup. Tools are filtered by the authenticated actor's
+scopes before registration, and every tool calls the typed REST client — never the database.
+
+## Operational notes
+
+- Structured JSON logs (request id, method, path, status, duration, actor, replay flag).
+- `GET /api/v1/boards/{id}/validate` runs `PRAGMA integrity_check` and `foreign_key_check` and
+  reports the board's `alembic_version` revision.
+- `POST /api/v1/boards/{id}/migrate` retries a failed board migration (admin only) and returns
+  the structured migration report.
+- Backups use SQLite's online-backup API; restore snapshots the backup into the live database file
+  and re-validates.
+- Docker Compose mounts a single data volume; the frontend container proxies `/api` to the backend.
+- Run exactly one backend process per data directory. SQLite writes, the in-memory rate limiter and
+  the per-board locks assume a single writer; horizontal scaling needs a shared coordination store.
+- End-to-end tests (`frontend/e2e`) run through `scripts/run-playwright.mjs`, which reuses a local
+  Playwright install and boots an isolated stack (backend `:8077`, Vite `:5273`).
