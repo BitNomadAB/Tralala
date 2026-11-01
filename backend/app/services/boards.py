@@ -298,16 +298,18 @@ class BoardService:
                     entity_id=board_id,
                     changes=changes,
                 )
+            # Links first: a crash before the board turns active leaves it in "maintenance", which
+            # the dashboard shows, instead of an active board that silently analyses nothing.
+            if payload.repository_ids:
+                self.repositories.set_board_links(board_id, payload.repository_ids)
+            if payload.agent_ids and self.agents is not None:
+                self.agents.set_board_agents(board_id, payload.agent_ids)
             self.registry.update_board(
                 board_id,
                 status="active",
                 schema_revision=runner.head_revision("board"),
                 schema_version=runner.revision_count("board"),
             )
-            if payload.repository_ids:
-                self.repositories.set_board_links(board_id, payload.repository_ids)
-            if payload.agent_ids and self.agents is not None:
-                self.agents.set_board_agents(board_id, payload.agent_ids)
         except Exception:
             self.registry.update_board(board_id, status="error")
             with self.registry.connect() as conn:

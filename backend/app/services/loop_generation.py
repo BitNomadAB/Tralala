@@ -166,16 +166,14 @@ class LoopGenerationService:
     ) -> dict[str, Any]:
         """Explicit choice, then the Loop's stored preference, then a board agent.
 
-        A run may name any agent the board lists; a Loop preference only fills in the default, and a
-        preference that no longer resolves (deleted agent, or the board dropped it) falls back to
-        the board default instead of blocking the run.
+        An explicit choice must be usable or the run fails loudly. A stored preference may have gone
+        stale (the agent was deleted, disabled, dropped from the board, or is an organisation
+        profile), and then the run falls back to the board default instead of blocking.
         """
         requested = agent_id
         if not agent_id:
             agent_id = self._preferred_agent(board_id, loop_id, purpose)
-        row = self._agent_row(agent_id, board_id) if agent_id else None
-        if row is None and agent_id and requested:
-            raise ValidationFailure("Agent not found", details={"agent_id": agent_id})
+        row = self._agent_row(agent_id, board_id, strict=bool(requested)) if agent_id else None
         if row is None:
             row = self._default_agent_row(board_id)
         if row is None:
@@ -195,37 +193,65 @@ class LoopGenerationService:
             )
         return row
 
-    def _agent_row(self, agent_id: str, board_id: str) -> dict[str, Any] | None:
-        """An agent the board may use, or None when it is unknown to the registry."""
+    def _agent_row(
+        self, agent_id: str, board_id: str, *, strict: bool
+    ) -> dict[str, Any] | None:
+        """An agent a run may use, or None when it is unusable and the caller is not strict."""
         row = self.registry.read_one("SELECT * FROM agents WHERE id = :id", {"id": agent_id})
         if row is None:
+            if strict:
+                raise ValidationFailure("Agent not found", details={"agent_id": agent_id})
+            return None
+        if self._is_organisation_profile(agent_id):
+            if strict:
+                raise ValidationFailure(
+                    "An organisation profile cannot run a Loop",
+                    code="agent_scope_organisation",
+                    details={"agent_id": agent_id, "board_id": board_id},
+                )
             return None
         if not row["enabled"]:
-            raise ValidationFailure("Agent is disabled", details={"agent_id": agent_id})
+            if strict:
+                raise ValidationFailure("Agent is disabled", details={"agent_id": agent_id})
+            return None
         board_agents = self._board_agent_ids(board_id)
         if board_agents and agent_id not in board_agents:
-            raise ValidationFailure(
-                "That agent does not work on this board",
-                code="agent_not_on_board",
-                details={"agent_id": agent_id, "board_id": board_id},
-            )
+            if strict:
+                raise ValidationFailure(
+                    "That agent does not work on this board",
+                    code="agent_not_on_board",
+                    details={"agent_id": agent_id, "board_id": board_id},
+                )
+            return None
         return row
 
+    def _is_organisation_profile(self, agent_id: str) -> bool:
+        row = self.registry.read_one(
+            "SELECT COALESCE(r.scope, 'board') AS scope FROM agents a"
+            " LEFT JOIN role_templates r ON r.id = a.role_template_id WHERE a.id = :id",
+            {"id": agent_id},
+        )
+        return bool(row and row["scope"] == "organisation")
+
     def _default_agent_row(self, board_id: str) -> dict[str, Any] | None:
-        """First board agent by name, else the first enabled generator of the installation."""
+        """First board agent by name, else the first enabled generator of the installation.
+
+        Organisation profiles are excluded either way: they are not a Loop's worker.
+        """
         board_agents = self._board_agent_ids(board_id)
         placeholders = ", ".join(f":agent_{index}" for index in range(len(board_agents)))
-        board_clause = f" AND id IN ({placeholders})" if board_agents else ""
+        board_clause = f" AND a.id IN ({placeholders})" if board_agents else ""
+        select = (
+            "SELECT a.* FROM agents a LEFT JOIN role_templates r ON r.id = a.role_template_id"
+            " WHERE a.enabled = 1 AND a.connection_type = 'openai_compatible'"
+            " AND COALESCE(r.scope, 'board') != 'organisation'"
+        )
         row = self.registry.read_one(
-            "SELECT * FROM agents WHERE enabled = 1 AND connection_type ="
-            f" 'openai_compatible'{board_clause} ORDER BY name LIMIT 1",
+            select + board_clause + " ORDER BY a.name LIMIT 1",
             {f"agent_{index}": value for index, value in enumerate(board_agents)},
         )
         if row is None and board_agents:
-            row = self.registry.read_one(
-                "SELECT * FROM agents WHERE enabled = 1 AND connection_type ="
-                " 'openai_compatible' ORDER BY name LIMIT 1"
-            )
+            row = self.registry.read_one(select + " ORDER BY a.name LIMIT 1")
         return row
 
     # --- start -----------------------------------------------------------------

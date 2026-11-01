@@ -583,3 +583,50 @@ duplicating keeps the scope) plus `test_agent_config`/`test_agents` updated for 
 `ruff` clean, full backend suite green. Frontend `typecheck` green, `pnpm test` 35/35, `pnpm build`
 green, `pnpm test:e2e` 26/26. Live: the twelve roles seed into the existing dev registry, and Settings
 shows Coordinator and Architect with the organisation badge.
+
+## 2026-11-01 ? Analysis round after the profile work (four skills)
+
+Reports: `analysis/anti-reverse-engineering-analysis/2026-11-01-board-and-agent-links-*`,
+`analysis/atam-architecture-analysis/2026-11-01-board-and-agent-links-*`,
+`analysis/cynefin-context-analysis/2026-11-01-organisation-wide-profiles-*`,
+`analysis/fmea/2026-11-01-board-and-agent-links-*`. All four pass `report.py check`.
+
+Fixed from the findings:
+- **Repository reads fit the caller**: `GET /repositories[/id]` hides `token_hint` and the
+  `last_check_*` fields from a caller without `boards:admin` (the board dialogs keep working), pinned by
+  `test_a_board_reader_gets_no_credential_hint_or_check_history`.
+- **Generation refuses an organisation profile**: strict for an explicit `agent_id`
+  (`422 agent_scope_organisation`), lenient for a stored Loop preference (falls back), and the default
+  pick filters the scope in SQL. `_agent_row(strict=…)` now also falls back for a disabled or
+  board-dropped preference instead of failing the run.
+- **Board creation writes its links before turning active**, so an interrupted creation is visible as
+  `maintenance` rather than an active board that analyses nothing.
+- **Upgrade test for `0011`**: a registry built at `0010` with a customized role, an agent pointing at
+  it and a board link keeps all three after the upgrade.
+- **`0013` records** that a malformed seed stops startup on purpose, and that the suite validates the
+  same file.
+
+Left open with reasons: dashboard counts open every board database three times per board (ATAM F1),
+per-id validation queries (ATAM F4), and a Loop preference staying readable to `loops:read`
+(anti-RE LOW-1, accepted because the generation dialog needs it).
+
+Also cleaned a workaround in `services/repositories.py`: the Authorization scheme was assembled from two
+fragments; it is a plain string again.
+
+## 2026-11-01 ? Discussions reachable again on a board without tickets
+
+Symptom: the forum looked dead. Selecting a board enabled *New discussion*, but the dialog's ticket
+picker was empty because no Loop had a ticket yet ("Every discussion references exactly one existing
+ticket"), and nothing explained why the form could not be submitted. The API was fine: creating a
+ticket in a Loop and then a discussion worked end to end (verified against the dev instance, thread,
+message and run control included).
+
+Fix in `features/discussions/DiscussionsPage.tsx`:
+- The dialog now states the blocker when the board has no tickets, with a link straight to the board
+  ("Open <board> and add a ticket to a Loop, then start the discussion here").
+- It shows "Loading tickets..." while the picker query runs, so an empty picker is never ambiguous.
+- *New discussion* carries `title="Select a board first"` while no board is selected.
+
+Verified: `typecheck`, `pnpm test` 35/35, `pnpm build`, `pnpm test:e2e` 26/26 (the discussions journeys
+are part of the suite), and a live round trip: board → new discussion → ticket picked → created →
+thread opened.

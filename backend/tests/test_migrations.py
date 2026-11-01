@@ -368,3 +368,75 @@ def test_registry_upgrade_keeps_the_repository_assignment(settings: Settings) ->
 
 
 
+
+
+def test_registry_upgrade_keeps_customized_roles_and_agent_references(settings: Settings) -> None:
+    """0011 rebuilds role_templates; a customized prompt and every agent reference must survive."""
+    from app.storage.sqlite import create_sqlite_engine
+
+    settings.ensure_dirs()
+    engine = create_sqlite_engine(settings.registry_path)
+    try:
+        with engine.begin() as conn:
+            runner.upgrade("registry", conn, "0010_board_agents")
+            now = "2026-11-01T00:00:00Z"
+            role_id = str(uuid.uuid4())
+            agent_id = str(uuid.uuid4())
+            board_id = str(uuid.uuid4())
+            conn.execute(
+                text(
+                    "INSERT INTO role_templates (id, name, description, system_prompt,"
+                    " default_system_prompt, built_in, builtin_key, created_at, updated_at)"
+                    " VALUES (:id, 'House Voice', 'Custom profile', 'Edited by a person',"
+                    " 'Factory text', 0, NULL, :now, :now)"
+                ),
+                {"id": role_id, "now": now},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO agents (id, name, description, role_template_id, connection_type,"
+                    " base_url, enabled, created_at, updated_at)"
+                    " VALUES (:id, 'House agent', '', :role, 'openai_compatible',"
+                    " 'http://127.0.0.1:8099/v1', 1, :now, :now)"
+                ),
+                {"id": agent_id, "role": role_id, "now": now},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO boards (id, name, description, status, created_at, updated_at,"
+                    " archived_at, schema_version, schema_revision)"
+                    " VALUES (:id, 'Role board', '', 'active', :now, :now, NULL, 0, NULL)"
+                ),
+                {"id": board_id, "now": now},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO board_agents (board_id, agent_id, created_at)"
+                    " VALUES (:board, :agent, :now)"
+                ),
+                {"board": board_id, "agent": agent_id, "now": now},
+            )
+            runner.upgrade("registry", conn, "head")
+
+            role = conn.execute(
+                text(
+                    "SELECT system_prompt, default_system_prompt, scope FROM role_templates"
+                    " WHERE id = :id"
+                ),
+                {"id": role_id},
+            ).mappings().one()
+            assert role["system_prompt"] == "Edited by a person"
+            assert role["default_system_prompt"] == "Factory text"
+            assert role["scope"] == "board"
+
+            agent = conn.execute(
+                text("SELECT role_template_id FROM agents WHERE id = :id"), {"id": agent_id}
+            ).scalar_one()
+            assert agent == role_id
+
+            link = conn.execute(
+                text("SELECT agent_id FROM board_agents WHERE board_id = :id"), {"id": board_id}
+            ).scalar_one()
+            assert link == agent_id
+    finally:
+        engine.dispose()

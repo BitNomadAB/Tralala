@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import pytest
 from conftest import Api
 
-from app.services import role_defaults
+from app.services import role_defaults, runtime
 
 
 def test_the_seed_file_defines_every_builtin_role() -> None:
@@ -134,3 +135,55 @@ def test_duplicating_an_organisation_profile_keeps_its_scope(api: Api) -> None:
     )
     assert copy["scope"] == "organisation"
     assert copy["built_in"] is False
+
+
+def _loop_base(board: dict[str, Any], loop: dict[str, Any]) -> str:
+    return f"/api/v1/boards/{board['id']}/loops/{loop['id']}"
+
+
+def test_generation_refuses_an_organisation_profile(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    coordinator = _agent_with_role(api, "coordinator agent", "coordinator")
+    api.data(api.put(f"{_loop_base(board, loop)}/documents/info", json={"content": "Intent"}))
+
+    response = api.post(
+        f"{_loop_base(board, loop)}/generation-runs",
+        json={"purpose": "analysis", "agent_id": coordinator["id"]},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "agent_scope_organisation"
+
+
+def test_the_default_agent_skips_an_organisation_profile(
+    api: Api, board: dict[str, Any], loop: dict[str, Any], monkeypatch: Any
+) -> None:
+    _agent_with_role(api, "aaa coordinator", "coordinator")
+    worker = _agent_with_role(api, "zzz analyst", "analytics_agent")
+    api.data(api.put(f"{_loop_base(board, loop)}/documents/info", json={"content": "Intent"}))
+    used: dict[str, Any] = {}
+
+    def fake_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        used["agent"] = agent_row
+        return {
+            "ok": True,
+            "error": None,
+            "text": (
+                '{"schema_version":1,"outcome":"x","scope":[],"findings":[],"assumptions":[],'
+                '"open_questions":[],"options":[],"recommendation":"x","verification":[],'
+                '"sources":[],"repository_revision":""}'
+            ),
+            "model": "m",
+            "usage": {},
+        }
+
+    monkeypatch.setattr(runtime, "call_completion", fake_call)
+    started = api.data(
+        api.post(f"{_loop_base(board, loop)}/generation-runs", json={"purpose": "analysis"})
+    )
+    for _ in range(100):
+        run = api.data(api.get(f"{_loop_base(board, loop)}/generation-runs/{started['id']}"))
+        if run["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.05)
+    assert used["agent"]["id"] == worker["id"]

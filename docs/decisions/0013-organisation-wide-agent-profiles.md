@@ -32,6 +32,9 @@ code change and there was no single file that said which profiles an installatio
    Existing templates become `board`, which is what they were. `organisation` profiles are not
    selectable as board agents: `agent_ids` on a board rejects them with `422 agent_scope_organisation`,
    the board pickers list only board profiles, and the Loop generation candidate list excludes them.
+   Generation itself refuses an organisation profile as well, both when a run names one
+   (`422 agent_scope_organisation`) and when the default pick would otherwise choose one, so a board
+   that lists no agents still runs on a board profile.
    An operator who wants one creates an agent in **Settings -> Agents**, where the scope is shown.
 3. **Organisation profiles live where the whole picture lives.** Role templates, agents and
    credentials were already registry data; this decision states the rule instead of leaving it
@@ -40,7 +43,9 @@ code change and there was no single file that said which profiles an installatio
 4. **The profiles ship as a seed file:** `backend/app/seeds/role_seeds.json`, loaded and validated by
    `services/role_defaults.py` at import. Every installation seeds the same set, a new profile is a
    data change, and a broken seed (missing key, duplicate key, unknown scope, unresolved placeholder)
-   fails startup instead of quietly seeding an incomplete set.
+   fails startup instead of quietly seeding an incomplete set. That is deliberate: an installation
+   that starts with half the profiles would fail later and less clearly. The suite loads and validates
+   the same file (`tests/test_role_seeds.py`) before a release.
    The file lives in `app/seeds/`, not `app/data/`, because `data` is ignored by both git and the
    container build.
 5. **The Architect needs one read-only token that covers the organisation.** Tralala cannot grant

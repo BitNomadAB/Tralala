@@ -289,3 +289,39 @@ def _admin_actor() -> Any:
         role="admin",
         scopes=frozenset(SCOPES),
     )
+
+
+def test_a_board_reader_gets_no_credential_hint_or_check_history(api: Api) -> None:
+    """Administration detail stays with administrators; the list itself stays usable."""
+    created = _create(api)
+    credential = api.data(
+        api.post(
+            "/api/v1/credentials",
+            json={"name": "planner agent", "scopes": ["boards:read", "loops:read"]},
+        )
+    )
+    headers = {"Authorization": f"Bearer {credential['token']}"}
+
+    listed = api.client.get("/api/v1/repositories", headers=headers)
+    assert listed.status_code == 200, listed.text
+    entry = listed.json()["data"][0]
+    assert set(entry) == {
+        "id",
+        "name",
+        "provider",
+        "url",
+        "branch",
+        "enabled",
+        "has_token",
+        "boards",
+        "created_at",
+        "updated_at",
+    }
+    assert entry["id"] == created["id"]
+
+    single = api.client.get(f"/api/v1/repositories/{created['id']}", headers=headers)
+    assert single.status_code == 200, single.text
+    assert "token_hint" not in single.json()["data"]
+
+    admin_view = api.data(api.get(f"/api/v1/repositories/{created['id']}"))
+    assert admin_view["token_hint"] == created["token_hint"]

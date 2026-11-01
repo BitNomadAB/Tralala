@@ -18,14 +18,28 @@ from ..deps import RequestContext, get_context, ok
 router = APIRouter(tags=["repositories"])
 
 
-@router.get("/repositories", response_model=Envelope[list[RepositoryOut]])
+def _sees_health(ctx: RequestContext) -> bool:
+    """Credential hints and check outcomes belong to whoever may administer repositories."""
+    return ctx.actor.has_scope("boards:admin")
+
+
+@router.get(
+    "/repositories",
+    response_model=Envelope[list[RepositoryOut]],
+    response_model_exclude_none=True,
+)
 async def list_repositories(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     board_id: Annotated[str | None, Query()] = None,
 ) -> dict:
     ctx.actor.require("boards:read")
-    return ok(request, ctx.services.repository.list(board_id=board_id))
+    return ok(
+        request,
+        ctx.services.repository.list(
+            board_id=board_id, with_health=_sees_health(ctx)
+        ),
+    )
 
 
 @router.post("/repositories", response_model=Envelope[RepositoryOut], status_code=201)
@@ -37,14 +51,21 @@ async def create_repository(
     return ok(request, ctx.services.repository.create(ctx.actor, payload))
 
 
-@router.get("/repositories/{repository_id}", response_model=Envelope[RepositoryOut])
+@router.get(
+    "/repositories/{repository_id}",
+    response_model=Envelope[RepositoryOut],
+    response_model_exclude_none=True,
+)
 async def get_repository(
     repository_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict:
     ctx.actor.require("boards:read")
-    return ok(request, ctx.services.repository.get(repository_id))
+    return ok(
+        request,
+        ctx.services.repository.get(repository_id, with_health=_sees_health(ctx)),
+    )
 
 
 @router.patch("/repositories/{repository_id}", response_model=Envelope[RepositoryOut])

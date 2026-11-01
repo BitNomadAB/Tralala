@@ -245,6 +245,11 @@ rotates. `check` reports `ok`, `unauthorized`, `not_found`, `forbidden`, `branch
 `unreachable` and stores the last outcome on the record. See
 [decisions/0011](decisions/0011-repository-access-for-analysis-agents.md).
 
+`GET /repositories` and `GET /repositories/{id}` are readable with `boards:read`, but a caller without
+`boards:admin` gets the entry without `token_hint`, `last_checked_at`, `last_check_status` and
+`last_check_detail`: the list stays usable for board dialogs while credential hints and access-check
+history remain administration detail.
+
 The dialog carries the same recipe for an operator, and it can be followed before the repository
 exists: GitHub -> Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens,
 *Only select repositories* (this one), *Repository permissions* -> **Contents: Read-only**, short

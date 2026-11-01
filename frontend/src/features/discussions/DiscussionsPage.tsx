@@ -177,7 +177,11 @@ export function DiscussionsPage() {
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button onClick={() => setCreating(true)} disabled={!activeBoard}>
+          <Button
+            onClick={() => setCreating(true)}
+            disabled={!activeBoard}
+            title={activeBoard ? undefined : "Select a board first"}
+          >
             <Plus size={15} /> New discussion
           </Button>
         </div>
@@ -461,6 +465,17 @@ export function DiscussionsPage() {
                 ))}
               </Select>
             </Field>
+            {ticketsQuery.isLoading ? (
+              <p className="text-xs text-[var(--muted-foreground)]">Loading tickets…</p>
+            ) : boardTickets.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted-foreground)]">
+                This board has no tickets yet, and a discussion must reference one. Open{" "}
+                <Link className="underline" to={`/boards/${activeBoard}`}>
+                  {activeBoardEntry?.board_name ?? "the board"}
+                </Link>{" "}
+                and add a ticket to a Loop, then start the discussion here.
+              </p>
+            ) : null}
             <Field label="Title (optional)" htmlFor="discussion-title">
               <Input
                 id="discussion-title"

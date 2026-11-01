@@ -41,14 +41,13 @@ def _github_get(
     """One read-only GitHub API call; isolated so tests never reach the network."""
     import httpx
 
-    scheme = "Bea" + "rer"
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "tralala",
     }
     if token:
-        headers["Authorization"] = f"{scheme} {token}"
+        headers["Authorization"] = "Bearer " + token
     with httpx.Client(timeout=timeout, follow_redirects=False) as client:
         response = client.get(url, headers=headers)
     try:
@@ -96,12 +95,27 @@ class RepositoryService:
         return owner, name
 
     def serialize(
-        self, row: dict[str, Any], boards: list[dict[str, str]] | None = None
+        self,
+        row: dict[str, Any],
+        boards: list[dict[str, str]] | None = None,
+        *,
+        with_health: bool = True,
     ) -> dict[str, Any]:
+        """A repository entry. ``with_health=False`` hides the credential hint and check history.
+
+        A caller without ``boards:admin`` still needs to see which repositories exist and which
+        boards use them (board dialogs offer the list), but the token hint and the outcome of the
+        last access check are administration detail.
+        """
         entry = dict(row)
         entry["has_token"] = bool(entry.pop("token_ciphertext", None))
         entry["enabled"] = bool(entry.get("enabled", 1))
         entry["boards"] = boards or []
+        if not with_health:
+            entry.pop("token_hint", None)
+            entry.pop("last_checked_at", None)
+            entry.pop("last_check_status", None)
+            entry.pop("last_check_detail", None)
         return entry
 
     def _row(self, repository_id: str) -> dict[str, Any] | None:
@@ -136,7 +150,9 @@ class RepositoryService:
 
     # --- queries ---------------------------------------------------------------
 
-    def list(self, *, board_id: str | None = None) -> list[dict[str, Any]]:
+    def list(
+        self, *, board_id: str | None = None, with_health: bool = True
+    ) -> list[dict[str, Any]]:
         if board_id:
             self._require_board(board_id)
             records = self.registry.read(
@@ -149,11 +165,16 @@ class RepositoryService:
                 f"{_SELECT} ORDER BY r.name COLLATE NOCASE, r.id"
             )
         boards = self.boards_by_repository()
-        return [self.serialize(record, boards.get(record["id"])) for record in records]
+        return [
+            self.serialize(record, boards.get(record["id"]), with_health=with_health)
+            for record in records
+        ]
 
-    def get(self, repository_id: str) -> dict[str, Any]:
+    def get(self, repository_id: str, *, with_health: bool = True) -> dict[str, Any]:
         row = self._require(repository_id)
-        return self.serialize(row, self.boards_by_repository().get(repository_id))
+        return self.serialize(
+            row, self.boards_by_repository().get(repository_id), with_health=with_health
+        )
 
     def for_board(self, board_id: str) -> list[dict[str, Any]]:
         """Enabled repositories the board selected, for the analysis context."""
