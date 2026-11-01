@@ -279,3 +279,43 @@ def run_idempotent(
         ttl_seconds=ttl_seconds,
     )
     return result, False
+
+def require_mutable_card(conn: Connection, card_id: str) -> None:
+    """Reject writes to subresources of a Loop that is completed, archived or cancelled.
+
+    Every retained endpoint that reaches a Ticket passes through here, so a finished Loop stays
+    read-only through comments, attachments, checklists and labels alike.
+    """
+    row = one(
+        conn,
+        "SELECT l.stage, l.completed_at, l.archived_at, l.cancelled_at FROM cards c"
+        " JOIN loops l ON l.id = c.loop_id WHERE c.id = :id",
+        {"id": card_id},
+    )
+    if row is None:
+        return
+    if (
+        row["completed_at"] is not None
+        or row["stage"] == "completed"
+        or row["archived_at"] is not None
+        or row["cancelled_at"] is not None
+    ):
+        raise Conflict(
+            "This Loop is read-only", code="loop_read_only", details={"card_id": card_id}
+        )
+
+def require_mutable_checklist(conn: Connection, checklist_id: str) -> None:
+    row = one(conn, "SELECT card_id FROM checklists WHERE id = :id", {"id": checklist_id})
+    if row is not None:
+        require_mutable_card(conn, row["card_id"])
+
+
+def require_mutable_checklist_item(conn: Connection, item_id: str) -> None:
+    row = one(
+        conn,
+        "SELECT ch.card_id FROM checklist_items i JOIN checklists ch ON ch.id = i.checklist_id"
+        " WHERE i.id = :id",
+        {"id": item_id},
+    )
+    if row is not None:
+        require_mutable_card(conn, row["card_id"])

@@ -12,7 +12,7 @@
  * "playwright/test". Chromium is installed on demand if no browser build is present.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -145,6 +145,13 @@ ensureModuleLink(packageDir);
 if (!hasChromium()) {
   console.error("[playwright] no browser build found; installing chromium…");
   execFileSync(process.execPath, [cli, "install", "chromium"], { stdio: "inherit" });
+}
+
+// The e2e stack is disposable: start every test run from an empty data directory, otherwise a
+// preference or a board left behind by the previous run leaks into the next one. Set
+// E2E_KEEP_DATA=1 to inspect a finished run's data instead.
+if (process.argv[2] === "test" && process.env.E2E_KEEP_DATA !== "1") {
+  rmSync(path.join(frontendDir, "e2e", ".data"), { recursive: true, force: true });
 }
 
 const env = {

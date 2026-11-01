@@ -2,18 +2,28 @@ from __future__ import annotations
 
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 
 
 def _card_titles(api: Api, board_id: str) -> list[str]:
-    return [card["title"] for card in api.data(api.get(f"/api/v1/boards/{board_id}/cards"))]
+    return [
+        card["title"]
+        for card in api.data(
+            api.get(f"/api/v1/boards/{board_id}/loops/{loop_id(api, board_id)}/cards")
+        )
+    ]
 
 
 def test_backup_create_list_and_restore(api: Api, board: dict[str, Any]) -> None:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     todo = lists[1]["id"]
     api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards", json={"list_id": todo, "title": "Before"})
+        api.post(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+            json={"list_id": todo, "title": "Before"},
+        )
     )
     backup = api.data(api.post(f"/api/v1/boards/{board['id']}/backups"))
     assert backup["verification"]["ok"] is True
@@ -21,7 +31,10 @@ def test_backup_create_list_and_restore(api: Api, board: dict[str, Any]) -> None
     assert [item["name"] for item in listed] == [backup["name"]]
 
     api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards", json={"list_id": todo, "title": "After"})
+        api.post(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+            json={"list_id": todo, "title": "After"},
+        )
     )
     assert len(_card_titles(api, board["id"])) == 2
 
@@ -35,7 +48,8 @@ def test_validate_reports_integrity(api: Api, board: dict[str, Any]) -> None:
     assert report["ok"] is True
     assert report["integrity"] == "ok"
     assert report["foreign_key_violations"] == []
-    assert report["counts"]["lists"] == 5
+    assert report["counts"]["lists"] == 0
+    assert report["counts"]["cards"] == 0
 
 
 def test_restore_rejects_path_traversal(api: Api, board: dict[str, Any]) -> None:

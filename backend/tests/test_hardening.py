@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import Api
+from conftest import Api, loop_id
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -133,7 +133,7 @@ def test_restore_lock_blocks_concurrent_readers(api: Api, board: dict[str, Any])
     worker.start()
     time.sleep(0.1)
     with boards.reader(board["id"]) as conn:
-        assert conn.exec_driver_sql("SELECT COUNT(*) FROM lists").scalar_one() == 5
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM lists").scalar_one() == 0
         events.append("read")
     worker.join()
     assert events.index("released") < events.index("read")
@@ -142,10 +142,12 @@ def test_restore_lock_blocks_concurrent_readers(api: Api, board: dict[str, Any])
 def test_restore_rejects_a_corrupt_backup(
     api: Api, board: dict[str, Any], settings: Settings
 ) -> None:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": lists[0]["id"], "title": "Still here"},
         )
     )
@@ -158,15 +160,19 @@ def test_restore_rejects_a_corrupt_backup(
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_failed"
 
-    cards = api.data(api.get(f"/api/v1/boards/{board['id']}/cards"))
+    cards = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards")
+    )
     assert [card["title"] for card in cards] == ["Still here"]
 
 
 @pytest.mark.parametrize("value", ["next tuesday", "2026-13-45", "15/01/2027"])
 def test_invalid_due_dates_are_rejected(api: Api, board: dict[str, Any], value: str) -> None:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     response = api.post(
-        f"/api/v1/boards/{board['id']}/cards",
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
         json={"list_id": lists[0]["id"], "title": "Bad due", "due_at": value},
     )
     assert response.status_code == 422
@@ -174,16 +180,21 @@ def test_invalid_due_dates_are_rejected(api: Api, board: dict[str, Any], value: 
 
 
 def test_due_date_is_normalized(api: Api, board: dict[str, Any]) -> None:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     created = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": lists[0]["id"], "title": "Dated", "due_at": "2027-01-15"},
         )
     )
     assert created["due_at"] == "2027-01-15T00:00:00Z"
 
-    invalid_filter = api.get(f"/api/v1/boards/{board['id']}/cards", params={"due_before": "soon"})
+    invalid_filter = api.get(
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+        params={"due_before": "soon"},
+    )
     assert invalid_filter.status_code == 422
 
 
@@ -247,7 +258,7 @@ def test_request_id_is_sanitized(api: Api) -> None:
 
 def test_bulk_failure_does_not_expose_internals(api: Api, board: dict[str, Any]) -> None:
     response = api.post(
-        f"/api/v1/boards/{board['id']}/cards/bulk",
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/bulk",
         json={"cards": [{"list_id": "missing-list", "title": "Broken"}]},
     )
     payload = response.json()["data"]

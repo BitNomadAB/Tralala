@@ -20,6 +20,7 @@ from ..core.errors import NotFound, ValidationFailure
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
+from .common import require_mutable_card
 
 # extension -> (content type, magic-byte predicate name)
 ALLOWED_TYPES: dict[str, str] = {
@@ -181,6 +182,7 @@ class AttachmentService:
             ).first()
             if card is None:
                 raise NotFound("Card not found")
+            require_mutable_card(conn, card_id)
             usage = self._board_usage(conn)
             if usage + len(data) > self.settings.board_attachment_max_bytes:
                 raise ValidationFailure(
@@ -236,6 +238,8 @@ class AttachmentService:
         self.board_service.ensure_active(board_id)
         with self.boards.session(board_id) as conn:
             row = self._row(conn, attachment_id)
+            if row.get("card_id"):
+                require_mutable_card(conn, row["card_id"])
             conn.execute(
                 text("UPDATE attachments SET deleted_at = :now WHERE id = :id"),
                 {"now": utcnow(), "id": attachment_id},

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "playwright/test";
-import { addCard, createBoard, login, openCard, uniqueName } from "./support";
+import { addCard, boardWithLoop, login, openCard, uniqueName } from "./support";
 
 async function createAgent(page: Page, name: string): Promise<void> {
   await page.getByRole("link", { name: "Settings" }).click();
@@ -23,7 +23,7 @@ test.describe("agent mentions in ticket comments", () => {
   }) => {
     await login(page);
     const boardName = uniqueName("Mention board");
-    await createBoard(page, boardName);
+    await boardWithLoop(page, boardName);
     await addCard(page, "Todo", "Retry storm");
     const boardUrl = page.url();
 
@@ -31,7 +31,7 @@ test.describe("agent mentions in ticket comments", () => {
     await createAgent(page, agentName);
 
     await page.goto(boardUrl);
-    await expect(page.getByRole("heading", { name: boardName, level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Delivery", level: 1 })).toBeVisible();
     const dialog = await openCard(page, "Todo", "Retry storm");
     await expect(dialog.getByText("live", { exact: true })).toBeVisible();
 

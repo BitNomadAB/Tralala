@@ -23,6 +23,7 @@ class ListMove(StrictModel):
 class ListOut(OutModel):
     id: str
     board_id: str
+    loop_id: str
     name: str
     position: int
     created_at: str

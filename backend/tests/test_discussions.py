@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 from sqlalchemy import text
 
 
 def _ticket(api: Api, board: dict[str, Any]) -> dict[str, Any]:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     return api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": lists[0]["id"], "title": "Auth review"},
         )
     )

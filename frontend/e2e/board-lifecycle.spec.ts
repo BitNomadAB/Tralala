@@ -1,11 +1,11 @@
 import { expect, test } from "playwright/test";
-import { createBoard, csrfToken, login, uniqueName } from "./support";
+import { boardIdFromUrl, boardWithLoop, csrfToken, login, uniqueName } from "./support";
 
 test.describe("board lifecycle", () => {
   test("archives and restores a board from the dashboard", async ({ page }) => {
     await login(page);
     const boardName = uniqueName("Lifecycle board");
-    await createBoard(page, boardName);
+    await boardWithLoop(page, boardName);
 
     await page.getByRole("link", { name: "Boards" }).click();
     const row = page.getByRole("listitem").filter({ hasText: boardName });
@@ -30,8 +30,8 @@ test.describe("board lifecycle", () => {
   test("exposes an export archive and an integrity report through the API", async ({ page }) => {
     await login(page);
     const boardName = uniqueName("Export board");
-    await createBoard(page, boardName);
-    const boardId = new URL(page.url()).pathname.split("/").pop();
+    await boardWithLoop(page, boardName);
+    const boardId = boardIdFromUrl(page);
 
     const exported = await page.request.get(`/api/v1/boards/${boardId}/export`);
     expect(exported.status()).toBe(200);
@@ -43,7 +43,7 @@ test.describe("board lifecycle", () => {
     expect(validation.status()).toBe(200);
     const payload = await validation.json();
     expect(payload.data.ok).toBe(true);
-    expect(payload.data.counts.lists).toBe(5);
+    expect(payload.data.counts.lists).toBe(5); // five Loop-owned columns
 
     const backup = await page.request.post(`/api/v1/boards/${boardId}/backups`, {
       headers: { "X-CSRF-Token": await csrfToken(page) },

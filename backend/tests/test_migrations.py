@@ -20,57 +20,48 @@ from app.storage.schema import runner
 from app.storage.sqlite import create_sqlite_engine
 
 APP_ROOT = Path(__file__).resolve().parents[1] / "app"
+PREVIOUS_REVISION = "0007_comment_mentions"
 
 
 def _services(client: TestClient) -> Any:
     return client.app.state.services  # type: ignore[attr-defined]
 
 
-def _make_board_legacy(services: Any, board_id: str) -> None:
-    """Turn a current board into a pre-Alembic v1 database.
-
-    The v1 schema has no completed-at index, no assignment columns and no attachments table, so all
-    later revisions have real work to do when the board is adopted.
-    """
+def _seed_previous_revision(services: Any, board_id: str, *, populate: bool) -> None:
+    """Rebuild a board database at the revision before Loop ownership existed."""
     services.boards.close(board_id)
-    engine = create_sqlite_engine(services.boards.path(board_id))
+    path = services.boards.path(board_id)
+    if path.exists():
+        path.unlink()
+    engine = create_sqlite_engine(path)
+    previous = PREVIOUS_REVISION
     with engine.begin() as conn:
-        conn.exec_driver_sql("DROP TABLE IF EXISTS attachments")
-        for table in (
-            "card_events",
-            "comment_mention_jobs",
-            "discussion_rounds",
-            "discussion_runs",
-            "discussion_events",
-            "discussion_outcomes",
-            "discussion_votes",
-            "discussion_messages",
-            "discussion_participants",
-            "discussion_threads",
-        ):
-            conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table}")
-        for index in (
-            "ix_cards_assignee",
-            "ix_attachments_card",
-            "ix_attachments_discussion",
-            "ix_attachments_message",
-            "ix_card_events_card",
-            "ix_comment_mentions_card",
-            "uq_comment_mentions_once",
-            "idx_cards_completed_at",
-        ):
-            conn.exec_driver_sql(f"DROP INDEX IF EXISTS {index}")
-        for column in (
-            "assignee_actor_id",
-            "assignee_type",
-            "assignee_name",
-            "assigned_at",
-            "assigned_by_actor_id",
-        ):
-            conn.exec_driver_sql(f"ALTER TABLE cards DROP COLUMN {column}")
-        conn.exec_driver_sql("DROP TABLE alembic_version")
-        conn.exec_driver_sql("PRAGMA user_version=1")
+        runner.upgrade("board", conn, previous)
+        conn.execute(
+            text(
+                "INSERT INTO board_metadata (id, description, created_at, updated_at,"
+                " schema_version) VALUES (:id, '', :now, :now, 7)"
+            ),
+            {"id": board_id, "now": "2026-01-01T00:00:00Z"},
+        )
+        if populate:
+            conn.execute(
+                text(
+                    "INSERT INTO lists (id, name, position, created_at, updated_at)"
+                    " VALUES ('legacy-list', 'Backlog', 1024, :now, :now)"
+                ),
+                {"now": "2026-01-01T00:00:00Z"},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO cards (id, list_id, title, description, position, priority,"
+                    " created_at, updated_at, version) VALUES ('legacy-card', 'legacy-list',"
+                    " 'Pre-Loop card', '', 1024, 'none', :now, :now, 1)"
+                ),
+                {"now": "2026-01-01T00:00:00Z"},
+            )
     engine.dispose()
+    services.registry.update_board(board_id, schema_revision=previous, schema_version=7)
 
 
 def _revision(services: Any, board_id: str) -> str | None:
@@ -111,35 +102,46 @@ def test_fresh_install_creates_schema_at_head(api: Api, board: dict[str, Any]) -
     assert index is not None
 
 
-def test_legacy_board_is_adopted_and_upgraded_without_data_loss(
+def test_populated_pre_loop_board_requires_an_explicit_reset(
     api: Api, board: dict[str, Any], settings: Settings
 ) -> None:
     services = _services(api.client)
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
-    api.data(
-        api.post(
-            f"/api/v1/boards/{board['id']}/cards",
-            json={"list_id": lists[0]["id"], "title": "Survives the migration"},
-        )
-    )
-    _make_board_legacy(services, board["id"])
+    _seed_previous_revision(services, board["id"], populate=True)
+
+    report = services.migrations.migrate_board(board["id"])
+
+    assert report.status == "failed"
+    assert "app.dev_reset" in (report.error or "")
+    assert services.registry.board(board["id"])["status"] == "migration_failed"
+    assert report.backup is not None
+    assert any(path.name == report.backup for path in _backup_files(settings, board["id"]))
+    blocked = api.post(f"/api/v1/boards/{board['id']}/loops", json={"name": "Blocked"}, headers={})
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "board_migration_failed"
+
+    from app import dev_reset
+
+    with pytest.raises(RuntimeError):
+        dev_reset.reset(settings, confirm=False)
+    removed = dev_reset.reset(settings, confirm=True)
+    assert removed["removed"]
+    assert not Path(settings.registry_path).exists()
+    assert not settings.boards_dir.exists()
+
+
+def test_empty_board_from_previous_revision_upgrades_to_loop_schema(
+    api: Api, board: dict[str, Any]
+) -> None:
+    services = _services(api.client)
+    _seed_previous_revision(services, board["id"], populate=False)
 
     report = services.migrations.migrate_board(board["id"])
 
     assert report.status == "migrated"
-    assert report.adopted is True
-    assert report.from_revision == runner.CHAIN_BASELINES["board"]
     assert report.to_revision == runner.head_revision("board")
-    assert report.backup is not None
-    assert any(path.name == report.backup for path in _backup_files(settings, board["id"]))
-
-    cards = api.data(api.get(f"/api/v1/boards/{board['id']}/cards"))
-    assert [card["title"] for card in cards] == ["Survives the migration"]
     assert _revision(services, board["id"]) == runner.head_revision("board")
-
     validation = api.data(api.get(f"/api/v1/boards/{board['id']}/validate"))
     assert validation["ok"] is True
-    assert validation["schema_revision"] == runner.head_revision("board")
 
 
 def test_legacy_registry_is_stamped_and_batch_migrated(tmp_path: Path) -> None:
@@ -192,14 +194,9 @@ def test_failed_migration_marks_board_and_allows_resume(
     api: Api, board: dict[str, Any], settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     services = _services(api.client)
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
-    api.data(
-        api.post(
-            f"/api/v1/boards/{board['id']}/cards",
-            json={"list_id": lists[0]["id"], "title": "Keep me"},
-        )
-    )
-    _make_board_legacy(services, board["id"])
+    loop = api.data(api.post(f"/api/v1/boards/{board['id']}/loops", json={"name": "Resume loop"}))
+    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/loops/{loop['id']}/lists"))
+    _seed_previous_revision(services, board["id"], populate=False)
 
     original_upgrade = runner.upgrade
 
@@ -217,29 +214,23 @@ def test_failed_migration_marks_board_and_allows_resume(
     assert report.backup is not None and len(backups) == 1
     assert (Path(settings.data_dir) / "backups" / board["id"] / report.backup).exists()
 
-    blocked = api.post(
-        f"/api/v1/boards/{board['id']}/cards",
-        json={"list_id": lists[0]["id"], "title": "Should be rejected"},
-    )
+    blocked = api.post(f"/api/v1/boards/{board['id']}/loops", json={"name": "Rejected"})
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "board_migration_failed"
 
     resumed = services.migrations.migrate_board(board["id"])
     assert resumed.status == "migrated"
     assert services.registry.board(board["id"])["status"] == "active"
-    cards = api.data(api.get(f"/api/v1/boards/{board['id']}/cards"))
-    assert [card["title"] for card in cards] == ["Keep me"]
+    assert _revision(services, board["id"]) == runner.head_revision("board")
+    del lists
 
 
 def test_unknown_revision_is_never_silently_accepted(api: Api, board: dict[str, Any]) -> None:
     services = _services(api.client)
-    _make_board_legacy(services, board["id"])
+    _seed_previous_revision(services, board["id"], populate=False)
     engine = create_sqlite_engine(services.boards.path(board["id"]))
     with engine.begin() as conn:
-        conn.exec_driver_sql(
-            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-        )
-        conn.exec_driver_sql("INSERT INTO alembic_version VALUES ('9999_from_the_future')")
+        conn.exec_driver_sql("UPDATE alembic_version SET version_num = '9999_from_the_future'")
     engine.dispose()
 
     report = services.migrations.migrate_board(board["id"])
@@ -252,7 +243,7 @@ def test_unknown_revision_is_never_silently_accepted(api: Api, board: dict[str, 
     with engine.begin() as conn:
         conn.exec_driver_sql(
             "UPDATE alembic_version SET version_num = :baseline",
-            {"baseline": runner.CHAIN_BASELINES["board"]},
+            {"baseline": PREVIOUS_REVISION},
         )
     engine.dispose()
 
@@ -273,7 +264,7 @@ def test_startup_migrates_every_board_before_serving(settings: Settings) -> None
             board_ids.append(response.json()["data"]["id"])
         services = _services(client)
         for board_id in board_ids:
-            _make_board_legacy(services, board_id)
+            _seed_previous_revision(services, board_id, populate=False)
 
     second_app = create_app(settings)
     with TestClient(second_app) as client:

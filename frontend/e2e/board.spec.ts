@@ -1,9 +1,9 @@
 import { expect, test } from "playwright/test";
 import {
   addCard,
+  boardWithLoop,
   cardTile,
   closeDialog,
-  createBoard,
   listRegion,
   login,
   openCard,
@@ -11,10 +11,9 @@ import {
 } from "./support";
 
 test.describe("boards and cards", () => {
-  test("creates a board with the default workflow and edits a card", async ({ page }) => {
+  test("creates a Loop with the default columns and edits a ticket", async ({ page }) => {
     await login(page);
-    const boardName = uniqueName("Launch board");
-    await createBoard(page, boardName);
+    await boardWithLoop(page, uniqueName("Launch board"));
 
     for (const listName of ["Backlog", "Todo", "In Progress", "Review", "Done"]) {
       await expect(listRegion(page, listName)).toBeVisible();
@@ -41,21 +40,21 @@ test.describe("boards and cards", () => {
 
   test("filters the board with server-side search", async ({ page }) => {
     await login(page);
-    await createBoard(page, uniqueName("Filter board"));
+    await boardWithLoop(page, uniqueName("Filter board"));
     await addCard(page, "Todo", "Fix login bug");
     await addCard(page, "Todo", "Write documentation");
 
-    await page.getByLabel("Filter cards").fill("login");
+    await page.getByLabel("Filter tickets").fill("login");
     await expect(cardTile(page, "Todo", "Fix login bug")).toBeVisible();
     await expect(cardTile(page, "Todo", "Write documentation")).toHaveCount(0);
 
-    await page.getByLabel("Filter cards").fill("");
+    await page.getByLabel("Filter tickets").fill("");
     await expect(cardTile(page, "Todo", "Write documentation")).toBeVisible();
   });
 
   test("archives a card and hides it from the board", async ({ page }) => {
     await login(page);
-    await createBoard(page, uniqueName("Archive board"));
+    await boardWithLoop(page, uniqueName("Archive board"));
     await addCard(page, "Backlog", "Temporary card");
 
     const dialog = await openCard(page, "Backlog", "Temporary card");

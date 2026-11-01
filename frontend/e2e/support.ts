@@ -23,7 +23,28 @@ export async function createBoard(page: Page, name: string): Promise<void> {
   await dialog.getByLabel("Name").fill(name);
   await dialog.getByRole("button", { name: "Create board" }).click();
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-  await expect(listRegion(page, "Todo")).toBeVisible();
+}
+
+export async function createLoop(page: Page, name: string, goal = ""): Promise<string> {
+  await page.getByRole("button", { name: "New Loop" }).click();
+  const dialog = page.getByRole("dialog", { name: "New Loop" });
+  await dialog.getByLabel("Name").fill(name);
+  if (goal) await dialog.getByLabel("Broad goal").fill(goal);
+  await dialog.getByRole("button", { name: "Create Loop" }).click();
+  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+  await expect(page.getByRole("region", { name: /^List / }).first()).toBeVisible();
+  return loopIdFromUrl(page);
+}
+
+export async function boardWithLoop(
+  page: Page,
+  boardName: string,
+  loopName = "Delivery",
+): Promise<{ boardId: string; loopId: string }> {
+  await createBoard(page, boardName);
+  const boardId = boardIdFromUrl(page);
+  const loopId = await createLoop(page, loopName);
+  return { boardId, loopId };
 }
 
 export function listRegion(page: Page, listName: string): Locator {
@@ -91,12 +112,31 @@ export async function openBoardFromDashboard(page: Page, name: string): Promise<
   await expect(page.getByRole("heading", { name: "Boards", level: 1 })).toBeVisible();
   await page.getByRole("button", { name, exact: true }).click();
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Loop" })).toBeVisible();
 }
 
 export function boardIdFromUrl(page: Page): string {
   const match = /\/boards\/([0-9a-f-]{36})/.exec(page.url());
   if (!match) throw new Error(`No board id in ${page.url()}`);
   return match[1];
+}
+
+export function loopIdFromUrl(page: Page): string {
+  const match = /\/boards\/[0-9a-f-]{36}\/loops\/([0-9a-f-]{36})/.exec(page.url());
+  if (!match) throw new Error(`No loop id in ${page.url()}`);
+  return match[1];
+}
+
+export async function resolveLoopId(
+  page: Page,
+  boardId: string,
+  loopName?: string,
+): Promise<string> {
+  const response = await page.request.get(`/api/v1/boards/${boardId}/loops`);
+  const loops = (await response.json()).data as Array<{ id: string; name: string }>;
+  const match = loopName ? loops.find((loop) => loop.name === loopName) : loops[0];
+  if (!match) throw new Error(`No loop found for board ${boardId}`);
+  return match.id;
 }
 
 export async function csrfToken(page: Page): Promise<string> {

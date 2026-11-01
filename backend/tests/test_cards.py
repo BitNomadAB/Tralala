@@ -2,11 +2,27 @@ from __future__ import annotations
 
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
+
+
+def _board_id(value: Any) -> str:
+    return value["id"] if isinstance(value, dict) else value
+
+
+def _cards(api: Api, board: Any, suffix: str = "") -> str:
+    identifier = _board_id(board)
+    path = f"/api/v1/boards/{identifier}/loops/{loop_id(api, identifier)}/cards"
+    return f"{path}{suffix}"
+
+
+def _lists(api: Api, board: Any, suffix: str = "") -> str:
+    identifier = _board_id(board)
+    path = f"/api/v1/boards/{identifier}/loops/{loop_id(api, identifier)}/lists"
+    return f"{path}{suffix}"
 
 
 def _list_id(api: Api, board_id: str, index: int) -> str:
-    lists = api.data(api.get(f"/api/v1/boards/{board_id}/lists"))
+    lists = api.data(api.get(f"{_lists(api, board_id)}"))
     return lists[index]["id"]
 
 
@@ -14,7 +30,7 @@ def test_card_lifecycle(api: Api, board: dict[str, Any]) -> None:
     todo = _list_id(api, board["id"], 1)
     created = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"{_cards(api, board['id'])}",
             json={
                 "list_id": todo,
                 "title": "Implement authentication",
@@ -29,7 +45,7 @@ def test_card_lifecycle(api: Api, board: dict[str, Any]) -> None:
 
     updated = api.data(
         api.patch(
-            f"/api/v1/boards/{board['id']}/cards/{created['id']}",
+            f"{_cards(api, board['id'])}/{created['id']}",
             json={"version": 1, "title": "Implement auth", "completed": True},
         )
     )
@@ -37,27 +53,27 @@ def test_card_lifecycle(api: Api, board: dict[str, Any]) -> None:
     assert updated["version"] == 2
     assert updated["completed_at"] is not None
 
-    archived = api.data(api.post(f"/api/v1/boards/{board['id']}/cards/{created['id']}/archive"))
+    archived = api.data(api.post(f"{_cards(api, board['id'])}/{created['id']}/archive"))
     assert archived["archived_at"] is not None
-    hidden = api.data(api.get(f"/api/v1/boards/{board['id']}/cards"))
+    hidden = api.data(api.get(f"{_cards(api, board['id'])}"))
     assert hidden == []
-    restored = api.data(api.post(f"/api/v1/boards/{board['id']}/cards/{created['id']}/restore"))
+    restored = api.data(api.post(f"{_cards(api, board['id'])}/{created['id']}/restore"))
     assert restored["archived_at"] is None
 
 
 def test_version_conflict_returns_409(api: Api, board: dict[str, Any]) -> None:
     todo = _list_id(api, board["id"], 1)
     created = api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards", json={"list_id": todo, "title": "v1"})
+        api.post(f"{_cards(api, board['id'])}", json={"list_id": todo, "title": "v1"})
     )
     api.data(
         api.patch(
-            f"/api/v1/boards/{board['id']}/cards/{created['id']}",
+            f"{_cards(api, board['id'])}/{created['id']}",
             json={"version": 1, "title": "v2"},
         )
     )
     response = api.patch(
-        f"/api/v1/boards/{board['id']}/cards/{created['id']}",
+        f"{_cards(api, board['id'])}/{created['id']}",
         json={"version": 1, "title": "stale"},
     )
     assert response.status_code == 409
@@ -72,7 +88,7 @@ def test_move_card_persists_ordering(api: Api, board: dict[str, Any]) -> None:
     ids = [
         api.data(
             api.post(
-                f"/api/v1/boards/{board['id']}/cards",
+                f"{_cards(api, board['id'])}",
                 json={"list_id": todo, "title": f"card-{index}"},
             )
         )
@@ -80,50 +96,46 @@ def test_move_card_persists_ordering(api: Api, board: dict[str, Any]) -> None:
     ]
     moved = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards/{ids[0]['id']}/move",
+            f"{_cards(api, board['id'])}/{ids[0]['id']}/move",
             json={"version": 1, "list_id": todo, "position": 2},
         )
     )
     assert moved["list_id"] == todo
-    ordered = api.data(api.get(f"/api/v1/boards/{board['id']}/cards", params={"list_id": todo}))
+    ordered = api.data(api.get(f"{_cards(api, board['id'])}", params={"list_id": todo}))
     assert [card["title"] for card in ordered] == ["card-1", "card-2", "card-0"]
 
     api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards/{ids[1]['id']}/move",
+            f"{_cards(api, board['id'])}/{ids[1]['id']}/move",
             json={"version": 1, "list_id": doing, "position": 0},
         )
     )
-    doing_cards = api.data(
-        api.get(f"/api/v1/boards/{board['id']}/cards", params={"list_id": doing})
-    )
+    doing_cards = api.data(api.get(f"{_cards(api, board['id'])}", params={"list_id": doing}))
     assert [card["title"] for card in doing_cards] == ["card-1"]
 
 
 def test_list_reorder_and_archive(api: Api, board: dict[str, Any]) -> None:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(api.get(f"{_lists(api, board['id'])}"))
     moved = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/lists/{lists[-1]['id']}/move",
+            f"{_lists(api, board['id'])}/{lists[-1]['id']}/move",
             json={"position": 0},
         )
     )
     assert moved[0]["name"] == "Done"
-    archived = api.data(api.post(f"/api/v1/boards/{board['id']}/lists/{moved[0]['id']}/archive"))
+    archived = api.data(api.post(f"{_lists(api, board['id'])}/{moved[0]['id']}/archive"))
     assert archived["archived_at"] is not None
-    remaining = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    remaining = api.data(api.get(f"{_lists(api, board['id'])}"))
     assert "Done" not in [item["name"] for item in remaining]
 
 
 def test_checklist_and_comment_workflow(api: Api, board: dict[str, Any]) -> None:
     todo = _list_id(api, board["id"], 1)
     card = api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards", json={"list_id": todo, "title": "Tasks"})
+        api.post(f"{_cards(api, board['id'])}", json={"list_id": todo, "title": "Tasks"})
     )
     checklist = api.data(
-        api.post(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}/checklists", json={"title": "Steps"}
-        )
+        api.post(f"{_cards(api, board['id'])}/{card['id']}/checklists", json={"title": "Steps"})
     )
     item = api.data(
         api.post(
@@ -141,7 +153,7 @@ def test_checklist_and_comment_workflow(api: Api, board: dict[str, Any]) -> None
 
     comment = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}/comments",
+            f"{_cards(api, board['id'])}/{card['id']}/comments",
             json={"content": "Looks good"},
         )
     )
@@ -149,7 +161,7 @@ def test_checklist_and_comment_workflow(api: Api, board: dict[str, Any]) -> None
 
     detail = api.data(
         api.get(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}",
+            f"{_cards(api, board['id'])}/{card['id']}",
             params={"include": "checklists,comments"},
         )
     )
@@ -163,7 +175,7 @@ def test_search_by_title_label_and_overdue(api: Api, board: dict[str, Any]) -> N
     todo = _list_id(api, board["id"], 1)
     api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"{_cards(api, board['id'])}",
             json={
                 "list_id": todo,
                 "title": "Fix login bug",
@@ -174,19 +186,37 @@ def test_search_by_title_label_and_overdue(api: Api, board: dict[str, Any]) -> N
     )
     api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"{_cards(api, board['id'])}",
             json={"list_id": todo, "title": "Write documentation", "priority": "low"},
         )
     )
-    found = api.data(api.get(f"/api/v1/boards/{board['id']}/search", params={"q": "login"}))
+    found = api.data(
+        api.get(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/search",
+            params={"q": "login"},
+        )
+    )
     assert len(found) == 1
-    meta = api.get(f"/api/v1/boards/{board['id']}/search", params={"q": "login"}).json()["meta"]
+    meta = api.get(
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/search",
+        params={"q": "login"},
+    ).json()["meta"]
     assert meta["engine"] in {"fts5", "like"}
 
-    by_label = api.data(api.get(f"/api/v1/boards/{board['id']}/search", params={"label": "bug"}))
+    by_label = api.data(
+        api.get(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/search",
+            params={"label": "bug"},
+        )
+    )
     assert [card["title"] for card in by_label] == ["Fix login bug"]
 
-    overdue = api.data(api.get(f"/api/v1/boards/{board['id']}/search", params={"overdue": True}))
+    overdue = api.data(
+        api.get(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/search",
+            params={"overdue": True},
+        )
+    )
     assert [card["title"] for card in overdue] == ["Fix login bug"]
 
 
@@ -197,7 +227,7 @@ def test_global_search_combines_boards(api: Api) -> None:
         todo = _list_id(api, board["id"], 1)
         api.data(
             api.post(
-                f"/api/v1/boards/{board['id']}/cards",
+                f"{_cards(api, board['id'])}",
                 json={"list_id": todo, "title": "Shared keyword"},
             )
         )
@@ -208,7 +238,7 @@ def test_global_search_combines_boards(api: Api) -> None:
 def test_bulk_create_reports_partial_failures(api: Api, board: dict[str, Any]) -> None:
     todo = _list_id(api, board["id"], 1)
     response = api.post(
-        f"/api/v1/boards/{board['id']}/cards/bulk",
+        f"{_cards(api, board['id'])}/bulk",
         json={
             "cards": [
                 {"list_id": todo, "title": "First"},
@@ -228,47 +258,39 @@ def test_card_creation_idempotency(api: Api, board: dict[str, Any]) -> None:
     todo = _list_id(api, board["id"], 1)
     payload = {"list_id": todo, "title": "Only once"}
     headers = {"Idempotency-Key": "card-1"}
-    first = api.data(api.post(f"/api/v1/boards/{board['id']}/cards", json=payload, headers=headers))
-    second = api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards", json=payload, headers=headers)
-    )
+    first = api.data(api.post(f"{_cards(api, board['id'])}", json=payload, headers=headers))
+    second = api.data(api.post(f"{_cards(api, board['id'])}", json=payload, headers=headers))
     assert first["id"] == second["id"]
-    cards = api.data(api.get(f"/api/v1/boards/{board['id']}/cards"))
+    cards = api.data(api.get(f"{_cards(api, board['id'])}"))
     assert len(cards) == 1
 
 
 def test_activity_feed_distinguishes_actors(api: Api, board: dict[str, Any]) -> None:
     todo = _list_id(api, board["id"], 1)
-    api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards", json={"list_id": todo, "title": "Audited"})
-    )
+    api.data(api.post(f"{_cards(api, board['id'])}", json={"list_id": todo, "title": "Audited"}))
     activity = api.data(api.get(f"/api/v1/boards/{board['id']}/activity"))
     actions = [entry["action"] for entry in activity]
     assert "card.created" in actions
     assert all(entry["actor_type"] == "user" for entry in activity)
 
 
-def test_cross_board_transfer_moves_card(api: Api, board: dict[str, Any]) -> None:
+def test_cross_board_transfer_is_not_supported(api: Api, board: dict[str, Any]) -> None:
     target = api.data(api.post("/api/v1/boards", json={"name": "Target"}))
     todo = _list_id(api, board["id"], 1)
-    target_list = _list_id(api, target["id"], 1)
     card = api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards", json={"list_id": todo, "title": "Move me"})
+        api.post(f"{_cards(api, board['id'])}", json={"list_id": todo, "title": "Move me"})
     )
-    result = api.data(
-        api.post(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}/transfer",
-            json={
-                "version": 1,
-                "target_board_id": target["id"],
-                "target_list_id": target_list,
-            },
-        )
+    response = api.post(
+        f"{_cards(api, board['id'])}/{card['id']}/transfer",
+        json={
+            "version": 1,
+            "target_board_id": target["id"],
+            "target_list_id": _list_id(api, target["id"], 1),
+        },
     )
-    assert result["finalized"] is True
-    assert api.get(f"/api/v1/boards/{board['id']}/cards/{card['id']}").status_code == 404
-    target_cards = api.data(api.get(f"/api/v1/boards/{target['id']}/cards"))
-    assert [item["title"] for item in target_cards] == ["Move me"]
+    assert response.status_code in {404, 405}
+    still_there = api.data(api.get(f"{_cards(api, board['id'])}/{card['id']}"))
+    assert still_there["archived_at"] is None
 
 
 def test_bulk_creation_is_idempotent(api: Api, board: dict[str, Any]) -> None:
@@ -280,59 +302,8 @@ def test_bulk_creation_is_idempotent(api: Api, board: dict[str, Any]) -> None:
         ]
     }
     headers = {"Idempotency-Key": "bulk-batch-1"}
-    first = api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards/bulk", json=payload, headers=headers)
-    )
-    second = api.data(
-        api.post(f"/api/v1/boards/{board['id']}/cards/bulk", json=payload, headers=headers)
-    )
+    first = api.data(api.post(f"{_cards(api, board['id'])}/bulk", json=payload, headers=headers))
+    second = api.data(api.post(f"{_cards(api, board['id'])}/bulk", json=payload, headers=headers))
     assert [card["id"] for card in first["created"]] == [card["id"] for card in second["created"]]
-    cards = api.data(api.get(f"/api/v1/boards/{board['id']}/cards"))
+    cards = api.data(api.get(f"{_cards(api, board['id'])}"))
     assert len(cards) == 2
-
-
-def test_transfer_failure_archives_source(
-    api: Api, board: dict[str, Any], monkeypatch: Any
-) -> None:
-    target = api.data(api.post("/api/v1/boards", json={"name": "Fallback target"}))
-    source_list = _list_id(api, board["id"], 1)
-    target_list = _list_id(api, target["id"], 1)
-    card = api.data(
-        api.post(
-            f"/api/v1/boards/{board['id']}/cards",
-            json={"list_id": source_list, "title": "Fallback"},
-        )
-    )
-
-    boards = api.client.app.state.services.boards
-    original_session = boards.session
-    state = {"failed": False}
-
-    def flaky_session(board_id: str) -> Any:
-        if board_id == board["id"] and not state["failed"]:
-            state["failed"] = True
-            raise RuntimeError("simulated delete failure")
-        return original_session(board_id)
-
-    monkeypatch.setattr(boards, "session", flaky_session)
-    result = api.data(
-        api.post(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}/transfer",
-            json={"version": 1, "target_board_id": target["id"], "target_list_id": target_list},
-        )
-    )
-    monkeypatch.setattr(boards, "session", original_session)
-
-    assert result["finalized"] is False
-    assert "archived" in (result["warning"] or "")
-    assert "simulated delete failure" not in (result["warning"] or "")
-    source = api.data(api.get(f"/api/v1/boards/{board['id']}/cards/{card['id']}"))
-    assert source["archived_at"] is not None
-    target_cards = api.data(api.get(f"/api/v1/boards/{target['id']}/cards"))
-    assert [item["title"] for item in target_cards] == ["Fallback"]
-    activity = api.data(
-        api.get(
-            f"/api/v1/boards/{board['id']}/activity", params={"action": "card.transfer_incomplete"}
-        )
-    )
-    assert len(activity) == 1

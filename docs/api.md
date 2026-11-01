@@ -25,8 +25,15 @@ Failure (same shape for every status):
 Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_token`,
 `token_revoked`, `token_expired`, `forbidden`, `csrf_failed`, `not_found`, `conflict`,
 `version_conflict`, `board_archived`, `board_migration_failed`, `board_schema_outdated`,
-`idempotency_key_reused`, `creation_in_progress`,
-`creation_failed`, `validation_failed`, `payload_too_large`, `rate_limited`.
+`idempotency_key_reused`, `creation_in_progress`, `creation_failed`, `validation_failed`,
+`payload_too_large`, `rate_limited`, and the Loop workflow codes `loop_not_found`,
+`loop_required`, `loop_mismatch`, `loop_read_only`, `document_stale`, `approval_required`,
+`human_action_required`, `invalid_dependency_graph`, `ticket_blocked`, `plan_change_required`,
+`generation_input_changed`, `generation_unavailable`, `generation_in_progress`, `qa_incomplete`.
+
+Human-only decisions (Info edits, analysis approval, RoadMap approval, confirming a human-only
+Ticket, accepting QA and finalizing a Loop) reject agent tokens with `403 human_action_required`
+even when the token holds the scope.
 
 ## Authentication
 
@@ -119,6 +126,46 @@ names and labels are applied; an explicit `description` or `lists` in the payloa
 template is rejected with `422 validation_failed` before any board row is written, so an
 `Idempotency-Key` can be reused after correcting the request.
 
+### Loops
+
+A Board is a container of Loops. A Loop owns its Kanban columns, Tickets and the five planning
+document slots; there is no Board-level Kanban.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/boards/{board_id}/loops` | `include_completed`, `include_archived`, `stage` filters |
+| POST | `/boards/{board_id}/loops` | Creates the Loop with its own columns and five empty documents; accepts `Idempotency-Key` |
+| GET/PATCH | `/boards/{board_id}/loops/{loop_id}` | `PATCH` requires the Loop `version` |
+| POST | `/boards/{board_id}/loops/{loop_id}/cancel` | Human-only; records `cancelled_at` |
+| POST | `/boards/{board_id}/loops/{loop_id}/archive` | Hides the Loop from active views |
+| GET | `/boards/{board_id}/loops/{loop_id}/documents` | Current and approved revisions per kind |
+| GET | `/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions` | Revision history |
+| PUT | `/boards/{board_id}/loops/{loop_id}/documents/info` | Human-only; new immutable revision |
+| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval |
+| POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids |
+| POST | `/boards/{board_id}/loops/{loop_id}/reviews/roadmap` | Human-only; publishes the plan atomically |
+| GET | `/boards/{board_id}/loops/{loop_id}/plan` | Active plan with phases and readiness |
+| GET | `/boards/{board_id}/loops/{loop_id}/readiness` | Machine-readable blockers and human gates |
+| GET | `/boards/{board_id}/loops/{loop_id}/context` | Bounded, versioned context plus output schemas |
+| POST | `/boards/{board_id}/loops/{loop_id}/generation-runs` | Starts an analysis, RoadMap or QA run (`202`); `Idempotency-Key` supported |
+| GET | `/boards/{board_id}/loops/{loop_id}/generation-runs[/{run_id}]` | Durable run state and failures |
+| POST | `/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/cancel` | Cancels a queued or running run |
+| POST | `/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/retry` | Starts a new run with the same inputs |
+| POST | `/boards/{board_id}/loops/{loop_id}/completion` | Human-only implementation acceptance and QA outcome |
+| GET | `/boards/{board_id}/loops/{loop_id}/qa` | Active or latest QA cycle with both instruction views |
+| PUT | `/boards/{board_id}/loops/{loop_id}/qa/instructions` | Supplies a scenario set (human or agent) |
+| POST | `/boards/{board_id}/loops/{loop_id}/qa/results` | Records scenario outcomes; agents may submit |
+| POST | `/boards/{board_id}/loops/{loop_id}/qa/decision` | Human-only acceptance; finalizes atomically |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/confirm` | Human-only confirmation of a human Ticket |
+| GET | `/boards/{board_id}/tickets` | Explicit Board-level aggregate read; each row names its Loop |
+| GET | `/boards/{board_id}/history` | History search (`q`, `source_kind`, `loop_key`, `qa_status`, dates) |
+| GET | `/boards/{board_id}/history/{history_id}` | Immutable record with its envelope and artifacts |
+| POST | `/boards/{board_id}/history/import` | Legacy envelope ingestion; never creates Tickets |
+
+Ticket keys look like `AC004-DA02-003`: Loop prefix and Board-local Loop sequence, Phase prefix and
+number, then the Ticket sequence within that Phase. They are allocated by the server, frozen after
+allocation and unique within the Board.
+
 ### Board templates
 
 | Method | Path | Scope |
@@ -199,8 +246,10 @@ name, template `updated_at`, effective prompt, SHA-256, timestamp) so history st
 | GET | `/boards/{board_id}/discussions/{id}/events` (`text/event-stream`) | `discussions:read` |
 | GET | `/boards/{board_id}/discussions/{id}/events/history?after=&limit=` | `discussions:read` |
 
-A discussion references exactly one existing ticket. Participants keep an immutable role snapshot,
-so later template edits never rewrite what an agent was told.
+A discussion references exactly one existing ticket and resolves its Loop through that ticket: every
+thread carries `loop_id`, `loop_key`, `loop_name` and `ticket_key`, so the client shows the owning
+Loop and deep-links the Ticket as `/boards/{board_id}/loops/{loop_id}?card={card_id}`. Participants
+keep an immutable role snapshot, so later template edits never rewrite what an agent was told.
 
 `GET /discussions/overview` is the Discussions page's first level: one entry per board with
 `discussion_count`, `open_count` and the board's newest `last_activity_at`, ordered newest activity
@@ -280,7 +329,7 @@ enabled registry agent id) or `clear_assignee: true`. The card stores the displa
 lists render without a cross-database join; every change is written to the activity log. Filter with
 `GET /cards?assignee=me|<actor-or-agent-id>|unassigned`.
 
-### Lists
+### Lists (Loop-scoped: `/boards/{board_id}/loops/{loop_id}/lists`)
 
 | Method | Path | Scope |
 | --- | --- | --- |
@@ -293,7 +342,7 @@ lists render without a cross-database join; every change is written to the activ
 | POST | `/boards/{board_id}/lists/{list_id}/restore` | `cards:write` |
 | DELETE | `/boards/{board_id}/lists/{list_id}` (archived and empty) | `cards:write` |
 
-### Cards
+### Cards (Loop-scoped: `/boards/{board_id}/loops/{loop_id}/cards`)
 
 | Method | Path | Scope |
 | --- | --- | --- |

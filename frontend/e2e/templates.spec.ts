@@ -1,5 +1,5 @@
 ﻿import { expect, test, type Page } from "playwright/test";
-import { createBoard, listRegion, login, uniqueName } from "./support";
+import { boardWithLoop, createBoard, createLoop, listRegion, login, uniqueName } from "./support";
 
 function templateRow(page: Page, name: string) {
   return page.getByRole("listitem").filter({ hasText: name });
@@ -69,10 +69,11 @@ test.describe("board templates", () => {
     await dialog.getByRole("button", { name: "Create board" }).click();
 
     await expect(page.getByRole("heading", { name: boardName, level: 1 })).toBeVisible();
+    await expect(page.getByText("Updated flow")).toBeVisible();
+    await createLoop(page, "Templated loop");
     for (const name of ["Ideas", "Building", "Done"]) {
       await expect(listRegion(page, name)).toBeVisible();
     }
-    await expect(page.getByText("Updated flow")).toBeVisible();
 
     await openSettings(page);
     await templateRow(page, templateName)
@@ -86,9 +87,9 @@ test.describe("board templates", () => {
   test("saves an existing board as a reusable template", async ({ page }) => {
     await login(page);
     const boardName = uniqueName("Snapshot");
-    await createBoard(page, boardName);
+    await boardWithLoop(page, boardName);
 
-    await page.getByRole("button", { name: "Save as template" }).click();
+    await page.getByRole("button", { name: "Save columns as template" }).click();
     const dialog = page.getByRole("dialog", { name: "Save as template" });
     const templateName = uniqueName("Snapshot template");
     await dialog.getByLabel("Template name").fill(templateName);
@@ -106,6 +107,7 @@ test.describe("board templates", () => {
     await login(page);
     const boardName = uniqueName("Blank");
     await createBoard(page, boardName);
+    await createLoop(page, "Blank loop");
     for (const name of ["Backlog", "Todo", "In Progress", "Review", "Done"]) {
       await expect(listRegion(page, name)).toBeVisible();
     }

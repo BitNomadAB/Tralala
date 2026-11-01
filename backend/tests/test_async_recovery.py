@@ -4,10 +4,26 @@ import time
 import uuid
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 from sqlalchemy import text
 
 from app.services import runtime
+
+
+def _board_id(value: Any) -> str:
+    return value["id"] if isinstance(value, dict) else value
+
+
+def _cards(api: Api, board: Any, suffix: str = "") -> str:
+    identifier = _board_id(board)
+    path = f"/api/v1/boards/{identifier}/loops/{loop_id(api, identifier)}/cards"
+    return f"{path}{suffix}"
+
+
+def _lists(api: Api, board: Any, suffix: str = "") -> str:
+    identifier = _board_id(board)
+    path = f"/api/v1/boards/{identifier}/loops/{loop_id(api, identifier)}/lists"
+    return f"{path}{suffix}"
 
 
 def _services(api: Api) -> Any:
@@ -31,10 +47,10 @@ def _agent(api: Api, name: str) -> dict[str, Any]:
 
 
 def _card(api: Api, board: dict[str, Any]) -> dict[str, Any]:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(api.get(f"{_lists(api, board['id'])}"))
     return api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"{_cards(api, board['id'])}",
             json={"list_id": lists[0]["id"], "title": "Recovery host"},
         )
     )
@@ -70,7 +86,7 @@ def _answer(text: str = "Recovered and answering. AGREE"):
 
 
 def _wait_job(api: Api, board: dict[str, Any], card_id: str, job_id: str) -> dict[str, Any]:
-    url = f"/api/v1/boards/{board['id']}/cards/{card_id}/mentions"
+    url = f"{_cards(api, board['id'])}/{card_id}/mentions"
     deadline = time.monotonic() + 10
     latest: dict[str, Any] = {}
     while time.monotonic() < deadline:
@@ -130,13 +146,13 @@ def test_restart_recovery_resolves_mention_jobs(
     services = _services(api)
     human = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}/comments",
+            f"{_cards(api, board['id'])}/{card['id']}/comments",
             json={"content": "No mention here, just the source comment"},
         )
     )
     queued_source = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}/comments",
+            f"{_cards(api, board['id'])}/{card['id']}/comments",
             json={"content": "Another source comment"},
         )
     )
@@ -184,7 +200,7 @@ def test_restart_recovery_resolves_mention_jobs(
     monkeypatch.setattr(runtime, "call_agent", _answer())
     assert services.mention.recover(board["id"]) == 2
 
-    interrupted = api.data(api.get(f"/api/v1/boards/{board['id']}/cards/{card['id']}/mentions"))
+    interrupted = api.data(api.get(f"{_cards(api, board['id'])}/{card['id']}/mentions"))
     failed = next(job for job in interrupted if job["id"] == running_id)
     assert failed["status"] == "failed"
     assert failed["error"] == "process_restart"
@@ -195,16 +211,14 @@ def test_restart_recovery_resolves_mention_jobs(
     assert resumed["attempts"] == 1
 
     retried = api.data(
-        api.post(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}/mentions/{running_id}/retry"
-        )
+        api.post(f"{_cards(api, board['id'])}/{card['id']}/mentions/{running_id}/retry")
     )
     assert retried["status"] in ("queued", "running", "completed")
     completed = _wait_job(api, board, card["id"], running_id)
     assert completed["status"] == "completed"
     assert completed["attempts"] == 2
 
-    comments = api.data(api.get(f"/api/v1/boards/{board['id']}/cards/{card['id']}/comments"))
+    comments = api.data(api.get(f"{_cards(api, board['id'])}/{card['id']}/comments"))
     assert [comment["id"] for comment in comments[:2]] == [human["id"], queued_source["id"]]
     assert len(comments) == 4
     assert all(comment["actor_type"] == "agent" for comment in comments[2:])

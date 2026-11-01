@@ -5,7 +5,7 @@ import queue
 import time
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 
 from app.services import runtime
 from app.services.mentions import extract_mentions
@@ -48,10 +48,12 @@ def _agent(api: Api, name: str, *, enabled: bool = True) -> dict[str, Any]:
 
 
 def _card(api: Api, board: dict[str, Any], title: str = "Mention host") -> dict[str, Any]:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     return api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={
                 "list_id": lists[0]["id"],
                 "title": title,
@@ -62,12 +64,12 @@ def _card(api: Api, board: dict[str, Any], title: str = "Mention host") -> dict[
     )
 
 
-def _urls(board: dict[str, Any], card: dict[str, Any]) -> str:
-    return f"/api/v1/boards/{board['id']}/cards/{card['id']}"
+def _urls(api: Api, board: dict[str, Any], card: dict[str, Any]) -> str:
+    return f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/{card['id']}"
 
 
 def _jobs(api: Api, board: dict[str, Any], card: dict[str, Any]) -> list[dict[str, Any]]:
-    return api.data(api.get(f"{_urls(board, card)}/mentions"))
+    return api.data(api.get(f"{_urls(api, board, card)}/mentions"))
 
 
 def _wait_job(
@@ -112,7 +114,7 @@ def test_mentioned_agent_answers_in_the_ticket_thread(
     monkeypatch.setattr(runtime, "call_agent", _answer())
 
     response = api.post(
-        f"{_urls(board, card)}/comments",
+        f"{_urls(api, board, card)}/comments",
         json={"content": f"@{agent['name']} can you look at the retry storm?"},
     )
     human = api.data(response)
@@ -129,7 +131,7 @@ def test_mentioned_agent_answers_in_the_ticket_thread(
     assert job["comment_id"] == human["id"]
     assert job["can_retry"] is False
 
-    comments = api.data(api.get(f"{_urls(board, card)}/comments"))
+    comments = api.data(api.get(f"{_urls(api, board, card)}/comments"))
     assert [comment["id"] for comment in comments] == [human["id"], job["response_comment_id"]]
     reply = comments[-1]
     assert reply["actor_id"] == agent["id"]
@@ -145,12 +147,12 @@ def test_context_contains_ticket_labels_checklists_and_recent_comments(
     label = api.data(api.post(f"/api/v1/boards/{board['id']}/labels", json={"name": "reliability"}))
     api.data(
         api.patch(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/{card['id']}",
             json={"version": card["version"], "labels": [label["id"]]},
         )
     )
     checklist = api.data(
-        api.post(f"{_urls(board, card)}/checklists", json={"title": "Acceptance"})
+        api.post(f"{_urls(api, board, card)}/checklists", json={"title": "Acceptance"})
     )
     api.data(
         api.post(
@@ -158,7 +160,9 @@ def test_context_contains_ticket_labels_checklists_and_recent_comments(
             json={"text": "Backoff is capped"},
         )
     )
-    api.data(api.post(f"{_urls(board, card)}/comments", json={"content": "Earlier human note"}))
+    api.data(
+        api.post(f"{_urls(api, board, card)}/comments", json={"content": "Earlier human note"})
+    )
     api.post(
         f"/api/v1/boards/{board['id']}/attachments",
         params={"card_id": card["id"], "filename": "trace.txt"},
@@ -178,7 +182,7 @@ def test_context_contains_ticket_labels_checklists_and_recent_comments(
     monkeypatch.setattr(runtime, "call_agent", capture)
     api.data(
         api.post(
-            f"{_urls(board, card)}/comments",
+            f"{_urls(api, board, card)}/comments",
             json={"content": f"@{agent['name']} what should we do?"},
         )
     )
@@ -214,7 +218,7 @@ def test_a_failed_mention_is_retried_without_duplicating_the_comment(
     monkeypatch.setattr(runtime, "call_agent", flaky)
     human = api.data(
         api.post(
-            f"{_urls(board, card)}/comments",
+            f"{_urls(api, board, card)}/comments",
             json={"content": f"@{agent['name']} ping"},
         )
     )
@@ -223,25 +227,25 @@ def test_a_failed_mention_is_retried_without_duplicating_the_comment(
     assert failed["error"] == "ConnectError"
     assert failed["can_retry"] is True
     assert failed["response_comment_id"] is None
-    assert len(api.data(api.get(f"{_urls(board, card)}/comments"))) == 1
+    assert len(api.data(api.get(f"{_urls(api, board, card)}/comments"))) == 1
 
-    retried = api.data(api.post(f"{_urls(board, card)}/mentions/{failed['id']}/retry"))
+    retried = api.data(api.post(f"{_urls(api, board, card)}/mentions/{failed['id']}/retry"))
     assert retried["status"] in ("queued", "running", "completed")
     completed = _wait_job(api, board, card)[0]
     assert completed["status"] == "completed"
     assert completed["attempts"] == 2
     assert completed["id"] == failed["id"]
 
-    comments = api.data(api.get(f"{_urls(board, card)}/comments"))
+    comments = api.data(api.get(f"{_urls(api, board, card)}/comments"))
     assert [comment["id"] for comment in comments] == [
         human["id"],
         completed["response_comment_id"],
     ]
 
-    again = api.post(f"{_urls(board, card)}/mentions/{failed['id']}/retry")
+    again = api.post(f"{_urls(api, board, card)}/mentions/{failed['id']}/retry")
     assert again.status_code == 409
     assert again.json()["error"]["code"] == "conflict"
-    assert len(api.data(api.get(f"{_urls(board, card)}/comments"))) == 2
+    assert len(api.data(api.get(f"{_urls(api, board, card)}/comments"))) == 2
 
 
 def test_disabled_agents_and_unknown_names_are_ignored(
@@ -252,13 +256,13 @@ def test_disabled_agents_and_unknown_names_are_ignored(
     monkeypatch.setattr(runtime, "call_agent", _answer())
     api.data(
         api.post(
-            f"{_urls(board, card)}/comments",
+            f"{_urls(api, board, card)}/comments",
             json={"content": f"@{agent['name']} and @Nobody are not here"},
         )
     )
     time.sleep(0.2)
     assert _jobs(api, board, card) == []
-    assert len(api.data(api.get(f"{_urls(board, card)}/comments"))) == 1
+    assert len(api.data(api.get(f"{_urls(api, board, card)}/comments"))) == 1
 
 
 def test_mention_events_are_published_stored_and_streamed(
@@ -272,7 +276,7 @@ def test_mention_events_are_published_stored_and_streamed(
     try:
         api.data(
             api.post(
-                f"{_urls(board, card)}/comments",
+                f"{_urls(api, board, card)}/comments",
                 json={"content": f"@{agent['name']} say hi"},
             )
         )
@@ -303,10 +307,10 @@ def test_mention_events_are_published_stored_and_streamed(
         "duration_ms",
     }
 
-    stored = api.data(api.get(f"{_urls(board, card)}/events/history"))
+    stored = api.data(api.get(f"{_urls(api, board, card)}/events/history"))
     assert [item["seq"] for item in stored["items"]] == [event["seq"] for event in published]
 
-    with api.client.stream("GET", f"{_urls(board, card)}/events") as response:
+    with api.client.stream("GET", f"{_urls(api, board, card)}/events") as response:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
         lines: list[str] = []
@@ -319,15 +323,13 @@ def test_mention_events_are_published_stored_and_streamed(
                 break
     assert any(line.startswith("id: ") for line in lines)
     payload = next(
-        line
-        for line in lines
-        if line.startswith("data: ") and '"type": "agent_completed"' in line
+        line for line in lines if line.startswith("data: ") and '"type": "agent_completed"' in line
     )
     assert json.loads(payload[len("data: ") :])["payload"]["agent_name"] == agent["name"]
 
 
 def test_mention_endpoints_validate_the_card(api: Api, board: dict[str, Any]) -> None:
-    base = f"/api/v1/boards/{board['id']}/cards/does-not-exist"
+    base = f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/does-not-exist"
     assert api.get(f"{base}/mentions").status_code == 404
     assert api.get(f"{base}/events/history").status_code == 404
     assert api.client.get(f"{base}/events").status_code == 404

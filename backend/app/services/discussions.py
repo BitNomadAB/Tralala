@@ -13,6 +13,7 @@ from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
+from .common import require_mutable_card
 from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED
 from .mentions import extract_mentions
 
@@ -104,9 +105,17 @@ class DiscussionService:
             ).scalar_one()
         )
         card = conn.execute(
-            text("SELECT title FROM cards WHERE id = :id"), {"id": thread["card_id"]}
+            text(
+                "SELECT c.title, c.ticket_key, c.loop_id, l.key, l.name"
+                " FROM cards c JOIN loops l ON l.id = c.loop_id WHERE c.id = :id"
+            ),
+            {"id": thread["card_id"]},
         ).first()
         entry["card_title"] = card[0] if card else None
+        entry["ticket_key"] = card[1] if card else None
+        entry["loop_id"] = card[2] if card else None
+        entry["loop_key"] = card[3] if card else None
+        entry["loop_name"] = card[4] if card else None
         entry["round_count"] = int(entry.get("round_count") or 0)
         entry["tokens_used"] = int(entry.get("tokens_used") or 0)
         entry["elapsed_ms"] = int(entry.get("elapsed_ms") or 0)
@@ -317,6 +326,7 @@ class DiscussionService:
                     "Discussion must reference an existing ticket",
                     details={"card_id": payload.card_id},
                 )
+            require_mutable_card(conn, payload.card_id)
             title = (payload.title or f"{card['title']} — discussion").strip()
             conn.execute(
                 text(

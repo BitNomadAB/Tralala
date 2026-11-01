@@ -1,3 +1,5 @@
+"""Ticket search, scoped to one Loop, and App-wide search that keeps Loop context."""
+
 from __future__ import annotations
 
 import json
@@ -6,9 +8,10 @@ from typing import Any
 from sqlalchemy import text
 
 from ..core.errors import NotFound
+from ..storage.sqlite import utcnow
 from .boards import BoardService
 from .cards import CardService
-from .common import rows
+from .common import decorate_cards, rows
 
 
 def _fts_query(value: str) -> str:
@@ -26,6 +29,7 @@ class SearchService:
     def board(
         self,
         board_id: str,
+        loop_id: str,
         *,
         q: str | None = None,
         priority: str | None = None,
@@ -41,8 +45,8 @@ class SearchService:
         if not self.boards.exists(board_id):
             raise NotFound("Board database not found")
 
-        clauses: list[str] = []
-        params: dict[str, Any] = {}
+        clauses: list[str] = ["c.loop_id = :loop_id"]
+        params: dict[str, Any] = {"loop_id": loop_id}
         join = ""
         if q:
             if self.boards.fts_available(board_id):
@@ -64,16 +68,21 @@ class SearchService:
         if completed is not None:
             clauses.append("c.completed_at IS NOT NULL" if completed else "c.completed_at IS NULL")
         if overdue:
-            from ..storage.sqlite import utcnow
-
             clauses.append("c.due_at IS NOT NULL AND c.due_at < :now AND c.completed_at IS NULL")
             params["now"] = utcnow()
         if list_id:
             clauses.append("c.list_id = :list_id")
             params["list_id"] = list_id
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        where = f" WHERE {' AND '.join(clauses)}"
         base = f"FROM cards c{join}{where}"
         with self.boards.reader(board_id) as conn:
+            loop = rows(
+                conn,
+                "SELECT id, key, name, stage, current_plan_id FROM loops WHERE id = :id",
+                {"id": loop_id},
+            )
+            if not loop:
+                raise NotFound("Loop not found", code="loop_not_found")
             total = conn.execute(text(f"SELECT COUNT(DISTINCT c.id) {base}"), params).scalar_one()
             records = rows(
                 conn,
@@ -81,9 +90,25 @@ class SearchService:
                 f" LIMIT :limit OFFSET :offset",
                 {**params, "limit": limit, "offset": offset},
             )
-            from .common import decorate_cards
-
             items = decorate_cards(conn, board_id, records)
+            loop_row = loop[0]
+            readiness: dict[str, dict[str, Any]] = {}
+            if loop_row["current_plan_id"]:
+                evaluation = self.card_service.plans.readiness(conn, loop_row)  # type: ignore[union-attr]
+                readiness = {
+                    item["card_id"]: item for item in evaluation["items"] if item["card_id"]
+                }
+        for item in items:
+            item["board_id"] = board_id
+            item["loop_id"] = loop_id
+            item["loop_key"] = loop_row["key"]
+            item["loop_name"] = loop_row["name"]
+            detail = readiness.get(item["id"])
+            item["ready"] = bool(detail["ready"]) if detail else True
+            item["human_action_required"] = (
+                bool(detail["human_action_required"]) if detail else False
+            )
+            item["blockers"] = detail["blockers"] if detail else []
         return {
             "items": items,
             "total": int(total),
@@ -94,7 +119,7 @@ class SearchService:
         }
 
     def global_search(
-        self, *, q: str, limit_per_board: int = 10, max_boards: int = 25
+        self, *, q: str, limit_per_loop: int = 10, max_boards: int = 25
     ) -> dict[str, Any]:
         boards = [
             row
@@ -105,15 +130,34 @@ class SearchService:
             )
         ]
         results: list[dict[str, Any]] = []
+        loop_count = 0
         for board in boards:
             try:
-                found = self.board(board["id"], q=q, limit=limit_per_board, include_archived=False)
+                with self.boards.reader(board["id"]) as conn:
+                    loops = rows(
+                        conn,
+                        "SELECT id FROM loops WHERE archived_at IS NULL"
+                        " AND completed_at IS NULL ORDER BY sequence",
+                    )
             except NotFound:
                 continue
-            for item in found["items"]:
-                item["board_name"] = board["name"]
-                results.append(item)
-        return {"items": results, "board_count": len(boards), "query": q}
+            for loop in loops:
+                loop_count += 1
+                try:
+                    found = self.board(
+                        board["id"], loop["id"], q=q, limit=limit_per_loop, include_archived=False
+                    )
+                except NotFound:
+                    continue
+                for item in found["items"]:
+                    item["board_name"] = board["name"]
+                    results.append(item)
+        return {
+            "items": results,
+            "board_count": len(boards),
+            "loop_count": loop_count,
+            "query": q,
+        }
 
 
 def activity_feed(

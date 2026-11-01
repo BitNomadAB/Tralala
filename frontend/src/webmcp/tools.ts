@@ -29,6 +29,7 @@ export function dashboardTools(options: {
           id: board.id,
           name: board.name,
           status: board.status,
+          loop_count: board.loop_count,
           list_count: board.list_count,
           card_count: board.card_count,
         })) };
@@ -108,33 +109,98 @@ export function dashboardTools(options: {
   ];
 }
 
-export function boardTools(options: {
+export function loopTools(options: {
   boardId: string;
-  boardName: string;
+  loopId: string;
+  loopName: string;
   lists: BoardList[];
   cardsByList: Record<string, Card[]>;
   onOpenCard: (cardId: string) => void;
 }): McpTool[] {
-  const { boardId } = options;
+  const { boardId, loopId } = options;
   return [
     {
-      name: "get_board_overview",
-      description: "Summarise the active board: lists and card counts.",
-      requiredScope: "boards:read",
+      name: "get_loop_overview",
+      description:
+        "Summarise the active Loop: stage, document states, published phases and column counts.",
+      requiredScope: "loops:read",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
-      execute: () => ({
-        board_id: boardId,
-        name: options.boardName,
-        lists: options.lists.map((list) => ({
-          id: list.id,
-          name: list.name,
-          card_count: (options.cardsByList[list.id] ?? []).length,
-        })),
-      }),
+      execute: async () => {
+        const [loop, readiness] = await Promise.all([
+          api.getLoop(boardId, loopId),
+          api.getReadiness(boardId, loopId),
+        ]);
+        return {
+          board_id: boardId,
+          loop_id: loopId,
+          name: loop.name,
+          key: loop.key,
+          stage: loop.stage,
+          documents: Object.fromEntries(
+            Object.entries(loop.documents).map(([kind, document]) => [kind, document.state]),
+          ),
+          execution_allowed: readiness.execution_allowed,
+          phases: readiness.phases.map((phase) => ({
+            number: phase.number,
+            name: phase.name,
+            state: phase.state,
+            blocked_by: phase.blocked_by.map((blocker) => blocker.reason),
+          })),
+          lists: options.lists.map((list) => ({
+            id: list.id,
+            name: list.name,
+            card_count: (options.cardsByList[list.id] ?? []).length,
+          })),
+        };
+      },
     },
     {
-      name: "list_board_cards",
-      description: "List cards on the active board, optionally limited to one list.",
+      name: "get_loop_plan",
+      description: "Read the approved plan with per-Ticket readiness, blockers and human gates.",
+      requiredScope: "loops:read",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      execute: async () => {
+        const readiness = await api.getReadiness(boardId, loopId);
+        return {
+          loop_id: loopId,
+          stage: readiness.stage,
+          execution_allowed: readiness.execution_allowed,
+          tickets: readiness.items.map((item) => ({
+            key: item.key,
+            title: item.title,
+            phase_number: item.phase_number,
+            ready: item.ready,
+            human_action_required: item.human_action_required,
+            blockers: item.blockers.map((blocker) => blocker.reason),
+          })),
+        };
+      },
+    },
+    {
+      name: "request_generation",
+      description:
+        "Ask the configured agent to draft the analysis or the RoadMap for this Loop. Generation never approves a document.",
+      requiredScope: "loops:generate",
+      inputSchema: {
+        type: "object",
+        properties: {
+          purpose: { type: "string", enum: ["analysis", "roadmap", "qa"] },
+        },
+        required: ["purpose"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const run = await api.startGeneration(
+          boardId,
+          loopId,
+          String(input.purpose) as "analysis" | "roadmap" | "qa",
+        );
+        return { run_id: run.id, status: run.status, purpose: run.purpose };
+      },
+    },
+    {
+      name: "list_loop_tickets",
+      description: "List Tickets on the active Loop, optionally limited to one column.",
       requiredScope: "cards:read",
       inputSchema: {
         type: "object",
@@ -142,7 +208,7 @@ export function boardTools(options: {
         additionalProperties: false,
       },
       execute: async (input) => {
-        const cards = await api.listCards(boardId, {
+        const cards = await api.listCards(boardId, loopId, {
           list_id: input.list_id ? String(input.list_id) : undefined,
           limit: 200,
         });
@@ -154,6 +220,9 @@ export function boardTools(options: {
             priority: card.priority,
             due_at: card.due_at,
             completed: Boolean(card.completed_at),
+            ticket_key: card.ticket_key,
+            ready: card.ready,
+            human_action_required: card.human_action_required,
             labels: card.labels.map((label) => label.name),
           })),
         };
@@ -170,7 +239,7 @@ export function boardTools(options: {
         additionalProperties: false,
       },
       execute: async (input) => {
-        const list = await api.createList(boardId, String(input.name));
+        const list = await api.createList(boardId, loopId, String(input.name));
         return { id: list.id, name: list.name };
       },
     },
@@ -190,7 +259,7 @@ export function boardTools(options: {
         additionalProperties: false,
       },
       execute: async (input) => {
-        const card = await api.createCard(boardId, {
+        const card = await api.createCard(boardId, loopId, {
           list_id: String(input.list_id),
           title: String(input.title),
           description: input.description ? String(input.description) : "",
@@ -214,7 +283,7 @@ export function boardTools(options: {
         additionalProperties: false,
       },
       execute: async (input) => {
-        const { items } = await api.searchCards(boardId, {
+        const { items } = await api.searchCards(boardId, loopId, {
           q: input.query ? String(input.query) : undefined,
           label: input.label ? String(input.label) : undefined,
           priority: input.priority as Card["priority"] | undefined,
@@ -255,7 +324,7 @@ export function boardTools(options: {
         additionalProperties: false,
       },
       execute: async (input) => {
-        const card = await api.moveCard(boardId, String(input.card_id), {
+        const card = await api.moveCard(boardId, loopId, String(input.card_id), {
           version: Number(input.version),
           list_id: String(input.list_id),
           position: typeof input.position === "number" ? input.position : 0,
@@ -266,8 +335,13 @@ export function boardTools(options: {
   ];
 }
 
-export function cardTools(options: { boardId: string; cardId: string; onClose: () => void }): McpTool[] {
-  const { boardId, cardId } = options;
+export function cardTools(options: {
+  boardId: string;
+  loopId: string;
+  cardId: string;
+  onClose: () => void;
+}): McpTool[] {
+  const { boardId, loopId, cardId } = options;
   return [
     {
       name: "get_card_details",
@@ -275,7 +349,7 @@ export function cardTools(options: { boardId: string; cardId: string; onClose: (
       requiredScope: "cards:read",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       execute: async () => {
-        const card = await api.getCard(boardId, cardId);
+        const card = await api.getCard(boardId, loopId, cardId);
         return {
           id: card.id,
           title: card.title,
@@ -319,7 +393,7 @@ export function cardTools(options: { boardId: string; cardId: string; onClose: (
         additionalProperties: false,
       },
       execute: async (input) => {
-        const card = await api.updateCard(boardId, cardId, {
+        const card = await api.updateCard(boardId, loopId, cardId, {
           version: Number(input.version),
           title: input.title ? String(input.title) : undefined,
           description: input.description !== undefined ? String(input.description) : undefined,
@@ -340,7 +414,7 @@ export function cardTools(options: { boardId: string; cardId: string; onClose: (
         additionalProperties: false,
       },
       execute: async (input) => {
-        const comment = await api.addComment(boardId, cardId, String(input.content));
+        const comment = await api.addComment(boardId, loopId, cardId, String(input.content));
         return { id: comment.id };
       },
     },
@@ -372,7 +446,7 @@ export function cardTools(options: { boardId: string; cardId: string; onClose: (
       requiredScope: "cards:write",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       execute: async () => {
-        const card = await api.archiveCard(boardId, cardId);
+        const card = await api.archiveCard(boardId, loopId, cardId);
         options.onClose();
         return { id: card.id, archived: true };
       },

@@ -1,5 +1,14 @@
 import { expect, request as playwrightRequest, test } from "playwright/test";
-import { addCard, boardIdFromUrl, cardTile, createBoard, csrfToken, login, uniqueName } from "./support";
+import {
+  addCard,
+  boardIdFromUrl,
+  boardWithLoop,
+  cardTile,
+  csrfToken,
+  login,
+  resolveLoopId,
+  uniqueName,
+} from "./support";
 
 test.describe("agent access", () => {
   test("an agent token can work on cards but cannot create boards, and is audited", async ({
@@ -7,10 +16,13 @@ test.describe("agent access", () => {
   }) => {
     await login(page);
     const boardName = uniqueName("Agent board");
-    await createBoard(page, boardName);
+    await boardWithLoop(page, boardName);
     const boardId = boardIdFromUrl(page);
+    const loopId = await resolveLoopId(page, boardId);
 
-    const listsResponse = await page.request.get(`/api/v1/boards/${boardId}/lists`);
+    const listsResponse = await page.request.get(
+      `/api/v1/boards/${boardId}/loops/${loopId}/lists`,
+    );
     expect(listsResponse.ok()).toBe(true);
     const lists = (await listsResponse.json()).data as { id: string; name: string }[];
     const todo = lists.find((list) => list.name === "Todo");
@@ -32,16 +44,23 @@ test.describe("agent access", () => {
       extraHTTPHeaders: { Authorization: `Bearer ${credential.token}` },
     });
 
-    const created = await agent.post(`/api/v1/boards/${boardId}/cards`, {
+    const created = await agent.post(`/api/v1/boards/${boardId}/loops/${loopId}/cards`, {
       data: { list_id: todo.id, title: "Agent-created task", priority: "medium" },
     });
     expect(created.status()).toBe(201, await created.text());
     const card = (await created.json()).data as { id: string; version: number };
     expect(card.version).toBe(1);
 
-    const moved = await agent.post(`/api/v1/boards/${boardId}/cards/${card.id}/move`, {
-      data: { version: 1, list_id: lists.find((list) => list.name === "Done")?.id, position: 0 },
-    });
+    const moved = await agent.post(
+      `/api/v1/boards/${boardId}/loops/${loopId}/cards/${card.id}/move`,
+      {
+        data: {
+          version: 1,
+          list_id: lists.find((list) => list.name === "Done")?.id,
+          position: 0,
+        },
+      },
+    );
     expect(moved.status()).toBe(200);
 
     const forbidden = await agent.post("/api/v1/boards", { data: { name: "Should fail" } });
@@ -60,7 +79,7 @@ test.describe("agent access", () => {
 
   test("a revoked token is rejected immediately", async ({ page }) => {
     await login(page);
-    await createBoard(page, uniqueName("Revoke board"));
+    await boardWithLoop(page, uniqueName("Revoke board"));
 
     const credentialResponse = await page.request.post("/api/v1/credentials", {
       headers: { "X-CSRF-Token": await csrfToken(page) },
@@ -88,7 +107,7 @@ test.describe("agent access", () => {
 test.describe("browser safety", () => {
   test("card Markdown cannot inject HTML", async ({ page }) => {
     await login(page);
-    await createBoard(page, uniqueName("XSS board"));
+    await boardWithLoop(page, uniqueName("XSS board"));
     await addCard(page, "Todo", "Unsafe card");
 
     const dialog = page.getByRole("dialog");

@@ -12,9 +12,12 @@ from ..deps import Pagination, RequestContext, get_context, ok, pagination
 router = APIRouter(tags=["search"])
 
 
-@router.get("/boards/{board_id}/search", response_model=Envelope[list[CardOut]])
+@router.get(
+    "/boards/{board_id}/loops/{loop_id}/search", response_model=Envelope[list[CardOut]]
+)
 async def search_board(
     board_id: str,
+    loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     page: Annotated[Pagination, Depends(pagination)],
@@ -29,6 +32,7 @@ async def search_board(
     ctx.actor.require("cards:read")
     result = ctx.services.search.board(
         board_id,
+        loop_id,
         q=q,
         priority=priority,
         label=label,
@@ -60,8 +64,16 @@ async def search_all_boards(
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> dict:
     ctx.actor.require("cards:read")
-    result = ctx.services.search.global_search(q=q, limit_per_board=limit)
-    return ok(request, result["items"], {"board_count": result["board_count"], "query": q})
+    result = ctx.services.search.global_search(q=q, limit_per_loop=limit)
+    return ok(
+        request,
+        result["items"],
+        {
+            "board_count": result["board_count"],
+            "loop_count": result["loop_count"],
+            "query": q,
+        },
+    )
 
 
 @router.get("/boards/{board_id}/activity", response_model=Envelope[list[ActivityOut]])

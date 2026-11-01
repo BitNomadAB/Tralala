@@ -7,7 +7,9 @@ import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { AppLayout } from "./AppLayout";
 import { DashboardPage } from "@/features/boards/DashboardPage";
-import { BoardPage } from "@/features/board/BoardPage";
+import { BoardLoopsPage } from "@/features/loops/BoardLoopsPage";
+import { LoopPage } from "@/features/loops/LoopPage";
+import { HistoryPage } from "@/features/history/HistoryPage";
 import { DiscussionsPage } from "@/features/discussions/DiscussionsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { TemplateEditorPage } from "@/features/settings/TemplateEditorPage";
@@ -66,7 +68,12 @@ export function App() {
                   }
                 >
                   <Route path="/" element={<DashboardPage />} />
-                  <Route path="/boards/:boardId" element={<BoardPage />} />
+                  <Route path="/boards/:boardId" element={<BoardLoopsPage />} />
+                  <Route
+                    path="/boards/:boardId/loops/:loopId"
+                    element={<LoopPage />}
+                  />
+                  <Route path="/boards/:boardId/history" element={<HistoryPage />} />
                   <Route path="/discussions" element={<DiscussionsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/settings/templates/:templateId" element={<TemplateEditorPage />} />

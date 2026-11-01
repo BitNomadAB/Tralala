@@ -88,6 +88,32 @@ def board(api: Api) -> dict[str, Any]:
     return api.data(response)
 
 
+def loop_id(api: Api, board_id: str, *, name: str = "Loop") -> str:
+    """Return the first Loop of a board, creating one when the board has none."""
+    loops = api.data(api.get(f"/api/v1/boards/{board_id}/loops"))
+    if loops:
+        return loops[0]["id"]
+    created = api.data(
+        api.post(f"/api/v1/boards/{board_id}/loops", json={"name": name})
+    )
+    return created["id"]
+
+
 @pytest.fixture()
-def board_lists(api: Api, board: dict[str, Any]) -> list[dict[str, Any]]:
-    return api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+def loop(api: Api, board: dict[str, Any]) -> dict[str, Any]:
+    created = api.data(
+        api.post(f"/api/v1/boards/{board['id']}/loops", json={"name": "Test loop"})
+    )
+    return created
+
+
+@pytest.fixture()
+def second_loop(api: Api, board: dict[str, Any]) -> dict[str, Any]:
+    return api.data(
+        api.post(f"/api/v1/boards/{board['id']}/loops", json={"name": "Second loop"})
+    )
+
+
+@pytest.fixture()
+def board_lists(api: Api, board: dict[str, Any], loop: dict[str, Any]) -> list[dict[str, Any]]:
+    return api.data(api.get(f"/api/v1/boards/{board['id']}/loops/{loop['id']}/lists"))

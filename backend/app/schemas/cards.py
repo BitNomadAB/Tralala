@@ -67,6 +67,7 @@ class BulkCardCreate(StrictModel):
 class CardOut(OutModel):
     id: str
     board_id: str
+    loop_id: str
     list_id: str
     title: str
     description: str
@@ -87,6 +88,30 @@ class CardOut(OutModel):
     checklist_total: int = 0
     checklist_completed: int = 0
     comment_count: int = 0
+    ticket_key: str | None = None
+    kind: str = "manual"
+    phase_id: str | None = None
+    phase_number: int | None = None
+    required_actor: str = "any"
+    execution_mode: str = "normal"
+    human_action_required: bool = False
+    human_action_reason: str = ""
+    human_instructions: str = ""
+    human_confirmed_at: str | None = None
+    human_confirmed_by_actor_id: str | None = None
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    expected_evidence: list[str] = Field(default_factory=list)
+    ready: bool = True
+    blockers: list[dict] = Field(default_factory=list)
+    downstream_phase_numbers: list[int] = Field(default_factory=list)
+    plan_item_id: str | None = None
+
+
+class BoardTicketOut(CardOut):
+    """Aggregate Board read; each item names the Loop that owns the Ticket."""
+
+    loop_key: str | None = None
+    loop_name: str | None = None
 
 
 class CardListOut(OutModel):

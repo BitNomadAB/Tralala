@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 
 from app.services import runtime
 
@@ -34,10 +34,12 @@ def _discussion(
     max_rounds: int = 3,
     mode: str = "manual",
 ) -> dict[str, Any]:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     card = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": lists[0]["id"], "title": "Run control"},
         )
     )
@@ -198,9 +200,7 @@ def test_consensus_stops_the_loop_after_one_round(
     assert detail["status"] == "consensus_proposed"
 
 
-def test_repeated_answers_stop_the_loop(
-    api: Api, board: dict[str, Any], monkeypatch: Any
-) -> None:
+def test_repeated_answers_stop_the_loop(api: Api, board: dict[str, Any], monkeypatch: Any) -> None:
     agent = _agent(api, "Echo Bot")
     discussion = _discussion(api, board, [agent], max_rounds=4)
     monkeypatch.setattr(runtime, "call_agent", _runtime({"Echo Bot": "disagree"}, varying=False))
@@ -233,9 +233,7 @@ def test_token_budget_ends_the_round_early(
     )
 
     base, runs_url = _urls(board, discussion)
-    run_id = api.data(
-        api.post(runs_url, json={"autonomous": True, "token_budget": 500})
-    )["run_id"]
+    run_id = api.data(api.post(runs_url, json={"autonomous": True, "token_budget": 500}))["run_id"]
     final = _wait(api, f"{runs_url}/{run_id}", lambda run: run["status"] != "running")
 
     assert final["status"] == "budget_exhausted"
@@ -253,14 +251,12 @@ def test_time_budget_stops_further_rounds(
 ) -> None:
     agent = _agent(api, "Slow Bot")
     discussion = _discussion(api, board, [agent], max_rounds=5)
-    monkeypatch.setattr(
-        runtime, "call_agent", _runtime({"Slow Bot": "disagree"}, delay=0.05)
-    )
+    monkeypatch.setattr(runtime, "call_agent", _runtime({"Slow Bot": "disagree"}, delay=0.05))
 
     _, runs_url = _urls(board, discussion)
-    run_id = api.data(
-        api.post(runs_url, json={"autonomous": True, "time_budget_seconds": 0})
-    )["run_id"]
+    run_id = api.data(api.post(runs_url, json={"autonomous": True, "time_budget_seconds": 0}))[
+        "run_id"
+    ]
     final = _wait(api, f"{runs_url}/{run_id}", lambda run: run["status"] != "running")
 
     assert final["status"] == "budget_exhausted"
@@ -274,9 +270,7 @@ def test_pause_holds_the_loop_and_resume_continues(
 ) -> None:
     agent = _agent(api, "Pause Bot")
     discussion = _discussion(api, board, [agent], max_rounds=4)
-    monkeypatch.setattr(
-        runtime, "call_agent", _runtime({"Pause Bot": "disagree"}, delay=0.12)
-    )
+    monkeypatch.setattr(runtime, "call_agent", _runtime({"Pause Bot": "disagree"}, delay=0.12))
 
     base, runs_url = _urls(board, discussion)
     run_id = api.data(api.post(runs_url, json={"autonomous": True}))["run_id"]
@@ -361,14 +355,13 @@ def test_run_inputs_are_validated(api: Api, board: dict[str, Any], monkeypatch: 
     listing = api.data(api.get(runs_url))
     assert listing["total"] == 0
 
+
 def test_roundtable_message_starts_one_round_automatically(
     api: Api, board: dict[str, Any], monkeypatch: Any
 ) -> None:
     agent = _agent(api, "Roundtable Bot")
     discussion = _discussion(api, board, [agent], mode="roundtable")
-    monkeypatch.setattr(
-        runtime, "call_agent", _runtime({"Roundtable Bot": "agree"})
-    )
+    monkeypatch.setattr(runtime, "call_agent", _runtime({"Roundtable Bot": "agree"}))
 
     base, runs_url = _urls(board, discussion)
     posted = api.data(
@@ -400,9 +393,7 @@ def test_manual_and_closed_threads_do_not_start_runs_from_a_message(
     monkeypatch.setattr(runtime, "call_agent", _runtime({"Quiet Bot": "agree"}))
 
     base, runs_url = _urls(board, manual)
-    posted = api.data(
-        api.post(f"{base}/messages", json={"content": "Manual thread question"})
-    )
+    posted = api.data(api.post(f"{base}/messages", json={"content": "Manual thread question"}))
     assert posted["auto_run"] is None
     assert api.data(api.get(runs_url))["total"] == 0
 
@@ -418,9 +409,7 @@ def test_autonomous_mode_message_starts_one_background_round(
 ) -> None:
     agent = _agent(api, "Autonomous Bot")
     discussion = _discussion(api, board, [agent], mode="autonomous")
-    monkeypatch.setattr(
-        runtime, "call_agent", _runtime({"Autonomous Bot": "disagree"})
-    )
+    monkeypatch.setattr(runtime, "call_agent", _runtime({"Autonomous Bot": "disagree"}))
 
     base, runs_url = _urls(board, discussion)
     api.data(api.post(f"{base}/messages", json={"content": "Please react to this"}))
@@ -431,6 +420,7 @@ def test_autonomous_mode_message_starts_one_background_round(
     assert runs["items"][0]["rounds_requested"] == 1
     assert runs["items"][0]["rounds_completed"] == 1
     assert api.data(api.get(runs_url))["total"] == 1
+
 
 def test_agents_mention_starts_a_round_in_a_manual_thread(
     api: Api, board: dict[str, Any], monkeypatch: Any
@@ -484,6 +474,7 @@ def test_participant_name_mention_starts_a_round_in_a_manual_thread(
     assert runs["items"][0]["rounds_completed"] == 1
     assert api.data(api.get(runs_url))["total"] == 1
 
+
 def test_auto_run_reports_a_run_that_is_already_active(
     api: Api, board: dict[str, Any], monkeypatch: Any
 ) -> None:
@@ -513,9 +504,7 @@ def test_auto_run_reports_a_run_that_is_already_active(
     assert started.status_code == 202, started.text
     assert entered.wait(timeout=10), "the run never reached the agent call"
     try:
-        posted = api.data(
-            api.post(f"{base}/messages", json={"content": "@agents are you there?"})
-        )
+        posted = api.data(api.post(f"{base}/messages", json={"content": "@agents are you there?"}))
         assert posted["auto_run"] == "already_running"
     finally:
         release.set()

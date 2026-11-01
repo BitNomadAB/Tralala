@@ -4,7 +4,7 @@ import json
 import queue
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 
 from app.services import runtime
 
@@ -29,13 +29,13 @@ def _agent(api: Api, name: str = "Event Bot") -> dict[str, Any]:
     )
 
 
-def _discussion(
-    api: Api, board: dict[str, Any], agent: dict[str, Any]
-) -> dict[str, Any]:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+def _discussion(api: Api, board: dict[str, Any], agent: dict[str, Any]) -> dict[str, Any]:
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     card = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": lists[0]["id"], "title": "Event source"},
         )
     )
@@ -157,9 +157,7 @@ def test_history_replays_only_events_after_a_sequence(
     assert everything["total"] > 10
 
     checkpoint = everything["items"][0]["seq"]
-    remaining = api.data(
-        api.get(f"{_base(board, discussion)}/events/history?after={checkpoint}")
-    )
+    remaining = api.data(api.get(f"{_base(board, discussion)}/events/history?after={checkpoint}"))
     assert all(item["seq"] > checkpoint for item in remaining["items"])
     assert remaining["total"] == everything["total"] - 1
 
@@ -208,9 +206,7 @@ def test_stream_replays_stored_events_as_server_sent_events(
     assert any(line.startswith("id: ") for line in lines)
     assert "event: message_created" in lines
     payload = next(
-        line
-        for line in lines
-        if line.startswith("data: ") and '"type": "message_created"' in line
+        line for line in lines if line.startswith("data: ") and '"type": "message_created"' in line
     )
     event = json.loads(payload[len("data: ") :])
     assert event["type"] == "message_created"

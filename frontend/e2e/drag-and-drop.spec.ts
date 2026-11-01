@@ -2,7 +2,7 @@ import { expect, test } from "playwright/test";
 import {
   addCard,
   cardTile,
-  createBoard,
+  boardWithLoop,
   dragCardToList,
   listRegion,
   login,
@@ -12,7 +12,7 @@ import {
 test.describe("drag and drop", () => {
   test("moves a card between lists and persists the position after reload", async ({ page }) => {
     await login(page);
-    await createBoard(page, uniqueName("Drag board"));
+    await boardWithLoop(page, uniqueName("Drag board"));
 
     const title = uniqueName("Drag me");
     await addCard(page, "Todo", title);
@@ -28,7 +28,7 @@ test.describe("drag and drop", () => {
 
   test("reorders lists horizontally", async ({ page }) => {
     await login(page);
-    await createBoard(page, uniqueName("List order board"));
+    await boardWithLoop(page, uniqueName("List order board"));
 
     const done = listRegion(page, "Done");
     const target = listRegion(page, "Backlog");

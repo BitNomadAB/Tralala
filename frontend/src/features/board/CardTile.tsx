@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CalendarClock, CheckSquare, MessageSquare } from "lucide-react";
+import { CalendarClock, CheckSquare, Lock, MessageSquare, User } from "lucide-react";
 import { LabelChip } from "@/components/ui/badge";
 import { cn, isOverdue } from "@/lib/utils";
 import type { Card } from "@/lib/types";
@@ -54,6 +54,11 @@ export function CardTile({
           {...(overlay ? {} : sortable.attributes)}
           {...(overlay ? {} : sortable.listeners)}
         >
+          {card.ticket_key ? (
+            <span className="mb-0.5 block font-mono text-[10px] text-[var(--muted-foreground)]">
+              {card.ticket_key}
+            </span>
+          ) : null}
           <span className="text-sm font-medium leading-snug text-[var(--foreground)]">
             {card.title}
           </span>
@@ -70,6 +75,29 @@ export function CardTile({
           </span>
         ) : null}
       </div>
+
+      {card.human_action_required || !card.ready || card.kind === "qa" ? (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {card.human_action_required ? (
+            <span className="inline-flex items-center gap-1 rounded border border-[var(--warning)] px-1.5 py-0.5 text-[10px] text-[var(--warning)]">
+              <User size={10} /> Human action required
+            </span>
+          ) : null}
+          {!card.ready ? (
+            <span
+              className="inline-flex items-center gap-1 rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]"
+              title={card.blockers.map((blocker) => blocker.key ?? blocker.reason).join(", ")}
+            >
+              <Lock size={10} /> Blocked
+            </span>
+          ) : null}
+          {card.kind === "qa" ? (
+            <span className="inline-flex items-center rounded border border-[var(--primary)] px-1.5 py-0.5 text-[10px] text-[var(--primary)]">
+              QA
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {card.labels.length > 0 ? (
         <div className="mt-2 flex flex-wrap gap-1">

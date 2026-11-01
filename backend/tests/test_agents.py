@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from conftest import Api
+from conftest import Api, loop_id
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
@@ -22,9 +22,11 @@ def test_agent_scopes_are_enforced(api: Api, client: TestClient, board: dict[str
     headers = {"Authorization": f"Bearer {token}"}
     boards = client.get("/api/v1/boards", headers=headers)
     assert boards.status_code == 200
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     denied = client.post(
-        f"/api/v1/boards/{board['id']}/cards",
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
         headers=headers,
         json={"list_id": lists[0]["id"], "title": "Nope"},
     )
@@ -37,9 +39,11 @@ def test_agent_writes_are_audited_as_agent(
 ) -> None:
     token = _issue_token(api, ["cards:read", "cards:write"])
     headers = {"Authorization": f"Bearer {token}"}
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     created = client.post(
-        f"/api/v1/boards/{board['id']}/cards",
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
         headers=headers,
         json={"list_id": lists[0]["id"], "title": "By agent"},
     )

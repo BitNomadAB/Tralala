@@ -37,6 +37,7 @@ class BoardOut(OutModel):
     archived_at: str | None = None
     schema_version: int
     schema_revision: str | None = None
+    loop_count: int = 0
     list_count: int = 0
     card_count: int = 0
 

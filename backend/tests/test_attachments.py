@@ -4,14 +4,16 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 
 
 def _card(api: Api, board: dict[str, Any]) -> dict[str, Any]:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     return api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": lists[0]["id"], "title": "Attachment host"},
         )
     )
@@ -75,9 +77,7 @@ def test_unsupported_extension_and_content_mismatch_are_rejected(
     disguised = _upload(api, board, card["id"], "fake.pdf", b"\x89PNG\r\n\x1a\n data")
     assert disguised.status_code == 422
 
-    traversal = api.data(
-        _upload(api, board, card["id"], "../../etc/passwd.txt", b"safe text")
-    )
+    traversal = api.data(_upload(api, board, card["id"], "../../etc/passwd.txt", b"safe text"))
     assert traversal["original_filename"] == "passwd.txt"
 
 
@@ -91,9 +91,7 @@ def test_size_limit_is_enforced(
     assert "size limit" in response.json()["error"]["message"].lower()
 
 
-def test_attachment_requires_authentication(
-    api: Api, board: dict[str, Any], client: Any
-) -> None:
+def test_attachment_requires_authentication(api: Api, board: dict[str, Any], client: Any) -> None:
     card = _card(api, board)
     client.cookies.clear()
     anonymous = client.get(f"/api/v1/boards/{board['id']}/attachments")
@@ -111,7 +109,7 @@ def test_card_assignment_to_human_and_agent(api: Api, board: dict[str, Any]) -> 
     me = api.data(api.get("/api/v1/auth/me"))
     assigned = api.data(
         api.patch(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/{card['id']}",
             json={"version": card["version"], "assignee_actor_id": me["id"]},
         )
     )
@@ -121,7 +119,12 @@ def test_card_assignment_to_human_and_agent(api: Api, board: dict[str, Any]) -> 
     assert assigned["assigned_at"] is not None
     assert assigned["assigned_by_actor_id"] == me["id"]
 
-    mine = api.data(api.get(f"/api/v1/boards/{board['id']}/cards", params={"assignee": "me"}))
+    mine = api.data(
+        api.get(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+            params={"assignee": "me"},
+        )
+    )
     assert [item["id"] for item in mine] == [card["id"]]
 
     roles = api.data(api.get("/api/v1/role-templates"))
@@ -138,7 +141,7 @@ def test_card_assignment_to_human_and_agent(api: Api, board: dict[str, Any]) -> 
     )
     to_agent = api.data(
         api.patch(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/{card['id']}",
             json={"version": assigned["version"], "assignee_actor_id": agent["id"]},
         )
     )
@@ -146,19 +149,25 @@ def test_card_assignment_to_human_and_agent(api: Api, board: dict[str, Any]) -> 
     assert to_agent["assignee_name"] == "Assignment Bot"
 
     by_agent = api.data(
-        api.get(f"/api/v1/boards/{board['id']}/cards", params={"assignee": agent["id"]})
+        api.get(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+            params={"assignee": agent["id"]},
+        )
     )
     assert [item["id"] for item in by_agent] == [card["id"]]
 
     cleared = api.data(
         api.patch(
-            f"/api/v1/boards/{board['id']}/cards/{card['id']}",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/{card['id']}",
             json={"version": to_agent["version"], "clear_assignee": True},
         )
     )
     assert cleared["assignee_actor_id"] is None
     unassigned = api.data(
-        api.get(f"/api/v1/boards/{board['id']}/cards", params={"assignee": "unassigned"})
+        api.get(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+            params={"assignee": "unassigned"},
+        )
     )
     assert [item["id"] for item in unassigned] == [card["id"]]
 
@@ -186,14 +195,14 @@ def test_disabled_agent_cannot_be_assigned(api: Api, board: dict[str, Any]) -> N
         )
     )
     response = api.patch(
-        f"/api/v1/boards/{board['id']}/cards/{card['id']}",
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/{card['id']}",
         json={"version": card["version"], "assignee_actor_id": agent["id"]},
     )
     assert response.status_code == 422
     assert "disabled" in response.json()["error"]["message"].lower()
 
     unknown = api.patch(
-        f"/api/v1/boards/{board['id']}/cards/{card['id']}",
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards/{card['id']}",
         json={"version": card["version"], "assignee_actor_id": "not-a-real-id"},
     )
     assert unknown.status_code == 422

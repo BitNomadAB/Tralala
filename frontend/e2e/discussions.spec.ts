@@ -1,5 +1,17 @@
-import { expect, test, type Page } from "playwright/test";
-import { addCard, createBoard, login, uniqueName } from "./support";
+import { expect, test, type Locator, type Page } from "playwright/test";
+import { addCard, boardWithLoop, login, uniqueName } from "./support";
+
+async function selectTicket(dialog: Locator, title: string): Promise<void> {
+  // Every option names the owning Loop, so the visible label is not the bare Ticket title.
+  const select = dialog.getByLabel("Ticket", { exact: true });
+  const value = await select
+    .locator("option")
+    .filter({ hasText: title })
+    .first()
+    .getAttribute("value");
+  if (!value) throw new Error(`Ticket ${title} is not selectable`);
+  await select.selectOption(value);
+}
 
 async function createAgent(page: Page, name: string): Promise<void> {
   await page.getByRole("link", { name: "Settings" }).click();
@@ -19,7 +31,7 @@ test.describe("discussion run control", () => {
   test("runs bounded rounds and reports budgets and failures", async ({ page }) => {
     await login(page);
     const boardName = uniqueName("Run board");
-    await createBoard(page, boardName);
+    await boardWithLoop(page, boardName);
     await addCard(page, "Todo", "Rate limit review");
 
     const agentName = uniqueName("Run Agent");
@@ -32,7 +44,7 @@ test.describe("discussion run control", () => {
 
     await page.getByRole("button", { name: "New discussion" }).click();
     const createDialog = page.getByRole("dialog", { name: "New discussion" });
-    await createDialog.getByLabel("Ticket", { exact: true }).selectOption({ label: "Rate limit review" });
+    await selectTicket(createDialog, "Rate limit review");
     await createDialog.getByLabel("Goal or question").fill("Should we throttle per actor?");
     await createDialog.getByRole("checkbox", { name: new RegExp(agentName) }).check();
     await createDialog.getByRole("button", { name: "Create discussion" }).click();
@@ -73,9 +85,7 @@ test.describe("discussion run control", () => {
     // A manual thread stays quiet until the message asks for an answer with @agents.
     await page.getByRole("button", { name: "New discussion" }).click();
     const manualDialog = page.getByRole("dialog", { name: "New discussion" });
-    await manualDialog
-      .getByLabel("Ticket", { exact: true })
-      .selectOption({ label: "Rate limit review" });
+    await selectTicket(manualDialog, "Rate limit review");
     await manualDialog.getByLabel("Goal or question").fill("Ask the agents explicitly");
     await manualDialog.getByRole("checkbox", { name: new RegExp(agentName) }).check();
     await manualDialog.getByRole("button", { name: "Create discussion" }).click();
@@ -94,5 +104,13 @@ test.describe("discussion run control", () => {
       .getByRole("list", { name: "Boards with discussions" })
       .getByRole("listitem");
     await expect(boardEntries.first()).toContainText(boardName);
+
+    // A thread names its Loop and deep-links the Ticket it is about.
+    await page.getByRole("button", { name: `Open discussions for ${boardName}` }).click();
+    await page.getByRole("listitem").filter({ hasText: "Rate limit review" }).first().click();
+    await expect(page.getByText("in Delivery", { exact: false })).toBeVisible();
+    await page.getByRole("link", { name: "Open Rate limit review" }).click();
+    await expect(page.getByRole("dialog", { name: "Rate limit review" })).toBeVisible();
+    await expect(page).toHaveURL(/\?card=/);
   });
 });

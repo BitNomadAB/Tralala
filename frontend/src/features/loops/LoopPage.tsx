@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
@@ -13,30 +13,35 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { Download, History, LayoutTemplate, Plus, Search } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, Download, History, LayoutTemplate, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
-import { keys, useBoard, useLists } from "@/lib/queries";
+import { keys, useBoard, useLists, useLoop } from "@/lib/queries";
 import type { BoardList, Card, Priority } from "@/lib/types";
-import { CardTile } from "./CardTile";
-import { ListColumn } from "./ListColumn";
+import { CardTile } from "@/features/board/CardTile";
+import { ListColumn } from "@/features/board/ListColumn";
 import { CardDialog } from "@/features/cards/CardDialog";
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
-import { useBoardTools } from "@/webmcp/useWebMcp";
+import { useLoopTools } from "@/webmcp/useWebMcp";
+import { LoopHeader } from "./LoopHeader";
 
 const LIST_LIMIT = 200;
 
-export function BoardPage() {
-  const { boardId = "" } = useParams();
+export function LoopPage() {
+  const { boardId = "", loopId = "" } = useParams();
   const queryClient = useQueryClient();
   const toast = useToast();
   const boardQuery = useBoard(boardId);
-  const listsQuery = useLists(boardId);
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const loopQuery = useLoop(boardId, loopId);
+  const listsQuery = useLists(boardId, loopId);
+  // A discussion or search result deep-links the Ticket it points at.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(
+    searchParams.get("card"),
+  );
   const [retrying, setRetrying] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [addingList, setAddingList] = useState(false);
@@ -54,13 +59,20 @@ export function BoardPage() {
   const lists = listsQuery.data ?? [];
 
   const openCard = useCallback((id: string) => setSelectedCardId(id), []);
-  const closeCard = useCallback(() => setSelectedCardId(null), []);
+  const closeCard = useCallback(() => {
+    setSelectedCardId(null);
+    if (searchParams.has("card")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("card");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const cardQueries = useQueries({
     queries: lists.map((list) => ({
-      queryKey: keys.listCards(boardId, list.id, LIST_LIMIT),
-      queryFn: () => api.listCards(boardId, { list_id: list.id, limit: LIST_LIMIT }),
-      enabled: Boolean(boardId),
+      queryKey: keys.listCards(boardId, loopId, list.id, LIST_LIMIT),
+      queryFn: () => api.listCards(boardId, loopId, { list_id: list.id, limit: LIST_LIMIT }),
+      enabled: Boolean(boardId && loopId),
     })),
   });
 
@@ -74,15 +86,15 @@ export function BoardPage() {
 
   const filtersActive = Boolean(filters.q.trim() || filters.priority || filters.overdue);
   const searchQuery = useQuery({
-    queryKey: keys.search(boardId, filters),
+    queryKey: keys.search(boardId, loopId, filters),
     queryFn: () =>
-      api.searchCards(boardId, {
+      api.searchCards(boardId, loopId, {
         q: filters.q.trim() || undefined,
         priority: filters.priority || undefined,
         overdue: filters.overdue || undefined,
         limit: 200,
       }),
-    enabled: Boolean(boardId) && filtersActive,
+    enabled: Boolean(boardId && loopId) && filtersActive,
   });
 
   const matchingIds = useMemo(() => {
@@ -91,32 +103,38 @@ export function BoardPage() {
   }, [filtersActive, searchQuery.data]);
 
   const invalidateLists = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: keys.lists(boardId) });
-    queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
-  }, [queryClient, boardId]);
+    queryClient.invalidateQueries({ queryKey: keys.lists(boardId, loopId) });
+    queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
+  }, [queryClient, boardId, loopId]);
 
   const invalidateCards = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: keys.boardCardsPrefix(boardId) });
+    queryClient.invalidateQueries({ queryKey: keys.loopCardsPrefix(boardId, loopId) });
+    queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) });
+    queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
     queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
-  }, [queryClient, boardId]);
+  }, [queryClient, boardId, loopId]);
 
   const createCardMutation = useMutation({
     mutationFn: ({ listId, title }: { listId: string; title: string }) =>
-      api.createCard(boardId, { list_id: listId, title }),
+      api.createCard(boardId, loopId, { list_id: listId, title }),
     onSuccess: invalidateCards,
-    onError: () =>
-      toast.push({ title: "Could not create card", variant: "error" }),
+    onError: (error) =>
+      toast.push({
+        title: "Could not create ticket",
+        description: error instanceof ApiError ? error.message : undefined,
+        variant: "error",
+      }),
   });
 
   const createListMutation = useMutation({
-    mutationFn: (name: string) => api.createList(boardId, name),
+    mutationFn: (name: string) => api.createList(boardId, loopId, name),
     onSuccess: invalidateLists,
-    onError: () => toast.push({ title: "Could not create list", variant: "error" }),
+    onError: () => toast.push({ title: "Could not create column", variant: "error" }),
   });
 
   const saveTemplateMutation = useMutation({
     mutationFn: () =>
-      api.saveBoardAsTemplate(boardId, {
+      api.saveBoardAsTemplate(boardId, loopId, {
         name: templateName.trim(),
         description: templateDescription,
       }),
@@ -137,12 +155,12 @@ export function BoardPage() {
 
   const renameListMutation = useMutation({
     mutationFn: ({ listId, name }: { listId: string; name: string }) =>
-      api.renameList(boardId, listId, name),
+      api.renameList(boardId, loopId, listId, name),
     onSuccess: invalidateLists,
   });
 
   const archiveListMutation = useMutation({
-    mutationFn: (listId: string) => api.archiveList(boardId, listId),
+    mutationFn: (listId: string) => api.archiveList(boardId, loopId, listId),
     onSuccess: () => {
       invalidateLists();
       invalidateCards();
@@ -151,33 +169,32 @@ export function BoardPage() {
 
   const moveListMutation = useMutation({
     mutationFn: ({ listId, position }: { listId: string; position: number }) =>
-      api.moveList(boardId, listId, position),
+      api.moveList(boardId, loopId, listId, position),
     onSuccess: invalidateLists,
     onError: () => {
       invalidateLists();
-      toast.push({ title: "Could not reorder lists", variant: "error" });
+      toast.push({ title: "Could not reorder columns", variant: "error" });
     },
   });
 
   const moveCardMutation = useMutation({
-    mutationFn: ({
-      card,
-      listId,
-      position,
-    }: {
-      card: Card;
-      listId: string;
-      position: number;
-    }) => api.moveCard(boardId, card.id, { version: card.version, list_id: listId, position }),
+    mutationFn: ({ card, listId, position }: { card: Card; listId: string; position: number }) =>
+      api.moveCard(boardId, loopId, card.id, {
+        version: card.version,
+        list_id: listId,
+        position,
+      }),
     onSettled: invalidateCards,
     onError: (error) => {
       invalidateCards();
       toast.push({
-        title: "Could not move card",
+        title: "Could not move ticket",
         description:
           error instanceof ApiError && error.code === "version_conflict"
-            ? "The card changed elsewhere. The board has been refreshed."
-            : undefined,
+            ? "The ticket changed elsewhere. The loop has been refreshed."
+            : error instanceof ApiError
+              ? error.message
+              : undefined,
         variant: "error",
       });
     },
@@ -236,57 +253,65 @@ export function BoardPage() {
     const sourceCards = (cardsByList[card.list_id] ?? []).filter((item) => item.id !== cardId);
 
     queryClient.setQueryData<Card[]>(
-      keys.listCards(boardId, card.list_id, LIST_LIMIT),
+      keys.listCards(boardId, loopId, card.list_id, LIST_LIMIT),
       sourceCards,
     );
-    queryClient.setQueryData<Card[]>(keys.listCards(boardId, targetListId, LIST_LIMIT), () => {
-      const next = [...targetCards];
-      next.splice(index, 0, { ...card, list_id: targetListId });
-      return next;
-    });
+    queryClient.setQueryData<Card[]>(
+      keys.listCards(boardId, loopId, targetListId, LIST_LIMIT),
+      () => {
+        const next = [...targetCards];
+        next.splice(index, 0, { ...card, list_id: targetListId });
+        return next;
+      },
+    );
 
     moveCardMutation.mutate({ card, listId: targetListId, position: index });
   }
 
-  useBoardTools({
+  useLoopTools({
     boardId,
-    boardName: boardQuery.data?.name ?? "",
+    loopId,
+    loopName: loopQuery.data?.name ?? "",
     lists,
     cardsByList,
     onOpenCard: openCard,
   });
 
-  if (boardQuery.isLoading) {
-    return <p className="text-sm text-[var(--muted-foreground)]">Loading board…</p>;
+  if (boardQuery.isLoading || loopQuery.isLoading) {
+    return <p className="text-sm text-[var(--muted-foreground)]">Loading loop…</p>;
   }
 
-  if (boardQuery.error || !boardQuery.data) {
+  if (boardQuery.error || !boardQuery.data || loopQuery.error || !loopQuery.data) {
+    const error = boardQuery.error ?? loopQuery.error;
     return (
       <p role="alert" className="text-sm text-[var(--destructive)]">
-        {boardQuery.error instanceof ApiError ? boardQuery.error.message : "Board unavailable."}
+        {error instanceof ApiError ? error.message : "Loop unavailable."}
       </p>
     );
   }
 
   const board = boardQuery.data;
-  const readOnly = board.status !== "active";
+  const loop = loopQuery.data;
+  const readOnly =
+    board.status !== "active" ||
+    loop.stage === "completed" ||
+    loop.stage === "cancelled" ||
+    loop.archived_at !== null;
 
   return (
-    <section className="flex h-[calc(100vh-7rem)] flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate text-lg font-semibold">{board.name}</h1>
-            <Badge tone={board.status === "active" ? "success" : board.status === "archived" ? "neutral" : "danger"}>
-              {board.status}
-            </Badge>
-          </div>
-          <p className="truncate text-xs text-[var(--muted-foreground)]">
-            {board.description || "No description"} · {board.list_count} lists ·{" "}
-            {board.card_count} cards
-          </p>
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+    <section className="flex h-[calc(100vh-7rem)] flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
+        <Link to={`/boards/${board.id}`} className="inline-flex items-center gap-1 hover:underline">
+          <ArrowLeft size={13} /> {board.name}
+        </Link>
+        <span aria-hidden>·</span>
+        <Link
+          to={`/boards/${board.id}/history`}
+          className="inline-flex items-center gap-1 hover:underline"
+        >
+          <History size={13} /> History
+        </Link>
+        <span className="ml-auto flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search
               size={14}
@@ -294,8 +319,8 @@ export function BoardPage() {
             />
             <Input
               className="h-8 w-44 pl-8"
-              placeholder="Filter cards"
-              aria-label="Filter cards"
+              placeholder="Filter tickets"
+              aria-label="Filter tickets"
               value={filters.q}
               onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))}
             />
@@ -305,7 +330,10 @@ export function BoardPage() {
             className="h-8 w-auto"
             value={filters.priority}
             onChange={(event) =>
-              setFilters((current) => ({ ...current, priority: event.target.value as Priority | "" }))
+              setFilters((current) => ({
+                ...current,
+                priority: event.target.value as Priority | "",
+              }))
             }
           >
             <option value="">Any priority</option>
@@ -330,56 +358,68 @@ export function BoardPage() {
             variant="outline"
             disabled={readOnly}
             onClick={() => {
-              setTemplateName(`${board.name} template`);
+              setTemplateName(`${loop.name} template`);
               setTemplateDescription(board.description);
               setTemplateOpen(true);
             }}
           >
-            <LayoutTemplate size={14} /> Save as template
+            <LayoutTemplate size={14} /> Save columns as template
           </Button>
           <a
             href={api.exportUrl(board.id)}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
           >
-            <Download size={14} /> Export
+            <Download size={14} /> Export board
           </a>
-        </div>
+        </span>
       </div>
+
+      <LoopHeader
+        boardId={boardId}
+        loop={loop}
+        boardStatus={board.status}
+        onChanged={() => {
+          queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
+          queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loopId) });
+          queryClient.invalidateQueries({ queryKey: keys.loopPlan(boardId, loopId) });
+          queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) });
+          invalidateCards();
+        }}
+      />
+
+      {board.status === "migration_failed" ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--warning)] p-2 text-xs text-[var(--warning)]">
+          <span>This board needs an explicit development reset before it can be used.</span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={retrying}
+            onClick={async () => {
+              setRetrying(true);
+              try {
+                const report = await api.retryMigration(board.id);
+                toast.push({ title: `Migration ${report.status}`, variant: "success" });
+                queryClient.invalidateQueries();
+              } catch (error) {
+                toast.push({
+                  title: "Migration failed",
+                  description: error instanceof ApiError ? error.message : "See the server log.",
+                  variant: "error",
+                });
+              } finally {
+                setRetrying(false);
+              }
+            }}
+          >
+            {retrying ? "Migrating…" : "Retry migration"}
+          </Button>
+        </div>
+      ) : null}
 
       {readOnly ? (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--warning)] p-2 text-xs text-[var(--warning)]">
-          <span>
-            This board is {board.status}. Mutations are rejected until it is restored
-            {board.status === "migration_failed"
-              ? "; retry the schema migration after fixing the cause."
-              : "."}
-          </span>
-          {board.status === "migration_failed" ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={retrying}
-              onClick={async () => {
-                setRetrying(true);
-                try {
-                  const report = await api.retryMigration(board.id);
-                  toast.push({ title: `Migration ${report.status}`, variant: "success" });
-                  queryClient.invalidateQueries();
-                } catch (error) {
-                  toast.push({
-                    title: "Migration failed",
-                    description:
-                      error instanceof ApiError ? error.message : "See the server log.",
-                    variant: "error",
-                  });
-                } finally {
-                  setRetrying(false);
-                }
-              }}
-            >
-              {retrying ? "Migrating?" : "Retry migration"}
-            </Button>
-          ) : null}
+          Read-only: this Loop is {loop.stage}
+          {loop.stage === "completed" ? " and its history snapshot is immutable." : "."}
         </div>
       ) : null}
 
@@ -394,7 +434,7 @@ export function BoardPage() {
           <div
             className="scrollbar-thin flex min-h-0 flex-1 items-start gap-3 overflow-x-auto pb-2"
             role="region"
-            aria-label="Board lists"
+            aria-label="Loop Kanban columns"
           >
             {lists.map((list: BoardList) => {
               const allCards = cardsByList[list.id] ?? [];
@@ -432,8 +472,8 @@ export function BoardPage() {
                   <Input
                     autoFocus
                     value={listName}
-                    aria-label="New list name"
-                    placeholder="List name"
+                    aria-label="New column name"
+                    placeholder="Column name"
                     onChange={(event) => setListName(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
@@ -444,7 +484,7 @@ export function BoardPage() {
                   />
                   <div className="flex gap-1.5">
                     <Button size="sm" type="submit" disabled={!listName.trim()}>
-                      Add list
+                      Add column
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => setAddingList(false)}>
                       Cancel
@@ -458,7 +498,7 @@ export function BoardPage() {
                   onClick={() => setAddingList(true)}
                   disabled={readOnly}
                 >
-                  <Plus size={14} /> Add list
+                  <Plus size={14} /> Add column
                 </Button>
               )}
             </div>
@@ -476,16 +516,24 @@ export function BoardPage() {
       {selectedCardId ? (
         <CardDialog
           boardId={boardId}
+          loopId={loopId}
           cardId={selectedCardId}
           lists={lists}
           onClose={closeCard}
+          onConfirmHuman={async (version, note) => {
+            await api.confirmHumanTicket(boardId, loopId, selectedCardId, { version, note });
+            invalidateCards();
+            queryClient.invalidateQueries({
+              queryKey: keys.card(boardId, loopId, selectedCardId),
+            });
+          }}
         />
       ) : null}
 
       <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
         <DialogContent
           title="Save as template"
-          description="Stores the board description, list names and labels in the registry."
+          description="Stores this Loop's column names and the board's labels for future Loops."
         >
           <form
             className="flex flex-col gap-3"
@@ -494,9 +542,9 @@ export function BoardPage() {
               if (templateName.trim()) saveTemplateMutation.mutate();
             }}
           >
-            <Field label="Template name" htmlFor="board-template-name">
+            <Field label="Template name" htmlFor="loop-template-name">
               <Input
-                id="board-template-name"
+                id="loop-template-name"
                 value={templateName}
                 onChange={(event) => setTemplateName(event.target.value)}
                 required
@@ -504,16 +552,16 @@ export function BoardPage() {
                 maxLength={200}
               />
             </Field>
-            <Field label="Description" htmlFor="board-template-description">
+            <Field label="Description" htmlFor="loop-template-description">
               <Textarea
-                id="board-template-description"
+                id="loop-template-description"
                 value={templateDescription}
                 onChange={(event) => setTemplateDescription(event.target.value)}
                 maxLength={20000}
               />
             </Field>
             <p className="text-[11px] text-[var(--muted-foreground)]">
-              Captures {board.list_count} lists. Cards are not copied.
+              Captures {lists.length} columns. Tickets are not copied.
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setTemplateOpen(false)}>

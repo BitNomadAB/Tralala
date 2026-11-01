@@ -1,9 +1,13 @@
 ﻿# Tralala
 
-Tralala is a self-hosted, AI-native kanban board. Humans get a fast React board; agents get the same
-capabilities through a documented REST API (and, where the browser supports it, WebMCP tools).
-Every board is its own SQLite database. No cloud services, no external AI provider, no Redis or
-Postgres.
+Tralala is a self-hosted, AI-native planning and delivery application. Humans work with Loops inside
+Boards; agents get the same capabilities through a documented REST API (and, where the browser
+supports it, WebMCP tools). Every board is its own SQLite database. No cloud services, no external
+AI provider, no Redis or Postgres.
+
+```
+App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / RoadMap + Phases
+```
 
 - Spec: `Tralala — Product Requirements & Technical Architecture Specification v1.0`
 - Development method: Ralph Loop (`.ralph/`, `AGENTS.md`)
@@ -12,9 +16,21 @@ Postgres.
 
 - Boards with an isolated SQLite database each; create, rename, duplicate, archive, export/import,
   delete with confirmation and typed-name safety.
-- Reusable board templates: save a board's description, lists and labels, or compose one in
-  Settings, then start a new board from the template dropdown or from a blank board. Templates can
-  be edited and deleted at any time.
+- Loops: each Board contains Loops, and each Loop owns its columns, Tickets and planning documents.
+  A Loop moves through Draft, Analysis review, Planning, RoadMap review, Ready, In progress,
+  Replanning, Awaiting QA and Completed, and Readiness explains every blocker.
+- Revisioned planning documents: human-authored Info, an AI technical analysis with a
+  plain-language human view, and a structured RoadMap whose numbered Phases and planned Tickets are
+  published atomically after a human approval. Generated content is validated before it can be
+  approved; approvals are bound to exact revisions and go stale when an input changes.
+- Version-bound human gates: agents may generate, plan and execute eligible Tickets, but only a
+  signed-in person approves plans, confirms human-only actions, accepts QA and finalizes a Loop.
+- QA handover with one QA Task carrying an agent view and a human view of the same scenarios,
+  scenario-level results, and a human acceptance decision.
+- Board-local history: completed Loops become immutable, searchable snapshots; legacy material can
+  be imported into the same read-only envelope and is always labelled as unvalidated.
+- Reusable templates: save a Loop's columns and a board's labels, or compose one in Settings, then
+  start a board from that template. Templates can be edited and deleted at any time.
 - AI agent foundation: nine built-in role templates (editable, duplicable, restorable) and separate
   agent configurations with their own OpenAI-compatible or A2A endpoint, encrypted API key, model
   limits and connection test. Role templates are shared; each discussion keeps a snapshot of the
@@ -22,10 +38,11 @@ Postgres.
 - Alembic-managed schema chains for the registry and boards: eager startup migration, verified
   pre-migration backups, integrity checks and a `migration_failed` state with an admin retry.
 - Lists with drag-and-drop ordering and gap-based integer positions.
-- Cards with Markdown descriptions, priority, due dates, labels, checklists, comments, activity
-  history, archive/restore, optimistic-concurrency versions and cross-board transfer.
-- Dashboard search, board filtering, FTS5 card search (with `LIKE` fallback), global search across
-  boards, overdue filters and an activity panel.
+- Tickets (cards) with stable keys, Markdown descriptions, priority, due dates, labels, checklists,
+  comments, activity history, archive/restore and optimistic-concurrency versions. Transfer between
+  Loops or Boards is intentionally not supported; amend the plan instead.
+- Dashboard search, board filtering, FTS5 ticket search (with `LIKE` fallback), global search across
+  boards and Loops, overdue filters, an activity panel and full-text history search.
 - Three theme kits: CareNomad (midnight navy), MatchMap (ink and ember) and Classic (the original
   flat palette, no motion), each with dark, light and system modes. Colour and the pulsing CSS-only
   motion change; the font and layout stay the same and `prefers-reduced-motion` turns motion off.
@@ -47,6 +64,18 @@ registry, then every board, at startup before serving requests; each board is sn
 validated afterwards, and marked `migration_failed` (with an admin retry endpoint) if anything
 fails. Add schema changes as a new revision - never as ad-hoc DDL. See
 [docs/database.md](docs/database.md#schema-migrations-alembic).
+
+Revision `0008_loops` is a structural redesign and refuses to convert a populated pre-Loop
+database. Reset development data explicitly, never automatically:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m app.dev_reset            # lists the data directory and targets
+..\.venv\Scripts\python.exe -m app.dev_reset --confirm  # erases boards, backups and the registry
+```
+
+The command keeps the session secret and the next start recreates a clean schema. The Loop
+workflow itself is described in [docs/loops.md](docs/loops.md).
 
 ## Requirements
 
@@ -380,8 +409,10 @@ cd ..\frontend; pnpm test; pnpm build
 ```
 
 `pnpm build` also runs the client build guard (no source maps, no server-only strings).
-`pnpm test:e2e` runs the 14 Playwright journeys against an isolated stack (backend `:8077` with
-`frontend/e2e/.data`, Vite `:5273`). It reuses whichever Playwright install already exists (local
+`pnpm test:e2e` runs the 26 Playwright journeys against an isolated stack (backend `:8077` with
+`frontend/e2e/.data`, Vite `:5273`). The stack starts from an empty data directory on every run, so
+a previous run's boards and appearance preferences cannot change the result (`E2E_KEEP_DATA=1`
+keeps them for inspection). It reuses whichever Playwright install already exists (local
 dependency, global install or npx cache), links it into `frontend/node_modules`, and only downloads
 Chromium when no browser build is present; override with `PLAYWRIGHT_CLI=<path to cli.js>`.
 

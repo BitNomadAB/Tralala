@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, MessagesSquare, Plus, Send } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -72,7 +73,7 @@ export function DiscussionsPage() {
   const discussions = discussionsQuery.data ?? [];
   const ticketsQuery = useQuery({
     queryKey: ["discussion-tickets", activeBoard],
-    queryFn: () => api.listCards(activeBoard, { limit: 200 }),
+    queryFn: () => api.listBoardTickets(activeBoard, { limit: 200 }),
     enabled: Boolean(activeBoard) && creating,
   });
   const detailQuery = useQuery({
@@ -218,8 +219,9 @@ export function DiscussionsPage() {
                           <span className="truncate">{discussion.title}</span>
                         </p>
                         <p className="mt-0.5 truncate text-[11px] text-[var(--muted-foreground)]">
-                          {discussion.card_title ?? discussion.card_id} · {discussion.message_count}{" "}
-                          messages · {discussion.participant_count} agents
+                          {discussion.card_title ?? discussion.card_id}
+                          {discussion.loop_name ? ` · ${discussion.loop_name}` : ""} ·{" "}
+                          {discussion.message_count} messages · {discussion.participant_count} agents
                         </p>
                         <p className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
                           <Badge tone={discussion.status === "open" ? "neutral" : "brand"}>
@@ -304,9 +306,23 @@ export function DiscussionsPage() {
                   ) : null}
                 </h2>
                 <p className="text-[11px] text-[var(--muted-foreground)]">
-                  {selected.card_title} · {selected.mode} · created by {selected.created_by_name} ·{" "}
+                  {selected.mode} · created by {selected.created_by_name} ·{" "}
                   {selected.participants?.length ?? selected.participant_count} snapshot(s)
                 </p>
+                {selected.loop_id ? (
+                  <p className="mt-1 text-[11px]">
+                    <Link
+                      to={`/boards/${activeBoard}/loops/${selected.loop_id}?card=${selected.card_id}`}
+                      className="text-[var(--brand)] underline"
+                    >
+                      Open {selected.ticket_key ?? selected.card_title ?? "ticket"}
+                    </Link>
+                    <span className="text-[var(--muted-foreground)]">
+                      {" "}
+                      in {selected.loop_name ?? "its Loop"}
+                    </span>
+                  </p>
+                ) : null}
                 <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
                   {(selected.participants ?? [])
                     .map(
@@ -440,7 +456,7 @@ export function DiscussionsPage() {
                 <option value="">Select a ticket…</option>
                 {boardTickets.map((card) => (
                   <option key={card.id} value={card.id}>
-                    {card.title}
+                    {card.title} · {card.loop_name}
                   </option>
                 ))}
               </Select>

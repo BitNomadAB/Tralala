@@ -12,17 +12,20 @@ const COALESCE_MS = 120;
  */
 export function useCardEvents(
   boardId: string,
+  loopId: string,
   cardId: string | null,
   onEvent: () => void,
 ): boolean {
   const [live, setLive] = useState(false);
 
   useEffect(() => {
-    if (!boardId || !cardId || typeof EventSource === "undefined") {
+    if (!boardId || !loopId || !cardId || typeof EventSource === "undefined") {
       setLive(false);
       return;
     }
-    const source = new EventSource(`/api/v1/boards/${boardId}/cards/${cardId}/events`);
+    const source = new EventSource(
+      `/api/v1/boards/${boardId}/loops/${loopId}/cards/${cardId}/events`,
+    );
     let timer: number | undefined;
     const notify = () => {
       if (timer !== undefined) return;
@@ -40,7 +43,7 @@ export function useCardEvents(
       source.close();
       setLive(false);
     };
-  }, [boardId, cardId, onEvent]);
+  }, [boardId, loopId, cardId, onEvent]);
 
   return live;
 }

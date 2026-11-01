@@ -4,9 +4,11 @@ Project-wide rules for every coding agent (human or AI) working in this reposito
 
 ## What this project is
 
-An AI-native, self-hosted kanban application: a React frontend for humans, a FastAPI service
-layer for everyone, and one SQLite database per board. There is no cloud dependency, no external
-AI provider and no Redis/Postgres/message broker.
+An AI-native, self-hosted planning and delivery application: a React frontend for humans, a
+FastAPI service layer for everyone, and one SQLite database per board. Work is organised as
+App -> Boards -> Loops -> a Loop-owned Kanban of Tickets, with revisioned planning documents and
+human approvals. There is no cloud dependency, no external AI provider and no Redis/Postgres/
+message broker.
 
 ## Non-negotiable architecture rules
 
@@ -14,6 +16,10 @@ AI provider and no Redis/Postgres/message broker.
    `backend/app/services/`. Business rules never live in routers, React components or WebMCP tools.
 2. **Board isolation.** A board's data lives only in `data/boards/{uuid}/board.sqlite`. A board id
    is always a UUID resolved through `BoardDatabaseManager`; never build a path from user text.
+2b. **A Loop owns its Kanban.** Boards contain Loops; loops contain lists, Tickets, documents,
+   Phases and QA. There is no board-level Kanban and no ownerless column. Every list/Ticket path
+   carries an explicit `loop_id` and the server rejects a mismatch (`409 loop_mismatch`). Phases
+   are planning groups, never columns, and a column named `Done` never completes work.
 3. **Registry is authoritative.** Board metadata, board templates, actors and credentials live in
    `data/registry.sqlite`. Board access is authorized through the registry before any board
    database is opened. Templates are registry data because they are chosen before a board (and its
@@ -34,6 +40,12 @@ AI provider and no Redis/Postgres/message broker.
    pre-migration backup, validates integrity and marks a failed board `migration_failed`.
 10. **No new infrastructure** without a documented decision in `docs/decisions/` that proves a
     requirement.
+11a. **Planning decisions are human decisions.** Approving analysis or a RoadMap, editing Info,
+    confirming a human-only Ticket, accepting implementation or QA, and finalizing a Loop reject
+    agent tokens (`403 human_action_required`) regardless of scope, and are never registered as
+    WebMCP tools. Approvals bind to exact document revision ids; a changed input invalidates them.
+11b. **Completed Loops are read-only.** Finalization writes an immutable, hashed snapshot to
+    `loop_history` in the same transaction and blocks every mutation path afterwards.
 11. **Role templates and agents are separate resources.** `role_templates` holds the shared,
     editable role prompt; `agents` holds identity, connection and credentials plus a *reference* to
     a template (or an override). Never join live templates into historical output: any discussion or
@@ -78,7 +90,8 @@ pnpm test:e2e       # Playwright journeys against an isolated stack (:8077 + :52
 ```
 
 Use pnpm for frontend work. `pnpm test:e2e` reuses a locally installed Playwright (no vendored
-copy); see `scripts/run-playwright.mjs`.
+copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot affect the next
+(`E2E_KEEP_DATA=1` keeps the directory); see `scripts/run-playwright.mjs`.
 
 ## Conventions
 
@@ -93,8 +106,9 @@ copy); see `scripts/run-playwright.mjs`.
 
 A story is complete only when:
 
-- schema changes include an Alembic revision plus tests for fresh install, upgrade from the
-  previous revision, data preservation and failure recovery,
+- schema changes include an Alembic revision plus tests for fresh install, upgrade from an empty
+  database at the previous revision, the explicit development reset and failure recovery
+  (pre-Loop data is deliberately not migrated),
 - the smallest relevant test command passes,
 - `ruff check` (backend) and `tsc --noEmit` (frontend) pass,
 - the production frontend build succeeds for UI changes,

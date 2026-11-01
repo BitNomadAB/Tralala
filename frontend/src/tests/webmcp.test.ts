@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRegistry } from "@/webmcp/registry";
 import { isWebMcpAvailable, getModelContext, type ModelContextApi } from "@/webmcp/capability";
-import { boardTools, cardTools, dashboardTools } from "@/webmcp/tools";
+import { cardTools, dashboardTools, loopTools } from "@/webmcp/tools";
 
 function fakeApi() {
   const registerTool = vi.fn().mockResolvedValue(undefined);
@@ -60,16 +60,20 @@ describe("webmcp tool definitions", () => {
   it("expose stable names and required scopes per context", () => {
     const names = {
       dashboard: dashboardTools({ onOpenBoard: () => undefined }).map((tool) => tool.name),
-      board: boardTools({
+      loop: loopTools({
         boardId: "b",
-        boardName: "Board",
+        loopId: "l",
+        loopName: "Loop",
         lists: [],
         cardsByList: {},
         onOpenCard: () => undefined,
       }).map((tool) => tool.name),
-      card: cardTools({ boardId: "b", cardId: "c", onClose: () => undefined }).map(
-        (tool) => tool.name,
-      ),
+      card: cardTools({
+        boardId: "b",
+        loopId: "l",
+        cardId: "c",
+        onClose: () => undefined,
+      }).map((tool) => tool.name),
     };
     expect(names.dashboard).toEqual([
       "list_boards",
@@ -78,8 +82,10 @@ describe("webmcp tool definitions", () => {
       "search_boards",
       "open_board",
     ]);
-    expect(names.board).toContain("get_board_overview");
-    expect(names.board).toContain("move_card");
+    expect(names.loop).toContain("get_loop_overview");
+    expect(names.loop).toContain("get_loop_plan");
+    expect(names.loop).toContain("move_card");
+    expect(names.loop).not.toContain("approve_plan");
     expect(names.card).toEqual([
       "get_card_details",
       "update_card",
@@ -87,19 +93,22 @@ describe("webmcp tool definitions", () => {
       "update_checklist",
       "archive_card",
     ]);
-    expect(boardTools({
-      boardId: "b",
-      boardName: "Board",
-      lists: [],
-      cardsByList: {},
-      onOpenCard: () => undefined,
-    }).find((tool) => tool.name === "create_card")?.requiredScope).toBe("cards:write");
+    expect(
+      loopTools({
+        boardId: "b",
+        loopId: "l",
+        loopName: "Loop",
+        lists: [],
+        cardsByList: {},
+        onOpenCard: () => undefined,
+      }).find((tool) => tool.name === "create_card")?.requiredScope,
+    ).toBe("cards:write");
   });
 
   it("every tool declares a JSON input schema", () => {
     const tools = [
       ...dashboardTools({ onOpenBoard: () => undefined }),
-      ...cardTools({ boardId: "b", cardId: "c", onClose: () => undefined }),
+      ...cardTools({ boardId: "b", loopId: "l", cardId: "c", onClose: () => undefined }),
     ];
     for (const tool of tools) {
       expect(tool.inputSchema).toMatchObject({ type: "object" });

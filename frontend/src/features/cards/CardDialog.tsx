@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Bot, CheckSquare, Circle, CircleCheck, Send } from "lucide-react";
+import { Archive, Bot, CheckSquare, Circle, CircleCheck, Send, User } from "lucide-react";
 import { Badge, LabelChip } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -39,20 +39,24 @@ interface Draft {
 
 export function CardDialog({
   boardId,
+  loopId,
   cardId,
   lists,
   onClose,
+  onConfirmHuman,
 }: {
   boardId: string;
+  loopId: string;
   cardId: string;
   lists: BoardList[];
   onClose: () => void;
+  onConfirmHuman?: (version: number, note: string) => Promise<void>;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { data: card, isLoading, error } = useQuery({
-    queryKey: keys.card(boardId, cardId),
-    queryFn: () => api.getCard(boardId, cardId),
+    queryKey: keys.card(boardId, loopId, cardId),
+    queryFn: () => api.getCard(boardId, loopId, cardId),
   });
   const labelsQuery = useLabels(boardId);
   const activityQuery = useActivity(boardId, cardId);
@@ -61,8 +65,8 @@ export function CardDialog({
     queryFn: () => api.listAgentDirectory(),
   });
   const mentionsQuery = useQuery({
-    queryKey: keys.mentions(boardId, cardId),
-    queryFn: () => api.listMentions(boardId, cardId),
+    queryKey: keys.mentions(boardId, loopId, cardId),
+    queryFn: () => api.listMentions(boardId, loopId, cardId),
   });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [preview, setPreview] = useState(false);
@@ -85,14 +89,14 @@ export function CardDialog({
   }, [card, draft]);
 
   const refresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: keys.card(boardId, cardId) });
-    queryClient.invalidateQueries({ queryKey: keys.boardCardsPrefix(boardId) });
+    queryClient.invalidateQueries({ queryKey: keys.card(boardId, loopId, cardId) });
+    queryClient.invalidateQueries({ queryKey: keys.loopCardsPrefix(boardId, loopId) });
     queryClient.invalidateQueries({ queryKey: keys.activity(boardId, cardId) });
     queryClient.invalidateQueries({ queryKey: keys.activity(boardId) });
-    queryClient.invalidateQueries({ queryKey: keys.mentions(boardId, cardId) });
-  }, [queryClient, boardId, cardId]);
+    queryClient.invalidateQueries({ queryKey: keys.mentions(boardId, loopId, cardId) });
+  }, [queryClient, boardId, loopId, cardId]);
 
-  const live = useCardEvents(boardId, cardId, refresh);
+  const live = useCardEvents(boardId, loopId, cardId, refresh);
 
   const onError = (mutationError: unknown) => {
     toast.push({
@@ -109,15 +113,15 @@ export function CardDialog({
   };
 
   const updateMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.updateCard>[2]) =>
-      api.updateCard(boardId, cardId, payload),
+    mutationFn: (payload: Parameters<typeof api.updateCard>[3]) =>
+      api.updateCard(boardId, loopId, cardId, payload),
     onSuccess: refresh,
     onError,
   });
 
   const moveMutation = useMutation({
     mutationFn: (listId: string) =>
-      api.moveCard(boardId, cardId, {
+      api.moveCard(boardId, loopId, cardId, {
         version: card?.version ?? 1,
         list_id: listId,
         position: 10_000,
@@ -127,7 +131,7 @@ export function CardDialog({
   });
 
   const archiveMutation = useMutation({
-    mutationFn: () => api.archiveCard(boardId, cardId),
+    mutationFn: () => api.archiveCard(boardId, loopId, cardId),
     onSuccess: () => {
       refresh();
       onClose();
@@ -137,7 +141,7 @@ export function CardDialog({
   });
 
   const checklistMutation = useMutation({
-    mutationFn: (title: string) => api.addChecklist(boardId, cardId, title),
+    mutationFn: (title: string) => api.addChecklist(boardId, loopId, cardId, title),
     onSuccess: () => {
       setChecklistTitle("");
       refresh();
@@ -163,7 +167,7 @@ export function CardDialog({
   });
 
   const commentMutation = useMutation({
-    mutationFn: (content: string) => api.addComment(boardId, cardId, content),
+    mutationFn: (content: string) => api.addComment(boardId, loopId, cardId, content),
     onSuccess: () => {
       setComment("");
       setMentionToken(null);
@@ -173,8 +177,9 @@ export function CardDialog({
   });
 
   const retryMentionMutation = useMutation({
-    mutationFn: (jobId: string) => api.retryMention(boardId, cardId, jobId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.mentions(boardId, cardId) }),
+    mutationFn: (jobId: string) => api.retryMention(boardId, loopId, cardId, jobId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: keys.mentions(boardId, loopId, cardId) }),
     onError,
   });
 
@@ -200,6 +205,7 @@ export function CardDialog({
 
   useCardTools({
     boardId,
+    loopId,
     cardId,
     onOpen: () => undefined,
     onClose,
@@ -244,6 +250,60 @@ export function CardDialog({
           </p>
         ) : (
           <div className="flex flex-col gap-4">
+            {card.ticket_key || card.human_action_required || card.blockers.length > 0 ? (
+              <div className="flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-2 text-[11px]">
+                <div className="flex flex-wrap items-center gap-2">
+                  {card.ticket_key ? (
+                    <span className="font-mono text-[var(--muted-foreground)]">{card.ticket_key}</span>
+                  ) : null}
+                  {card.phase_number ? <Badge tone="neutral">Phase {card.phase_number}</Badge> : null}
+                  {card.human_action_required ? (
+                    <Badge tone="warning">
+                      <User size={11} /> Human action required
+                    </Badge>
+                  ) : null}
+                  {card.ready ? null : <Badge tone="neutral">Blocked</Badge>}
+                </div>
+                {card.human_action_required && card.human_action_reason ? (
+                  <p className="text-[var(--muted-foreground)]">
+                    Why a human is needed: {card.human_action_reason}
+                  </p>
+                ) : null}
+                {card.human_action_required && card.human_instructions ? (
+                  <p className="text-[var(--muted-foreground)]">
+                    What to do: {card.human_instructions}
+                  </p>
+                ) : null}
+                {card.human_action_required && card.downstream_phase_numbers.length > 0 ? (
+                  <p className="text-[var(--muted-foreground)]">
+                    Phase {card.downstream_phase_numbers.join(", ")} and its dependent phases cannot
+                    start until a human confirms this action.
+                  </p>
+                ) : null}
+                {!card.ready && card.blockers.length > 0 ? (
+                  <p className="text-[var(--warning)]">
+                    Blocked by:{" "}
+                    {card.blockers
+                      .map((blocker) =>
+                        blocker.type === "phase"
+                          ? `Phase ${blocker.phase_number ?? "?"}`
+                          : (blocker.key ?? blocker.title ?? "Ticket"),
+                      )
+                      .join(", ")}
+                  </p>
+                ) : null}
+                {card.acceptance_criteria.length > 0 ? (
+                  <p className="text-[var(--muted-foreground)]">
+                    Accepted when: {card.acceptance_criteria.join("; ")}
+                  </p>
+                ) : null}
+                {card.expected_evidence.length > 0 ? (
+                  <p className="text-[var(--muted-foreground)]">
+                    Evidence: {card.expected_evidence.join("; ")}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="grid gap-3 md:grid-cols-[1fr_200px]">
               <div className="flex flex-col gap-2">
                 <Field label="Title" htmlFor="card-title">
@@ -371,10 +431,28 @@ export function CardDialog({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => updateMutation.mutate({ version: card.version, completed: !card.completed_at })}
+                disabled={!card.completed_at && card.kind !== "manual" && !card.ready}
+                title={
+                  !card.completed_at && card.blockers.length > 0
+                    ? `Blocked by ${card.blockers
+                        .map((blocker) => blocker.key ?? blocker.title ?? blocker.reason)
+                        .join(", ")}`
+                    : undefined
+                }
+                onClick={() => {
+                  if (!card.completed_at && card.human_action_required && onConfirmHuman) {
+                    void onConfirmHuman(card.version, "").then(onClose);
+                    return;
+                  }
+                  updateMutation.mutate({ version: card.version, completed: !card.completed_at });
+                }}
               >
                 <CircleCheck size={14} />
-                {card.completed_at ? "Mark incomplete" : "Mark complete"}
+                {card.completed_at
+                  ? "Mark incomplete"
+                  : card.human_action_required
+                    ? "Confirm human action"
+                    : "Mark complete"}
               </Button>
               <Button variant="outline" size="sm" onClick={() => archiveMutation.mutate()}>
                 <Archive size={14} /> Archive

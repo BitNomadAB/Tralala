@@ -219,19 +219,26 @@ class TemplateService:
         with self.registry.connect() as conn:
             conn.execute(text("DELETE FROM board_templates WHERE id = :id"), {"id": template_id})
 
-    def create_from_board(
-        self, actor: ActorContext, board_id: str, payload: TemplateFromBoard
+    def create_from_loop(
+        self, actor: ActorContext, board_id: str, loop_id: str, payload: TemplateFromBoard
     ) -> dict[str, Any]:
+        """A layout snapshot comes from one Loop, never from merged Board-wide columns."""
         actor.require("boards:write")
         self.board_service.require_row(board_id)
         with self.boards.reader(board_id) as conn:
+            loop = conn.execute(
+                text("SELECT id FROM loops WHERE id = :id"), {"id": loop_id}
+            ).first()
+            if loop is None:
+                raise NotFound("Loop not found", code="loop_not_found")
             lists = [
                 row["name"]
                 for row in conn.execute(
                     text(
-                        "SELECT name FROM lists WHERE archived_at IS NULL"
-                        " ORDER BY position, created_at"
-                    )
+                        "SELECT name FROM lists WHERE loop_id = :loop_id"
+                        " AND archived_at IS NULL ORDER BY position, created_at"
+                    ),
+                    {"loop_id": loop_id},
                 ).mappings()
             ]
             labels = [

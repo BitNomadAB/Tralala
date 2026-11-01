@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 
 from app.services import runtime
 
@@ -24,10 +24,12 @@ def _agent(api: Api, name: str, role_key: str) -> dict[str, Any]:
 
 
 def _discussion(api: Api, board: dict[str, Any], agents: list[dict[str, Any]]) -> dict[str, Any]:
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     card = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": lists[0]["id"], "title": "Session strategy"},
         )
     )
@@ -69,17 +71,13 @@ def test_round_records_agent_answers_and_unanimous_consensus(
     monkeypatch.setattr(runtime, "call_agent", _fake_runtime({"Lead": "agree", "Qa": "agree"}))
 
     result = api.data(
-        api.post(
-            f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/start", json={}
-        )
+        api.post(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/start", json={})
     )
     assert result["status"] == "consensus_proposed"
     assert result["failures"] == []
     assert {vote["position"] for vote in result["votes"]} == {"agree"}
 
-    reloaded = api.data(
-        api.get(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}")
-    )
+    reloaded = api.data(api.get(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}"))
     assert reloaded["status"] == "consensus_proposed"
     agent_messages = [m for m in reloaded["messages"] if m["author_type"] == "agent"]
     assert len(agent_messages) == 2
@@ -98,9 +96,7 @@ def test_dissent_keeps_discussion_open(api: Api, board: dict[str, Any], monkeypa
         api.post(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/start", json={})
     )
     assert result["status"] == "discussing"
-    reloaded = api.data(
-        api.get(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}")
-    )
+    reloaded = api.data(api.get(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}"))
     assert reloaded["status"] == "discussing"
 
 
@@ -119,9 +115,7 @@ def test_agent_failures_are_reported_without_losing_the_thread(
     )
     assert result["failures"] == [{"agent": "Broken", "error": "ConnectError"}]
     assert result["status"] == "discussing"
-    reloaded = api.data(
-        api.get(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}")
-    )
+    reloaded = api.data(api.get(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}"))
     assert [m["author_type"] for m in reloaded["messages"]] == ["user"]
 
 
@@ -150,9 +144,7 @@ def test_human_review_approve_veto_and_rework(
     assert closed.status_code == 409
 
     second = _discussion(api, board, [agent])
-    api.data(
-        api.post(f"/api/v1/boards/{board['id']}/discussions/{second['id']}/start", json={})
-    )
+    api.data(api.post(f"/api/v1/boards/{board['id']}/discussions/{second['id']}/start", json={}))
     rework = api.data(
         api.post(
             f"/api/v1/boards/{board['id']}/discussions/{second['id']}/review",

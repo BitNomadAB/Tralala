@@ -22,13 +22,20 @@ def extract_position(text: str) -> tuple[str, str]:
     return last.group(1).lower(), text[: last.start()].strip()[-800:]
 
 
-def call_agent(
+def call_completion(
     settings: Any,
     agent_row: dict[str, Any],
     *,
     system_prompt: str,
     messages: list[dict[str, str]],
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
+    """Call an OpenAI-compatible endpoint and return the raw answer.
+
+    Loop planning, RoadMap and QA generation reuse this provider call; discussion verdict
+    extraction stays a separate concern layered on top of it.
+    """
     api_key = None
     if agent_row.get("api_key_ciphertext"):
         try:
@@ -42,11 +49,14 @@ def call_agent(
         "model": agent_row.get("model") or "default",
         "messages": [{"role": "system", "content": system_prompt}, *messages],
         "temperature": (
-            agent_row["temperature"] if agent_row.get("temperature") is not None else 0.3
+            temperature
+            if temperature is not None
+            else (agent_row["temperature"] if agent_row.get("temperature") is not None else 0.3)
         ),
     }
-    if agent_row.get("max_output_tokens"):
-        payload["max_tokens"] = agent_row["max_output_tokens"]
+    limit = max_tokens or agent_row.get("max_output_tokens")
+    if limit:
+        payload["max_tokens"] = limit
     url = f"{str(agent_row['base_url']).rstrip('/')}/chat/completions"
     timeout = float(agent_row.get("timeout_seconds") or 60)
     try:
@@ -65,13 +75,27 @@ def call_agent(
         text = body["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
         return {"ok": False, "error": "malformed_response", "text": ""}
-    verdict, justification = extract_position(str(text))
     return {
         "ok": True,
         "error": None,
         "text": str(text).strip(),
-        "verdict": verdict,
-        "justification": justification,
         "model": body.get("model") or payload["model"],
         "usage": body.get("usage") or {},
     }
+
+
+def call_agent(
+    settings: Any,
+    agent_row: dict[str, Any],
+    *,
+    system_prompt: str,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Discussion-oriented call: the answer carries a structured position."""
+    result = call_completion(
+        settings, agent_row, system_prompt=system_prompt, messages=messages
+    )
+    if not result["ok"]:
+        return {**result, "verdict": "abstain", "justification": ""}
+    verdict, justification = extract_position(result["text"])
+    return {**result, "verdict": verdict, "justification": justification}

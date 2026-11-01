@@ -383,3 +383,43 @@ Format:
   motion is untouched, so CareNomad and MatchMap still breathe through the background.
 - Tidied the two comments that had lost their box characters. Build, vitest and the full Playwright
   suite pass; the header now reads just "AI Tralala".
+
+
+## 2026-11-01 ? Loop-based planning, delivery and history (Tralala_Loops_Implementation_Specification.md)
+
+Implemented the App -> Boards -> Loops -> Loop Kanban hierarchy from the v1.0 specification.
+
+- Board schema revision `0008_loops`: loops, loop_documents, loop_approvals, loop_generation_runs,
+  loop_plans, loop_phases, loop_plan_items, loop_dependencies, loop_qa_cycles, loop_qa_results,
+  loop_history, loop_history_artifacts, board_loop_defaults; `loop_id` on lists/cards with a
+  composite foreign key; composite indexes and uniqueness constraints (ticket keys, active plan,
+  active QA cycle, one native history row per Loop).
+- A populated pre-Loop board is refused with the development reset command instead of being
+  converted; `python -m app.dev_reset --confirm` erases boards, backups and the registry.
+- Services: loops (ownership, stage, readiness), loop_documents (revisions, approvals,
+  invalidation, server-rendered human views), loop_plans (validation, identities, atomic
+  publication, replan preview), loop_generation (bounded runs, schema validation, promotion
+  guards), loop_qa (acceptance, one QA task with two views, results, finalisation), loop_history
+  (immutable snapshot, search, legacy envelope).
+- Lists, Tickets, subresources, search, templates and board counts are Loop-scoped; card transfer
+  is removed; completed Loops are read-only across every retained path.
+- Frontend: Board loop overview, Loop page with planning header and Kanban dialogs (Info,
+  Analysis, RoadMap, Plan & readiness, Complete & QA), Board history, Loop-scoped API client and
+  WebMCP tools.
+- Verification: backend `pytest` (all tests), `ruff check`, frontend `vitest`, `tsc --noEmit`,
+  `pnpm build` and the Playwright journeys.
+
+Verification (final):
+- `cd backend; ..\.venv\Scripts\python.exe -m pytest` -> all tests pass.
+- `..\.venv\Scripts\python.exe -m ruff check app migrations tests` -> clean.
+- `cd frontend; pnpm test` -> 22 tests, `pnpm typecheck` clean, `pnpm build` ok (client guard ok).
+- `pnpm test:e2e` -> 26 journeys pass, twice in a row.
+
+Follow-ups found while verifying:
+- The Board-level aggregate `GET /boards/{id}/tickets` now returns `loop_key`/`loop_name`
+  (`BoardTicketOut`), the Discussions ticket picker names the Loop and the thread view deep-links
+  `/boards/{id}/loops/{loop_id}?card={card_id}`, which the Loop page opens with the Ticket dialog.
+- Attachment and discussion mutations on a completed Loop are covered by tests
+  (`409 loop_read_only`).
+- `pnpm test:e2e` now starts from an empty `frontend/e2e/.data`, so a previous run's boards and
+  appearance preferences no longer make the suite order-dependent (`E2E_KEEP_DATA=1` keeps them).

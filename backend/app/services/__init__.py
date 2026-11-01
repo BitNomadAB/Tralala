@@ -17,6 +17,12 @@ from .cards import CardService
 from .discussions import DiscussionService
 from .events import EventService
 from .lists import ListService
+from .loop_documents import LoopDocumentService
+from .loop_generation import LoopGenerationService
+from .loop_history import LoopHistoryService
+from .loop_plans import LoopPlanService
+from .loop_qa import LoopQaService
+from .loops import LoopService
 from .mentions import MentionService
 from .orchestrator import Orchestrator
 from .runs import RunService
@@ -39,8 +45,21 @@ class Services:
         self.board = BoardService(settings, self.registry, self.boards, self.migrations)
         self.template = TemplateService(self.registry, self.boards, self.board)
         self.board.templates = self.template
-        self.list = ListService(self.board)
-        self.card = CardService(self.board)
+        self.loop = LoopService(self.board)
+        self.loop_plan = LoopPlanService(self.board, self.loop)
+        self.loop_document = LoopDocumentService(self.board, self.loop, self.loop_plan)
+        self.loop_generation = LoopGenerationService(
+            self.board, self.loop, self.loop_document
+        )
+        self.loop_history = LoopHistoryService(self.board)
+        self.loop_qa = LoopQaService(self.board, self.loop)
+        self.loop_qa.history = self.loop_history
+        self.loop_qa.generation = self.loop_generation
+        self.loop_generation.qa = self.loop_qa
+        self.loop.plans = self.loop_plan
+        self.list = ListService(self.board, self.loop)
+        self.card = CardService(self.board, self.loop, self.loop_plan)
+        self.loop.cards = self.card
         self.label = LabelService(self.board)
         self.checklist = ChecklistService(self.board)
         self.comment = CommentService(self.board)
@@ -81,6 +100,7 @@ class Services:
             try:
                 recovered += self.run.recover(row["id"])
                 recovered += self.mention.recover(row["id"])
+                recovered += self.loop_generation.recover(row["id"])
             except (NotFound, ServiceUnavailable):
                 # A board mid-repair is resolved above or on its next start; never block startup.
                 continue
@@ -93,6 +113,7 @@ class Services:
     def shutdown(self) -> None:
         self.run.shutdown()
         self.mention.shutdown()
+        self.loop_generation.shutdown()
         self.event.shutdown()
         self.boards.close_all()
         self.registry.dispose()

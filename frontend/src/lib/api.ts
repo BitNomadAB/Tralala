@@ -18,8 +18,18 @@
   DiscussionRun,
   DiscussionRunSummary,
   Credential,
+  DocumentKind,
+  GenerationRun,
+  HistoryDetail,
+  HistorySummary,
   Label,
+  Loop,
+  LoopApproval,
+  LoopDocuments,
+  LoopPlanView,
+  LoopReadiness,
   MentionJob,
+  QaCycle,
   PageMeta,
   Priority,
   Role,
@@ -194,6 +204,282 @@ export const api = {
     return { items: result.data, meta: result.meta };
   },
 
+  async listLoops(
+    boardId: string,
+    params: { include_completed?: boolean; include_archived?: boolean } = {},
+  ): Promise<Loop[]> {
+    const query = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    return json(await request<Loop[]>(`/boards/${boardId}/loops?${query.toString()}`));
+  },
+
+  async createLoop(
+    boardId: string,
+    payload: { name: string; goal?: string; column_names?: string[] },
+  ): Promise<Loop> {
+    return json(await request<Loop>(`/boards/${boardId}/loops`, { method: "POST", body: payload }));
+  },
+
+  async getLoop(boardId: string, loopId: string): Promise<Loop> {
+    return json(await request<Loop>(`/boards/${boardId}/loops/${loopId}`));
+  },
+
+  async updateLoop(
+    boardId: string,
+    loopId: string,
+    payload: { version: number; name?: string; goal?: string },
+  ): Promise<Loop> {
+    return json(
+      await request<Loop>(`/boards/${boardId}/loops/${loopId}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    );
+  },
+
+  async cancelLoop(boardId: string, loopId: string, payload: { version: number; reason?: string }) {
+    return json(
+      await request<Loop>(`/boards/${boardId}/loops/${loopId}/cancel`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
+  async getLoopDocuments(boardId: string, loopId: string): Promise<LoopDocuments> {
+    return json(await request<LoopDocuments>(`/boards/${boardId}/loops/${loopId}/documents`));
+  },
+
+  async saveInfo(
+    boardId: string,
+    loopId: string,
+    payload: { content: string; note?: string; expected_revision_id?: string | null },
+  ): Promise<LoopDocuments> {
+    return json(
+      await request<LoopDocuments>(`/boards/${boardId}/loops/${loopId}/documents/info`, {
+        method: "PUT",
+        body: payload,
+      }),
+    );
+  },
+
+  async listDocumentRevisions(
+    boardId: string,
+    loopId: string,
+    kind: DocumentKind,
+  ): Promise<Array<Record<string, unknown>>> {
+    return json(
+      await request<Array<Record<string, unknown>>>(
+        `/boards/${boardId}/loops/${loopId}/documents/${kind}/revisions`,
+      ),
+    );
+  },
+
+  async submitCandidate(
+    boardId: string,
+    loopId: string,
+    payload: Record<string, unknown>,
+  ): Promise<LoopDocuments> {
+    return json(
+      await request<LoopDocuments>(`/boards/${boardId}/loops/${loopId}/candidates`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
+  async reviewAnalysis(
+    boardId: string,
+    loopId: string,
+    payload: {
+      decision: "approved" | "changes_requested";
+      version: number;
+      revisions: Record<string, string>;
+      feedback?: string;
+    },
+  ): Promise<LoopApproval> {
+    return json(
+      await request<LoopApproval>(`/boards/${boardId}/loops/${loopId}/reviews/analysis`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
+  async reviewRoadmap(
+    boardId: string,
+    loopId: string,
+    payload: {
+      decision: "approved" | "changes_requested";
+      version: number;
+      revisions: Record<string, string>;
+      feedback?: string;
+    },
+  ): Promise<LoopApproval> {
+    return json(
+      await request<LoopApproval>(`/boards/${boardId}/loops/${loopId}/reviews/roadmap`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
+  async getLoopPlan(boardId: string, loopId: string): Promise<LoopPlanView> {
+    return json(await request<LoopPlanView>(`/boards/${boardId}/loops/${loopId}/plan`));
+  },
+
+  async getReadiness(boardId: string, loopId: string): Promise<LoopReadiness> {
+    return json(await request<LoopReadiness>(`/boards/${boardId}/loops/${loopId}/readiness`));
+  },
+
+  async startGeneration(
+    boardId: string,
+    loopId: string,
+    purpose: "analysis" | "roadmap" | "qa",
+    agentId?: string,
+  ): Promise<GenerationRun> {
+    return json(
+      await request<GenerationRun>(`/boards/${boardId}/loops/${loopId}/generation-runs`, {
+        method: "POST",
+        body: agentId ? { purpose, agent_id: agentId } : { purpose },
+      }),
+    );
+  },
+
+  async listGenerationRuns(boardId: string, loopId: string): Promise<GenerationRun[]> {
+    return json(
+      await request<GenerationRun[]>(`/boards/${boardId}/loops/${loopId}/generation-runs`),
+    );
+  },
+
+  async getGenerationRun(
+    boardId: string,
+    loopId: string,
+    runId: string,
+  ): Promise<GenerationRun> {
+    return json(
+      await request<GenerationRun>(
+        `/boards/${boardId}/loops/${loopId}/generation-runs/${runId}`,
+      ),
+    );
+  },
+
+  async acceptImplementation(
+    boardId: string,
+    loopId: string,
+    payload: {
+      version: number;
+      accepted: boolean;
+      qa_status: "not_tested" | "tested_with_issues" | "passed";
+      attestation?: Record<string, string>;
+      note?: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    return json(
+      await request<Record<string, unknown>>(`/boards/${boardId}/loops/${loopId}/completion`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
+  async getQaCycle(boardId: string, loopId: string): Promise<QaCycle> {
+    return json(await request<QaCycle>(`/boards/${boardId}/loops/${loopId}/qa`));
+  },
+
+  async submitQaInstructions(
+    boardId: string,
+    loopId: string,
+    payload: Record<string, unknown>,
+  ): Promise<QaCycle> {
+    return json(
+      await request<QaCycle>(`/boards/${boardId}/loops/${loopId}/qa/instructions`, {
+        method: "PUT",
+        body: payload,
+      }),
+    );
+  },
+
+  async submitQaResults(
+    boardId: string,
+    loopId: string,
+    payload: { results: Array<Record<string, string>> },
+  ): Promise<QaCycle> {
+    return json(
+      await request<QaCycle>(`/boards/${boardId}/loops/${loopId}/qa/results`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
+  async decideQa(
+    boardId: string,
+    loopId: string,
+    payload: {
+      version: number;
+      cycle_id: string;
+      decision: "accepted" | "rejected";
+      not_applicable_approvals?: string[];
+      note?: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    return json(
+      await request<Record<string, unknown>>(`/boards/${boardId}/loops/${loopId}/qa/decision`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
+  async confirmHumanTicket(
+    boardId: string,
+    loopId: string,
+    cardId: string,
+    payload: { version: number; note?: string },
+  ): Promise<Card> {
+    return json(
+      await request<Card>(
+        `/boards/${boardId}/loops/${loopId}/cards/${cardId}/confirm`,
+        { method: "POST", body: payload },
+      ),
+    );
+  },
+
+  async searchHistory(
+    boardId: string,
+    params: { q?: string; source_kind?: string; qa_status?: string; limit?: number; offset?: number },
+  ): Promise<{ items: HistorySummary[]; meta?: PageMeta }> {
+    const query = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, value]) => value !== undefined && value !== "")
+        .map(([key, value]) => [key, String(value)]),
+    );
+    const result = await request<HistorySummary[]>(
+      `/boards/${boardId}/history?${query.toString()}`,
+    );
+    return { items: result.data, meta: result.meta };
+  },
+
+  async getHistoryRecord(boardId: string, historyId: string): Promise<HistoryDetail> {
+    return json(await request<HistoryDetail>(`/boards/${boardId}/history/${historyId}`));
+  },
+
+  async importLegacyRecord(
+    boardId: string,
+    payload: Record<string, unknown>,
+  ): Promise<HistoryDetail> {
+    return json(
+      await request<HistoryDetail>(`/boards/${boardId}/history/import`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
   async getBoard(boardId: string): Promise<Board> {
     return json(await request<Board>(`/boards/${boardId}`));
   },
@@ -233,10 +519,11 @@ export const api = {
 
   async saveBoardAsTemplate(
     boardId: string,
+    loopId: string,
     payload: { name: string; description?: string },
   ): Promise<BoardTemplate> {
     return json(
-      await request<BoardTemplate>(`/boards/${boardId}/templates`, {
+      await request<BoardTemplate>(`/boards/${boardId}/loops/${loopId}/templates`, {
         method: "POST",
         body: payload,
       }),
@@ -489,42 +776,77 @@ export const api = {
     );
   },
 
-  async listLists(boardId: string): Promise<BoardList[]> {
-    return json(await request<BoardList[]>(`/boards/${boardId}/lists`));
-  },
-
-  async createList(boardId: string, name: string): Promise<BoardList> {
+  async listLists(boardId: string, loopId: string): Promise<BoardList[]> {
     return json(
-      await request<BoardList>(`/boards/${boardId}/lists`, { method: "POST", body: { name } }),
+      await request<BoardList[]>(`/boards/${boardId}/loops/${loopId}/lists`),
     );
   },
 
-  async renameList(boardId: string, listId: string, name: string): Promise<BoardList> {
+  async createList(boardId: string, loopId: string, name: string): Promise<BoardList> {
     return json(
-      await request<BoardList>(`/boards/${boardId}/lists/${listId}`, {
+      await request<BoardList>(`/boards/${boardId}/loops/${loopId}/lists`, {
+        method: "POST",
+        body: { name },
+      }),
+    );
+  },
+
+  async renameList(
+    boardId: string,
+    loopId: string,
+    listId: string,
+    name: string,
+  ): Promise<BoardList> {
+    return json(
+      await request<BoardList>(`/boards/${boardId}/loops/${loopId}/lists/${listId}`, {
         method: "PATCH",
         body: { name },
       }),
     );
   },
 
-  async moveList(boardId: string, listId: string, position: number): Promise<BoardList[]> {
+  async moveList(
+    boardId: string,
+    loopId: string,
+    listId: string,
+    position: number,
+  ): Promise<BoardList[]> {
     return json(
-      await request<BoardList[]>(`/boards/${boardId}/lists/${listId}/move`, {
+      await request<BoardList[]>(`/boards/${boardId}/loops/${loopId}/lists/${listId}/move`, {
         method: "POST",
         body: { position },
       }),
     );
   },
 
-  async archiveList(boardId: string, listId: string): Promise<BoardList> {
+  async archiveList(boardId: string, loopId: string, listId: string): Promise<BoardList> {
     return json(
-      await request<BoardList>(`/boards/${boardId}/lists/${listId}/archive`, { method: "POST" }),
+      await request<BoardList>(
+        `/boards/${boardId}/loops/${loopId}/lists/${listId}/archive`,
+        { method: "POST" },
+      ),
+    );
+  },
+
+  async listBoardTickets(
+    boardId: string,
+    params: { q?: string; limit?: number } = {},
+  ): Promise<Array<Card & { loop_key: string; loop_name: string }>> {
+    const query = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, value]) => value !== undefined && value !== "")
+        .map(([key, value]) => [key, String(value)]),
+    );
+    return json(
+      await request<Array<Card & { loop_key: string; loop_name: string }>>(
+        `/boards/${boardId}/tickets?${query.toString()}`,
+      ),
     );
   },
 
   async listCards(
     boardId: string,
+    loopId: string,
     params: { list_id?: string; limit?: number; include_archived?: boolean } = {},
   ): Promise<Card[]> {
     const query = new URLSearchParams(
@@ -532,11 +854,14 @@ export const api = {
         .filter(([, value]) => value !== undefined && value !== "")
         .map(([key, value]) => [key, String(value)]),
     );
-    return json(await request<Card[]>(`/boards/${boardId}/cards?${query.toString()}`));
+    return json(
+      await request<Card[]>(`/boards/${boardId}/loops/${loopId}/cards?${query.toString()}`),
+    );
   },
 
   async searchCards(
     boardId: string,
+    loopId: string,
     params: {
       q?: string;
       label?: string;
@@ -552,19 +877,22 @@ export const api = {
         .filter(([, value]) => value !== undefined && value !== "" && value !== false)
         .map(([key, value]) => [key, String(value)]),
     );
-    const result = await request<Card[]>(`/boards/${boardId}/search?${query.toString()}`);
+    const result = await request<Card[]>(
+      `/boards/${boardId}/loops/${loopId}/search?${query.toString()}`,
+    );
     return { items: result.data, meta: result.meta };
   },
 
-  async getCard(boardId: string, cardId: string): Promise<CardDetail> {
+  async getCard(boardId: string, loopId: string, cardId: string): Promise<CardDetail> {
     const result = await request<CardDetail>(
-      `/boards/${boardId}/cards/${cardId}?include=checklists,comments`,
+      `/boards/${boardId}/loops/${loopId}/cards/${cardId}?include=checklists,comments`,
     );
     return result.data;
   },
 
   async createCard(
     boardId: string,
+    loopId: string,
     payload: {
       list_id: string;
       title: string;
@@ -575,12 +903,16 @@ export const api = {
     },
   ): Promise<Card> {
     return json(
-      await request<Card>(`/boards/${boardId}/cards`, { method: "POST", body: payload }),
+      await request<Card>(`/boards/${boardId}/loops/${loopId}/cards`, {
+        method: "POST",
+        body: payload,
+      }),
     );
   },
 
   async updateCard(
     boardId: string,
+    loopId: string,
     cardId: string,
     payload: {
       version: number;
@@ -594,7 +926,7 @@ export const api = {
     },
   ): Promise<Card> {
     return json(
-      await request<Card>(`/boards/${boardId}/cards/${cardId}`, {
+      await request<Card>(`/boards/${boardId}/loops/${loopId}/cards/${cardId}`, {
         method: "PATCH",
         body: payload,
       }),
@@ -603,26 +935,31 @@ export const api = {
 
   async moveCard(
     boardId: string,
+    loopId: string,
     cardId: string,
     payload: { version: number; list_id: string; position: number },
   ): Promise<Card> {
     return json(
-      await request<Card>(`/boards/${boardId}/cards/${cardId}/move`, {
+      await request<Card>(`/boards/${boardId}/loops/${loopId}/cards/${cardId}/move`, {
         method: "POST",
         body: payload,
       }),
     );
   },
 
-  async archiveCard(boardId: string, cardId: string): Promise<Card> {
+  async archiveCard(boardId: string, loopId: string, cardId: string): Promise<Card> {
     return json(
-      await request<Card>(`/boards/${boardId}/cards/${cardId}/archive`, { method: "POST" }),
+      await request<Card>(`/boards/${boardId}/loops/${loopId}/cards/${cardId}/archive`, {
+        method: "POST",
+      }),
     );
   },
 
-  async restoreCard(boardId: string, cardId: string): Promise<Card> {
+  async restoreCard(boardId: string, loopId: string, cardId: string): Promise<Card> {
     return json(
-      await request<Card>(`/boards/${boardId}/cards/${cardId}/restore`, { method: "POST" }),
+      await request<Card>(`/boards/${boardId}/loops/${loopId}/cards/${cardId}/restore`, {
+        method: "POST",
+      }),
     );
   },
 
@@ -645,9 +982,14 @@ export const api = {
     );
   },
 
-  async addChecklist(boardId: string, cardId: string, title: string): Promise<Checklist> {
+  async addChecklist(
+    boardId: string,
+    loopId: string,
+    cardId: string,
+    title: string,
+  ): Promise<Checklist> {
     return json(
-      await request<Checklist>(`/boards/${boardId}/cards/${cardId}/checklists`, {
+      await request<Checklist>(`/boards/${boardId}/loops/${loopId}/cards/${cardId}/checklists`, {
         method: "POST",
         body: { title },
       }),
@@ -684,23 +1026,37 @@ export const api = {
     await request(`/boards/${boardId}/checklist-items/${itemId}`, { method: "DELETE" });
   },
 
-  async addComment(boardId: string, cardId: string, content: string): Promise<Comment> {
+  async addComment(
+    boardId: string,
+    loopId: string,
+    cardId: string,
+    content: string,
+  ): Promise<Comment> {
     return json(
-      await request<Comment>(`/boards/${boardId}/cards/${cardId}/comments`, {
+      await request<Comment>(`/boards/${boardId}/loops/${loopId}/cards/${cardId}/comments`, {
         method: "POST",
         body: { content },
       }),
     );
   },
 
-  async listMentions(boardId: string, cardId: string): Promise<MentionJob[]> {
-    return json(await request<MentionJob[]>(`/boards/${boardId}/cards/${cardId}/mentions`));
+  async listMentions(boardId: string, loopId: string, cardId: string): Promise<MentionJob[]> {
+    return json(
+      await request<MentionJob[]>(
+        `/boards/${boardId}/loops/${loopId}/cards/${cardId}/mentions`,
+      ),
+    );
   },
 
-  async retryMention(boardId: string, cardId: string, jobId: string): Promise<MentionJob> {
+  async retryMention(
+    boardId: string,
+    loopId: string,
+    cardId: string,
+    jobId: string,
+  ): Promise<MentionJob> {
     return json(
       await request<MentionJob>(
-        `/boards/${boardId}/cards/${cardId}/mentions/${jobId}/retry`,
+        `/boards/${boardId}/loops/${loopId}/cards/${cardId}/mentions/${jobId}/retry`,
         { method: "POST" },
       ),
     );

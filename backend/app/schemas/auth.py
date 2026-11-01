@@ -13,10 +13,16 @@ Scope = Literal[
     "cards:read",
     "cards:write",
     "comments:write",
+    "loops:read",
+    "loops:write",
+    "loops:generate",
+    "history:read",
     "discussions:read",
     "discussions:write",
     "discussions:vote",
 ]
+# ``loops:review`` is deliberately absent: approving plans, confirming human work and accepting QA
+# always require a human session, so a token can never hold a usable review grant.
 Role = Literal["admin", "member"]
 ThemeMode = Literal["dark", "light", "system"]
 ThemeKit = Literal["carenomad", "matchmap", "classic"]

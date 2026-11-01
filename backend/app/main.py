@@ -22,8 +22,10 @@ from .api.v1 import auth as auth_routes
 from .api.v1 import boards as board_routes
 from .api.v1 import cards as card_routes
 from .api.v1 import discussions as discussion_routes
+from .api.v1 import history as history_routes
 from .api.v1 import labels as label_routes
 from .api.v1 import lists as list_routes
+from .api.v1 import loops as loop_routes
 from .api.v1 import search as search_routes
 from .api.v1 import templates as template_routes
 from .api.v1 import users as user_routes
@@ -227,6 +229,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     for router in (
         auth_routes.router,
         board_routes.router,
+        loop_routes.router,
+        history_routes.router,
         list_routes.router,
         card_routes.router,
         label_routes.router,

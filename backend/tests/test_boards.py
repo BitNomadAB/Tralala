@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 
 
 def test_create_board_creates_isolated_database(
@@ -14,7 +14,9 @@ def test_create_board_creates_isolated_database(
     assert board["status"] == "active"
     database = Path(settings.data_dir) / "boards" / board["id"] / "board.sqlite"
     assert database.exists()
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     assert [item["name"] for item in lists] == [
         "Backlog",
         "Todo",
@@ -46,8 +48,12 @@ def test_board_update_and_archive_roundtrip(api: Api, board: dict[str, Any]) -> 
 
 
 def test_board_write_is_blocked_while_archived(api: Api, board: dict[str, Any]) -> None:
+    api.data(api.post(f"/api/v1/boards/{board['id']}/loops", json={"name": "Archived loop"}))
     api.data(api.post(f"/api/v1/boards/{board['id']}/archive"))
-    response = api.post(f"/api/v1/boards/{board['id']}/lists", json={"name": "Blocked"})
+    response = api.post(
+        f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists",
+        json={"name": "Blocked"},
+    )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "board_archived"
 
@@ -63,24 +69,30 @@ def test_board_creation_is_idempotent(api: Api) -> None:
 
 
 def test_duplicate_board_copies_content(api: Api, board: dict[str, Any]) -> None:
-    todo = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))[1]
+    todo = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )[1]
     api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": todo["id"], "title": "Copied card"},
         )
     )
     duplicate = api.data(api.post(f"/api/v1/boards/{board['id']}/duplicate"))
     assert duplicate["id"] != board["id"]
-    cards = api.data(api.get(f"/api/v1/boards/{duplicate['id']}/cards"))
+    cards = api.data(
+        api.get(f"/api/v1/boards/{duplicate['id']}/loops/{loop_id(api, duplicate['id'])}/cards")
+    )
     assert [card["title"] for card in cards] == ["Copied card"]
 
 
 def test_export_and_import_roundtrip(api: Api, board: dict[str, Any]) -> None:
-    todo = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))[1]
+    todo = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )[1]
     api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/cards",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
             json={"list_id": todo["id"], "title": "Exported card", "priority": "high"},
         )
     )
@@ -98,7 +110,9 @@ def test_export_and_import_roundtrip(api: Api, board: dict[str, Any]) -> None:
     assert imported.status_code == 201, imported.text
     new_board = imported.json()["data"]
     assert new_board["id"] != board["id"]
-    cards = api.data(api.get(f"/api/v1/boards/{new_board['id']}/cards"))
+    cards = api.data(
+        api.get(f"/api/v1/boards/{new_board['id']}/loops/{loop_id(api, new_board['id'])}/cards")
+    )
     assert [card["title"] for card in cards] == ["Exported card"]
     assert cards[0]["priority"] == "high"
 

@@ -12,6 +12,11 @@ SCOPES: tuple[str, ...] = (
     "cards:read",
     "cards:write",
     "comments:write",
+    "loops:read",
+    "loops:write",
+    "loops:generate",
+    "loops:review",
+    "history:read",
     "agents:read",
     "agents:write",
     "agents:admin",
@@ -64,3 +69,12 @@ class ActorContext:
     def require(self, scope: str) -> None:
         if not self.has_scope(scope):
             raise Forbidden(f"Missing required scope: {scope}", details={"required_scope": scope})
+
+    def require_human(self, action: str) -> None:
+        """Human-only workflow decisions can never be satisfied by an agent credential."""
+        if not self.is_user:
+            raise Forbidden(
+                f"{action} is a human decision",
+                code="human_action_required",
+                details={"action": action, "actor_type": self.actor_type},
+            )

@@ -23,7 +23,7 @@ from .common import (
     store_idempotency,
 )
 
-EXPORT_FORMAT_VERSION = 1
+EXPORT_FORMAT_VERSION = 2
 BOARD_SCHEMA_VERSION = runner.revision_count("board")
 ALLOWED_STATUSES = {"active", "archived", "maintenance", "error", "migration_failed"}
 
@@ -62,26 +62,35 @@ class BoardService:
             )
         return self.templates.resolve(template_id)
 
-    def _counts(self, board_id: str) -> tuple[int, int]:
+    def _counts(self, board_id: str) -> tuple[int, int, int]:
         try:
             with self.boards.reader(board_id) as conn:
+                loops = conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM loops WHERE archived_at IS NULL"
+                        " AND completed_at IS NULL"
+                    )
+                ).scalar_one()
                 lists = conn.execute(
                     text("SELECT COUNT(*) FROM lists WHERE archived_at IS NULL")
                 ).scalar_one()
                 cards = conn.execute(
                     text("SELECT COUNT(*) FROM cards WHERE archived_at IS NULL")
                 ).scalar_one()
-            return int(lists), int(cards)
+            return int(loops), int(lists), int(cards)
         except (NotFound, ServiceUnavailable):
             # A board whose schema is mid-repair must still appear in the dashboard.
-            return 0, 0
+            return 0, 0, 0
 
     def serialize(self, row: dict[str, Any], *, with_counts: bool = True) -> dict[str, Any]:
         entry = dict(row)
         entry.setdefault("schema_revision", None)
         if with_counts:
-            entry["list_count"], entry["card_count"] = self._counts(row["id"])
+            entry["loop_count"], entry["list_count"], entry["card_count"] = self._counts(
+                row["id"]
+            )
         else:
+            entry.setdefault("loop_count", 0)
             entry.setdefault("list_count", 0)
             entry.setdefault("card_count", 0)
         return entry
@@ -204,25 +213,22 @@ class BoardService:
         try:
             self.boards.create_database(board_id, description)
             with self.boards.session(board_id) as conn:
-                for index, name in enumerate(names):
-                    conn.execute(
-                        text(
-                            "INSERT INTO lists (id, name, position, created_at, updated_at)"
-                            " VALUES (:id, :name, :position, :now, :now)"
-                        ),
-                        {
-                            "id": str(uuid4()),
-                            "name": name,
-                            "position": (index + 1) * 1024,
-                            "now": utcnow(),
-                        },
-                    )
+                conn.execute(
+                    text(
+                        "INSERT INTO board_loop_defaults (id, column_names_json, updated_at)"
+                        " VALUES (1, :names, :now)"
+                    ),
+                    {"names": json.dumps(names), "now": utcnow()},
+                )
                 for label in labels:
                     conn.execute(
                         text("INSERT INTO labels (id, name, color) VALUES (:id, :name, :color)"),
                         {"id": str(uuid4()), "name": label["name"], "color": label["color"]},
                     )
-                changes: dict[str, Any] = {"name": payload.name, "lists": names}
+                changes: dict[str, Any] = {
+                    "name": payload.name,
+                    "loop_columns": names,
+                }
                 if template is not None:
                     changes["template_id"] = template["id"]
                     changes["template_name"] = template["name"]
@@ -503,6 +509,9 @@ class BoardService:
             raise NotFound("Board database not found")
         return row
 
-    def default_position(self, board_id: str) -> int:
+    def default_position(self, board_id: str, loop_id: str) -> int:
         with self.boards.reader(board_id) as conn:
-            return position_for_index(conn, "lists", "archived_at IS NULL", {}, None)
+            return position_for_index(
+                conn, "lists", "loop_id = :loop_id AND archived_at IS NULL", {"loop_id": loop_id},
+                None
+            )

@@ -67,17 +67,21 @@ async def delete_template(
 
 
 @router.post(
-    "/boards/{board_id}/templates",
+    "/boards/{board_id}/loops/{loop_id}/templates",
     response_model=Envelope[TemplateOut],
     status_code=201,
 )
-async def save_board_as_template(
+async def save_loop_as_template(
     board_id: str,
+    loop_id: str,
     payload: TemplateFromBoard,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict:
-    return ok(request, ctx.services.template.create_from_board(ctx.actor, board_id, payload))
+    return ok(
+        request,
+        ctx.services.template.create_from_loop(ctx.actor, board_id, loop_id, payload),
+    )
 
 
 __all__ = ["router"]

@@ -15,6 +15,22 @@ One modular Python monolith. Every interface (React UI, WebMCP adapter, external
 REST) reaches the same service functions; no business rule is duplicated in the frontend or in
 WebMCP tool definitions.
 
+### Authoritative hierarchy
+
+```
+App (Tralala shell, Board overview)
+  Board (a project, application or defined part of one)
+    Loop (one feature or coherent change initiative)
+      Kanban header: Info, Analysis, RoadMap, Loop status, approvals, QA status
+      Kanban: Loop-owned columns containing Tickets
+      Numbered delivery Phases, shown in the RoadMap and on Tickets
+```
+
+A Board contains Loops; a Loop owns its Kanban, columns, Tickets and planning documents. Two Loops
+in one Board never share columns or ordering. The Board stays the storage boundary: `registry.sqlite`
+holds global metadata, `boards/{uuid}/board.sqlite` holds every Loop of that board. Phases are
+planning groups, not Kanban columns. See [loops.md](loops.md) for the workflow itself.
+
 ### Backend layers
 
 | Layer | Location | Responsibility |
@@ -30,7 +46,7 @@ WebMCP tool definitions.
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | App shell | `frontend/src/app` | Router, providers, layout |
-| Features | `frontend/src/features` | Boards, board view, cards, activity, settings, auth |
+| Features | `frontend/src/features` | Boards, Loops, Loop Kanban and planning dialogs, history, cards, activity, settings, auth |
 | API client | `frontend/src/lib/api.ts` | Typed REST client, envelope unwrapping, CSRF header |
 | WebMCP | `frontend/src/webmcp` | Capability detection, registry adapter, contextual tools |
 | Theme | `frontend/src/themes` | Theme kits (`data-theme-kit`) x dark/light/system over semantic CSS variables |
@@ -39,7 +55,8 @@ WebMCP tool definitions.
 
 - `data/registry.sqlite` holds boards, board templates, role templates, agents, actors, credentials
   and registry-level idempotency records.
-- `data/boards/{uuid}/board.sqlite` holds lists, cards, labels, checklists, comments and activity.
+- `data/boards/{uuid}/board.sqlite` holds Loops, their documents, approvals, plans, QA cycles,
+  history, Loop-owned lists, Tickets (cards), labels, checklists, comments and activity.
 - `data/backups/{uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite` holds consistent snapshots.
 - `data/exports/` is reserved for future generated exports; the export endpoint streams the archive.
 - `data/.session-secret` holds the generated per-install session secret when `TRALALA_SECRET_KEY` is unset (owner-only permissions); `data/.bootstrap-password` holds a generated first-administrator password until it is deleted.
@@ -77,17 +94,46 @@ SQLite has no cross-file transactions, so:
   is migrated eagerly and sequentially before requests are served, with a verified pre-migration
   snapshot and post-migration integrity checks. A failed board is marked `migration_failed` and
   blocks mutations until `POST /boards/{id}/migrate` succeeds.
-- Cross-board card transfer copies the card (labels, checklists, comments) into the target board
-  first and deletes the source copy second. If deletion fails the source card is archived and the
-  response reports `finalized: false` with a warning, so the card is never visible twice.
+- Card transfer between Loops or Boards is not supported: it would bypass the approved plan. The
+  endpoint is removed and the service answers `409 plan_change_required` so a caller gets an
+  actionable error instead of a silent shortcut.
 - Board templates are registry rows because they are selected before a board exists. Creating a
-  board with `template_id` resolves the template first (failing with `422` before reserving the
-  idempotency key), then writes the template's lists and labels into the new board database in the
-  same transaction that logs `board.created`.
+  board with `template_id` stores the template's column names as the board's Loop defaults and its
+  labels in the new board database; it never creates ownerless columns. Creating a Loop copies
+  those defaults into Loop-owned columns.
 - AI roles are split in two on purpose: `role_templates` (shared, editable) and `agents` (identity,
   connection, sealed credential, template reference or override). Any future discussion persists
   `AgentService.role_snapshot(...)` so prompt history is reproducible; see
   [decisions/0001](decisions/0001-role-template-vs-agent-snapshot.md).
+
+## Loop workflow
+
+The Loop workflow is the only place where planning rules live, and every interface reaches it
+through `services/loops.py`, `loop_documents.py`, `loop_plans.py`, `loop_generation.py`,
+`loop_qa.py` and `loop_history.py`.
+
+- **Documents.** Five slots per Loop: `info` (human intent), `analysis_ai`/`analysis` and
+  `roadmap_ai`/`roadmap`. Revisions are immutable, current and approved pointers are separate, and
+  the human views are rendered by the server from the validated structure, so a model cannot
+  invent or omit work only in the summary.
+- **Approvals.** `loop_approvals` stores human decisions bound to exact revision ids and source
+  hashes. Any change to an input revision makes the dependent approvals stale; the Loop stage
+  becomes `replanning` and execution transitions are frozen until a replacement plan is approved.
+- **Plans.** The structured RoadMap revision is authoritative. Phases and planned Tickets carry
+  stable UUIDs and keys; the relational rows are a validated projection. Validation rejects
+  unknown references, self-dependencies and cycles, including the implicit normal-Ticket-to-Phase
+  edge. RoadMap approval publishes every Ticket in one transaction and is idempotent.
+- **Readiness.** Phase completion is derived from Ticket dispositions; a Phase is entered when its
+  prerequisite Phases, prerequisite Tickets and its own pre-phase gates are satisfied. A gate
+  never depends on its own Phase, so it cannot deadlock. `GET /readiness` and every completion
+  transition use the same evaluation.
+- **QA.** Accepting implementation and accepting QA are separate human decisions. One QA Task
+  carries an agent view and a human view built from the same scenario ids. Agent-submitted results
+  are recorded, never accepted on the agent's behalf.
+- **History.** Completion writes an immutable, hashed snapshot into `loop_history` (plus
+  `loop_history_artifacts` for bounded evidence bytes) inside the same transaction, and marks the
+  Loop read-only. Repeated finalization returns the existing record. Legacy imports use the same
+  envelope with `source_kind = imported_legacy` and never create Tickets or approvals.
 
 ## Ordering strategy
 
@@ -159,6 +205,12 @@ without shipping every thread to the browser. Boards without threads stay reacha
 The overview is refreshed when the page opens, after a discussion is created and when the user
 returns to the board list (plus a 30 s interval while the list is visible); it is not refetched for
 every thread event.
+
+A thread belongs to one Ticket and therefore to one Loop, so every thread records `loop_id`,
+`loop_key`, `loop_name` and `ticket_key`. The thread view shows that Loop and links to
+`/boards/{board_id}/loops/{loop_id}?card={card_id}`, which the Loop page opens with the Ticket
+dialog already showing; closing the dialog drops the `card` parameter. Nothing infers a default
+Loop from a board.
 
 ## Ticket mentions
 

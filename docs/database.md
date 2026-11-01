@@ -19,9 +19,11 @@ the registry and board schemas are separate migration chains managed by the Migr
 | `agents` | AI agent identities: name (unique), role reference, optional prompt override, connection type/URL/model, encrypted API key + hint, sampling limits, enabled flag, last test result |
 
 Templates are global because they are chosen before a board (and therefore a board database)
-exists. A template stores list names in board order plus optional `{name, color}` labels. Creating a
-board with `template_id` materializes those lists and labels inside the new board's database,
-leaving all card, comment and activity data in the per-board file.
+exists. A template stores column names in order plus optional `{name, color}` labels. Creating a
+board with `template_id` stores those column names as the board's Loop defaults
+(`board_loop_defaults`) and writes the labels into the board database; it never creates ownerless
+columns. Creating a Loop copies the defaults into Loop-owned columns, and template edits affect
+future Loops only.
 
 Indexes: `boards(status)`, `api_credentials(actor_id)`.
 
@@ -70,12 +72,15 @@ Two independent Alembic chains live under `backend/migrations`:
 | Chain | Database | Version table | Head (current) |
 | --- | --- | --- | --- |
 | `registry` | `data/registry.sqlite` | `alembic_version` | `0006_user_preferences` |
-| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0007_comment_mentions` |
+| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0008_loops` |
 
 - The baseline revisions (`0001_registry_initial`, `0001_board_initial`) reproduce the schema that
   shipped before Alembic. A database that predates version tracking (no `alembic_version`) is
-  detected by its tables and **stamped** at the baseline, then upgraded. This is how existing
-  installations are adopted without data loss.
+  detected by its tables and **stamped** at the baseline, then upgraded.
+- Revision `0008_loops` is a structural redesign, not a data migration. A board database that still
+  contains lists or cards refuses to upgrade and reports the development reset command; an empty
+  database from an earlier revision upgrades normally. There is no preservation path for
+  pre-Loop development data (see [loops.md](loops.md#clean-schema-transition)).
 - New boards are created by upgrading an empty file to the chain head (`runner.create_schema`), so
   they always start at the latest schema.
 - Existing boards are migrated **eagerly at startup**, sequentially, before the app accepts

@@ -21,7 +21,13 @@ from ..schemas.subresources import (
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
-from .common import one, position_for_index, rows
+from .common import (
+    one,
+    position_for_index,
+    require_mutable_card,
+    require_mutable_checklist_item,
+    rows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +157,7 @@ class ChecklistService:
         checklist_id = str(uuid4())
         with self.boards.session(board_id) as conn:
             self._card(conn, card_id)
+            require_mutable_card(conn, card_id)
             position = position_for_index(
                 conn, "checklists", "card_id = :card_id", {"card_id": card_id}, None
             )
@@ -191,6 +198,7 @@ class ChecklistService:
             existing = one(conn, "SELECT * FROM checklists WHERE id = :id", {"id": checklist_id})
             if existing is None:
                 raise NotFound("Checklist not found")
+            require_mutable_card(conn, existing["card_id"])
             if payload.title is not None and payload.title != existing["title"]:
                 conn.execute(
                     text("UPDATE checklists SET title = :title WHERE id = :id"),
@@ -215,6 +223,7 @@ class ChecklistService:
             existing = one(conn, "SELECT * FROM checklists WHERE id = :id", {"id": checklist_id})
             if existing is None:
                 raise NotFound("Checklist not found")
+            require_mutable_card(conn, existing["card_id"])
             conn.execute(text("DELETE FROM checklists WHERE id = :id"), {"id": checklist_id})
             log_activity(
                 conn,
@@ -239,6 +248,7 @@ class ChecklistService:
             checklist = one(conn, "SELECT * FROM checklists WHERE id = :id", {"id": checklist_id})
             if checklist is None:
                 raise NotFound("Checklist not found")
+            require_mutable_card(conn, checklist["card_id"])
             position = position_for_index(
                 conn,
                 "checklist_items",
@@ -288,6 +298,7 @@ class ChecklistService:
             existing = one(conn, "SELECT * FROM checklist_items WHERE id = :id", {"id": item_id})
             if existing is None:
                 raise NotFound("Checklist item not found")
+            require_mutable_checklist_item(conn, item_id)
             updates: dict[str, Any] = {}
             if payload.text is not None:
                 updates["text"] = payload.text
@@ -332,6 +343,7 @@ class ChecklistService:
             existing = one(conn, "SELECT * FROM checklist_items WHERE id = :id", {"id": item_id})
             if existing is None:
                 raise NotFound("Checklist item not found")
+            require_mutable_checklist_item(conn, item_id)
             conn.execute(text("DELETE FROM checklist_items WHERE id = :id"), {"id": item_id})
             log_activity(
                 conn,
@@ -412,6 +424,7 @@ class CommentService:
             card = one(conn, "SELECT id FROM cards WHERE id = :id", {"id": card_id})
             if card is None:
                 raise NotFound("Card not found")
+            require_mutable_card(conn, card_id)
             conn.execute(
                 text(
                     "INSERT INTO comments (id, card_id, actor_id, content, created_at, updated_at)"
@@ -465,6 +478,7 @@ class CommentService:
             if existing is None:
                 raise NotFound("Comment not found")
             self._require_owner(actor, existing)
+            require_mutable_card(conn, existing["card_id"])
             conn.execute(
                 text("UPDATE comments SET content = :content, updated_at = :now WHERE id = :id"),
                 {"content": payload.content, "now": utcnow(), "id": comment_id},
@@ -489,6 +503,7 @@ class CommentService:
             if existing is None:
                 raise NotFound("Comment not found")
             self._require_owner(actor, existing)
+            require_mutable_card(conn, existing["card_id"])
             conn.execute(text("DELETE FROM comments WHERE id = :id"), {"id": comment_id})
             log_activity(
                 conn,

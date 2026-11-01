@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from conftest import Api
+from conftest import Api, loop_id
 
 
 def _template(api: Api, name: str = "Sprint", **overrides: Any) -> dict[str, Any]:
@@ -59,7 +59,9 @@ def test_create_board_from_template_applies_description_lists_and_labels(api: Ap
         )
     )
     assert board["description"] == "Two week delivery board"
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     assert [item["name"] for item in lists] == ["Ideas", "Doing", "Done"]
     labels = api.data(api.get(f"/api/v1/boards/{board['id']}/labels"))
     assert [(item["name"], item["color"]) for item in labels] == [("bug", "#ef4444")]
@@ -79,14 +81,18 @@ def test_board_description_overrides_template(api: Api) -> None:
         )
     )
     assert board["description"] == "Own words"
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     assert [item["name"] for item in lists] == ["Only"]
 
 
 def test_blank_board_uses_default_lists(api: Api) -> None:
     _template(api)
     board = api.data(api.post("/api/v1/boards", json={"name": "Blank"}))
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     assert [item["name"] for item in lists] == [
         "Backlog",
         "Todo",
@@ -98,9 +104,7 @@ def test_blank_board_uses_default_lists(api: Api) -> None:
 
 
 def test_create_board_with_unknown_template_is_rejected(api: Api) -> None:
-    response = api.post(
-        "/api/v1/boards", json={"name": "Ghost", "template_id": "missing-template"}
-    )
+    response = api.post("/api/v1/boards", json={"name": "Ghost", "template_id": "missing-template"})
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_failed"
     assert api.data(api.get("/api/v1/boards")) == []
@@ -111,7 +115,9 @@ def test_template_without_lists_falls_back_to_defaults(api: Api) -> None:
     board = api.data(
         api.post("/api/v1/boards", json={"name": "From empty", "template_id": template["id"]})
     )
-    lists = api.data(api.get(f"/api/v1/boards/{board['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
     assert len(lists) == 5
 
 
@@ -123,9 +129,7 @@ def test_template_names_are_unique(api: Api) -> None:
 
 
 def test_duplicate_template_list_names_are_rejected(api: Api) -> None:
-    response = api.post(
-        "/api/v1/templates", json={"name": "Dup", "lists": ["Todo", "todo"]}
-    )
+    response = api.post("/api/v1/templates", json={"name": "Dup", "lists": ["Todo", "todo"]})
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_failed"
 
@@ -139,7 +143,7 @@ def test_save_board_as_template_snapshots_structure(api: Api, board: dict[str, A
     )
     template = api.data(
         api.post(
-            f"/api/v1/boards/{board['id']}/templates",
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/templates",
             json={"name": "From board", "description": "Copied structure"},
         )
     )
@@ -150,7 +154,9 @@ def test_save_board_as_template_snapshots_structure(api: Api, board: dict[str, A
     clone = api.data(
         api.post("/api/v1/boards", json={"name": "Clone", "template_id": template["id"]})
     )
-    lists = api.data(api.get(f"/api/v1/boards/{clone['id']}/lists"))
+    lists = api.data(
+        api.get(f"/api/v1/boards/{clone['id']}/loops/{loop_id(api, clone['id'])}/lists")
+    )
     assert [item["name"] for item in lists] == template["lists"]
 
 

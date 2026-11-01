@@ -123,6 +123,10 @@ class DiscussionOut(OutModel):
     id: str
     card_id: str
     card_title: str | None = None
+    ticket_key: str | None = None
+    loop_id: str | None = None
+    loop_key: str | None = None
+    loop_name: str | None = None
     title: str
     goal: str
     mode: str
