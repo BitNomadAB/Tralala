@@ -225,6 +225,21 @@ rotates. `check` reports `ok`, `unauthorized`, `not_found`, `forbidden`, `branch
 `unreachable` and stores the last outcome on the record. See
 [decisions/0011](decisions/0011-repository-access-for-analysis-agents.md).
 
+The dialog carries the same recipe for an operator, and it can be followed before the repository
+exists: GitHub -> Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens,
+*Only select repositories* (this one), *Repository permissions* -> **Contents: Read-only**, short
+expiry. A token is issued by GitHub, never generated locally. Verify it on the machine before pasting:
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://api.github.com/repos/<owner>/<repository>
+```
+
+`200` means it works, `401` that it is wrong or expired, `404` that it cannot see the repository. An
+SSH deploy key (`ssh-keygen`) grants a *git client* read access; Tralala reads the REST API over
+HTTPS and runs no git binary, so a deploy key is not an alternative for this field.
+
 ### Agents
 
 | Method | Path | Scope |

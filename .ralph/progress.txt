@@ -472,3 +472,30 @@ Verification: backend `pytest` green (incl. 25 repository and migration tests), 
 frontend `typecheck`/`test`/`build` green, `pnpm test:e2e` 26/26. Verified live: creating a board with
 two repositories checked links both, unchecking one replaces the selection, deleting the board
 detaches them.
+
+## 2026-11-01 ? Key guide inside the repository dialog
+
+Delivered:
+- `features/settings/RepositoryTokenGuide.tsx`: a collapsible "How do I create the key?" panel under
+  the token field, with the repository slug taken from the URL field (`repositorySlug`), so the
+  guide names the real pages instead of `<owner>/<repository>`.
+- The guide covers: fine-grained token creation (resource owner, only-select-repositories,
+  Contents: read-only, short expiry), verifying the token on your own machine with curl or
+  PowerShell before pasting it (200/401/404), what Save and Test access do with it, and rotation by
+  replacing it in Edit.
+- It also answers the deploy-key question explicitly: `ssh-keygen` + a Deploy Key gives a git client
+  read access, and the guide shows that flow for a local agent clone, but Tralala reads the REST API
+  over HTTPS and runs no git binary, so an SSH key is not what the token field accepts.
+- `repository-token-guide.test.tsx` holds the slug parsing (bare URL, trailing slash, `.git`,
+  placeholder fallback) and that the deploy-key caveat is stated.
+
+Verification: frontend `typecheck` green, `pnpm test` 26/26, `pnpm build` green; guide checked live in
+both the New and Edit dialogs.
+
+Follow-up from the same day: the guide is neutral now. The URL field and the dialog description use
+`your-org/your-repo` as the example instead of this project's own repository, the guide's placeholder
+is `your-org/your-repo`, and it says in one line whether it is naming the repository from the URL
+field or still showing placeholders. `repositorySlug("")` therefore never renders a real repository
+name, and a test holds that (`carries no example repository of its own`).
+
+Verification: `typecheck` green, `pnpm test` 28/28, `pnpm build` green; checked live in both dialogs.

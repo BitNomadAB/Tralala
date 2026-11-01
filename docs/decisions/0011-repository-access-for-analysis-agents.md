@@ -44,7 +44,10 @@ recorded but not proposed.
 3. **Access is a fine-grained personal access token, read-only.** The documented recipe is a
    GitHub fine-grained PAT scoped to one repository with `Contents: read` and an expiry, not a classic
    token with `repo` scope and not a deploy key (a deploy key is per-repository and would need one
-   more secret format). The Settings form states this and links to the GitHub page that creates it.
+   more secret format). The repository dialog carries the recipe as a collapsible guide: it names
+   the exact repository from the URL field, links the token page, shows how to verify the token on
+   the operator's own machine before pasting it, and states that an SSH deploy key is not an
+   alternative for this field because Tralala reads the REST API over HTTPS and runs no git binary.
 4. **The URL is validated like a provider endpoint.** `services/connections.validate_endpoint` rules
    apply: `https` only, no embedded credentials, no redirects, and the host must be allowlisted
    (`github.com` and, for the API, `api.github.com`). A self-hosted Git server therefore needs an

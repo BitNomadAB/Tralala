@@ -8,6 +8,7 @@ import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { RepositoryTokenGuide } from "./RepositoryTokenGuide";
 
 const REPOSITORIES_KEY = ["repositories"];
 
@@ -240,7 +241,7 @@ function RepositoryDialog({
     <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
       <DialogContent
         title={draft.id ? "Edit repository" : "New repository"}
-        description="Read-only access for the Analysis agent. Only https://github.com/<owner>/<repository> is accepted."
+        description="Read-only access for the Analysis agent. Only https://github.com/your-org/your-repo is accepted."
       >
         <form
           className="flex flex-col gap-3"
@@ -262,7 +263,7 @@ function RepositoryDialog({
               id="repository-url"
               value={draft.url}
               onChange={(event) => update({ url: event.target.value })}
-              placeholder="https://github.com/BitNomadAB/Tralala"
+              placeholder="https://github.com/your-org/your-repo"
               required
               maxLength={500}
             />
@@ -294,6 +295,7 @@ function RepositoryDialog({
               maxLength={500}
             />
           </Field>
+          <RepositoryTokenGuide url={draft.url} />
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
