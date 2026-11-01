@@ -90,7 +90,8 @@ Finalization stores an immutable snapshot and returns the existing record on eve
 ## History
 
 Completed Loops live in `loop_history` inside their Board database: envelope, documents, plan,
-delivery dispositions, human decisions, QA evidence, generation provenance and an asset manifest,
+delivery dispositions, human decisions, QA evidence, generation provenance (agent, model and a
+`system_prompt_sha256` rather than the prompt itself) and an asset manifest,
 plus a content hash. `GET /boards/{board_id}/history` searches a derived text projection with FTS5
 (or `LIKE` when FTS5 is unavailable).
 
@@ -108,8 +109,11 @@ conversation is about instead of an inferred default Loop.
 
 ## Clean schema transition
 
-A database that predates Loop ownership cannot be converted in place. Startup stops with an
-actionable message and the board is marked `migration_failed`. Reset development data explicitly:
+A database that predates Loop ownership cannot be converted in place; the reasoning and the
+release requirement that follows from it are recorded in
+[decisions/0010](decisions/0010-loop-schema-transition-and-development-reset.md). Startup stops with
+an actionable message, the board is marked `migration_failed`, and the board page offers a retry and
+the export archive. Reset development data explicitly:
 
 ```powershell
 cd backend

@@ -132,7 +132,12 @@ through `services/loops.py`, `loop_documents.py`, `loop_plans.py`, `loop_generat
   are recorded, never accepted on the agent's behalf.
 - **History.** Completion writes an immutable, hashed snapshot into `loop_history` (plus
   `loop_history_artifacts` for bounded evidence bytes) inside the same transaction, and marks the
-  Loop read-only. Repeated finalization returns the existing record. Legacy imports use the same
+  Loop read-only. Repeated finalization returns the existing record. The FTS index is compared with
+  the table at startup and rebuilt when a restore or copy left it behind.
+- **Reading a board's Loops.** `GET /boards/{id}/loops` serializes every Loop with a constant number
+  of statements (documents, approvals, plans, QA cycles and progress are loaded per board rather
+  than per Loop), and a test holds that budget so the overview cannot drift back to one query set per
+  Loop. Legacy imports use the same
   envelope with `source_kind = imported_legacy` and never create Tickets or approvals.
 
 ## Ordering strategy
@@ -261,5 +266,8 @@ scopes before registration, and every tool calls the typed REST client — never
 - Docker Compose mounts a single data volume; the frontend container proxies `/api` to the backend.
 - Run exactly one backend process per data directory. SQLite writes, the in-memory rate limiter and
   the per-board locks assume a single writer; horizontal scaling needs a shared coordination store.
+  Startup takes an operating-system file lock on `data/.process.lock`, so an overlapping restart or
+  a second container fails with an actionable message instead of racing a schema rebuild. The kernel
+  releases the lock when the process exits, so no stale lock is left behind.
 - End-to-end tests (`frontend/e2e`) run through `scripts/run-playwright.mjs`, which reuses a local
   Playwright install and boots an isolated stack (backend `:8077`, Vite `:5273`).

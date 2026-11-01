@@ -15,17 +15,16 @@ from sqlalchemy import text
 
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
-from ..schemas.loops import LoopCancel, LoopCreate, LoopUpdate
+from ..schemas.loops import DOCUMENT_KINDS, LOOP_STAGES, LoopCancel, LoopCreate, LoopUpdate
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
 from .common import one, position_for_index, request_fingerprint, rows, run_idempotent
 from .loop_identifiers import format_loop_key, loop_prefix
 
-DOCUMENT_KINDS: tuple[str, ...] = ("info", "analysis_ai", "analysis", "roadmap_ai", "roadmap")
-OPEN_STAGES = ("draft", "analysis_review", "planning", "roadmap_review", "ready", "in_progress",
-               "replanning", "awaiting_qa")
+OPEN_STAGES = tuple(stage for stage in LOOP_STAGES if stage not in {"completed", "cancelled"})
 EXECUTION_STAGES = ("ready", "in_progress", "awaiting_qa")
+QA_OPEN_STATUSES = ("pending", "instructions_ready", "in_progress")
 
 
 def _decode(raw: Any, fallback: Any) -> Any:
@@ -153,7 +152,7 @@ class LoopService:
                 " ORDER BY CASE WHEN completed_at IS NULL THEN 0 ELSE 1 END, sequence, id",
                 params,
             )
-            return [self.serialize(conn, board_id, row) for row in records]
+            return self.serialize_many(conn, board_id, records)
 
     def get(self, board_id: str, loop_id: str) -> dict[str, Any]:
         self.board_service.require_row(board_id)
@@ -352,15 +351,23 @@ class LoopService:
 
     def document_rows(self, conn: Any, loop_id: str) -> dict[str, dict[str, Any]]:
         """Current and approved revisions for each of the five slots."""
-        records = rows(
-            conn,
-            "SELECT * FROM loop_documents WHERE loop_id = :id AND (is_current = 1 OR"
-            " is_approved = 1) ORDER BY kind, revision_number",
-            {"id": loop_id},
+        return self._document_snapshot(
+            rows(
+                conn,
+                "SELECT * FROM loop_documents WHERE loop_id = :id AND (is_current = 1 OR"
+                " is_approved = 1) ORDER BY kind, revision_number",
+                {"id": loop_id},
+            )
         )
-        snapshot: dict[str, dict[str, Any]] = {
-            kind: {"current": None, "approved": None} for kind in DOCUMENT_KINDS
-        }
+
+    @staticmethod
+    def _empty_documents() -> dict[str, dict[str, Any]]:
+        return {kind: {"current": None, "approved": None} for kind in DOCUMENT_KINDS}
+
+    def _document_snapshot(
+        self, records: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        snapshot = self._empty_documents()
         for record in records:
             bucket = snapshot.setdefault(record["kind"], {"current": None, "approved": None})
             if record["is_current"]:
@@ -370,11 +377,19 @@ class LoopService:
         return snapshot
 
     def latest_approvals(self, conn: Any, loop_id: str) -> dict[str, dict[str, Any]]:
-        records = rows(
-            conn,
-            "SELECT * FROM loop_approvals WHERE loop_id = :id ORDER BY created_at DESC, rowid DESC",
-            {"id": loop_id},
+        return self._latest_approvals(
+            rows(
+                conn,
+                "SELECT * FROM loop_approvals WHERE loop_id = :id"
+                " ORDER BY created_at DESC, rowid DESC",
+                {"id": loop_id},
+            )
         )
+
+    @staticmethod
+    def _latest_approvals(
+        records: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
         latest: dict[str, dict[str, Any]] = {}
         for record in records:
             latest.setdefault(record["scope"], record)
@@ -596,11 +611,52 @@ class LoopService:
             "stale_reasons": reasons,
         }
 
-    def _plan_summary(self, conn: Any, loop_row: dict[str, Any]) -> dict[str, Any] | None:
+    @staticmethod
+    def _plan_summary_from(
+        plan: dict[str, Any] | None,
+        phase_count: int,
+        totals: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if plan is None:
+            return None
+        counts = totals or {"total": 0, "completed": 0}
+        return {
+            "plan_id": plan["id"],
+            "revision_number": plan["revision_number"],
+            "activated_at": plan["activated_at"],
+            "phase_count": int(phase_count),
+            "ticket_total": int(counts["total"]),
+            "ticket_completed": int(counts["completed"]),
+        }
+
+    @staticmethod
+    def _qa_summary_from(cycles: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not cycles:
+            return None
+        opened = [cycle for cycle in cycles if cycle["status"] in QA_OPEN_STATUSES]
+        latest = opened[0] if opened else max(cycles, key=lambda row: row["cycle_number"])
+        return {
+            "cycle_id": latest["id"],
+            "cycle_number": latest["cycle_number"],
+            "status": latest["status"],
+            "card_id": latest["card_id"],
+            "open": bool(opened),
+        }
+
+    @staticmethod
+    def _progress_from(counts: dict[str, Any] | None) -> dict[str, int]:
+        values = counts or {"total": 0, "completed": 0, "archived": 0}
+        return {
+            "ticket_total": int(values["total"]),
+            "ticket_completed": int(values["completed"]),
+            "ticket_archived_incomplete": int(values["archived"]),
+        }
+
+    def _load_plan_summary(self, conn: Any, loop_id: str) -> dict[str, Any] | None:
         plan = one(
             conn,
             "SELECT * FROM loop_plans WHERE loop_id = :id AND status = 'active'",
-            {"id": loop_row["id"]},
+            {"id": loop_id},
         )
         if plan is None:
             return None
@@ -609,41 +665,33 @@ class LoopService:
             "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN c.completed_at IS NOT NULL"
             " THEN 1 ELSE 0 END), 0) AS completed FROM loop_plan_items i"
             " LEFT JOIN cards c ON c.plan_item_id = i.id WHERE i.loop_id = :id",
-            {"id": loop_row["id"]},
-        ) or {"total": 0, "completed": 0}
+            {"id": loop_id},
+        )
         phases = conn.execute(
-            text("SELECT COUNT(*) FROM loop_phases WHERE loop_id = :id"), {"id": loop_row["id"]}
+            text("SELECT COUNT(*) FROM loop_phases WHERE loop_id = :id"), {"id": loop_id}
         ).scalar_one()
-        return {
-            "plan_id": plan["id"],
-            "revision_number": plan["revision_number"],
-            "activated_at": plan["activated_at"],
-            "phase_count": int(phases),
-            "ticket_total": int(totals["total"]),
-            "ticket_completed": int(totals["completed"]),
-        }
+        return self._plan_summary_from(plan, int(phases), totals)
 
-    def _qa_summary(self, conn: Any, loop_row: dict[str, Any]) -> dict[str, Any] | None:
-        cycle = one(
-            conn,
-            "SELECT * FROM loop_qa_cycles WHERE loop_id = :id AND status IN"
-            " ('pending','instructions_ready','in_progress')",
-            {"id": loop_row["id"]},
+    def _load_qa_summary(self, conn: Any, loop_id: str) -> dict[str, Any] | None:
+        return self._qa_summary_from(
+            rows(
+                conn,
+                "SELECT * FROM loop_qa_cycles WHERE loop_id = :id ORDER BY cycle_number",
+                {"id": loop_id},
+            )
         )
-        latest = cycle or one(
-            conn,
-            "SELECT * FROM loop_qa_cycles WHERE loop_id = :id ORDER BY cycle_number DESC",
-            {"id": loop_row["id"]},
+
+    def _load_progress(self, conn: Any, loop_id: str) -> dict[str, int]:
+        return self._progress_from(
+            one(
+                conn,
+                "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL"
+                " THEN 1 ELSE 0 END), 0) AS completed, COALESCE(SUM(CASE WHEN archived_at IS NOT"
+                " NULL AND completed_at IS NULL THEN 1 ELSE 0 END), 0) AS archived"
+                " FROM cards WHERE loop_id = :id AND kind IN ('ticket','qa')",
+                {"id": loop_id},
+            )
         )
-        if latest is None:
-            return None
-        return {
-            "cycle_id": latest["id"],
-            "cycle_number": latest["cycle_number"],
-            "status": latest["status"],
-            "card_id": latest["card_id"],
-            "open": cycle is not None,
-        }
 
     def serialize(
         self, conn: Any, board_id: str, loop_row: dict[str, Any]
@@ -658,23 +706,111 @@ class LoopService:
             kind: self._document_state(kind, documents, approvals, stale)
             for kind in DOCUMENT_KINDS
         }
-        entry["plan"] = self._plan_summary(conn, loop_row)
-        entry["qa"] = self._qa_summary(conn, loop_row)
-        progress = one(
-            conn,
-            "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL"
-            " THEN 1 ELSE 0 END), 0) AS completed, COALESCE(SUM(CASE WHEN archived_at IS NOT"
-            " NULL AND completed_at IS NULL THEN 1 ELSE 0 END), 0) AS archived"
-            " FROM cards WHERE loop_id = :id AND kind IN ('ticket','qa')",
-            {"id": loop_id},
-        ) or {"total": 0, "completed": 0, "archived": 0}
-        entry["progress"] = {
-            "ticket_total": int(progress["total"]),
-            "ticket_completed": int(progress["completed"]),
-            "ticket_archived_incomplete": int(progress["archived"]),
-        }
+        entry["plan"] = self._load_plan_summary(conn, loop_id)
+        entry["qa"] = self._load_qa_summary(conn, loop_id)
+        entry["progress"] = self._load_progress(conn, loop_id)
         entry["warnings"] = self._warnings(entry, documents, approvals, stale)
         return entry
+
+    def serialize_many(
+        self, conn: Any, board_id: str, loop_rows: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Serialize a whole board's Loops with a constant number of statements.
+
+        The overview renders every Loop of a board, so loading documents, approvals, plans, QA and
+        progress per Loop made the response cost grow with the number of Loops.
+        """
+        if not loop_rows:
+            return []
+        documents = self._documents_by_loop(conn)
+        approvals = self._approvals_by_loop(conn)
+        plans = {
+            row["loop_id"]: row
+            for row in rows(
+                conn,
+                "SELECT * FROM loop_plans WHERE status = 'active'"
+                " AND loop_id IN (SELECT id FROM loops)",
+            )
+        }
+        phase_counts = {
+            row["loop_id"]: int(row["total"])
+            for row in rows(
+                conn,
+                "SELECT loop_id, COUNT(*) AS total FROM loop_phases"
+                " WHERE loop_id IN (SELECT id FROM loops) GROUP BY loop_id",
+            )
+        }
+        plan_totals = {
+            row["loop_id"]: row
+            for row in rows(
+                conn,
+                "SELECT i.loop_id AS loop_id, COUNT(*) AS total,"
+                " COALESCE(SUM(CASE WHEN c.completed_at IS NOT NULL THEN 1 ELSE 0 END), 0)"
+                " AS completed FROM loop_plan_items i LEFT JOIN cards c ON c.plan_item_id = i.id"
+                " WHERE i.loop_id IN (SELECT id FROM loops) GROUP BY i.loop_id",
+            )
+        }
+        cycles: dict[str, list[dict[str, Any]]] = {}
+        for cycle in rows(
+            conn,
+            "SELECT * FROM loop_qa_cycles WHERE loop_id IN (SELECT id FROM loops)"
+            " ORDER BY cycle_number",
+        ):
+            cycles.setdefault(cycle["loop_id"], []).append(cycle)
+        progress = {
+            row["loop_id"]: self._progress_from(row)
+            for row in rows(
+                conn,
+                "SELECT loop_id, COUNT(*) AS total,"
+                " COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS"
+                " completed, COALESCE(SUM(CASE WHEN archived_at IS NOT NULL AND completed_at IS"
+                " NULL THEN 1 ELSE 0 END), 0) AS archived FROM cards"
+                " WHERE kind IN ('ticket','qa') AND loop_id IN (SELECT id FROM loops)"
+                " GROUP BY loop_id",
+            )
+        }
+        entries: list[dict[str, Any]] = []
+        for loop_row in loop_rows:
+            loop_id = loop_row["id"]
+            loop_documents = documents.get(loop_id) or self._empty_documents()
+            loop_approvals = approvals.get(loop_id, {})
+            stale = self._stale_reasons(loop_documents, loop_approvals)
+            entry = dict(loop_row)
+            entry["board_id"] = board_id
+            entry["documents"] = {
+                kind: self._document_state(kind, loop_documents, loop_approvals, stale)
+                for kind in DOCUMENT_KINDS
+            }
+            entry["plan"] = self._plan_summary_from(
+                plans.get(loop_id),
+                phase_counts.get(loop_id, 0),
+                plan_totals.get(loop_id),
+            )
+            entry["qa"] = self._qa_summary_from(cycles.get(loop_id, []))
+            entry["progress"] = progress.get(loop_id) or self._progress_from(None)
+            entry["warnings"] = self._warnings(entry, loop_documents, loop_approvals, stale)
+            entries.append(entry)
+        return entries
+
+    def _documents_by_loop(self, conn: Any) -> dict[str, dict[str, dict[str, Any]]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for record in rows(
+            conn,
+            "SELECT * FROM loop_documents WHERE (is_current = 1 OR is_approved = 1)"
+            " AND loop_id IN (SELECT id FROM loops) ORDER BY kind, revision_number",
+        ):
+            grouped.setdefault(record["loop_id"], []).append(record)
+        return {loop_id: self._document_snapshot(records) for loop_id, records in grouped.items()}
+
+    def _approvals_by_loop(self, conn: Any) -> dict[str, dict[str, dict[str, Any]]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for record in rows(
+            conn,
+            "SELECT * FROM loop_approvals WHERE loop_id IN (SELECT id FROM loops)"
+            " ORDER BY created_at DESC, rowid DESC",
+        ):
+            grouped.setdefault(record["loop_id"], []).append(record)
+        return {loop_id: self._latest_approvals(records) for loop_id, records in grouped.items()}
 
     def _warnings(
         self,

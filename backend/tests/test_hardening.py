@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from conftest import Api, loop_id
@@ -20,7 +20,9 @@ from app.core.security import (
     verify_password,
 )
 from app.main import create_app
+from app.schemas.auth import Scope
 from app.schemas.boards import BoardCreate
+from app.services import Services
 from app.services.common import request_fingerprint
 from app.storage.sqlite import utcnow
 
@@ -58,10 +60,46 @@ def test_short_explicit_secret_is_replaced(tmp_path: Path) -> None:
     assert (settings.data_dir / SECRET_FILE_NAME).exists()
 
 
+def test_a_second_process_cannot_use_the_same_data_directory(tmp_path: Path) -> None:
+    """The per-board locks, the rate limiter and the session secret live in one process."""
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        secret_key="test-secret",
+        bootstrap_password="test-password",
+    )
+    first = Services(settings)
+    first.initialize()
+    second = Services(settings)
+    try:
+        with pytest.raises(RuntimeError) as failure:
+            second.initialize()
+        message = str(failure.value)
+        assert "already in use" in message
+        assert "TRALALA_DATA_DIR" in message
+        assert (settings.data_dir / ".process.lock").exists()
+    finally:
+        second.shutdown()
+        first.shutdown()
+    # The lock is released with the process, so the directory is usable again.
+    third = Services(settings)
+    third.initialize()
+    third.shutdown()
+
+
 def test_meta_reports_sqlite_capabilities(api: Api) -> None:
     body = api.data(api.get("/api/v1/meta"))
     assert isinstance(body["features"]["fts5"], bool)
     assert body["features"]["idempotency"] is True
+
+
+def test_meta_lists_exactly_the_grantable_token_scopes(api: Api) -> None:
+    body = api.data(api.get("/api/v1/meta"))
+    grantable = set(body["token_scopes"])
+    # The Settings page renders this list, so it must match what a token may actually hold.
+    assert grantable == set(get_args(Scope))
+    assert {"loops:read", "loops:write", "loops:generate", "history:read"} <= grantable
+    assert "loops:review" not in grantable
+    assert set(body["scopes"]) >= grantable
 
 
 def test_interrupted_board_creation_is_recoverable(api: Api) -> None:

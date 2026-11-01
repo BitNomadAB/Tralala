@@ -7,6 +7,7 @@ from ..core.config import Settings
 from ..core.errors import NotFound, ServiceUnavailable
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.migration_manager import MigrationManager, MigrationReport
+from ..storage.process_lock import DataDirectoryLock
 from ..storage.registry import Registry
 from .agents import AgentService, RoleTemplateService
 from .attachments import AttachmentService
@@ -20,6 +21,7 @@ from .lists import ListService
 from .loop_documents import LoopDocumentService
 from .loop_generation import LoopGenerationService
 from .loop_history import LoopHistoryService
+from .loop_links import LoopWorkflowLinks
 from .loop_plans import LoopPlanService
 from .loop_qa import LoopQaService
 from .loops import LoopService
@@ -48,14 +50,18 @@ class Services:
         self.loop = LoopService(self.board)
         self.loop_plan = LoopPlanService(self.board, self.loop)
         self.loop_document = LoopDocumentService(self.board, self.loop, self.loop_plan)
-        self.loop_generation = LoopGenerationService(
-            self.board, self.loop, self.loop_document
-        )
+        self.loop_links = LoopWorkflowLinks()
         self.loop_history = LoopHistoryService(self.board)
-        self.loop_qa = LoopQaService(self.board, self.loop)
-        self.loop_qa.history = self.loop_history
-        self.loop_qa.generation = self.loop_generation
-        self.loop_generation.qa = self.loop_qa
+        self.loop_generation = LoopGenerationService(
+            self.board, self.loop, self.loop_document, self.loop_links
+        )
+        self.loop_qa = LoopQaService(
+            self.board, self.loop, self.loop_history, self.loop_links
+        )
+        self.loop_links.bind(
+            start_generation=self.loop_generation.start,
+            apply_qa_instructions=self.loop_qa.apply_instructions,
+        )
         self.loop.plans = self.loop_plan
         self.list = ListService(self.board, self.loop)
         self.card = CardService(self.board, self.loop, self.loop_plan)
@@ -77,10 +83,12 @@ class Services:
         self.discussion.events = self.event
         self.mention = MentionService(settings, self.board, self.agent, self.event)
         self.comment.mentions = self.mention
+        self.data_lock = DataDirectoryLock(settings.data_dir)
         self.migration_reports: list[MigrationReport] = []
 
     def initialize(self) -> None:
-        """Registry first, then every board, before the application accepts requests."""
+        """Take the data directory, then migrate, before the application accepts requests."""
+        self.data_lock.acquire()
         self.migrations.migrate_registry()
         self.registry.bootstrap_admin()
         self.role_templates.seed_defaults()
@@ -117,6 +125,7 @@ class Services:
         self.event.shutdown()
         self.boards.close_all()
         self.registry.dispose()
+        self.data_lock.release()
 
 
 

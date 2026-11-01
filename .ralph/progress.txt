@@ -423,3 +423,27 @@ Follow-ups found while verifying:
   (`409 loop_read_only`).
 - `pnpm test:e2e` now starts from an empty `frontend/e2e/.data`, so a previous run's boards and
   appearance preferences no longer make the suite order-dependent (`E2E_KEEP_DATA=1` keeps them).
+
+
+## 2026-11-01 ? Remediation from the four analyses
+
+Analyses: `analysis/anti-reverse-engineering-analysis/2026-11-01-*`, `analysis/atam-architecture-analysis/2026-11-01-*`,
+`analysis/cynefin-context-analysis/2026-11-01-*`, `analysis/fmea/2026-11-01-*`.
+
+Delivered:
+- `storage/process_lock.py`: OS file lock on the data directory, taken before any migration, so a
+  second backend process refuses to start with an actionable message.
+- `docs/decisions/0010-loop-schema-transition-and-development-reset.md`: the no-migration cut is now a
+  recorded decision with the release requirement that replaces it.
+- Board page banner for a board that is not active: state, retry migration and the export archive.
+- `GET /boards/{id}/loops` serializes a board with a constant number of statements (11 for 5, 10 or 25
+  Loops; it was 124 for 20) and a test holds that budget.
+- `DOCUMENT_KINDS`, `LOOP_STAGES`, `APPROVAL_SCOPES` derive from the Pydantic literals; the token
+  scope list comes from `/api/v1/meta` instead of a client copy.
+- `services/loop_links.py` replaces the QA/generation attribute cycle with one typed object.
+- History provenance carries `system_prompt_sha256` instead of the prompt text.
+- FTS index drift is detected and rebuilt at startup; a generation run that loses its Loop fails with
+  `loop_closed`; a missing board database logs an integrity event.
+
+Verification: backend `pytest` green, `ruff` clean, frontend `typecheck`/`test`/`build` green,
+`pnpm test:e2e` 26/26.

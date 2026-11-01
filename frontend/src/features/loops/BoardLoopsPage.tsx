@@ -55,6 +55,21 @@ export function BoardLoopsPage() {
       }),
   });
 
+  const retryMigration = useMutation({
+    mutationFn: () => api.retryMigration(boardId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
+      queryClient.invalidateQueries({ queryKey: ["loops", boardId] });
+      toast.push({ title: "Migration retried", variant: "success" });
+    },
+    onError: (error) =>
+      toast.push({
+        title: "Migration still fails",
+        description: error instanceof ApiError ? error.message : undefined,
+        variant: "error",
+      }),
+  });
+
   if (boardQuery.isLoading) {
     return <p className="text-sm text-[var(--muted-foreground)]">Loading board…</p>;
   }
@@ -110,6 +125,38 @@ export function BoardLoopsPage() {
           </Button>
         </div>
       </div>
+
+      {board.status !== "active" && board.status !== "archived" ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs">
+          <p className="flex items-center gap-1.5 font-medium">
+            <AlertTriangle size={13} className="text-[var(--destructive)]" />
+            This board cannot be used while its status is {board.status}.
+          </p>
+          <p className="text-[var(--muted-foreground)]">
+            {board.status === "migration_failed"
+              ? "A schema upgrade stopped on this board. The Loop schema replaces the old lists and cards, so a database written before Loops cannot be converted in place; the server log names the board. Retrying only helps after the underlying problem is fixed."
+              : "The board is in maintenance or error state; retrying the migration is safe."}{" "}
+            The last backups and the export archive stay available.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => retryMigration.mutate()}
+              disabled={retryMigration.isPending}
+            >
+              Retry migration
+            </Button>
+            <a
+              className="underline"
+              href={api.exportUrl(boardId)}
+              download={`${board.name}.zip`}
+            >
+              Download export archive
+            </a>
+          </div>
+        </div>
+      ) : null}
 
       <LoopList loops={active} boardId={boardId} empty="This board has no active Loops yet." />
 

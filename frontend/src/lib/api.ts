@@ -181,6 +181,10 @@ export const api = {
     return json(await request<Actor>("/auth/me"));
   },
 
+  async meta(): Promise<{ scopes: string[]; token_scopes: string[] }> {
+    return json(await request<{ scopes: string[]; token_scopes: string[] }>("/meta"));
+  },
+
   async updatePreferences(payload: {
     theme_mode?: UserPreferences["theme_mode"];
     theme_kit?: UserPreferences["theme_kit"];

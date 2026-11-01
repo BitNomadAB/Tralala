@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import time
 import uuid
 from collections.abc import Iterator
@@ -16,6 +18,8 @@ from .schema import ensure_fts, runner
 from .sqlite import create_sqlite_engine, utcnow
 
 MAX_CACHED_BOARDS = 64
+
+logger = logging.getLogger("tralala")
 
 
 class BoardDatabaseManager:
@@ -96,6 +100,16 @@ class BoardDatabaseManager:
             if engine is None:
                 path = self.path(board_id)
                 if not path.exists():
+                    # A registry row without its database is an integrity event, not a normal 404.
+                    logger.error(
+                        json.dumps(
+                            {
+                                "event": "board_database_missing",
+                                "board_id": board_id,
+                                "path": str(path),
+                            }
+                        )
+                    )
                     raise NotFound("Board database not found")
                 engine = create_sqlite_engine(path)
                 self._engines[board_id] = engine

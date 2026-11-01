@@ -32,7 +32,9 @@ message broker.
 7. **Timestamps are ISO 8601.** Validate them at the schema boundary (`core/dates.py`); never
    accept free text for `due_at` or due-date filters.
 8. **One backend process per data directory.** Per-board locks, the rate limiter and the session
-   secret file are process-local. Do not scale out without a shared coordination store.
+   secret file are process-local. `storage/process_lock.py` takes an OS file lock at startup, so a
+   second process on the same directory refuses to start. Do not scale out without a shared
+   coordination store.
 9. **Schema changes only through Alembic revisions.** Add a revision under
    `backend/migrations/registry` or `backend/migrations/board`; never edit a released revision and
    never write DDL anywhere else. Use `batch_alter_table` for SQLite table reconstruction. The

@@ -6,7 +6,7 @@ to LIKE. It is therefore created outside the Alembic chain and never blocks a mi
 
 from __future__ import annotations
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 FTS_STATEMENTS = [
     """
@@ -60,6 +60,14 @@ FTS_STATEMENTS = [
 ]
 
 
+def _history_index_matches(conn: Connection) -> bool:
+    """External-content FTS5 reads its rows from the table, so compare the index side instead."""
+    return (
+        conn.exec_driver_sql("SELECT COUNT(*) FROM loop_history").scalar_one()
+        == conn.exec_driver_sql("SELECT COUNT(*) FROM loop_history_fts_docsize").scalar_one()
+    )
+
+
 def ensure_fts(engine: Engine) -> bool:
     """Create the FTS tables/triggers when supported; rebuild only when first created."""
     try:
@@ -75,6 +83,12 @@ def ensure_fts(engine: Engine) -> bool:
             if not existed:
                 conn.exec_driver_sql("INSERT INTO cards_fts(cards_fts) VALUES('rebuild')")
             if not history_existed:
+                conn.exec_driver_sql(
+                    "INSERT INTO loop_history_fts(loop_history_fts) VALUES('rebuild')"
+                )
+            elif not _history_index_matches(conn):
+                # A restore or a copy can leave the index behind the table; rebuilding is cheap
+                # and turns a silently empty history search into a correct one.
                 conn.exec_driver_sql(
                     "INSERT INTO loop_history_fts(loop_history_fts) VALUES('rebuild')"
                 )

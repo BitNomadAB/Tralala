@@ -188,6 +188,39 @@ def test_a_board_holds_independent_loops(
     assert crossed.json()["error"]["code"] == "loop_mismatch"
 
 
+def test_loop_overview_cost_does_not_grow_with_the_number_of_loops(
+    api: Api, board: dict[str, Any]
+) -> None:
+    """The board overview renders every Loop, so its statements must stay constant."""
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    counted = {"statements": 0}
+
+    def count_statement(*_args: Any, **_kwargs: Any) -> None:
+        counted["statements"] += 1
+
+    event.listen(Engine, "before_cursor_execute", count_statement)
+    try:
+        loops_url = f"/api/v1/boards/{board['id']}/loops"
+        api.data(api.post(loops_url, json={"name": "First"}))
+        counted["statements"] = 0
+        api.data(api.get(loops_url))
+        small = counted["statements"]
+
+        for index in range(18):
+            api.data(api.post(loops_url, json={"name": f"Loop {index}"}))
+        counted["statements"] = 0
+        loops = api.data(api.get(loops_url))
+        large = counted["statements"]
+    finally:
+        event.remove(Engine, "before_cursor_execute", count_statement)
+
+    assert len(loops) == 19
+    assert large <= small + 1, (small, large)
+    assert large <= 15, large
+
+
 def test_board_ticket_aggregate_names_the_owning_loop(
     api: Api, board: dict[str, Any], loop: dict[str, Any], second_loop: dict[str, Any]
 ) -> None:
@@ -529,6 +562,64 @@ def test_publication_is_idempotent(api: Api, board: dict[str, Any], loop: dict[s
     assert retry.json()["error"]["code"] == "version_conflict"
     cards = api.data(api.get(f"{_base(api, board, loop)}/cards"))
     assert len(cards) == 1
+
+
+def test_readiness_shown_and_readiness_enforced_agree(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    """The endpoint and the completion transition must never disagree about a blocker."""
+    second_phase = str(uuid.uuid4())
+    first_ticket = str(uuid.uuid4())
+    second_ticket = str(uuid.uuid4())
+    api.data(
+        api.put(
+            f"{_base(api, board, loop)}/documents/info",
+            json={"content": "Users must confirm their email address."},
+        )
+    )
+    _submit_analysis(api, board, loop)
+    _approve_analysis(api, board, loop)
+    _publish_plan(
+        api,
+        board,
+        loop,
+        _plan(
+            phase_id=str(uuid.uuid4()),
+            ticket_id=first_ticket,
+            extra_phases=[
+                {
+                    "id": second_phase,
+                    "number": 2,
+                    "name": "Second phase",
+                    "objective": "Ship it",
+                    "prerequisite_phase_ids": [],
+                    "tickets": [
+                        {
+                            "id": second_ticket,
+                            "title": "Publish the result",
+                            "prerequisite_ticket_ids": [first_ticket],
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+    cards = {card["id"]: card for card in api.data(api.get(f"{_base(api, board, loop)}/cards"))}
+    readiness = api.data(api.get(f"{_base(api, board, loop)}/readiness"))
+    blocked = next(
+        item for item in readiness["items"] if item.get("card_id") == cards[second_ticket]["id"]
+    )
+    assert blocked["ready"] is False
+    assert blocked["blockers"]
+
+    attempt = api.patch(
+        f"{_base(api, board, loop)}/cards/{cards[second_ticket]['id']}",
+        json={"version": cards[second_ticket]["version"], "completed": True},
+    )
+    assert attempt.status_code == 409
+    body = attempt.json()["error"]
+    assert body["code"] == "ticket_blocked"
+    assert body["details"]["blockers"] == blocked["blockers"]
 
 
 def test_approved_ticket_scope_cannot_be_edited_through_a_card_endpoint(
@@ -917,6 +1008,87 @@ def test_completed_loop_is_read_only_everywhere(
     assert history[0]["qa_status"] == "accepted"
 
 
+def test_read_only_guard_covers_every_card_scoped_mutation(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    """One retrofit endpoint that forgets the guard must not slip through a per-endpoint test."""
+    _, card = _ready_loop(api, board, loop)
+    base = _base(api, board, loop)
+    cards = f"{base}/cards/{card['id']}"
+    board_url = f"/api/v1/boards/{board['id']}"
+    comment = api.data(api.post(f"{cards}/comments", json={"content": "Before completion"}))
+    checklist = api.data(api.post(f"{cards}/checklists", json={"title": "Before"}))
+    item = api.data(
+        api.post(f"{board_url}/checklists/{checklist['id']}/items", json={"text": "Before"})
+    )
+    attachment = api.data(
+        api.post(
+            f"{board_url}/attachments",
+            params={"card_id": card["id"], "filename": "before.txt"},
+            content=b"before completion",
+            headers={"Content-Type": "text/plain"},
+        )
+    )
+    lists = api.data(api.get(f"{base}/lists"))
+
+    _complete_delivery(api, board, loop)
+    api.data(
+        api.post(
+            f"{base}/completion",
+            json={
+                "version": _version(api, board, loop),
+                "accepted": True,
+                "qa_status": "passed",
+                "attestation": {"scope": "smoke", "results": "passed"},
+            },
+        )
+    )
+    version = api.data(api.get(cards))["version"]
+
+    attempts = {
+        "card update": api.patch(cards, json={"version": version, "title": "After"}),
+        "card move": api.post(
+            f"{cards}/move",
+            json={"version": version, "list_id": lists[0]["id"], "position": 0},
+        ),
+        "card archive": api.post(f"{cards}/archive"),
+        "card confirm": api.post(f"{cards}/confirm", json={"version": version, "note": "done"}),
+        "comment create": api.post(f"{cards}/comments", json={"content": "After"}),
+        "comment update": api.patch(
+            f"{board_url}/comments/{comment['id']}", json={"content": "After"}
+        ),
+        "comment delete": api.delete(f"{board_url}/comments/{comment['id']}"),
+        "checklist create": api.post(f"{cards}/checklists", json={"title": "After"}),
+        "checklist update": api.patch(
+            f"{board_url}/checklists/{checklist['id']}", json={"title": "After"}
+        ),
+        "checklist delete": api.delete(f"{board_url}/checklists/{checklist['id']}"),
+        "item create": api.post(
+            f"{board_url}/checklists/{checklist['id']}/items", json={"text": "After"}
+        ),
+        "item update": api.patch(
+            f"{board_url}/checklist-items/{item['id']}", json={"completed": True}
+        ),
+        "item delete": api.delete(f"{board_url}/checklist-items/{item['id']}"),
+        "attachment upload": api.post(
+            f"{board_url}/attachments",
+            params={"card_id": card["id"], "filename": "after.txt"},
+            content=b"after completion",
+            headers={"Content-Type": "text/plain"},
+        ),
+        "attachment delete": api.delete(f"{board_url}/attachments/{attachment['id']}"),
+        "discussion create": api.post(
+            f"{board_url}/discussions",
+            json={"card_id": card["id"], "goal": "After completion"},
+        ),
+    }
+    rejected = {
+        name: (response.status_code, response.json().get("error", {}).get("code"))
+        for name, response in attempts.items()
+    }
+    assert rejected == {name: (409, "loop_read_only") for name in attempts}
+
+
 def test_history_search_covers_decisions_and_ticket_keys(
     api: Api, board: dict[str, Any], loop: dict[str, Any]
 ) -> None:
@@ -968,6 +1140,38 @@ def test_legacy_import_preserves_bytes_and_creates_no_tickets(
     assert envelope["raw_text"] == payload["raw_text"]
     assert envelope["documents"][0]["content"] == payload["documents"]["info"]
     assert api.data(api.get(f"/api/v1/boards/{board['id']}/loops")) == []
+
+
+def test_history_search_index_recovers_from_drift(api: Api, board: dict[str, Any]) -> None:
+    """A restore or copy can leave the FTS index behind the table; startup rebuilds it."""
+    from app.storage.schema.fts import ensure_fts
+
+    api.data(
+        api.post(
+            f"/api/v1/boards/{board['id']}/history/import",
+            json={
+                "loop_name": "Indexed legacy",
+                "raw_text": "Zebra crossing notes",
+                "documents": {"info": "Only the searchable summary matters here."},
+            },
+        )
+    )
+    services = api.client.app.state.services
+    engine = services.boards.open(board["id"])
+    if not services.boards.fts_available(board["id"]):
+        return
+    with engine.begin() as conn:
+        # The index side loses its rows while the content table keeps them.
+        conn.exec_driver_sql("DELETE FROM loop_history_fts_docsize")
+        assert (
+            conn.exec_driver_sql("SELECT COUNT(*) FROM loop_history_fts_docsize").scalar_one() == 0
+        )
+
+    assert ensure_fts(engine) is True
+    found = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/history", params={"q": "Zebra"})
+    )
+    assert [item["loop_name"] for item in found] == ["Indexed legacy"]
 
 
 def test_qa_not_applicable_needs_a_human_decision(

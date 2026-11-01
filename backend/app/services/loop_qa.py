@@ -32,7 +32,9 @@ from .common import (
     rows,
     store_idempotency,
 )
+from .loop_history import LoopHistoryService
 from .loop_identifiers import format_ticket_key
+from .loop_links import LoopWorkflowLinks
 from .loops import LoopService
 
 QA_PHASE_NAME = "Verification"
@@ -85,12 +87,18 @@ def render_qa_task(instructions: QaInstructions, cycle_number: int) -> str:
 
 
 class LoopQaService:
-    def __init__(self, board_service: BoardService, loop_service: LoopService) -> None:
+    def __init__(
+        self,
+        board_service: BoardService,
+        loop_service: LoopService,
+        history_service: LoopHistoryService,
+        links: LoopWorkflowLinks,
+    ) -> None:
         self.board_service = board_service
         self.boards = board_service.boards
         self.loops = loop_service
-        self.history: Any = None
-        self.generation: Any = None
+        self.history = history_service
+        self.links = links
 
     # --- helpers ---------------------------------------------------------------
 
@@ -364,10 +372,11 @@ class LoopQaService:
         self, actor: ActorContext, board_id: str, loop_id: str
     ) -> None:
         """Start QA instruction generation when a provider exists; never block acceptance."""
-        if self.generation is None:
+        start = self.links.start_generation
+        if start is None:
             return
         try:
-            self.generation.start(
+            start(
                 actor,
                 board_id,
                 loop_id,

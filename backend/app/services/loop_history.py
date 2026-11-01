@@ -29,6 +29,37 @@ LEGACY_LABEL = "Imported legacy reference - may not follow the current standard"
 MAX_SEARCH_TEXT = 200_000
 
 
+def generation_provenance(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prove which agent and instructions produced a document without handing over the prompt."""
+    return [
+        {
+            "run_id": run["id"],
+            "purpose": run["purpose"],
+            "status": run["status"],
+            "agent_id": run["agent_id"],
+            "agent_name": run["agent_name"],
+            "model": run["model"],
+            "system_prompt_sha256": _prompt_digest(run["role_snapshot_json"]),
+            "usage": json.loads(run["usage_json"] or "{}"),
+            "created_at": run["created_at"],
+            "finished_at": run["finished_at"],
+            "error_code": run["error_code"],
+        }
+        for run in runs
+    ]
+
+
+def _prompt_digest(role_snapshot_json: str | None) -> str | None:
+    try:
+        snapshot = json.loads(role_snapshot_json or "{}")
+    except (TypeError, ValueError):
+        return None
+    prompt = snapshot.get("system_prompt") if isinstance(snapshot, dict) else None
+    if not isinstance(prompt, str) or not prompt:
+        return None
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
 def _canonical(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
 
@@ -312,22 +343,7 @@ class LoopHistoryService:
                     for result in qa_results
                 ],
             },
-            "generation_provenance": [
-                {
-                    "run_id": run["id"],
-                    "purpose": run["purpose"],
-                    "status": run["status"],
-                    "agent_id": run["agent_id"],
-                    "agent_name": run["agent_name"],
-                    "model": run["model"],
-                    "role_snapshot": json.loads(run["role_snapshot_json"] or "{}"),
-                    "usage": json.loads(run["usage_json"] or "{}"),
-                    "created_at": run["created_at"],
-                    "finished_at": run["finished_at"],
-                    "error_code": run["error_code"],
-                }
-                for run in runs
-            ],
+            "generation_provenance": generation_provenance(runs),
             "activity": [
                 {
                     "actor_id": entry["actor_id"],

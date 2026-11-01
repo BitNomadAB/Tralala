@@ -8,7 +8,7 @@ import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
-import { SCOPES, type Credential } from "@/lib/types";
+import type { Credential } from "@/lib/types";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { THEME_KITS, useTheme, type ThemeKit, type ThemeMode } from "@/themes/ThemeProvider";
 import { isWebMcpAvailable } from "@/webmcp/capability";
@@ -41,6 +41,14 @@ export function SettingsPage() {
     queryFn: () => api.listCredentials(),
     enabled: isAdmin,
   });
+  // The server owns which scopes a token may hold, so the form never keeps its own copy.
+  const metaQuery = useQuery({
+    queryKey: ["api-meta"],
+    queryFn: () => api.meta(),
+    enabled: isAdmin,
+    staleTime: 5 * 60_000,
+  });
+  const grantableScopes = metaQuery.data?.token_scopes ?? [];
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<string[]>(["boards:read", "cards:read"]);
@@ -241,7 +249,7 @@ export function SettingsPage() {
                 OpenAPI docs
               </a>
               <span>
-                Scopes: <code>{SCOPES.join(", ")}</code>
+                Grantable scopes: <code>{grantableScopes.join(", ") || "loading…"}</code>
               </span>
             </div>
           </div>
@@ -268,7 +276,7 @@ export function SettingsPage() {
                   <legend className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
                     Scopes
                   </legend>
-                  {SCOPES.map((scope) => (
+                  {grantableScopes.map((scope) => (
                     <label key={scope} className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"

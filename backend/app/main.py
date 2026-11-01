@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, get_args
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -210,12 +210,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def meta(request: Request) -> dict:
         get_context(request)
         from .core.context import SCOPES
+        from .schemas.auth import Scope
 
         return {
             "success": True,
             "data": {
                 "api_version": "v1",
                 "scopes": list(SCOPES),
+                # The token schema is the only authority for what a token may hold, so the
+                # Settings page reads the grantable subset from here instead of keeping a copy.
+                "token_scopes": [str(scope) for scope in get_args(Scope)],
                 "features": {
                     "webmcp": "client-side capability detection",
                     "fts5": sqlite_supports_fts5(),

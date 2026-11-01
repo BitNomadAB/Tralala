@@ -7,14 +7,14 @@ structures, so a model cannot invent, omit or reorder work only in the summary v
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import Field, field_validator
 
 from .common import Id, LongText, Name, OutModel, Priority, StrictModel
 
 DocumentKind = Literal["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"]
-DOCUMENT_KINDS: tuple[str, ...] = ("info", "analysis_ai", "analysis", "roadmap_ai", "roadmap")
+DOCUMENT_KINDS: tuple[str, ...] = get_args(DocumentKind)
 LoopStage = Literal[
     "draft",
     "analysis_review",
@@ -27,7 +27,10 @@ LoopStage = Literal[
     "completed",
     "cancelled",
 ]
+# One authority per enumeration: the literals above feed both the validators and the services.
+LOOP_STAGES: tuple[str, ...] = get_args(LoopStage)
 ApprovalScope = Literal["analysis", "roadmap", "implementation", "qa"]
+APPROVAL_SCOPES: tuple[str, ...] = get_args(ApprovalScope)
 RequiredActor = Literal["any", "human"]
 ExecutionMode = Literal["normal", "pre_phase_gate"]
 

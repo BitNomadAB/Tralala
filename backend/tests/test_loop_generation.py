@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import threading
 import time
 from typing import Any
 
@@ -153,3 +156,78 @@ def test_interrupted_runs_are_marked_failed_at_startup(
     run = api.data(api.get(f"{_base(board, loop)}/generation-runs/{started['id']}"))
     assert run["status"] == "failed"
     assert run["error_code"] == "interrupted"
+
+def test_history_provenance_hashes_the_prompt_instead_of_copying_it() -> None:
+    from app.services.loop_history import generation_provenance
+
+    prompt = "You are the technical analysis agent for a software change initiative."
+    provenance = generation_provenance(
+        [
+            {
+                "id": "run-1",
+                "purpose": "analysis",
+                "status": "completed",
+                "agent_id": "agent-1",
+                "agent_name": "planner",
+                "model": "test-model",
+                "role_snapshot_json": json.dumps(
+                    {"system_prompt": prompt, "agent_name": "planner", "purpose": "analysis"}
+                ),
+                "usage_json": json.dumps({"total_tokens": 12}),
+                "created_at": "2026-01-01T00:00:00Z",
+                "finished_at": "2026-01-01T00:00:01Z",
+                "error_code": None,
+            }
+        ]
+    )
+    assert set(provenance[0]) == {
+        "run_id",
+        "purpose",
+        "status",
+        "agent_id",
+        "agent_name",
+        "model",
+        "system_prompt_sha256",
+        "usage",
+        "created_at",
+        "finished_at",
+        "error_code",
+    }
+    expected = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    assert provenance[0]["system_prompt_sha256"] == expected
+    assert prompt not in json.dumps(provenance)
+
+def test_a_run_that_loses_its_loop_names_the_reason(
+    api: Api, board: dict[str, Any], loop: dict[str, Any], monkeypatch: Any
+) -> None:
+    _agent(api)
+    api.data(api.put(f"{_base(board, loop)}/documents/info", json={"content": "Intent"}))
+    started = threading.Event()
+
+    def slow_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        started.set()
+        time.sleep(0.3)
+        return {
+            "ok": True,
+            "error": None,
+            "text": _analysis_json(),
+            "model": "test-model",
+            "usage": {},
+        }
+
+    monkeypatch.setattr(runtime, "call_completion", slow_call)
+    run = api.data(
+        api.post(f"{_base(board, loop)}/generation-runs", json={"purpose": "analysis"})
+    )
+    assert started.wait(5)
+    loop_row = api.data(api.get(_base(board, loop)))
+    api.data(
+        api.post(
+            f"{_base(board, loop)}/cancel",
+            json={"version": loop_row["version"], "reason": "Stopping the Loop"},
+        )
+    )
+    finished = _wait_run(api, f"{_base(board, loop)}/generation-runs", run["id"])
+    assert finished["status"] == "failed"
+    assert finished["error_code"] == "loop_closed"
+    assert "not retryable" in (finished["error_message"] or "")

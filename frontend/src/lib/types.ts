@@ -492,22 +492,6 @@ export interface PageMeta {
   [key: string]: unknown;
 }
 
-export const SCOPES = [
-  "boards:read",
-  "boards:write",
-  "boards:admin",
-  "cards:read",
-  "cards:write",
-  "comments:write",
-  "agents:read",
-  "agents:write",
-  "agents:admin",
-  "discussions:read",
-  "discussions:write",
-  "discussions:admin",
-  "discussions:vote",
-] as const;
-
 export const ROLES = ["admin", "member"] as const;
 
 export type Role = (typeof ROLES)[number];

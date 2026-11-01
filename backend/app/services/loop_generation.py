@@ -19,18 +19,20 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from ..core.context import ActorContext
-from ..core.errors import Conflict, NotFound, ServiceUnavailable, ValidationFailure
+from ..core.errors import ApiError, Conflict, NotFound, ServiceUnavailable, ValidationFailure
 from ..schemas.loops import AnalysisPayload, GenerationRequest, PlanPayload, QaInstructions
 from ..storage.sqlite import utcnow
 from . import runtime
 from .boards import BoardService
 from .common import one, request_fingerprint, rows, run_idempotent
 from .loop_documents import LoopDocumentService
+from .loop_links import LoopWorkflowLinks
 from .loops import LoopService
 
 logger = logging.getLogger("tralala.loop_generation")
 
 MAX_REPAIRS = 2
+CLOSED_LOOP_CODES = {"loop_read_only", "loop_not_found"}
 MAX_OUTPUT_CHARS = 200_000
 FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
@@ -88,6 +90,7 @@ class LoopGenerationService:
         board_service: BoardService,
         loop_service: LoopService,
         document_service: LoopDocumentService,
+        links: LoopWorkflowLinks,
     ) -> None:
         self.board_service = board_service
         self.boards = board_service.boards
@@ -95,7 +98,7 @@ class LoopGenerationService:
         self.settings = board_service.settings
         self.loops = loop_service
         self.documents = document_service
-        self.qa: Any = None
+        self.links = links
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="loop-generation")
         self._futures: set[Future[None]] = set()
 
@@ -491,6 +494,31 @@ class LoopGenerationService:
                 return
             self._promote(board_id, loop_id, run_id, captured, result)
 
+        except ApiError as exc:
+            if exc.code in CLOSED_LOOP_CODES:
+                # The Loop closed or was archived while the model was working: nothing is wrong
+                # with the provider, so name the real cause instead of a generic failure.
+                self._finish(
+                    board_id,
+                    loop_id,
+                    run_id,
+                    status="failed",
+                    error_code="loop_closed",
+                    error_message=exc.message,
+                    details=None,
+                    retryable=False,
+                )
+                return
+            logger.exception("loop generation run failed", extra={"run_id": run_id})
+            self._finish(
+                board_id,
+                loop_id,
+                run_id,
+                status="failed",
+                error_code="generation_failed",
+                error_message=f"{type(exc).__name__}",
+                retryable=True,
+            )
         except Exception as exc:  # noqa: BLE001 - a run failure must not break the process
             logger.exception("loop generation run failed", extra={"run_id": run_id})
             self._finish(
@@ -555,9 +583,7 @@ class LoopGenerationService:
                     run_id=run_id, provenance=provenance
                 )
             else:
-                if self.qa is None:
-                    raise ServiceUnavailable("QA workflow is unavailable")
-                outputs = self.qa.apply_instructions(
+                outputs = self.links.apply_qa_instructions(
                     conn,
                     loop,
                     QaInstructions.model_validate(payload),
