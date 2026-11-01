@@ -45,6 +45,7 @@ def test_builtin_role_templates_are_seeded(api: Api) -> None:
         "security_engineer",
         "ux_designer",
         "customer",
+        "analytics_agent",
     } <= keys
     assert all(role["system_prompt"].strip() for role in roles)
     assert all(role["customized"] is False for role in roles)

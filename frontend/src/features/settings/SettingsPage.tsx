@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { Copy, GitBranch, KeyRound, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import { ApiError, api } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 import type { Credential } from "@/lib/types";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { Link } from "react-router-dom";
 import { THEME_KITS, useTheme, type ThemeKit, type ThemeMode } from "@/themes/ThemeProvider";
 import { isWebMcpAvailable } from "@/webmcp/capability";
 import { BoardTemplatesCard } from "./BoardTemplatesCard";
@@ -176,6 +177,24 @@ export function SettingsPage() {
           ))}
         </div>
       </div>
+
+      {isAdmin ? (
+        <div className="card-surface p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold">GitHub repositories</h2>
+            <Link
+              to="/settings/repositories"
+              className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs hover:bg-[var(--surface-raised)]"
+            >
+              <GitBranch size={14} /> Manage repositories
+            </Link>
+          </div>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+            Read-only repository access for the Analytics agent. Several repositories can serve one
+            board; the access token is stored sealed and never shown again.
+          </p>
+        </div>
+      ) : null}
 
       <BoardTemplatesCard />
 

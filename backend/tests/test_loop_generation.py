@@ -231,3 +231,74 @@ def test_a_run_that_loses_its_loop_names_the_reason(
     assert finished["status"] == "failed"
     assert finished["error_code"] == "loop_closed"
     assert "not retryable" in (finished["error_message"] or "")
+
+def _agent_named(
+    api: Api,
+    name: str,
+    *,
+    connection_type: str = "openai_compatible",
+    enabled: bool = True,
+    role_key: str = "qa_engineer",
+) -> dict[str, Any]:
+    roles = api.data(api.get("/api/v1/role-templates"))
+    role = next(entry for entry in roles if entry["builtin_key"] == role_key)
+    return api.data(
+        api.post(
+            "/api/v1/agents",
+            json={
+                "name": name,
+                "connection_type": connection_type,
+                "base_url": "http://127.0.0.1:8099/v1",
+                "model": f"{name}-model",
+                "role_template_id": role["id"],
+                "enabled": enabled,
+            },
+        )
+    )
+
+
+def test_generation_uses_the_agent_the_caller_picks(
+    api: Api, board: dict[str, Any], loop: dict[str, Any], monkeypatch: Any
+) -> None:
+    _agent(api)
+    chosen = _agent_named(api, "review agent", role_key="analytics_agent")
+    api.data(api.put(f"{_base(board, loop)}/documents/info", json={"content": "Intent"}))
+    used: dict[str, Any] = {}
+
+    def fake_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        used["agent"] = agent_row
+        used["system_prompt"] = kwargs.get("system_prompt", "")
+        return {"ok": True, "error": None, "text": _analysis_json(), "model": "m", "usage": {}}
+
+    monkeypatch.setattr(runtime, "call_completion", fake_call)
+    started = api.data(
+        api.post(
+            f"{_base(board, loop)}/generation-runs",
+            json={"purpose": "analysis", "agent_id": chosen["id"]},
+        )
+    )
+    run = _wait_run(api, f"{_base(board, loop)}/generation-runs", started["id"])
+    assert run["status"] == "completed", run
+    assert used["agent"]["id"] == chosen["id"]
+    assert run["agent_name"] == "review agent"
+    # The agent's role shapes the prompt, and the machine contract still comes last.
+    assert "You are the Analytics agent" in used["system_prompt"]
+    assert "JSON schema" in used["system_prompt"]
+    prompt = used["system_prompt"]
+    assert prompt.index("Analytics agent") < prompt.index("JSON schema")
+
+
+def test_generation_refuses_an_agent_that_cannot_reach_a_model(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    disabled = _agent_named(api, "paused agent", enabled=False)
+    a2a = _agent_named(api, "a2a agent", connection_type="a2a")
+    api.data(api.put(f"{_base(board, loop)}/documents/info", json={"content": "Intent"}))
+    attempts = ((disabled["id"], "Agent is disabled"), (a2a["id"], "connection type"))
+    for agent_id, expected in attempts:
+        response = api.post(
+            f"{_base(board, loop)}/generation-runs",
+            json={"purpose": "analysis", "agent_id": agent_id},
+        )
+        assert response.status_code in {422, 503}, response.text
+        assert expected in response.text, response.text

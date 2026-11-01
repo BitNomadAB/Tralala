@@ -42,6 +42,12 @@ provider key unreadable.
 8. **The first administrator's password is never a published word.** A generated password is
    written to `<data>/.bootstrap-password` (owner-only) instead of the log; the file is deleted after
    the first sign-in.
+   Note (2026-11-01): during the test phase the repository publishes one shared starting password in
+   `README.md` and `.env.example` so a fresh clone can sign in immediately. The rule above still
+   describes the application: without an explicit `TRALALA_BOOTSTRAP_PASSWORD`, or with a
+   placeholder, a random password is generated, and the shared value stops mattering as soon as the
+   account's password is changed. It must be removed from the repository before the first public
+   release.
 
 ## Consequences
 

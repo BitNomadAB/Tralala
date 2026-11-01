@@ -20,11 +20,21 @@ class BoardCreate(StrictModel):
         max_length=64,
         description="Optional saved template whose description, lists and labels are applied",
     )
+    repository_ids: list[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Repositories this board is about; chosen from the repository list",
+    )
 
 
 class BoardUpdate(StrictModel):
     name: Name | None = None
     description: LongText | None = None
+    repository_ids: list[str] | None = Field(
+        default=None,
+        max_length=50,
+        description="Replace the board's repository selection; omit to keep it",
+    )
 
 
 class BoardOut(OutModel):
@@ -40,6 +50,7 @@ class BoardOut(OutModel):
     loop_count: int = 0
     list_count: int = 0
     card_count: int = 0
+    repository_ids: list[str] = Field(default_factory=list)
 
 
 class BoardListOut(OutModel):

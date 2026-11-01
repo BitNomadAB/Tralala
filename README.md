@@ -12,6 +12,31 @@ App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / Ro
 - Spec: `Tralala — Product Requirements & Technical Architecture Specification v1.0`
 - Development method: Ralph Loop (`.ralph/`, `AGENTS.md`)
 
+## Test version: the administrator account
+
+This build is a **test version**, so every instance started from the instructions below uses the same
+administrator account. Nothing else has to be configured to get in:
+
+| Username | Password |
+| --- | --- |
+| `admin` | `tralala-dev-1` |
+
+Sign in at <http://localhost:5173>, then change it under **Settings → Your password** (fields
+"Current password" and "New password", at least 8 characters). A password change revokes every
+session, including your own, so sign in again with the new one.
+
+Two things keep this honest:
+
+- The value is not a built-in default. It works because `TRALALA_BOOTSTRAP_PASSWORD=tralala-dev-1` is
+  set in `.env` (see [`.env.example`](.env.example)) or in the process environment. With no value, or
+  with a placeholder such as `admin` or `change-me`, the server generates a random password into
+  `<data>/.bootstrap-password` on first start.
+- It only applies while no user exists. Once you have changed the password, the bootstrap value is
+  ignored for that installation.
+
+Change the password before the instance is reachable by anyone else, and never run a network-facing
+instance on the shared test password.
+
 ## Features
 
 - Boards with an isolated SQLite database each; create, rename, duplicate, archive, export/import,
@@ -31,7 +56,8 @@ App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / Ro
   be imported into the same read-only envelope and is always labelled as unvalidated.
 - Reusable templates: save a Loop's columns and a board's labels, or compose one in Settings, then
   start a board from that template. Templates can be edited and deleted at any time.
-- AI agent foundation: nine built-in role templates (editable, duplicable, restorable) and separate
+- AI agent foundation: ten built-in role templates (editable, duplicable, restorable), including the
+  Analytics agent that turns Info into an evidence-based analysis, and separate
   agent configurations with their own OpenAI-compatible or A2A endpoint, encrypted API key, model
   limits and connection test. Role templates are shared; each discussion keeps a snapshot of the
   prompt it used.
@@ -154,7 +180,7 @@ Create `backend\.env` (gitignored) with:
 ```ini
 TRALALA_SECRET_KEY=replace-with-a-long-random-string
 TRALALA_BOOTSTRAP_USERNAME=admin
-TRALALA_BOOTSTRAP_PASSWORD=choose-a-strong-password
+TRALALA_BOOTSTRAP_PASSWORD=tralala-dev-1
 TRALALA_DATA_DIR=..\data
 ```
 
@@ -185,7 +211,7 @@ pnpm dev
 
 ### 9. Open the application
 
-<http://localhost:5173> - sign in with the bootstrap user. API documentation:
+<http://localhost:5173> - sign in as `admin` with the test password from [Test version](#test-version-the-administrator-account). API documentation:
 <http://localhost:5173/docs> after sign-in. Stop both processes with `Ctrl+C`.
 
 ## Install and run on Ubuntu / Debian (bash)
@@ -249,7 +275,7 @@ cd frontend && pnpm install && cd ..
 cat > backend/.env <<'EOF'
 TRALALA_SECRET_KEY=replace-with-a-long-random-string
 TRALALA_BOOTSTRAP_USERNAME=admin
-TRALALA_BOOTSTRAP_PASSWORD=choose-a-strong-password
+TRALALA_BOOTSTRAP_PASSWORD=tralala-dev-1
 TRALALA_DATA_DIR=../data
 EOF
 ```
@@ -274,7 +300,7 @@ pnpm dev
 
 ### 9. Open the application
 
-<http://localhost:5173> - sign in with the bootstrap user. API documentation:
+<http://localhost:5173> - sign in as `admin` with the test password from [Test version](#test-version-the-administrator-account). API documentation:
 <http://localhost:5173/docs> after sign-in. Stop both processes with `Ctrl+C`.
 
 ## Install and run on macOS (zsh/bash)
@@ -326,7 +352,7 @@ cd frontend && pnpm install && cd ..
 cat > backend/.env <<'EOF'
 TRALALA_SECRET_KEY=replace-with-a-long-random-string
 TRALALA_BOOTSTRAP_USERNAME=admin
-TRALALA_BOOTSTRAP_PASSWORD=choose-a-strong-password
+TRALALA_BOOTSTRAP_PASSWORD=tralala-dev-1
 TRALALA_DATA_DIR=../data
 EOF
 ```
@@ -351,14 +377,15 @@ pnpm dev
 
 ### 8. Open the application
 
-<http://localhost:5173> - sign in with the bootstrap user. API documentation:
+<http://localhost:5173> - sign in as `admin` with the test password from [Test version](#test-version-the-administrator-account). API documentation:
 <http://localhost:5173/docs> after sign-in. Stop both processes with `Ctrl+C`.
 
 ## Run with Docker (any operating system)
 
 ```bash
 cp .env.example .env
-# edit .env: set TRALALA_SECRET_KEY and TRALALA_BOOTSTRAP_PASSWORD
+# the copied file already carries the shared test password (README: "Test version"); set
+# TRALALA_SECRET_KEY to a long random string, then start and change the password after sign-in
 docker compose up --build
 ```
 
@@ -440,9 +467,12 @@ Chromium when no browser build is present; override with `PLAYWRIGHT_CLI=<path t
 
 - The session secret is generated per install (`<data>/.session-secret`, owner-only) when
   `TRALALA_SECRET_KEY` is unset; the published fallback is never used.
-- The first administrator password is never a published word: an explicit
-  `TRALALA_BOOTSTRAP_PASSWORD` is used, otherwise a random password is written once to
-  `<data>/.bootstrap-password`.
+- The application ships no built-in password: without an explicit
+  `TRALALA_BOOTSTRAP_PASSWORD` (and for placeholders such as `admin` or `change-me`) a random
+  password is written once to `<data>/.bootstrap-password`. In this **test version** the value in
+  [`.env.example`](.env.example) is a shared starting password, so change it on first sign-in
+  ([Test version](#test-version-the-administrator-account)); it is honoured only while no account
+  exists.
 - Sessions are rows in the registry; logout, a password change, a role change and disabling an
   account revoke them. Expired sessions are purged at startup.
 - Sign-in is throttled per username and per client address with exponential backoff
@@ -471,19 +501,23 @@ Chromium when no browser build is present; override with `PLAYWRIGHT_CLI=<path t
 #    admin session). The raw token is shown once.
 export TRALALA_TOKEN="trl_..."
 
-# 2. Take the ids from GET /api/v1/boards and GET /api/v1/boards/<id>/lists
+# 2. Take the ids from GET /api/v1/boards, GET /api/v1/boards/<id>/loops and
+#    GET /api/v1/boards/<id>/loops/<loop>/lists
 export BOARD="<board-uuid>"
+export LOOP="<loop-uuid>"
 export TODO="<todo-list-uuid>"
 
-# 3. Create a card as the agent
-curl -s -X POST "http://localhost:8000/api/v1/boards/$BOARD/cards" \
+# 3. Create a Ticket in the Loop as the agent
+curl -s -X POST "http://localhost:8000/api/v1/boards/$BOARD/loops/$LOOP/cards" \
   -H "Authorization: Bearer $TRALALA_TOKEN" -H "Content-Type: application/json" \
   -H "Idempotency-Key: 7c1f" \
   -d '{"list_id":"'"$TODO"'","title":"Implement auth","priority":"high","labels":["backend"]}'
 ```
 
-Agent capabilities covered by the API: discover boards, inspect metadata, list cards/lists, search,
-create/update/move cards, update checklists, comment, read activity, find overdue work, archive.
+Agent capabilities covered by the API: discover boards and Loops, inspect metadata, list Ticket
+columns and Tickets, search, create/update/move Tickets, submit Analysis and RoadMap candidates, read
+readiness, update checklists, comment, read activity, find overdue work, archive. Approving a
+document, confirming a human Ticket, accepting QA and finalizing a Loop stay with a signed-in person.
 Card text is never treated as instructions and cannot elevate permissions.
 
 ## Layout

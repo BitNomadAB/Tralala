@@ -26,6 +26,7 @@ from .api.v1 import history as history_routes
 from .api.v1 import labels as label_routes
 from .api.v1 import lists as list_routes
 from .api.v1 import loops as loop_routes
+from .api.v1 import repositories as repository_routes
 from .api.v1 import search as search_routes
 from .api.v1 import templates as template_routes
 from .api.v1 import users as user_routes
@@ -242,6 +243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         label_routes.comments,
         search_routes.router,
         template_routes.router,
+        repository_routes.router,
         agent_routes.router,
         attachment_routes.router,
         discussion_routes.router,

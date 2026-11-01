@@ -23,6 +23,7 @@ from ..core.errors import ApiError, Conflict, NotFound, ServiceUnavailable, Vali
 from ..schemas.loops import AnalysisPayload, GenerationRequest, PlanPayload, QaInstructions
 from ..storage.sqlite import utcnow
 from . import runtime
+from .agents import AgentService
 from .boards import BoardService
 from .common import one, request_fingerprint, rows, run_idempotent
 from .loop_documents import LoopDocumentService
@@ -91,6 +92,7 @@ class LoopGenerationService:
         loop_service: LoopService,
         document_service: LoopDocumentService,
         links: LoopWorkflowLinks,
+        agent_service: AgentService,
     ) -> None:
         self.board_service = board_service
         self.boards = board_service.boards
@@ -99,6 +101,7 @@ class LoopGenerationService:
         self.loops = loop_service
         self.documents = document_service
         self.links = links
+        self.agents = agent_service
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="loop-generation")
         self._futures: set[Future[None]] = set()
 
@@ -251,7 +254,8 @@ class LoopGenerationService:
                     "model": agent.get("model"),
                 },
             }
-            prompt = self._system_prompt(request.purpose)
+            role = self._role_prompt(agent)
+            prompt = self._system_prompt(request.purpose, agent)
 
             def action() -> dict[str, Any]:
                 conn.execute(
@@ -277,6 +281,9 @@ class LoopGenerationService:
                         "role": json.dumps(
                             {
                                 "system_prompt": prompt,
+                                "role_source": role["role_source"],
+                                "role_template_id": role["role_template_id"],
+                                "role_template_name": role["role_template_name"],
                                 "agent_id": agent["id"],
                                 "agent_name": agent["name"],
                                 "model": agent.get("model"),
@@ -355,9 +362,21 @@ class LoopGenerationService:
 
     # --- execution -------------------------------------------------------------
 
-    def _system_prompt(self, purpose: str) -> str:
+    def _role_prompt(self, agent_row: dict[str, Any]) -> dict[str, Any]:
+        """Resolve the agent's role the same way a discussion does, without joining it later."""
+        role = self.agents.effective_role(agent_row["id"])
+        return {
+            "system_prompt": str(role.get("system_prompt") or "").strip(),
+            "role_source": role.get("role_source"),
+            "role_template_id": role.get("role_template_id"),
+            "role_template_name": role.get("role_template_name"),
+        }
+
+    def _system_prompt(self, purpose: str, agent_row: dict[str, Any]) -> str:
         schema = json.dumps(SCHEMAS[purpose].model_json_schema(), ensure_ascii=False)
-        return f"{PURPOSE_PROMPTS[purpose]}\n\nJSON schema:\n{schema}"
+        role = self._role_prompt(agent_row)["system_prompt"]
+        persona = f"{role}\n\n" if role else ""
+        return f"{persona}{PURPOSE_PROMPTS[purpose]}\n\nJSON schema:\n{schema}"
 
     def _user_message(self, captured: dict[str, Any]) -> str:
         context = json.dumps(captured["context"], ensure_ascii=False)
@@ -385,7 +404,7 @@ class LoopGenerationService:
 
     def _generate(self, purpose: str, captured: dict[str, Any], agent_row: dict[str,
     Any]) -> dict[str, Any]:
-        system_prompt = self._system_prompt(purpose)
+        system_prompt = self._system_prompt(purpose, agent_row)
         messages = [{"role": "user", "content": self._user_message(captured)}]
         usage: dict[str, Any] = {}
         model_name: str | None = None

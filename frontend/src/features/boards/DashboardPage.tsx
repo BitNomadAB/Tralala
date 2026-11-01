@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
@@ -34,6 +35,7 @@ export function DashboardPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [templateId, setTemplateId] = useState("");
+  const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
   const [deleting, setDeleting] = useState<Board | null>(null);
   const [confirmName, setConfirmName] = useState("");
   const importInput = useRef<HTMLInputElement>(null);
@@ -54,6 +56,7 @@ export function DashboardPage() {
         name: name.trim(),
         description: description.trim(),
         template_id: templateId || null,
+        repository_ids: repositoryIds,
       }),
     onSuccess: (board) => {
       invalidate();
@@ -61,6 +64,7 @@ export function DashboardPage() {
       setName("");
       setDescription("");
       setTemplateId("");
+      setRepositoryIds([]);
       toast.push({ title: "Board created", variant: "success" });
       navigate(`/boards/${board.id}`);
     },
@@ -320,7 +324,10 @@ export function DashboardPage() {
         open={creating}
         onOpenChange={(open) => {
           setCreating(open);
-          if (!open) setTemplateId("");
+          if (!open) {
+            setTemplateId("");
+            setRepositoryIds([]);
+          }
         }}
       >
         <DialogContent title="New board" description="A dedicated SQLite database is created for it.">
@@ -374,6 +381,7 @@ export function DashboardPage() {
                 ) : null}
               </div>
             ) : null}
+            <RepositoryPicker selected={repositoryIds} onChange={setRepositoryIds} />
             <Field label="Description" htmlFor="board-description">
               <Textarea
                 id="board-description"

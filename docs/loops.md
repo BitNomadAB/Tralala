@@ -46,6 +46,19 @@ is rejected with `403 human_action_required` for every action in the lower half 
 when it holds the scope. WebMCP registers inspection, generation and permitted Ticket tools, never
 these decisions.
 
+## The agent and its repository context
+
+Generation runs on a chosen agent, and the agent's role prompt is the first part of the prompt
+(followed by the purpose contract and the JSON schema); the whole composed text is what the run
+snapshots. The built-in `analytics_agent` role is written for turning Info into a structured
+analysis and for investigating a codebase.
+
+Which code that agent may look at is decided on the Board: **Edit board** and **New board** list
+every repository from **Settings -> GitHub repositories** as checkboxes, and the board stores its
+selection (`repository_ids`). A repository can serve several boards, and a board can list several.
+The token behind each repository is read-only and sealed; see
+[decisions/0011](decisions/0011-repository-access-for-analysis-agents.md).
+
 ## Identities
 
 ```text

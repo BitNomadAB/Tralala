@@ -126,6 +126,11 @@ names and labels are applied; an explicit `description` or `lists` in the payloa
 template is rejected with `422 validation_failed` before any board row is written, so an
 `Idempotency-Key` can be reused after correcting the request.
 
+`POST` and `PATCH /boards` accept `repository_ids: [uuid]`: the set of GitHub repositories the board
+is about. The list replaces the board's previous selection (an empty list detaches every
+repository); an unknown id is rejected with `422 validation_failed` and nothing is written. Every
+`BoardOut` carries `repository_ids`, which is what the create/edit dialogs show as checkboxes.
+
 ### Loops
 
 A Board is a container of Loops. A Loop owns its Kanban columns, Tickets and the five planning
@@ -192,10 +197,33 @@ exists. Names are unique (case-insensitive); duplicates return `409 template_nam
 | POST | `/role-templates/{id}/restore-defaults` (built-in only) | `agents:admin` |
 | DELETE | `/role-templates/{id}` (custom only) | `agents:admin` |
 
-Nine built-in roles are seeded on startup (`lead_developer`, `project_manager`, `product_owner`,
+Ten built-in roles are seeded on startup (`lead_developer`, `project_manager`, `product_owner`,
 `backend_developer`, `frontend_developer`, `qa_engineer`, `security_engineer`, `ux_designer`,
-`customer`). Built-ins carry `built_in: true` and a factory copy of their prompt, so edits are
-reversible. `customized` is true while `system_prompt` differs from the factory text.
+`customer`, `analytics_agent`). Built-ins carry `built_in: true` and a factory copy of their prompt,
+so edits are reversible. `customized` is true while `system_prompt` differs from the factory text.
+The agent's role prompt is the first part of every Loop generation prompt, followed by the purpose
+contract and the JSON schema, and the whole composed text is what a run snapshots.
+
+### Repository credentials
+
+| Method | Path | Scope |
+| --- | --- | --- |
+| GET | `/repositories?board_id=&unassigned=` | `boards:read` |
+| POST | `/repositories` | `boards:admin` |
+| GET | `/repositories/{id}` | `boards:read` |
+| PATCH | `/repositories/{id}` | `boards:admin` |
+| POST | `/repositories/{id}/check` | `boards:admin` |
+| DELETE | `/repositories/{id}` | `boards:admin` |
+
+Repositories are a registry-level list, managed from **Settings -> GitHub repositories**
+(`/settings/repositories`). A repository is never owned by a board: boards select the ones they are
+about with `repository_ids`, so one repository can serve several boards and a board can list several
+(it resolves to `board_repositories`). The token is a fine-grained personal access token with
+`Contents: read` for that repository; it is sealed with the same mechanism as provider keys,
+returned only as `has_token`/`token_hint`, never logged, and re-sealed when the session secret
+rotates. `check` reports `ok`, `unauthorized`, `not_found`, `forbidden`, `branch_missing` or
+`unreachable` and stores the last outcome on the record. See
+[decisions/0011](decisions/0011-repository-access-for-analysis-agents.md).
 
 ### Agents
 

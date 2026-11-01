@@ -321,3 +321,50 @@ def test_meta_reports_migration_heads(api: Api) -> None:
     payload = api.data(api.get("/api/v1/meta"))
     assert payload["migrations"]["registry_head"] == runner.head_revision("registry")
     assert payload["migrations"]["board_head"] == runner.head_revision("board")
+
+def test_registry_upgrade_keeps_the_repository_assignment(settings: Settings) -> None:
+    """0009 rebuilds repositories; the board links must survive the table recreation."""
+    from app.storage.sqlite import create_sqlite_engine
+
+    settings.ensure_dirs()
+    engine = create_sqlite_engine(settings.registry_path)
+    try:
+        with engine.begin() as conn:
+            runner.upgrade("registry", conn, "0008_repositories_and_board_assignment")
+            board_id = str(uuid.uuid4())
+            repository_id = str(uuid.uuid4())
+            now = "2026-11-01T00:00:00Z"
+            conn.execute(
+                text(
+                    "INSERT INTO boards (id, name, description, status, created_at, updated_at,"
+                    " archived_at, schema_version, schema_revision)"
+                    " VALUES (:id, 'Link board', '', 'active', :now, :now, NULL, 0, NULL)"
+                ),
+                {"id": board_id, "now": now},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO repositories (id, name, provider, url, branch, board_id,"
+                    " token_ciphertext, token_hint, enabled, created_at, updated_at)"
+                    " VALUES (:id, 'Tralala', 'github', 'https://github.com/BitNomadAB/Tralala',"
+                    " NULL, :board, NULL, NULL, 1, :now, :now)"
+                ),
+                {"id": repository_id, "board": board_id, "now": now},
+            )
+            runner.upgrade("registry", conn, "head")
+
+            link = conn.execute(
+                text("SELECT board_id FROM board_repositories WHERE repository_id = :id"),
+                {"id": repository_id},
+            ).scalar_one_or_none()
+            assert link == board_id
+            columns = {
+                row[1]
+                for row in conn.exec_driver_sql("PRAGMA table_info(repositories)").fetchall()
+            }
+            assert "board_id" not in columns
+    finally:
+        engine.dispose()
+
+
+

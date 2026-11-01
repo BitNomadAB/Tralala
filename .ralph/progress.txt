@@ -447,3 +447,28 @@ Delivered:
 
 Verification: backend `pytest` green, `ruff` clean, frontend `typecheck`/`test`/`build` green,
 `pnpm test:e2e` 26/26.
+
+## 2026-11-01 ? GitHub repository access for the Analytics agent
+
+Delivered:
+- Built-in role `analytics_agent` (10 roles) and role-aware Loop generation: the composed prompt is
+  the agent's role text, then the purpose contract, then the JSON schema, and the run snapshots that
+  whole text.
+- `docs/decisions/0011-repository-access-for-analysis-agents.md`: Model A (Tralala fetches a bounded
+  read-only snapshot), fine-grained read-only PAT, sealed token, single-process assumptions.
+- Registry revisions `0007`-`0009`: a registry-level `repositories` list with a sealed token and the
+  `board_repositories` link table, so one repository can serve several boards and a board can list
+  several.
+- `RepositoryService`, `/api/v1/repositories` (list, create, get, patch, delete, check) and the admin
+  page `/settings/repositories`; the check reports `ok`, `unauthorized`, `not_found`, `forbidden`,
+  `branch_missing` or `unreachable` and never echoes the token.
+- Board payloads carry `repository_ids` (create and update replace the selection atomically); the
+  create and edit dialogs show them as checkboxes, and the admin page shows the boards per repository.
+- `test_registry_upgrade_keeps_the_repository_assignment` guards the upgrade path: `0009` rebuilds
+  `repositories`, and `batch_alter_table` would otherwise cascade-delete the links, so the pairs are
+  read before the rebuild and re-inserted after it.
+
+Verification: backend `pytest` green (incl. 25 repository and migration tests), `ruff` clean,
+frontend `typecheck`/`test`/`build` green, `pnpm test:e2e` 26/26. Verified live: creating a board with
+two repositories checked links both, unchecking one replaces the selection, deleting the board
+detaches them.

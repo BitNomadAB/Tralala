@@ -33,6 +33,7 @@ export interface Board {
   loop_count: number;
   list_count: number;
   card_count: number;
+  repository_ids: string[];
 }
 
 export interface BoardList {
@@ -334,6 +335,32 @@ export interface GenerationRun {
   model: string | null;
   agent_name: string | null;
   usage: Record<string, unknown>;
+}
+
+export interface Repository {
+  id: string;
+  name: string;
+  provider: "github";
+  url: string;
+  branch: string | null;
+  enabled: boolean;
+  has_token: boolean;
+  token_hint: string | null;
+  boards: Array<{ id: string; name: string }>;
+  last_checked_at: string | null;
+  last_check_status: string | null;
+  last_check_detail: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RepositoryCheck {
+  status: string;
+  detail: string | null;
+  default_branch: string | null;
+  private: boolean | null;
+  size_kb: number | null;
+  checked_at: string;
 }
 
 export interface HistorySummary {

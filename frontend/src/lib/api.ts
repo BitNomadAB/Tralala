@@ -25,6 +25,8 @@
   Label,
   Loop,
   LoopApproval,
+  Repository,
+  RepositoryCheck,
   LoopDocuments,
   LoopPlanView,
   LoopReadiness,
@@ -492,6 +494,7 @@ export const api = {
     name: string;
     description?: string;
     template_id?: string | null;
+    repository_ids?: string[];
   }): Promise<Board> {
     return json(await request<Board>("/boards", { method: "POST", body: payload }));
   },
@@ -745,7 +748,7 @@ export const api = {
 
   async updateBoard(
     boardId: string,
-    payload: { name?: string; description?: string },
+    payload: { name?: string; description?: string; repository_ids?: string[] },
   ): Promise<Board> {
     return json(await request<Board>(`/boards/${boardId}`, { method: "PATCH", body: payload }));
   },
@@ -965,6 +968,50 @@ export const api = {
         method: "POST",
       }),
     );
+  },
+
+  async listRepositories(params: { board_id?: string } = {}): Promise<Repository[]> {
+    const query = params.board_id ? `?board_id=${encodeURIComponent(params.board_id)}` : "";
+    return json(await request<Repository[]>(`/repositories${query}`));
+  },
+
+  async createRepository(payload: {
+    name?: string;
+    url: string;
+    branch?: string | null;
+    enabled?: boolean;
+    token?: string;
+  }): Promise<Repository> {
+    return json(await request<Repository>("/repositories", { method: "POST", body: payload }));
+  },
+
+  async updateRepository(
+    repositoryId: string,
+    payload: {
+      name?: string;
+      url?: string;
+      branch?: string | null;
+      enabled?: boolean;
+      token?: string;
+      clear_token?: boolean;
+    },
+  ): Promise<Repository> {
+    return json(
+      await request<Repository>(`/repositories/${repositoryId}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    );
+  },
+
+  async deleteRepository(repositoryId: string): Promise<void> {
+    await request(`/repositories/${repositoryId}`, { method: "DELETE" });
+  },
+
+  async checkRepository(repositoryId: string): Promise<RepositoryCheck> {
+    return json(await request<RepositoryCheck>(`/repositories/${repositoryId}/check`, {
+      method: "POST",
+    }));
   },
 
   async retryMigration(boardId: string): Promise<{ status: string; to_revision: string | null }> {

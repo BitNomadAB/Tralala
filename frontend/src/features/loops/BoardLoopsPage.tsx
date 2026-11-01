@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, History, Plus } from "lucide-react";
+import { AlertTriangle, ArrowRight, History, Pencil, Plus } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { keys, useBoard, useLoops } from "@/lib/queries";
 import type { Loop, LoopStage } from "@/lib/types";
+import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
 
 const STAGE_TONES: Record<LoopStage, BadgeTone> = {
   draft: "neutral",
@@ -35,6 +36,10 @@ export function BoardLoopsPage() {
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [showCompleted, setShowCompleted] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editRepositoryIds, setEditRepositoryIds] = useState<string[]>([]);
 
   const createLoop = useMutation({
     mutationFn: () => api.createLoop(boardId, { name: name.trim(), goal }),
@@ -65,6 +70,28 @@ export function BoardLoopsPage() {
     onError: (error) =>
       toast.push({
         title: "Migration still fails",
+        description: error instanceof ApiError ? error.message : undefined,
+        variant: "error",
+      }),
+  });
+
+  const saveBoard = useMutation({
+    mutationFn: () =>
+      api.updateBoard(boardId, {
+        name: editName.trim(),
+        description: editDescription,
+        repository_ids: editRepositoryIds,
+      }),
+    onSuccess: () => {
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
+      queryClient.invalidateQueries({ queryKey: ["boards"] });
+      queryClient.invalidateQueries({ queryKey: ["repositories"] });
+      toast.push({ title: "Board updated", variant: "success" });
+    },
+    onError: (error) =>
+      toast.push({
+        title: "Could not update the board",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
       }),
@@ -110,6 +137,18 @@ export function BoardLoopsPage() {
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setEditName(board.name);
+              setEditDescription(board.description);
+              setEditRepositoryIds(board.repository_ids ?? []);
+              setEditing(true);
+            }}
+          >
+            <Pencil size={14} /> Edit
+          </Button>
           <Link
             to={`/boards/${board.id}/history`}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
@@ -173,6 +212,52 @@ export function BoardLoopsPage() {
           ) : null}
         </div>
       ) : null}
+
+      <Dialog open={editing} onOpenChange={setEditing}>
+        <DialogContent
+          title="Edit board"
+          description="Name, description and which repositories this board is about."
+        >
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (editName.trim()) saveBoard.mutate();
+            }}
+          >
+            <Field label="Name" htmlFor="board-edit-name">
+              <Input
+                id="board-edit-name"
+                value={editName}
+                onChange={(event) => setEditName(event.target.value)}
+                required
+                maxLength={200}
+              />
+            </Field>
+            <Field label="Description" htmlFor="board-edit-description">
+              <Textarea
+                id="board-edit-description"
+                value={editDescription}
+                onChange={(event) => setEditDescription(event.target.value)}
+                maxLength={20000}
+              />
+            </Field>
+            <RepositoryPicker
+              selected={editRepositoryIds}
+              onChange={setEditRepositoryIds}
+              disabled={saveBoard.isPending}
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saveBoard.isPending || !editName.trim()}>
+                {saveBoard.isPending ? "Saving?" : "Save board"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent

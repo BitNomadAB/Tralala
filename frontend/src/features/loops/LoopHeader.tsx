@@ -1,13 +1,13 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ClipboardCheck, FileText, ListChecks, Sparkles } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Field, Input, Textarea } from "@/components/ui/input";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
-import { keys, useLoopDocuments, useReadiness } from "@/lib/queries";
+import { keys, useAgents, useLoopDocuments, useReadiness } from "@/lib/queries";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { renderMarkdown } from "@/lib/markdown";
 import type { Card, DocumentKind, Loop } from "@/lib/types";
@@ -210,10 +210,20 @@ function LoopDocumentDialog({
   const [technical, setTechnical] = useState(false);
   const [infoDraft, setInfoDraft] = useState<string | null>(null);
   const [feedback, setFeedback] = useState("");
+  const [runId, setRunId] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState("");
   const queryClient = useQueryClient();
   const toast = useToast();
   const documentsQuery = useLoopDocuments(boardId, loop.id);
   const documents = documentsQuery.data?.documents;
+  const agentsQuery = useAgents();
+  const generationAgents = useMemo(
+    () =>
+      (agentsQuery.data ?? [])
+        .filter((agent) => agent.enabled && agent.connection_type === "openai_compatible")
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    [agentsQuery.data],
+  );
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loop.id) });
@@ -239,18 +249,45 @@ function LoopDocumentDialog({
 
   const generate = useMutation({
     mutationFn: (purpose: "analysis" | "roadmap") =>
-      api.startGeneration(boardId, loop.id, purpose),
+      api.startGeneration(boardId, loop.id, purpose, agentId || undefined),
     onSuccess: (run) => {
+      setRunId(run.id);
       invalidate();
-      toast.push({
-        title: "Generation started",
-        description: `Run ${run.status}. Refresh to follow its progress.`,
-        variant: "success",
-      });
+      toast.push({ title: "Generation started", description: "Following the run?", variant: "success" });
     },
     onError: (error) =>
       toast.push({ title: "Generation unavailable", description: errorText(error), variant: "error" }),
   });
+
+  // Follow the run instead of asking the person to reload: generation answers in the background.
+  const runQuery = useQuery({
+    queryKey: ["generation-run", loop.id, runId],
+    queryFn: () => api.getGenerationRun(boardId, loop.id, String(runId)),
+    enabled: Boolean(runId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 1500 : false;
+    },
+  });
+  const run = runId ? runQuery.data : undefined;
+  const runFinished = run ? ["completed", "failed", "cancelled"].includes(run.status) : false;
+
+  useEffect(() => {
+    if (!runFinished) return;
+    invalidate();
+    setRunId(null);
+    if (run?.status === "completed") {
+      toast.push({ title: "Draft ready for review", variant: "success" });
+      return;
+    }
+    toast.push({
+      title: "Generation failed",
+      description: run?.error_message ?? "The provider did not return a usable answer.",
+      variant: "error",
+    });
+    // `invalidate` and `toast` are stable enough for this one-shot reaction to a finished run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runFinished]);
 
   const review = useMutation({
     mutationFn: (args: { scope: "analysis" | "roadmap"; decision: "approved" | "changes_requested" }) => {
@@ -322,14 +359,38 @@ function LoopDocumentDialog({
             </Button>
           ) : null}
           {tab !== "info" ? (
+            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
+              Agent
+              <Select
+                aria-label="Generation agent"
+                className="w-52"
+                value={agentId}
+                onChange={(event) => setAgentId(event.target.value)}
+                disabled={readOnly || Boolean(runId)}
+              >
+                <option value="">
+                  {generationAgents.length > 0 ? "Default (first by name)" : "No agent configured"}
+                </option>
+                {generationAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                    {agent.model ? ` ? ${agent.model}` : ""}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          ) : null}
+          {tab !== "info" ? (
             <Button
               size="sm"
               variant="outline"
-              className="ml-auto"
-              disabled={readOnly || generate.isPending}
+              disabled={readOnly || generate.isPending || Boolean(runId)}
               onClick={() => generate.mutate(tab)}
             >
-              <Sparkles size={14} /> Generate {tab === "analysis" ? "analysis" : "RoadMap"}
+              <Sparkles size={14} />{" "}
+              {runId && !runFinished
+                ? "Generating?"
+                : `Generate ${tab === "analysis" ? "analysis" : "RoadMap"}`}
             </Button>
           ) : null}
         </div>

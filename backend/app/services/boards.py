@@ -82,7 +82,13 @@ class BoardService:
             # A board whose schema is mid-repair must still appear in the dashboard.
             return 0, 0, 0
 
-    def serialize(self, row: dict[str, Any], *, with_counts: bool = True) -> dict[str, Any]:
+    def serialize(
+        self,
+        row: dict[str, Any],
+        *,
+        with_counts: bool = True,
+        repository_map: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
         entry = dict(row)
         entry.setdefault("schema_revision", None)
         if with_counts:
@@ -93,7 +99,31 @@ class BoardService:
             entry.setdefault("loop_count", 0)
             entry.setdefault("list_count", 0)
             entry.setdefault("card_count", 0)
+        entry["repository_ids"] = (
+            repository_map[row["id"]]
+            if repository_map is not None and row["id"] in repository_map
+            else ([] if repository_map is not None else self._repository_ids(row["id"]))
+        )
         return entry
+
+    def _repository_ids(self, board_id: str) -> list[str]:
+        return [
+            record["repository_id"]
+            for record in self.registry.read(
+                "SELECT repository_id FROM board_repositories WHERE board_id = :id"
+                " ORDER BY created_at, repository_id",
+                {"id": board_id},
+            )
+        ]
+
+    def _repository_ids_by_board(self) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for record in self.registry.read(
+            "SELECT board_id, repository_id FROM board_repositories"
+            " ORDER BY created_at, repository_id"
+        ):
+            grouped.setdefault(record["board_id"], []).append(record["repository_id"])
+        return grouped
 
     # --- queries ---------------------------------------------------------------
 
@@ -132,7 +162,11 @@ class BoardService:
             " LIMIT :limit OFFSET :offset",
             {**params, "limit": limit, "offset": offset},
         )
-        return [self.serialize(row) for row in page], int(total["total"] if total else 0)
+        repository_map = self._repository_ids_by_board()
+        return (
+            [self.serialize(row, repository_map=repository_map) for row in page],
+            int(total["total"] if total else 0),
+        )
 
     def get(self, board_id: str) -> dict[str, Any]:
         return self.serialize(self.require_row(board_id))
@@ -148,6 +182,8 @@ class BoardService:
     ) -> tuple[dict[str, Any], bool]:
         actor.require("boards:write")
         template = self._resolve_template(payload.template_id)
+        if payload.repository_ids:
+            self.repositories.validate_ids(list(payload.repository_ids))
         fingerprint = request_fingerprint({"op": "board.create", "payload": payload.model_dump()})
         board_id = str(uuid4())
         if idempotency_key:
@@ -246,6 +282,8 @@ class BoardService:
                 schema_revision=runner.head_revision("board"),
                 schema_version=runner.revision_count("board"),
             )
+            if payload.repository_ids:
+                self.repositories.set_board_links(board_id, payload.repository_ids)
         except Exception:
             self.registry.update_board(board_id, status="error")
             with self.registry.connect() as conn:
@@ -274,7 +312,13 @@ class BoardService:
         actor.require("boards:write")
         row = self.require_row(board_id)
         updates = payload.model_dump(exclude_none=True)
+        repository_ids = updates.pop("repository_ids", None)
+        if repository_ids is not None:
+            self.repositories.validate_ids(list(repository_ids))
         if not updates:
+            if repository_ids is not None:
+                self.repositories.set_board_links(board_id, list(repository_ids))
+                return self.get(board_id)
             return self.serialize(row)
         previous = {key: row[key] for key in updates}
         self.registry.update_board(board_id, **updates)
@@ -287,6 +331,8 @@ class BoardService:
                 entity_id=board_id,
                 changes={"before": previous, "after": updates},
             )
+        if repository_ids is not None:
+            self.repositories.set_board_links(board_id, list(repository_ids))
         return self.get(board_id)
 
     def archive(self, actor: ActorContext, board_id: str) -> dict[str, Any]:

@@ -12,6 +12,7 @@ import { LoopPage } from "@/features/loops/LoopPage";
 import { HistoryPage } from "@/features/history/HistoryPage";
 import { DiscussionsPage } from "@/features/discussions/DiscussionsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { RepositoriesPage } from "@/features/settings/RepositoriesPage";
 import { TemplateEditorPage } from "@/features/settings/TemplateEditorPage";
 import { RoleTemplateEditorPage } from "@/features/settings/RoleTemplateEditorPage";
 import { AgentEditorPage } from "@/features/settings/AgentEditorPage";
@@ -76,6 +77,7 @@ export function App() {
                   <Route path="/boards/:boardId/history" element={<HistoryPage />} />
                   <Route path="/discussions" element={<DiscussionsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/settings/repositories" element={<RepositoriesPage />} />
                   <Route path="/settings/templates/:templateId" element={<TemplateEditorPage />} />
                   <Route
                     path="/settings/roles/:roleId"
