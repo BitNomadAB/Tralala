@@ -499,3 +499,87 @@ field or still showing placeholders. `repositorySlug("")` therefore never render
 name, and a test holds that (`carries no example repository of its own`).
 
 Verification: `typecheck` green, `pnpm test` 28/28, `pnpm build` green; checked live in both dialogs.
+
+## 2026-11-01 ? A board selects the agents that work on it
+
+`docs/decisions/0012-board-agent-membership.md`. Registry revision `0010_board_agents` adds the
+`board_agents` link table (cascade from both sides), `AgentService` gains `validate_ids`,
+`set_board_agents`, `agent_ids`, `agent_ids_for_boards`, and board payloads carry `agent_ids`
+alongside `repository_ids`.
+
+- Selection is on the board: *New board* and *Edit board* show an **Agents** checkbox list
+  (`features/boards/AgentPicker.tsx`), and `POST`/`PATCH /boards` replace it atomically. An unknown
+  id is rejected with `404 agent_not_found` before anything is written, the same shape as
+  repositories.
+- An empty selection keeps the previous behaviour (any enabled OpenAI-compatible agent), so existing
+  boards did not need a backfill.
+- A non-empty selection is enforced by the service: `LoopGenerationService._resolve_agent` refuses an
+  agent the board does not list (`422 agent_not_on_board`), and the default pick prefers a board
+  agent. The Loop's *Agent* dropdown narrows its list with the same rule
+  (`lib/boardAgents.ts`), so UI and API agree.
+- Deleting an agent detaches it from every board instead of leaving a dangling selection.
+
+Verification: `tests/test_board_agents.py` (9 tests: selection on create, replacement on edit, shared
+agent across boards, unknown id leaves no half-created board, delete detaches, outsider agent
+refused, default is a board agent, empty selection keeps every generator, disabled board agent still
+reported as disabled); frontend `board-agents.test.tsx` (5 tests on the narrowing helper);
+`ruff` clean, `typecheck` green, `pnpm test` green, `pnpm build` green.
+
+Live check in the dev instance: Demo board had no selection, so *Edit board* showed both agents
+unchecked; ticking only "Local test agent" and saving made the Loop's *Agent* dropdown list exactly
+that agent with the label "Default (board agent)" — the migration `0010_board_agents` applied to the
+existing data directory on restart.
+`pnpm test:e2e` 26/26.
+
+## 2026-11-01 ? Board context in the header and a per-purpose agent per Loop
+
+Follow-up on `0012`:
+
+- **Board header badges** (`BoardLoopsPage.tsx`): under the description the board now shows *Code*
+  (its repositories) and *Agents*, with "none selected" / "any enabled agent" when empty, so the two
+  decisions are visible without opening *Edit board*.
+- **Per-Loop, per-purpose agent preference**: board revision `0009_loop_agent_preferences` stores
+  `analysis`/`roadmap`/`qa` ? `agent_id` in the board database (no foreign key: a board database must
+  not depend on registry rows). `LoopAgentService` validates the ids against the board, `GET`/`PUT
+  `/boards/{id}/loops/{loop_id}/agents` read and write it (`boards:write`), and generation resolves
+  agent = explicit `agent_id` ? Loop preference ? board default. A preference that no longer resolves
+  falls back instead of blocking the run; an omitted field in the `PUT` keeps its value and `null`
+  clears it.
+- **UI**: a **Loop agents** button on the Loop header opens three selects (Analysis, RoadMap, QA)
+  limited to the board's agents; the generation dialog's default option now reads
+  `Default (<agent name>)` when the Loop has stored a choice for that purpose.
+
+Verification: `tests/test_loop_agents.py` (7 tests: remember per purpose, clear one purpose only,
+stay inside the board's agents, another board's Loop is 404, stored preference becomes the default,
+explicit agent still wins, deleted agent falls back, write needs `boards:write`) and
+`tests/test_board_agents.py` green; `ruff` clean; frontend `typecheck` green, `pnpm test` 33/33,
+`pnpm build` green. Live: saved "Local test agent" for Analysis on EM001 through the dialog, and the
+generation dialog then offered `Default (Local test agent)`.
+
+## 2026-11-01 ? Coordinator and Architect as organisation profiles, roles as a seed file
+
+`docs/decisions/0013-organisation-wide-agent-profiles.md`.
+
+- Factory role templates moved out of Python into `backend/app/seeds/role_seeds.json`, loaded and
+  validated by `services/role_defaults.py` at import (duplicate key, unknown scope or empty prompt
+  fails startup). The file sits outside `app/data/` because `data` is ignored by both git and the
+  container build; `{{discussion}}` expands to the shared discussion preamble so the text lives once.
+- Two new built-ins: **Coordinator** (overview across boards, moderation of agents and tasks, and a
+  recommendation of which profile should answer a discussion thread) and **Architect** (every
+  registered repository, its technology and purpose, and how repositories interact; it expects one
+  read-only token that covers the organisation).
+- Role templates gained `scope` (registry revision `0011_role_scope`): `board` or `organisation`.
+  Organisation profiles cannot be board agents ? `agent_ids` rejects them with
+  `422 agent_scope_organisation`, the board pickers list board profiles only, and the Loop generation
+  candidates exclude them. `AgentOut` and the agent directory expose `role_template_scope`, and the
+  Settings cards show an "organisation" badge.
+- The repository token guide gained the organisation variant (*Repository access: All repositories*,
+  still `Contents: Read-only`) so the Architect has a documented way to read everything.
+
+Verification: `tests/test_role_seeds.py` (8 tests: seed is the only source of the prompts, 12 roles,
+board/organisation split, the two prompts describe their job, a broken seed fails, both seeded in the
+registry, an organisation profile is refused as a board agent, a board profile stays selectable,
+duplicating keeps the scope) plus `test_agent_config`/`test_agents` updated for `role_template_scope`;
+`ruff` clean, full backend suite green. Frontend `typecheck` green, `pnpm test` 35/35, `pnpm build`
+green, `pnpm test:e2e` 26/26. Live: the twelve roles seed into the existing dev registry, and Settings
+shows Coordinator and Architect with the organisation badge.

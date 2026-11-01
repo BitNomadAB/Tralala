@@ -17,6 +17,8 @@ from ...schemas.loops import (
     HumanConfirmation,
     ImplementationAcceptance,
     InfoRevisionWrite,
+    LoopAgentPreferencesOut,
+    LoopAgentPreferencesUpdate,
     LoopCancel,
     LoopContextOut,
     LoopCreate,
@@ -32,6 +34,16 @@ from ...schemas.loops import (
 from ..deps import RequestContext, get_context, idempotency_key, ok
 
 router = APIRouter(tags=["loops"])
+
+
+def _agent_preferences(loop_id: str, stored: dict[str, str | None]) -> dict:
+    """Purpose-keyed storage, the wire shape the schema names per purpose."""
+    return {
+        "loop_id": loop_id,
+        "analysis_agent_id": stored.get("analysis"),
+        "roadmap_agent_id": stored.get("roadmap"),
+        "qa_agent_id": stored.get("qa"),
+    }
 
 
 @router.get("/boards/{board_id}/loops", response_model=Envelope[list[LoopOut]])
@@ -242,6 +254,41 @@ async def get_context_resource(
 ) -> dict:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop_document.context(board_id, loop_id))
+
+
+@router.get(
+    "/boards/{board_id}/loops/{loop_id}/agents", response_model=Envelope[LoopAgentPreferencesOut]
+)
+async def get_loop_agents(
+    board_id: str,
+    loop_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict:
+    ctx.actor.require("loops:read")
+    stored = ctx.services.loop_agents.get(board_id, loop_id)
+    return ok(request, _agent_preferences(loop_id, stored))
+
+
+@router.put(
+    "/boards/{board_id}/loops/{loop_id}/agents", response_model=Envelope[LoopAgentPreferencesOut]
+)
+async def set_loop_agents(
+    board_id: str,
+    loop_id: str,
+    payload: LoopAgentPreferencesUpdate,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict:
+    assignments = {}
+    if "analysis_agent_id" in payload.model_fields_set:
+        assignments["analysis"] = payload.analysis_agent_id
+    if "roadmap_agent_id" in payload.model_fields_set:
+        assignments["roadmap"] = payload.roadmap_agent_id
+    if "qa_agent_id" in payload.model_fields_set:
+        assignments["qa"] = payload.qa_agent_id
+    stored = ctx.services.loop_agents.set(ctx.actor, board_id, loop_id, assignments)
+    return ok(request, _agent_preferences(loop_id, stored))
 
 
 @router.post(

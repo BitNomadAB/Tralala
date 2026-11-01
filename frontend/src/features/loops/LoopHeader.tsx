@@ -1,16 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ClipboardCheck, FileText, ListChecks, Sparkles } from "lucide-react";
+import { AlertTriangle, Bot, ClipboardCheck, FileText, ListChecks, Sparkles } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
-import { keys, useAgents, useLoopDocuments, useReadiness } from "@/lib/queries";
+import {
+  keys,
+  useAgents,
+  useBoard,
+  useLoopAgents,
+  useLoopDocuments,
+  useReadiness,
+} from "@/lib/queries";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { generationAgents } from "@/lib/boardAgents";
 import { renderMarkdown } from "@/lib/markdown";
 import type { Card, DocumentKind, Loop } from "@/lib/types";
+import { LoopAgentsDialog } from "./LoopAgentsDialog";
 import { LoopCompletionDialog } from "./LoopCompletionDialog";
 import { LoopPlanDialog } from "./LoopPlanDialog";
 
@@ -50,6 +59,7 @@ export function LoopHeader({
 }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [completionOpen, setCompletionOpen] = useState(false);
   const documents = useLoopDocuments(boardId, loop.id);
   const readiness = useReadiness(boardId, loop.id);
@@ -91,6 +101,9 @@ export function LoopHeader({
           <Button size="sm" variant="outline" onClick={() => setTab("roadmap")}>
             RoadMap
             <DocumentDot state={documentState("roadmap")} />
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setAgentsOpen(true)}>
+            <Bot size={14} /> Loop agents
           </Button>
           <Button size="sm" variant="outline" onClick={() => setPlanOpen(true)}>
             <ListChecks size={14} /> Plan &amp; readiness
@@ -150,6 +163,13 @@ export function LoopHeader({
           onChanged={onChanged}
         />
       ) : null}
+
+      <LoopAgentsDialog
+        boardId={boardId}
+        loop={loop}
+        open={agentsOpen}
+        onClose={() => setAgentsOpen(false)}
+      />
 
       <LoopPlanDialog
         boardId={boardId}
@@ -216,14 +236,20 @@ function LoopDocumentDialog({
   const toast = useToast();
   const documentsQuery = useLoopDocuments(boardId, loop.id);
   const documents = documentsQuery.data?.documents;
+  const boardQuery = useBoard(boardId);
   const agentsQuery = useAgents();
-  const generationAgents = useMemo(
-    () =>
-      (agentsQuery.data ?? [])
-        .filter((agent) => agent.enabled && agent.connection_type === "openai_compatible")
-        .sort((left, right) => left.name.localeCompare(right.name)),
-    [agentsQuery.data],
+  const candidates = useMemo(
+    () => generationAgents(agentsQuery.data ?? [], boardQuery.data?.agent_ids),
+    [agentsQuery.data, boardQuery.data?.agent_ids],
   );
+  const preferencesQuery = useLoopAgents(boardId, loop.id);
+  const savedAgentId =
+    tab === "analysis"
+      ? preferencesQuery.data?.analysis_agent_id
+      : tab === "roadmap"
+        ? preferencesQuery.data?.roadmap_agent_id
+        : null;
+  const savedAgentName = candidates.agents.find((agent) => agent.id === savedAgentId)?.name;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loop.id) });
@@ -369,9 +395,17 @@ function LoopDocumentDialog({
                 disabled={readOnly || Boolean(runId)}
               >
                 <option value="">
-                  {generationAgents.length > 0 ? "Default (first by name)" : "No agent configured"}
+                  {savedAgentName
+                    ? `Default (${savedAgentName})`
+                    : candidates.agents.length > 0
+                      ? candidates.restrictedToBoard
+                        ? "Default (board agent)"
+                        : "Default (first by name)"
+                      : candidates.restrictedToBoard
+                        ? "No board agent can generate"
+                        : "No agent configured"}
                 </option>
-                {generationAgents.map((agent) => (
+                {candidates.agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
                     {agent.name}
                     {agent.model ? ` ? ${agent.model}` : ""}

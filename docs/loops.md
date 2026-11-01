@@ -53,11 +53,40 @@ Generation runs on a chosen agent, and the agent's role prompt is the first part
 snapshots. The built-in `analytics_agent` role is written for turning Info into a structured
 analysis and for investigating a codebase.
 
-Which code that agent may look at is decided on the Board: **Edit board** and **New board** list
-every repository from **Settings -> GitHub repositories** as checkboxes, and the board stores its
-selection (`repository_ids`). A repository can serve several boards, and a board can list several.
-The token behind each repository is read-only and sealed; see
-[decisions/0011](decisions/0011-repository-access-for-analysis-agents.md).
+Which agents work on a Loop is decided one level up, on the **Board**: *New board* and *Edit board*
+list every agent as a checkbox (`agent_ids`), and the Loop's *Agent* dropdown offers those agents
+only. A board that lists none keeps the old behaviour — any enabled OpenAI-compatible agent — so a
+board created before this selection existed still generates. The server enforces the same rule: a
+run that asks for an agent the board does not list is rejected with `422 agent_not_on_board`, and the
+default pick is the first board agent by name.
+
+Inside that set a Loop can remember one agent per purpose (**Loop agents** on the Loop header):
+analysis, RoadMap and QA. The stored choice only fills in the default of the next run and shows as
+`Default (<agent name>)`; the run dialog can still deviate for a single run, and a stored agent that
+is no longer available falls back to the board default.
+
+Which code that agent may look at is decided on the same dialog: the repositories from
+**Settings -> GitHub repositories** (`repository_ids`). A repository can serve several boards, and a
+board can list several. The token behind each repository is read-only and sealed; see
+[decisions/0011](decisions/0011-repository-access-for-analysis-agents.md) and
+[decisions/0012](decisions/0012-board-agent-membership.md).
+
+## Board profiles and organisation profiles
+
+Role templates carry a scope. **Board profiles** answer inside one board and are what a board selects
+(`agent_ids`) and a Loop may run on. **Organisation profiles** work across the whole installation
+because their job is the overview no single board can give:
+
+| Profile | Job |
+| --- | --- |
+| Coordinator | Overview of every board and Loop, moderation of agents and tasks, a recommendation of which profile should answer a discussion thread |
+| Architect | The whole set of registered repositories: each one's technology and purpose, how they interact, and what a change across boards actually touches |
+
+Neither is offered as a board agent: the selection in *Edit board* lists board profiles only, and the
+server refuses the rest with `422 agent_scope_organisation`. Their input is the registry itself — the
+board list, the Loop overviews and the whole repository list — which is also why they live in
+`registry.sqlite` next to the roles and agents they reason about. The Architect expects one read-only
+token that reaches every repository; the token guide in the repository dialog describes that variant.
 
 ## Identities
 

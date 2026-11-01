@@ -25,6 +25,11 @@ class BoardCreate(StrictModel):
         max_length=50,
         description="Repositories this board is about; chosen from the repository list",
     )
+    agent_ids: list[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Agents that work on this board; chosen from the agent list",
+    )
 
 
 class BoardUpdate(StrictModel):
@@ -34,6 +39,11 @@ class BoardUpdate(StrictModel):
         default=None,
         max_length=50,
         description="Replace the board's repository selection; omit to keep it",
+    )
+    agent_ids: list[str] | None = Field(
+        default=None,
+        max_length=50,
+        description="Replace the board's agent selection; omit to keep it",
     )
 
 
@@ -51,6 +61,7 @@ class BoardOut(OutModel):
     list_count: int = 0
     card_count: int = 0
     repository_ids: list[str] = Field(default_factory=list)
+    agent_ids: list[str] = Field(default_factory=list)
 
 
 class BoardListOut(OutModel):

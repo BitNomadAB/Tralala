@@ -93,6 +93,7 @@ class LoopGenerationService:
         document_service: LoopDocumentService,
         links: LoopWorkflowLinks,
         agent_service: AgentService,
+        loop_agents: Any | None = None,
     ) -> None:
         self.board_service = board_service
         self.boards = board_service.boards
@@ -102,6 +103,7 @@ class LoopGenerationService:
         self.documents = document_service
         self.links = links
         self.agents = agent_service
+        self.loop_agents = loop_agents
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="loop-generation")
         self._futures: set[Future[None]] = set()
 
@@ -143,22 +145,39 @@ class LoopGenerationService:
 
     # --- agent resolution ------------------------------------------------------
 
-    def _resolve_agent(self, agent_id: str | None) -> dict[str, Any]:
-        if agent_id:
-            row = self.registry.read_one("SELECT * FROM agents WHERE id = :id", {"id": agent_id})
-            if row is None:
-                raise ValidationFailure(
-                    "Agent not found", details={"agent_id": agent_id}
-                )
-            if not row["enabled"]:
-                raise ValidationFailure(
-                    "Agent is disabled", details={"agent_id": agent_id}
-                )
-        else:
-            row = self.registry.read_one(
-                "SELECT * FROM agents WHERE enabled = 1 AND connection_type ="
-                " 'openai_compatible' ORDER BY name LIMIT 1"
+    def _board_agent_ids(self, board_id: str) -> list[str]:
+        return [
+            record["agent_id"]
+            for record in self.registry.read(
+                "SELECT agent_id FROM board_agents WHERE board_id = :id", {"id": board_id}
             )
+        ]
+
+    def _preferred_agent(self, board_id: str, loop_id: str, purpose: str) -> str | None:
+        """The Loop's stored choice for this purpose, or None when it has no preference."""
+        return (
+            self.loop_agents.resolve(board_id, loop_id, purpose)
+            if self.loop_agents is not None
+            else None
+        )
+
+    def _resolve_agent(
+        self, agent_id: str | None, board_id: str, loop_id: str, purpose: str
+    ) -> dict[str, Any]:
+        """Explicit choice, then the Loop's stored preference, then a board agent.
+
+        A run may name any agent the board lists; a Loop preference only fills in the default, and a
+        preference that no longer resolves (deleted agent, or the board dropped it) falls back to
+        the board default instead of blocking the run.
+        """
+        requested = agent_id
+        if not agent_id:
+            agent_id = self._preferred_agent(board_id, loop_id, purpose)
+        row = self._agent_row(agent_id, board_id) if agent_id else None
+        if row is None and agent_id and requested:
+            raise ValidationFailure("Agent not found", details={"agent_id": agent_id})
+        if row is None:
+            row = self._default_agent_row(board_id)
         if row is None:
             raise ServiceUnavailable(
                 "No enabled generation agent is configured",
@@ -173,6 +192,39 @@ class LoopGenerationService:
                     "connection_type": row.get("connection_type"),
                     "supported": ["openai_compatible"],
                 },
+            )
+        return row
+
+    def _agent_row(self, agent_id: str, board_id: str) -> dict[str, Any] | None:
+        """An agent the board may use, or None when it is unknown to the registry."""
+        row = self.registry.read_one("SELECT * FROM agents WHERE id = :id", {"id": agent_id})
+        if row is None:
+            return None
+        if not row["enabled"]:
+            raise ValidationFailure("Agent is disabled", details={"agent_id": agent_id})
+        board_agents = self._board_agent_ids(board_id)
+        if board_agents and agent_id not in board_agents:
+            raise ValidationFailure(
+                "That agent does not work on this board",
+                code="agent_not_on_board",
+                details={"agent_id": agent_id, "board_id": board_id},
+            )
+        return row
+
+    def _default_agent_row(self, board_id: str) -> dict[str, Any] | None:
+        """First board agent by name, else the first enabled generator of the installation."""
+        board_agents = self._board_agent_ids(board_id)
+        placeholders = ", ".join(f":agent_{index}" for index in range(len(board_agents)))
+        board_clause = f" AND id IN ({placeholders})" if board_agents else ""
+        row = self.registry.read_one(
+            "SELECT * FROM agents WHERE enabled = 1 AND connection_type ="
+            f" 'openai_compatible'{board_clause} ORDER BY name LIMIT 1",
+            {f"agent_{index}": value for index, value in enumerate(board_agents)},
+        )
+        if row is None and board_agents:
+            row = self.registry.read_one(
+                "SELECT * FROM agents WHERE enabled = 1 AND connection_type ="
+                " 'openai_compatible' ORDER BY name LIMIT 1"
             )
         return row
 
@@ -229,7 +281,7 @@ class LoopGenerationService:
                 "payload": request.model_dump(),
             }
         )
-        agent = self._resolve_agent(request.agent_id)
+        agent = self._resolve_agent(request.agent_id, board_id, loop_id, request.purpose)
         run_id = str(uuid4())
         with self.boards.session(board_id) as conn:
             loop = self.loops.require_loop_row(conn, board_id, loop_id)

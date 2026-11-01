@@ -24,6 +24,7 @@
   HistorySummary,
   Label,
   Loop,
+  LoopAgentPreferences,
   LoopApproval,
   Repository,
   RepositoryCheck,
@@ -361,6 +362,27 @@ export const api = {
     );
   },
 
+  async getLoopAgents(boardId: string, loopId: string): Promise<LoopAgentPreferences> {
+    return json(await request<LoopAgentPreferences>(`/boards/${boardId}/loops/${loopId}/agents`));
+  },
+
+  async setLoopAgents(
+    boardId: string,
+    loopId: string,
+    payload: {
+      analysis_agent_id?: string | null;
+      roadmap_agent_id?: string | null;
+      qa_agent_id?: string | null;
+    },
+  ): Promise<LoopAgentPreferences> {
+    return json(
+      await request<LoopAgentPreferences>(`/boards/${boardId}/loops/${loopId}/agents`, {
+        method: "PUT",
+        body: payload,
+      }),
+    );
+  },
+
   async getGenerationRun(
     boardId: string,
     loopId: string,
@@ -495,6 +517,7 @@ export const api = {
     description?: string;
     template_id?: string | null;
     repository_ids?: string[];
+    agent_ids?: string[];
   }): Promise<Board> {
     return json(await request<Board>("/boards", { method: "POST", body: payload }));
   },
@@ -748,7 +771,12 @@ export const api = {
 
   async updateBoard(
     boardId: string,
-    payload: { name?: string; description?: string; repository_ids?: string[] },
+    payload: {
+      name?: string;
+      description?: string;
+      repository_ids?: string[];
+      agent_ids?: string[];
+    },
   ): Promise<Board> {
     return json(await request<Board>(`/boards/${boardId}`, { method: "PATCH", body: payload }));
   },

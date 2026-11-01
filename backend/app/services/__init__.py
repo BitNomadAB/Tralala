@@ -18,6 +18,7 @@ from .cards import CardService
 from .discussions import DiscussionService
 from .events import EventService
 from .lists import ListService
+from .loop_agents import LoopAgentService
 from .loop_documents import LoopDocumentService
 from .loop_generation import LoopGenerationService
 from .loop_history import LoopHistoryService
@@ -52,10 +53,12 @@ class Services:
         self.agent = AgentService(settings, self.registry, self.role_templates)
         self.repository = RepositoryService(settings, self.registry)
         self.board.repositories = self.repository
+        self.board.agents = self.agent
         self.loop = LoopService(self.board)
         self.loop_plan = LoopPlanService(self.board, self.loop)
         self.loop_document = LoopDocumentService(self.board, self.loop, self.loop_plan)
         self.loop_links = LoopWorkflowLinks()
+        self.loop_agents = LoopAgentService(self.boards, self.agent)
         self.loop_history = LoopHistoryService(self.board)
         self.loop_generation = LoopGenerationService(
             self.board,
@@ -63,6 +66,7 @@ class Services:
             self.loop_document,
             self.loop_links,
             self.agent,
+            self.loop_agents,
         )
         self.loop_qa = LoopQaService(
             self.board, self.loop, self.loop_history, self.loop_links

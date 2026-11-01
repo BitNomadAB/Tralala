@@ -59,6 +59,9 @@ export function RoleTemplatesCard() {
                     <ShieldHalf size={14} className="shrink-0 text-[var(--muted-foreground)]" />
                     <span className="truncate">{role.name}</span>
                     {role.built_in ? <Badge tone="neutral">built-in</Badge> : null}
+                    {role.scope === "organisation" ? (
+                      <Badge tone="success">organisation</Badge>
+                    ) : null}
                     {role.customized ? <Badge tone="brand">customized</Badge> : null}
                   </p>
                   {role.description ? (

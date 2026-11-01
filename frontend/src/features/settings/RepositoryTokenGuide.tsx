@@ -117,7 +117,20 @@ $env:GITHUB_TOKEN = "github_pat_..."
 
         <div>
           <p className="font-medium text-[var(--foreground)]">
-            4. SSH deploy key instead? Not for this field
+            4. One key for several repositories
+          </p>
+          <p className="mt-1">
+            A repository entry holds one token for one repository, which is what a board needs. An
+            organisation profile such as the Architect reads the whole picture, so give that agent a
+            token of its own: same recipe, but <em>Repository access</em> = <em>All repositories</em>{" "}
+            (or every repository of one owner), still <em>Contents: Read-only</em>. Keep it separate
+            from the tokens you enter here so one leak cannot spread.
+          </p>
+        </div>
+
+        <div>
+          <p className="font-medium text-[var(--foreground)]">
+            5. SSH deploy key instead? Not for this field
           </p>
           <p className="mt-1">
             An SSH key gives a <em>git client</em> access and is issued locally with{" "}

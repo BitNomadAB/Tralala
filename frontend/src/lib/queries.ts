@@ -114,6 +114,13 @@ export function useLoopPlan(boardId: string, loopId: string) {
   });
 }
 
+export function useLoopAgents(boardId: string, loopId: string) {
+  return useQuery({
+    queryKey: ["loop-agents", boardId, loopId],
+    queryFn: () => api.getLoopAgents(boardId, loopId),
+  });
+}
+
 export function useReadiness(boardId: string, loopId: string) {
   return useQuery({
     queryKey: keys.readiness(boardId, loopId),

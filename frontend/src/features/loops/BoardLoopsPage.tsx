@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, History, Pencil, Plus } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bot, GitBranch, History, Pencil, Plus } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
-import { keys, useBoard, useLoops } from "@/lib/queries";
+import { keys, useAgents, useBoard, useLoops } from "@/lib/queries";
+import { api as apiClient } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
 import type { Loop, LoopStage } from "@/lib/types";
+import { AgentPicker } from "@/features/boards/AgentPicker";
 import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
 
 const STAGE_TONES: Record<LoopStage, BadgeTone> = {
@@ -32,6 +35,12 @@ export function BoardLoopsPage() {
   const toast = useToast();
   const boardQuery = useBoard(boardId);
   const loopsQuery = useLoops(boardId, true);
+  const agentsQuery = useAgents();
+  const repositoriesQuery = useQuery({
+    queryKey: ["repositories"],
+    queryFn: () => apiClient.listRepositories(),
+    staleTime: 60_000,
+  });
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
@@ -39,6 +48,7 @@ export function BoardLoopsPage() {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editAgentIds, setEditAgentIds] = useState<string[]>([]);
   const [editRepositoryIds, setEditRepositoryIds] = useState<string[]>([]);
 
   const createLoop = useMutation({
@@ -81,12 +91,14 @@ export function BoardLoopsPage() {
         name: editName.trim(),
         description: editDescription,
         repository_ids: editRepositoryIds,
+        agent_ids: editAgentIds,
       }),
     onSuccess: () => {
       setEditing(false);
       queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
       queryClient.invalidateQueries({ queryKey: ["boards"] });
       queryClient.invalidateQueries({ queryKey: ["repositories"] });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
       toast.push({ title: "Board updated", variant: "success" });
     },
     onError: (error) =>
@@ -135,6 +147,12 @@ export function BoardLoopsPage() {
             {board.description || "No description"} · {active.length} active Loops ·{" "}
             {finished.length} completed
           </p>
+          <BoardContext
+            agentIds={board.agent_ids ?? []}
+            repositoryIds={board.repository_ids ?? []}
+            agents={agentsQuery.data ?? []}
+            repositories={repositoriesQuery.data ?? []}
+          />
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Button
@@ -144,6 +162,7 @@ export function BoardLoopsPage() {
               setEditName(board.name);
               setEditDescription(board.description);
               setEditRepositoryIds(board.repository_ids ?? []);
+              setEditAgentIds(board.agent_ids ?? []);
               setEditing(true);
             }}
           >
@@ -216,7 +235,7 @@ export function BoardLoopsPage() {
       <Dialog open={editing} onOpenChange={setEditing}>
         <DialogContent
           title="Edit board"
-          description="Name, description and which repositories this board is about."
+          description="Name, description, and the code and agents this board is about."
         >
           <form
             className="flex flex-col gap-3"
@@ -245,6 +264,11 @@ export function BoardLoopsPage() {
             <RepositoryPicker
               selected={editRepositoryIds}
               onChange={setEditRepositoryIds}
+              disabled={saveBoard.isPending}
+            />
+            <AgentPicker
+              selected={editAgentIds}
+              onChange={setEditAgentIds}
               disabled={saveBoard.isPending}
             />
             <div className="flex justify-end gap-2">
@@ -361,5 +385,54 @@ function LoopList({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** What this board is about: the code it may read and the agents that may work on it. */
+function BoardContext({
+  agentIds,
+  repositoryIds,
+  agents,
+  repositories,
+}: {
+  agentIds: string[];
+  repositoryIds: string[];
+  agents: Array<{ id: string; name: string }>;
+  repositories: Array<{ id: string; name: string }>;
+}) {
+  const agentNames = agentIds
+    .map((id) => agents.find((agent) => agent.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
+  const repositoryNames = repositoryIds
+    .map((id) => repositories.find((repository) => repository.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+      <span className="flex items-center gap-1 text-[var(--muted-foreground)]">
+        <GitBranch size={11} /> Code
+      </span>
+      {repositoryNames.length > 0 ? (
+        repositoryNames.map((name) => (
+          <Badge key={name} tone="neutral">
+            {name}
+          </Badge>
+        ))
+      ) : (
+        <span className="text-[var(--muted-foreground)]">none selected</span>
+      )}
+      <span className="ml-2 flex items-center gap-1 text-[var(--muted-foreground)]">
+        <Bot size={11} /> Agents
+      </span>
+      {agentNames.length > 0 ? (
+        agentNames.map((name) => (
+          <Badge key={name} tone="brand">
+            {name}
+          </Badge>
+        ))
+      ) : (
+        <span className="text-[var(--muted-foreground)]">any enabled agent</span>
+      )}
+    </div>
   );
 }

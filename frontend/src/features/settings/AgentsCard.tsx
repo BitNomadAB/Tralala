@@ -90,6 +90,9 @@ export function AgentsCard() {
                       {agent.enabled ? "enabled" : "disabled"}
                     </Badge>
                     {agent.has_role_override ? <Badge tone="brand">override</Badge> : null}
+                    {agent.role_template_scope === "organisation" ? (
+                      <Badge tone="brand">organisation</Badge>
+                    ) : null}
                   </p>
                   <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
                     {agent.role_template_name ?? "No role"} ·{" "}

@@ -58,13 +58,23 @@ class RoleTemplateService:
                     {"key": role["key"]},
                 ).first()
                 if existing is not None:
+                    # Every built-in was a board profile before scope existed; keep the seed as the
+                    # source of truth for the scope so an upgrade lands on the right value.
+                    conn.execute(
+                        text(
+                            "UPDATE role_templates SET scope = :scope"
+                            " WHERE builtin_key = :key AND scope != :scope"
+                        ),
+                        {"key": role["key"], "scope": role["scope"]},
+                    )
                     continue
                 conn.execute(
                     text(
                         "INSERT INTO role_templates"
                         " (id, name, description, system_prompt, default_system_prompt, built_in,"
-                        "  builtin_key, created_at, updated_at)"
-                        " VALUES (:id, :name, :description, :prompt, :prompt, 1, :key, :now, :now)"
+                        "  builtin_key, scope, created_at, updated_at)"
+                        " VALUES (:id, :name, :description, :prompt, :prompt, 1, :key, :scope,"
+                        "         :now, :now)"
                     ),
                     {
                         "id": str(uuid4()),
@@ -72,6 +82,7 @@ class RoleTemplateService:
                         "description": role["description"],
                         "prompt": role["prompt"],
                         "key": role["key"],
+                        "scope": role["scope"],
                         "now": now,
                     },
                 )
@@ -128,6 +139,7 @@ class RoleTemplateService:
         system_prompt: str,
         built_in: bool,
         builtin_key: str | None,
+        scope: str = "board",
     ) -> dict[str, Any]:
         role_id = str(uuid4())
         now = utcnow()
@@ -137,9 +149,9 @@ class RoleTemplateService:
                     text(
                         "INSERT INTO role_templates"
                         " (id, name, description, system_prompt, default_system_prompt, built_in,"
-                        "  builtin_key, created_at, updated_at)"
+                        "  builtin_key, scope, created_at, updated_at)"
                         " VALUES (:id, :name, :description, :prompt, :prompt, :built_in, :key,"
-                        "         :now, :now)"
+                        "         :scope, :now, :now)"
                     ),
                     {
                         "id": role_id,
@@ -148,6 +160,7 @@ class RoleTemplateService:
                         "prompt": system_prompt,
                         "built_in": 1 if built_in else 0,
                         "key": builtin_key,
+                        "scope": scope,
                         "now": now,
                     },
                 )
@@ -197,6 +210,7 @@ class RoleTemplateService:
             system_prompt=current["system_prompt"],
             built_in=False,
             builtin_key=None,
+            scope=current.get("scope") or "board",
         )
 
     def restore_defaults(self, actor: ActorContext, role_id: str) -> dict[str, Any]:
@@ -248,6 +262,7 @@ class AgentService:
         entry.pop("api_key_ciphertext", None)
         role = roles.get(str(row.get("role_template_id") or ""))
         entry["role_template_name"] = role["name"] if role else None
+        entry["role_template_scope"] = (role or {}).get("scope") or "board"
         entry["role_template_updated_at"] = role["updated_at"] if role else None
         entry["has_role_override"] = bool(row.get("role_prompt_override"))
         entry["has_api_key"] = bool(row.get("api_key_ciphertext"))
@@ -299,9 +314,12 @@ class AgentService:
                 "role_template_name": (
                     roles.get(str(row.get("role_template_id") or "")) or {}
                 ).get("name"),
+                "role_template_scope": row.get("scope") or "board",
             }
             for row in self.registry.read(
-                "SELECT id, name, role_template_id FROM agents WHERE enabled = 1 ORDER BY name"
+                "SELECT a.id, a.name, a.role_template_id, COALESCE(r.scope, 'board') AS scope"
+                " FROM agents a LEFT JOIN role_templates r ON r.id = a.role_template_id"
+                " WHERE a.enabled = 1 ORDER BY a.name"
             )
         ]
 
@@ -500,6 +518,58 @@ class AgentService:
         self.get_row(agent_id)
         with self.registry.connect() as conn:
             conn.execute(text("DELETE FROM agents WHERE id = :id"), {"id": agent_id})
+
+    # --- board membership ------------------------------------------------------
+
+    def validate_ids(self, agent_ids: list[str]) -> None:
+        """Every id must exist and be a board profile before it is written to a board."""
+        for agent_id in agent_ids:
+            row = self.registry.read_one(
+                "SELECT a.id, COALESCE(r.scope, 'board') AS scope FROM agents a"
+                " LEFT JOIN role_templates r ON r.id = a.role_template_id WHERE a.id = :id",
+                {"id": agent_id},
+            )
+            if row is None:
+                raise NotFound("Agent not found", code="agent_not_found")
+            if row["scope"] == "organisation":
+                raise ValidationFailure(
+                    "An organisation-wide profile works across boards and is not a board agent",
+                    code="agent_scope_organisation",
+                    details={"agent_id": agent_id},
+                )
+
+    def set_board_agents(self, board_id: str, agent_ids: list[str]) -> None:
+        """Replace a board's selection; called after the board row exists."""
+        self.validate_ids(list(agent_ids))
+        now = utcnow()
+        with self.registry.connect() as conn:
+            conn.execute(text("DELETE FROM board_agents WHERE board_id = :id"), {"id": board_id})
+            for agent_id in dict.fromkeys(agent_ids):
+                conn.execute(
+                    text(
+                        "INSERT INTO board_agents (board_id, agent_id, created_at)"
+                        " VALUES (:board_id, :agent_id, :now)"
+                    ),
+                    {"board_id": board_id, "agent_id": agent_id, "now": now},
+                )
+
+    def agent_ids(self, board_id: str) -> list[str]:
+        return [
+            record["agent_id"]
+            for record in self.registry.read(
+                "SELECT agent_id FROM board_agents WHERE board_id = :id"
+                " ORDER BY created_at, agent_id",
+                {"id": board_id},
+            )
+        ]
+
+    def agent_ids_for_boards(self) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for record in self.registry.read(
+            "SELECT board_id, agent_id FROM board_agents ORDER BY created_at, agent_id"
+        ):
+            grouped.setdefault(record["board_id"], []).append(record["agent_id"])
+        return grouped
 
     # --- secret rotation -------------------------------------------------------
 

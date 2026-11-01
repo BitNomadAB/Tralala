@@ -40,6 +40,7 @@ planning groups, not Kanban columns. See [loops.md](loops.md) for the workflow i
 | Storage | `backend/app/storage` | SQLite engines, migrations, registry and per-board databases |
 | Schemas | `backend/app/schemas` | Pydantic v2 request/response validation |
 | Core | `backend/app/core` | Settings, errors, security primitives, actor context, rate limiting |
+| Seeds | `backend/app/seeds` | Factory data seeded into a new registry, currently the role templates |
 
 ### Frontend layers
 
@@ -54,11 +55,12 @@ planning groups, not Kanban columns. See [loops.md](loops.md) for the workflow i
 ## Storage model
 
 - `data/registry.sqlite` holds boards, board templates, role templates, agents, actors, credentials,
-  the repositories a board is about (with their sealed read-only tokens) and the `board_repositories`
-  links between them, and registry-level idempotency records. Secrets live here rather than in a
-  board database, so a board export never carries one.
+  the repositories a board is about (with their sealed read-only tokens), the `board_repositories`
+  and `board_agents` links between a board and what works on it, and registry-level idempotency
+  records. Secrets live here rather than in a board database, so a board export never carries one.
 - `data/boards/{uuid}/board.sqlite` holds Loops, their documents, approvals, plans, QA cycles,
-  history, Loop-owned lists, Tickets (cards), labels, checklists, comments and activity.
+  history, Loop-owned lists, Tickets (cards), labels, checklists, comments, the per-Loop agent
+  preference per purpose and activity.
 - `data/backups/{uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite` holds consistent snapshots.
 - `data/exports/` is reserved for future generated exports; the export endpoint streams the archive.
 - `data/.session-secret` holds the generated per-install session secret when `TRALALA_SECRET_KEY` is unset (owner-only permissions); `data/.bootstrap-password` holds a generated first-administrator password until it is deleted.

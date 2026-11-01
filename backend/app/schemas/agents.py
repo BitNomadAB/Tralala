@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from .common import Id, LongText, Name, OutModel, StrictModel
@@ -30,6 +32,7 @@ class RoleTemplateOut(OutModel):
     system_prompt: str
     built_in: bool
     builtin_key: str | None = None
+    scope: Literal["board", "organisation"] = "board"
     customized: bool = False
     agent_count: int = 0
     created_at: str
@@ -80,6 +83,7 @@ class AgentOut(OutModel):
     description: str
     role_template_id: str | None = None
     role_template_name: str | None = None
+    role_template_scope: Literal["board", "organisation"] = "board"
     role_template_updated_at: str | None = None
     has_role_override: bool = False
     connection_type: str
@@ -105,6 +109,7 @@ class AgentDirectoryEntry(OutModel):
     name: str
     role_template_id: str | None = None
     role_template_name: str | None = None
+    role_template_scope: Literal["board", "organisation"] = "board"
 
 
 class AgentTestRequest(StrictModel):

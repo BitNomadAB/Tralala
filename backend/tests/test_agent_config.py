@@ -300,9 +300,11 @@ def test_agent_directory_returns_only_identity_and_role(api: Api) -> None:
         "name",
         "role_template_id",
         "role_template_name",
+        "role_template_scope",
     }
     assert entries[enabled["id"]]["name"] == "Directory Bot"
     assert entries[enabled["id"]]["role_template_name"] == "QA Engineer"
+    assert entries[enabled["id"]]["role_template_scope"] == "board"
     body = api.get("/api/v1/agents/directory").text
     assert "sk-directory" not in body
     assert "127.0.0.1:8080" not in body

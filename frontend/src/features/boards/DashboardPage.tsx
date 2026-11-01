@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { AgentPicker } from "@/features/boards/AgentPicker";
 import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
@@ -36,6 +37,7 @@ export function DashboardPage() {
   const [description, setDescription] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
+  const [agentIds, setAgentIds] = useState<string[]>([]);
   const [deleting, setDeleting] = useState<Board | null>(null);
   const [confirmName, setConfirmName] = useState("");
   const importInput = useRef<HTMLInputElement>(null);
@@ -57,6 +59,7 @@ export function DashboardPage() {
         description: description.trim(),
         template_id: templateId || null,
         repository_ids: repositoryIds,
+        agent_ids: agentIds,
       }),
     onSuccess: (board) => {
       invalidate();
@@ -65,6 +68,7 @@ export function DashboardPage() {
       setDescription("");
       setTemplateId("");
       setRepositoryIds([]);
+      setAgentIds([]);
       toast.push({ title: "Board created", variant: "success" });
       navigate(`/boards/${board.id}`);
     },
@@ -327,6 +331,7 @@ export function DashboardPage() {
           if (!open) {
             setTemplateId("");
             setRepositoryIds([]);
+            setAgentIds([]);
           }
         }}
       >
@@ -382,6 +387,7 @@ export function DashboardPage() {
               </div>
             ) : null}
             <RepositoryPicker selected={repositoryIds} onChange={setRepositoryIds} />
+            <AgentPicker selected={agentIds} onChange={setAgentIds} />
             <Field label="Description" htmlFor="board-description">
               <Textarea
                 id="board-description"

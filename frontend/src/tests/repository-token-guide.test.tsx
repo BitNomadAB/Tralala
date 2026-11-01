@@ -42,6 +42,12 @@ describe("RepositoryTokenGuide", () => {
   it("states that a deploy key is not what this field reads", () => {
     render(<RepositoryTokenGuide url="https://github.com/acme/rocket" />);
     expect(screen.getByText(/Tralala never uses SSH or a git binary/)).toBeInTheDocument();
-    expect(screen.getByText(/Contents/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Contents/).length).toBeGreaterThan(0);
+  });
+
+  it("explains the organisation-wide token for an organisation profile", () => {
+    render(<RepositoryTokenGuide url="https://github.com/acme/rocket" />);
+    expect(screen.getByText(/One key for several repositories/)).toBeInTheDocument();
+    expect(screen.getByText(/All repositories/)).toBeInTheDocument();
   });
 });

@@ -323,6 +323,24 @@ class GenerationRequest(StrictModel):
     instructions: LongText = ""
 
 
+class LoopAgentPreferencesUpdate(StrictModel):
+    """Agent per generation purpose for one Loop.
+
+    Omitted fields keep their stored value; an explicit ``null`` clears that purpose.
+    """
+
+    analysis_agent_id: Id | None = None
+    roadmap_agent_id: Id | None = None
+    qa_agent_id: Id | None = None
+
+
+class LoopAgentPreferencesOut(OutModel):
+    loop_id: str
+    analysis_agent_id: str | None = None
+    roadmap_agent_id: str | None = None
+    qa_agent_id: str | None = None
+
+
 class GenerationRunOut(OutModel):
     id: str
     loop_id: str

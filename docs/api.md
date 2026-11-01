@@ -128,8 +128,18 @@ template is rejected with `422 validation_failed` before any board row is writte
 
 `POST` and `PATCH /boards` accept `repository_ids: [uuid]`: the set of GitHub repositories the board
 is about. The list replaces the board's previous selection (an empty list detaches every
-repository); an unknown id is rejected with `422 validation_failed` and nothing is written. Every
-`BoardOut` carries `repository_ids`, which is what the create/edit dialogs show as checkboxes.
+repository); an unknown id is rejected with `404 repository_not_found` before anything is written.
+Every `BoardOut` carries `repository_ids`, which is what the create/edit dialogs show as checkboxes.
+
+The same pair applies to `agent_ids`: the agents that work on that board. An empty list means "any
+enabled agent", a non-empty list is enforced at generation time — a run may only use an agent the
+board lists (`422 agent_not_on_board`), and the default pick prefers a board agent. An unknown id is
+rejected with `404 agent_not_found` before anything is written.
+
+A Loop can narrow that further per purpose: `PUT …/loops/{loop_id}/agents` stores
+`analysis_agent_id`, `roadmap_agent_id` and `qa_agent_id`, which seed the default of the next run
+(`Default (<agent name>)` in the dialog). A run's explicit `agent_id` still wins, and a stored agent
+that the board dropped or that was deleted falls back to the board default instead of failing.
 
 ### Loops
 
@@ -150,6 +160,8 @@ document slots; there is no Board-level Kanban.
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/roadmap` | Human-only; publishes the plan atomically |
 | GET | `/boards/{board_id}/loops/{loop_id}/plan` | Active plan with phases and readiness |
+| GET | `/boards/{board_id}/loops/{loop_id}/agents` | The agent this Loop prefers per purpose |
+| PUT | `/boards/{board_id}/loops/{loop_id}/agents` | Sets that preference (`boards:write`; omitted field keeps its value, `null` clears) |
 | GET | `/boards/{board_id}/loops/{loop_id}/readiness` | Machine-readable blockers and human gates |
 | GET | `/boards/{board_id}/loops/{loop_id}/context` | Bounded, versioned context plus output schemas |
 | POST | `/boards/{board_id}/loops/{loop_id}/generation-runs` | Starts an analysis, RoadMap or QA run (`202`); `Idempotency-Key` supported |
@@ -197,12 +209,20 @@ exists. Names are unique (case-insensitive); duplicates return `409 template_nam
 | POST | `/role-templates/{id}/restore-defaults` (built-in only) | `agents:admin` |
 | DELETE | `/role-templates/{id}` (custom only) | `agents:admin` |
 
-Ten built-in roles are seeded on startup (`lead_developer`, `project_manager`, `product_owner`,
-`backend_developer`, `frontend_developer`, `qa_engineer`, `security_engineer`, `ux_designer`,
-`customer`, `analytics_agent`). Built-ins carry `built_in: true` and a factory copy of their prompt,
-so edits are reversible. `customized` is true while `system_prompt` differs from the factory text.
+Twelve built-in roles are seeded on startup from `backend/app/seeds/role_seeds.json`
+(`lead_developer`, `project_manager`, `product_owner`, `backend_developer`, `frontend_developer`,
+`qa_engineer`, `security_engineer`, `ux_designer`, `customer`, `analytics_agent`, `coordinator`,
+`architect`). Built-ins carry `built_in: true` and a factory copy of their prompt, so edits are
+reversible. `customized` is true while `system_prompt` differs from the factory text.
 The agent's role prompt is the first part of every Loop generation prompt, followed by the purpose
 contract and the JSON schema, and the whole composed text is what a run snapshots.
+
+`scope` says where a profile works. `board` profiles answer inside one board; `organisation`
+profiles (`coordinator`, `architect`) work across the whole installation and cannot be selected as
+board agents — `agent_ids` on a board rejects them with `422 agent_scope_organisation`. Their input
+is the registry itself: `GET /boards`, `GET /repositories` and the Loop overview endpoints, and the
+Architect expects one read-only token that reaches every repository. Custom templates copy the scope
+of the template they came from.
 
 ### Repository credentials
 

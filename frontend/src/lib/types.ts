@@ -34,6 +34,14 @@ export interface Board {
   list_count: number;
   card_count: number;
   repository_ids: string[];
+  agent_ids: string[];
+}
+
+export interface LoopAgentPreferences {
+  loop_id: string;
+  analysis_agent_id: string | null;
+  roadmap_agent_id: string | null;
+  qa_agent_id: string | null;
 }
 
 export interface BoardList {
@@ -65,6 +73,8 @@ export interface BoardTemplate {
   list_count: number;
 }
 
+export type RoleScope = "board" | "organisation";
+
 export interface RoleTemplate {
   id: string;
   name: string;
@@ -72,6 +82,7 @@ export interface RoleTemplate {
   system_prompt: string;
   built_in: boolean;
   builtin_key: string | null;
+  scope: RoleScope;
   customized: boolean;
   agent_count: number;
   created_at: string;
@@ -86,6 +97,7 @@ export interface Agent {
   description: string;
   role_template_id: string | null;
   role_template_name: string | null;
+  role_template_scope: RoleScope;
   role_template_updated_at: string | null;
   has_role_override: boolean;
   connection_type: ConnectionType;
@@ -109,6 +121,7 @@ export interface AgentDirectoryEntry {
   name: string;
   role_template_id: string | null;
   role_template_name: string | null;
+  role_template_scope: RoleScope;
 }
 
 export interface AgentTestResult {

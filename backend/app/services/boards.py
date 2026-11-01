@@ -42,6 +42,8 @@ class BoardService:
         self.boards = boards
         self.migrations = migrations
         self.templates = templates
+        self.repositories: Any | None = None
+        self.agents: Any | None = None
 
     # --- helpers ---------------------------------------------------------------
 
@@ -88,6 +90,7 @@ class BoardService:
         *,
         with_counts: bool = True,
         repository_map: dict[str, list[str]] | None = None,
+        agent_map: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         entry = dict(row)
         entry.setdefault("schema_revision", None)
@@ -103,6 +106,11 @@ class BoardService:
             repository_map[row["id"]]
             if repository_map is not None and row["id"] in repository_map
             else ([] if repository_map is not None else self._repository_ids(row["id"]))
+        )
+        entry["agent_ids"] = (
+            agent_map[row["id"]]
+            if agent_map is not None and row["id"] in agent_map
+            else ([] if agent_map is not None else self._agent_ids(row["id"]))
         )
         return entry
 
@@ -124,6 +132,14 @@ class BoardService:
         ):
             grouped.setdefault(record["board_id"], []).append(record["repository_id"])
         return grouped
+
+    def _agent_ids(self, board_id: str) -> list[str]:
+        if self.agents is None:
+            return []
+        return self.agents.agent_ids(board_id)
+
+    def _agent_ids_by_board(self) -> dict[str, list[str]]:
+        return self.agents.agent_ids_for_boards() if self.agents is not None else {}
 
     # --- queries ---------------------------------------------------------------
 
@@ -163,8 +179,12 @@ class BoardService:
             {**params, "limit": limit, "offset": offset},
         )
         repository_map = self._repository_ids_by_board()
+        agent_map = self._agent_ids_by_board()
         return (
-            [self.serialize(row, repository_map=repository_map) for row in page],
+            [
+                self.serialize(row, repository_map=repository_map, agent_map=agent_map)
+                for row in page
+            ],
             int(total["total"] if total else 0),
         )
 
@@ -184,6 +204,8 @@ class BoardService:
         template = self._resolve_template(payload.template_id)
         if payload.repository_ids:
             self.repositories.validate_ids(list(payload.repository_ids))
+        if payload.agent_ids and self.agents is not None:
+            self.agents.validate_ids(list(payload.agent_ids))
         fingerprint = request_fingerprint({"op": "board.create", "payload": payload.model_dump()})
         board_id = str(uuid4())
         if idempotency_key:
@@ -284,6 +306,8 @@ class BoardService:
             )
             if payload.repository_ids:
                 self.repositories.set_board_links(board_id, payload.repository_ids)
+            if payload.agent_ids and self.agents is not None:
+                self.agents.set_board_agents(board_id, payload.agent_ids)
         except Exception:
             self.registry.update_board(board_id, status="error")
             with self.registry.connect() as conn:
@@ -315,9 +339,15 @@ class BoardService:
         repository_ids = updates.pop("repository_ids", None)
         if repository_ids is not None:
             self.repositories.validate_ids(list(repository_ids))
+        agent_ids = updates.pop("agent_ids", None)
+        if agent_ids is not None and self.agents is not None:
+            self.agents.validate_ids(list(agent_ids))
         if not updates:
             if repository_ids is not None:
                 self.repositories.set_board_links(board_id, list(repository_ids))
+            if agent_ids is not None and self.agents is not None:
+                self.agents.set_board_agents(board_id, list(agent_ids))
+            if repository_ids is not None or agent_ids is not None:
                 return self.get(board_id)
             return self.serialize(row)
         previous = {key: row[key] for key in updates}
@@ -333,6 +363,8 @@ class BoardService:
             )
         if repository_ids is not None:
             self.repositories.set_board_links(board_id, list(repository_ids))
+        if agent_ids is not None and self.agents is not None:
+            self.agents.set_board_agents(board_id, list(agent_ids))
         return self.get(board_id)
 
     def archive(self, actor: ActorContext, board_id: str) -> dict[str, Any]:

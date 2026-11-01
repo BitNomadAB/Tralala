@@ -52,7 +52,10 @@ message broker.
     editable role prompt; `agents` holds identity, connection and credentials plus a *reference* to
     a template (or an override). Never join live templates into historical output: any discussion or
     run persists `AgentService.role_snapshot(...)` so later template edits cannot rewrite what an
-    agent was told.
+    agent was told. Factory templates are data, not code: edit
+    `backend/app/seeds/role_seeds.json`, validate via `services/role_defaults.py`, and keep the
+    `scope` rule — `board` profiles may be selected for a board, `organisation` profiles
+    (Coordinator, Architect) may not.
 12. **Provider credentials are sealed, never echoed.** API keys are encrypted with
     `core/secrets.py`; responses and logs expose only `has_api_key` and a short hint. Endpoints are
     validated by `services/connections.validate_endpoint` (no metadata/link-local targets, no
