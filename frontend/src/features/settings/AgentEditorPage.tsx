@@ -299,20 +299,32 @@ export function AgentEditorPage() {
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Connection type" htmlFor="agent-connection">
+          <Field
+            label="Connection type"
+            htmlFor="agent-connection"
+            hint={
+              connectionType === "a2a"
+                ? "An agent that already runs outside Tralala. It brings its own tools, memory and way of working; the role here only decides how it answers in this board."
+                : "A model endpoint you point Tralala at. It has no tools or memory of its own here: Tralala sends the role prompt and the conversation, and the model answers as that role."
+            }
+          >
             <Select
               id="agent-connection"
               value={connectionType}
               onChange={(event) => setConnectionType(event.target.value as ConnectionType)}
             >
-              <option value="openai_compatible">OpenAI-compatible API</option>
-              <option value="a2a">A2A agent</option>
+              <option value="openai_compatible">OpenAI-compatible API — a model you point at</option>
+              <option value="a2a">A2A agent — an agent that already exists</option>
             </Select>
           </Field>
           <Field
             label="Provider preset"
             htmlFor="agent-provider"
-            hint={presetById(providerId)?.hint ?? "Prefills the base URL and default model."}
+            hint={
+              connectionType === "a2a"
+                ? "Optional. A preset only prefills the endpoint; the A2A agent brings its own model."
+                : (presetById(providerId)?.hint ?? "Prefills the base URL and default model.")
+            }
           >
             <Select
               id="agent-provider"
@@ -349,12 +361,16 @@ export function AgentEditorPage() {
               required
             />
           </Field>
-          <Field label="Model identifier" htmlFor="agent-model">
+          <Field
+            label="Model identifier"
+            htmlFor="agent-model"
+            hint={connectionType === "a2a" ? "Optional. The A2A agent chooses its own model." : undefined}
+          >
             <Input
               id="agent-model"
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder="llama-3.1-8b-instruct"
+              placeholder={connectionType === "a2a" ? "" : "llama-3.1-8b-instruct"}
             />
           </Field>
           <Field

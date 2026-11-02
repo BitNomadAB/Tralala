@@ -45,9 +45,15 @@ second if you want your own coding agent to drive Tralala.
 
 1. **Settings → Agents → New agent.**
 2. Name it, pick a **role template** (the factory list includes Lead Developer, QA Engineer,
-   Security Engineer, Architect, Project Manager…), and set the **connection**: `openai_compatible`
-   with a base URL and model, or `a2a` with an agent card URL. A local model is fine — private and
-   loopback addresses are allowed on purpose.
+   Security Engineer, Architect, Project Manager…), and set the **connection**. The two choices are
+   different things, not two ways to say the same:
+
+   | Connection | What sits on the other end | What the role decides |
+   | --- | --- | --- |
+   | `openai_compatible` | A model endpoint you point at. It has no tools or memory of its own. | Everything: Tralala sends the role prompt and the conversation, and the model answers as that role. |
+   | `a2a` | An agent that already runs outside Tralala, with its own tools, memory and job. | Only how it answers inside this board. It arrives with its own way of working. |
+
+   A local model is fine — private and loopback addresses are allowed on purpose.
 3. Paste the provider **API key** if the endpoint needs one. It is sealed with a key derived from your
    session secret and never shown again; the list only says `has_api_key` plus a hint.
 4. Press the test action in the agent list to see the round trip.
