@@ -157,6 +157,16 @@ async def duplicate_agent(
     return ok(request, ctx.services.agent.duplicate(ctx.actor, agent_id, payload))
 
 
+@router.post("/agents/test", response_model=Envelope[AgentTestResult])
+async def probe_agent(
+    payload: AgentTestRequest,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict:
+    """Test a connection before the agent is saved; nothing is written."""
+    return ok(request, ctx.services.agent.probe(ctx.actor, payload))
+
+
 @router.post("/agents/{agent_id}/test", response_model=Envelope[AgentTestResult])
 async def test_agent(
     agent_id: str,

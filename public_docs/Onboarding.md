@@ -56,9 +56,14 @@ second if you want your own coding agent to drive Tralala.
    A local model is fine — private and loopback addresses are allowed on purpose.
 3. Paste the provider **API key** if the endpoint needs one. It is sealed with a key derived from your
    session secret and never shown again; the list only says `has_api_key` plus a hint.
-4. Press **Test connection**. It asks the endpoint which models it serves *and* sends one tiny
-   real completion, so a wrong model name fails here instead of in a generation an hour later.
-   The reported model names then appear as suggestions in the model field.
+4. Press **Test connection** — before you save. It asks the endpoint which models it serves *and*
+   sends one tiny real completion, so a wrong model name fails here instead of in a generation an hour
+   later. Nothing is stored until the test is green, the reported model names become suggestions in
+   the model field, and the raw answer is shown as JSON so the same block serves every provider.
+
+   A model running on your own machine or network — `http://192.168.0.10:8080` — usually has no key:
+   tick **This endpoint needs no key** and nothing is sent, in the test or in a generation. The known
+   local presets tick it for you; hosted providers keep it unticked and cannot be saved without one.
 5. Make it work on the board: open the board and choose **Edit board → Agents**. An agent a board does
    not list is never asked on that board; leaving every box unchecked means "any enabled board
    profile", which is fine for a single-agent install. A Loop can narrow that further in its own

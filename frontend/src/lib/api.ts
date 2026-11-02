@@ -651,10 +651,28 @@ export const api = {
       base_url?: string;
       model?: string;
       api_key?: string;
+      no_api_key?: boolean;
     } = {},
   ): Promise<AgentTestResult> {
     return json(
       await request<AgentTestResult>(`/agents/${agentId}/test`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
+  },
+
+  /** Test a configuration that has not been saved: nothing is written on success or failure. */
+  async probeAgent(payload: {
+    connection_type?: ConnectionType;
+    base_url?: string;
+    model?: string;
+    api_key?: string;
+    no_api_key?: boolean;
+    timeout_seconds?: number;
+  }): Promise<AgentTestResult> {
+    return json(
+      await request<AgentTestResult>("/agents/test", {
         method: "POST",
         body: payload,
       }),

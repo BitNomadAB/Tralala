@@ -331,6 +331,7 @@ HTTPS and runs no git binary, so a deploy key is not an alternative for this fie
 | PATCH | `/agents/{id}` (`clear_api_key: true` removes the stored key) | `agents:write` |
 | POST | `/agents/{id}/duplicate` | `agents:write` |
 | POST | `/agents/{id}/test` (optional unsaved overrides) | `agents:write` |
+| POST | `/agents/test` (test a configuration that is not saved; nothing is written) | `agents:write` |
 | DELETE | `/agents/{id}` | `agents:admin` |
 
 An agent needs either `role_template_id` or `role_prompt_override`. `connection_type` is
@@ -343,6 +344,15 @@ API keys are sealed with Fernet (HKDF-derived from the install secret). Response
 `has_api_key` and a `••••ab12` hint — never the key itself. `/agents/directory` is the autocomplete
 projection: enabled agents with `id`, `name` and role only, no endpoint, model or credential hint.
 
+`POST /agents/test` takes the same body and does the same work without an agent row, so a form can
+prove a connection before it saves one. Nothing is written on success or failure: `last_test_*` stays
+untouched because there is nothing to touch.
+
+Both test endpoints accept `no_api_key: true`, which means "call this endpoint without a credential".
+That is different from omitting `api_key`, which means "use the one already stored on this agent": a
+model on your own network usually wants no key at all, and the stored one must not silently travel
+with the request. With no key there is no `Authorization` header in any call, probe or generation.
+
 `POST /agents/{id}/test` probes `GET {base_url}/models` for OpenAI-compatible endpoints and the A2A
 agent card (`/.well-known/agent.json`) for `a2a`, then records `last_test_status`,
 `last_test_message` and `last_tested_at`. When an OpenAI-compatible agent has a model, the probe
@@ -352,6 +362,11 @@ name exists and that the parameters a generation sends are accepted, which is th
 a green test and a run that fails with `400`. A refused completion fails the test and carries the
 provider's own sentence, while `models` still comes back so the form can offer the names the
 endpoint knows.
+
+Both endpoints write a pair of structured log events per attempt — `agent_probe_started` and then
+`agent_probe_finished` or `agent_probe_failed` (a warning) — carrying the endpoint, the model, whether
+a key was used, the status, the latency, how many models were reported and, on failure, the reason cut
+to 200 characters. The key itself and the request body never appear.
 
 **Role snapshot rule:** `role_templates` and `agents` are separate resources. Editing a template
 changes *future* work; every discussion persists `AgentService.role_snapshot(...)` (template id and

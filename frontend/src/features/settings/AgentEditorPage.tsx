@@ -9,7 +9,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { useAgent, useRoleTemplates } from "@/lib/queries";
-import { PROVIDER_PRESETS, presetById } from "@/lib/providers";
+import { PROVIDER_PRESETS, presetById, presetRequirements } from "@/lib/providers";
 import { formatDateTime } from "@/lib/utils";
 import type { Agent, AgentTestResult, ConnectionType } from "@/lib/types";
 
@@ -64,6 +64,8 @@ export function AgentEditorPage() {
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  // Unticked by default: the field is available until you say the endpoint needs no credential.
+  const [noKey, setNoKey] = useState(false);
   const [temperature, setTemperature] = useState("");
   const [maxTokens, setMaxTokens] = useState("");
   const [timeoutSeconds, setTimeoutSeconds] = useState("30");
@@ -88,6 +90,7 @@ export function AgentEditorPage() {
       )?.id ?? "custom",
     );
     setModel(agent.model ?? "");
+    setNoKey(!agent.has_api_key);
     setTemperature(agent.temperature === null ? "" : String(agent.temperature));
     setMaxTokens(agent.max_output_tokens === null ? "" : String(agent.max_output_tokens));
     setTimeoutSeconds(String(agent.timeout_seconds));
@@ -119,7 +122,16 @@ export function AgentEditorPage() {
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const body = apiKey.trim() ? { ...payload, api_key: apiKey.trim() } : payload;
+      // "No key" on an existing agent has to clear a stored one, which the API spells
+      // `clear_api_key`; a new agent simply never receives a key.
+      const credentials = noKey
+        ? isNew
+          ? {}
+          : { clear_api_key: true }
+        : apiKey.trim()
+          ? { api_key: apiKey.trim() }
+          : {};
+      const body = { ...payload, ...credentials };
       return isNew ? api.createAgent(body) : api.updateAgent(String(agentId), body);
     },
     onSuccess: (agent) => {
@@ -137,13 +149,21 @@ export function AgentEditorPage() {
   });
 
   const testMutation = useMutation({
-    mutationFn: () =>
-      api.testAgent(String(agentId), {
+    mutationFn: () => {
+      const connection = {
         connection_type: connectionType,
         base_url: baseUrl.trim(),
         ...(model.trim() ? { model: model.trim() } : {}),
-        ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-      }),
+        ...(!noKey && apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+        // Explicit: omitting the key means "use the one stored on the agent".
+        ...(noKey ? { no_api_key: true } : {}),
+      };
+      // A new agent has no row to test against, so the form asks the endpoint directly. Saving
+      // first would put a configuration in the registry that nobody has proved works.
+      return isNew
+        ? api.probeAgent({ ...connection, timeout_seconds: Number(timeoutSeconds) || 30 })
+        : api.testAgent(String(agentId), connection);
+    },
     onSuccess: (result) => {
       setTestResult(result);
       invalidate();
@@ -205,7 +225,37 @@ export function AgentEditorPage() {
   }
 
   const stored = agentQuery.data;
-  const canSave = Boolean(name.trim() && baseUrl.trim() && (roleTemplateId || override.trim()));
+  const preset = presetById(providerId);
+  const requirements = presetRequirements(
+    preset ?? {
+      id: "custom",
+      label: "Custom",
+      baseUrl: "",
+      model: "",
+      baseUrlFixed: false,
+      requiresApiKey: false,
+      requiresModel: false,
+    },
+  );
+  const hasStoredKey = Boolean(stored?.has_api_key);
+  const endpointLocked = connectionType === "openai_compatible" && requirements.endpointLocked;
+  const keyMissing =
+    connectionType === "openai_compatible" &&
+    requirements.apiKey === "required" &&
+    !noKey &&
+    !apiKey.trim() &&
+    !hasStoredKey;
+  const modelMissing =
+    connectionType === "openai_compatible" &&
+    requirements.model === "required" &&
+    !model.trim();
+  const canSave = Boolean(
+    name.trim() &&
+      baseUrl.trim() &&
+      (roleTemplateId || override.trim()) &&
+      !keyMissing &&
+      !modelMissing,
+  );
 
   return (
     <section className="flex max-w-3xl flex-col gap-6">
@@ -320,37 +370,47 @@ export function AgentEditorPage() {
               <option value="a2a">A2A agent — an agent that already exists</option>
             </Select>
           </Field>
-          <Field
-            label="Provider preset"
-            htmlFor="agent-provider"
-            hint={
-              connectionType === "a2a"
-                ? "Optional. A preset only prefills the endpoint; the A2A agent brings its own model."
-                : (presetById(providerId)?.hint ?? "Prefills the base URL and default model.")
-            }
-          >
-            <Select
-              id="agent-provider"
-              value={providerId}
-              onChange={(event) => {
-                const preset = presetById(event.target.value);
-                setProviderId(event.target.value);
-                if (!preset || preset.id === "custom") return;
-                setBaseUrl(preset.baseUrl);
-                setModel(preset.model);
-              }}
+          {connectionType === "openai_compatible" ? (
+            <Field
+              label="Provider preset"
+              htmlFor="agent-provider"
+              hint={preset?.hint ?? "Prefills the base URL and default model."}
             >
-              {PROVIDER_PRESETS.map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+              <Select
+                id="agent-provider"
+                value={providerId}
+                onChange={(event) => {
+                  const chosen = presetById(event.target.value);
+                  setProviderId(event.target.value);
+                  if (!chosen) return;
+                  // A known local preset needs no key; anything you point at yourself may or may not.
+                  setNoKey(chosen.id !== "custom" && !chosen.requiresApiKey);
+                  if (chosen.id !== "custom") {
+                    setBaseUrl(chosen.baseUrl);
+                    setModel(chosen.model);
+                  } else if (preset?.baseUrlFixed) {
+                    // Leaving a hosted provider: clear what its preset filled in.
+                    setBaseUrl("");
+                    setModel("");
+                  }
+                }}
+              >
+                {PROVIDER_PRESETS.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           <Field
             label={connectionType === "a2a" ? "Agent endpoint or card URL" : "API base URL"}
             htmlFor="agent-base-url"
-            hint="Credentials are encrypted; local endpoints are allowed."
+            hint={
+              endpointLocked
+                ? "Fixed by the preset. Choose Custom to point somewhere else."
+                : "Credentials are encrypted; local endpoints are allowed."
+            }
           >
             <Input
               id="agent-base-url"
@@ -361,25 +421,44 @@ export function AgentEditorPage() {
                   ? "http://127.0.0.1:9001"
                   : "http://127.0.0.1:8080/v1"
               }
+              readOnly={endpointLocked}
               required
             />
+            {preset?.docsUrl ? (
+              <a
+                className="text-[11px] underline text-[var(--muted-foreground)]"
+                href={preset.docsUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                {preset.label} API documentation
+              </a>
+            ) : null}
           </Field>
           <Field
-            label="Model identifier"
+            label={
+              connectionType === "a2a"
+                ? "Model identifier"
+                : requirements.model === "required"
+                  ? "Model identifier (required)"
+                  : "Model identifier (optional)"
+            }
             htmlFor="agent-model"
             hint={
               connectionType === "a2a"
                 ? "Optional. The A2A agent chooses its own model."
                 : testModels.length > 0
                   ? `${testModels.length} model(s) reported by the endpoint — pick one, or type a name it accepts.`
-                  : "Run the connection test to see which models the endpoint offers."
+                  : (preset?.hint ?? "Run the connection test to see which models the endpoint offers.")
             }
           >
             <Input
               id="agent-model"
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder={connectionType === "a2a" ? "" : "llama-3.1-8b-instruct"}
+              placeholder={
+                connectionType === "a2a" ? "" : (preset?.modelPlaceholder ?? "llama-3.1-8b-instruct")
+              }
               list={testModels.length > 0 ? "agent-model-options" : undefined}
             />
             {testModels.length > 0 ? (
@@ -391,22 +470,52 @@ export function AgentEditorPage() {
             ) : null}
           </Field>
           <Field
-            label={stored?.has_api_key ? "Replace API key" : "API key (optional)"}
+            label={
+              noKey
+                ? "API key (not used)"
+                : hasStoredKey
+                  ? "Replace API key"
+                  : requirements.apiKey === "required" && connectionType !== "a2a"
+                    ? "API key (required)"
+                    : "API key (optional)"
+            }
             htmlFor="agent-api-key"
             hint={
-              stored?.has_api_key
-                ? `A key is stored (${stored.api_key_hint}). Leave empty to keep it.`
-                : "Local endpoints usually need no key."
+              hasStoredKey
+                ? `A key is stored (${stored?.api_key_hint}). Leave empty to keep it.`
+                : connectionType === "a2a"
+                  ? "Only if the agent card requires one."
+                  : requirements.apiKey === "required"
+                    ? "This provider rejects calls without a key."
+                    : "Not used by this provider; a local endpoint accepts calls without one."
             }
           >
             <Input
               id="agent-api-key"
               type="password"
               autoComplete="off"
-              value={apiKey}
+              value={noKey ? "" : apiKey}
+              disabled={noKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder={stored?.has_api_key ? "••••" : ""}
+              placeholder={noKey ? "not used" : stored?.has_api_key ? "••••" : ""}
             />
+            <label className="mt-1 flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={noKey}
+                onChange={(event) => {
+                  setNoKey(event.target.checked);
+                  if (event.target.checked) setApiKey("");
+                }}
+              />
+              This endpoint needs no key
+            </label>
+            {noKey ? (
+              <p className="text-[11px] text-[var(--muted-foreground)]">
+                No <code>Authorization</code> header is sent, in the test or in a call. A model on the
+                same machine or network usually works this way.
+              </p>
+            ) : null}
           </Field>
           <Field label="Temperature" htmlFor="agent-temperature">
             <Input
@@ -475,6 +584,10 @@ export function AgentEditorPage() {
                 {testResult.models.length > 8 ? ` (+${testResult.models.length - 8} more)` : ""}
               </p>
             ) : null}
+            {/* The raw answer, so the same block serves every provider and no field is lost. */}
+            <pre className="mt-2 max-h-64 overflow-auto rounded border border-[var(--border)] bg-[var(--surface-raised)] p-2 text-[11px] leading-snug">
+              {JSON.stringify(testResult, null, 2)}
+            </pre>
           </div>
         ) : null}
         {stored?.last_tested_at ? (
@@ -494,16 +607,21 @@ export function AgentEditorPage() {
               <Trash2 size={14} /> Delete
             </Button>
           ) : null}
-          {!isNew ? (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={testMutation.isPending}
-              onClick={() => testMutation.mutate()}
-            >
-              <PlugZap size={14} /> {testMutation.isPending ? "Testing…" : "Test connection"}
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testMutation.isPending || !baseUrl.trim() || keyMissing}
+            title={
+              keyMissing
+                ? "This provider needs a key before it can be tested"
+                : !baseUrl.trim()
+                  ? "Fill in the endpoint first"
+                  : undefined
+            }
+            onClick={() => testMutation.mutate()}
+          >
+            <PlugZap size={14} /> {testMutation.isPending ? "Testing…" : "Test connection"}
+          </Button>
           {!isNew ? (
             <Button
               type="button"

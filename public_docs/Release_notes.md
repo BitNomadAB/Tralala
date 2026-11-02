@@ -31,6 +31,12 @@ Worth knowing when you look at the dashboard:
 - **A held file no longer half-deletes a board.** Host filesystem behaviour follows
   `TRALALA_PLATFORM_PROFILE`, and a board delete that cannot remove its files answers
   `409 board_files_busy` with the leftover directory.
+- **The agent form follows the provider you pick.** A preset now fixes the endpoint for hosted
+  providers, asks for the key only where one is needed, and says which providers need a model name at
+  all — so a local Ollama install is not asked for a key and OpenAI cannot be saved without one.
+  **Test connection works before saving**: nothing is written until the test passes, and the raw JSON
+  answer is shown as it came back. A model on your own network can be marked **no key**, and then no
+  `Authorization` header is sent — an explicitly ticked box beats a key stored earlier on the agent.
 - **The connection test also calls the model.** It used to check only that the endpoint answered;
   a wrong model name passed the test and failed the first generation. It now sends one real
   completion, reports the provider's sentence when that is refused, and offers the model names

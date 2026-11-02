@@ -119,6 +119,9 @@ class AgentTestRequest(StrictModel):
     base_url: str | None = Field(default=None, min_length=1, max_length=2000)
     model: Name | None = None
     api_key: str | None = Field(default=None, max_length=4096)
+    # A model on your own network usually has no credential. Saying so explicitly is different from
+    # omitting `api_key`, which means "use the one already stored on this agent".
+    no_api_key: bool = False
     timeout_seconds: int | None = Field(default=None, ge=1, le=600)
 
 

@@ -336,6 +336,11 @@ tool may do.
 
 ## Operational notes
 
+- Connecting an agent writes two JSON log events per attempt: `agent_probe_started`, then
+  `agent_probe_finished` (info) or `agent_probe_failed` (warning) with the endpoint, model, status,
+  latency, how many models the endpoint reported and the provider's reason. The key and the request
+  body never appear.
+
 - Structured JSON logs (request id, method, path, status, duration, actor, replay flag).
 - `GET /api/v1/boards/{id}/validate` runs `PRAGMA integrity_check` and `foreign_key_check` and
   reports the board's `alembic_version` revision.

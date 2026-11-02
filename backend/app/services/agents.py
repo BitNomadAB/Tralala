@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from typing import Any
 from uuid import uuid4
@@ -664,31 +665,99 @@ class AgentService:
     def test(
         self, actor: ActorContext, agent_id: str, payload: AgentTestRequest
     ) -> dict[str, Any]:
+        """Probe a stored agent and record the outcome on it."""
         actor.require("agents:write")
+        row = self.get_row(agent_id)
+        result = self._probe(payload, row=row, agent_id=agent_id)
+        with self.registry.connect() as conn:
+            conn.execute(
+                text(
+                    "UPDATE agents SET last_test_status = :status, last_test_message = :message,"
+                    " last_tested_at = :now WHERE id = :id"
+                ),
+                {
+                    "status": result["status"],
+                    "message": result["message"][:500],
+                    "now": utcnow(),
+                    "id": agent_id,
+                },
+            )
+        return result
+
+    def probe(self, actor: ActorContext, payload: AgentTestRequest) -> dict[str, Any]:
+        """Probe a configuration that has not been saved yet.
+
+        The form asks before saving, because a connection that cannot answer is not worth a row in
+        the registry. Nothing is persisted here, so there is no `last_test_*` to update.
+        """
+        actor.require("agents:write")
+        return self._probe(payload, row=None, agent_id=None)
+
+    def _probe(
+        self,
+        payload: AgentTestRequest,
+        *,
+        row: dict[str, Any] | None,
+        agent_id: str | None,
+    ) -> dict[str, Any]:
         from ..core.secrets import CredentialError, open_secret
 
-        row = self.get_row(agent_id)
         overrides = payload.model_dump(exclude_none=True)
-        connection_type = overrides.get("connection_type", row["connection_type"])
-        base_url = overrides.get("base_url", row["base_url"])
+        connection_type = overrides.get("connection_type") or (
+            row["connection_type"] if row else "openai_compatible"
+        )
+        base_url = overrides.get("base_url") or (row["base_url"] if row else "")
+        if not base_url:
+            raise ValidationFailure(
+                "An endpoint is required to test a connection",
+                details={"field": "base_url"},
+            )
         api_key: str | None = overrides.get("api_key")
-        if api_key is None and row.get("api_key_ciphertext"):
+        if overrides.get("no_api_key"):
+            # Explicit: this endpoint is called without a credential, stored one or not.
+            api_key = None
+        elif api_key is None and row and row.get("api_key_ciphertext"):
             try:
                 api_key = open_secret(self.settings, row["api_key_ciphertext"])
             except CredentialError:
                 api_key = None
-        timeout = float(overrides.get("timeout_seconds", row["timeout_seconds"]))
+        fallback_timeout = row["timeout_seconds"] if row else 30
+        timeout = float(overrides.get("timeout_seconds") or fallback_timeout)
+        fallback_model = row.get("model") if row else ""
+        selected_model = str(overrides.get("model") or fallback_model or "").strip()
         validated = connections.validate_endpoint(
             base_url, allow_private=self.settings.agents_allow_private_endpoints
+        )
+
+        # One pair of events per attempt: an operator reading the log can tell a refused credential
+        # from a model the endpoint does not serve, without the request or the key ever appearing.
+        self._log_probe(
+            "agent_probe_started",
+            agent_id=agent_id,
+            connection_type=connection_type,
+            endpoint=validated,
+            model=selected_model,
+            has_api_key=bool(api_key),
+            timeout_seconds=timeout,
         )
         probe = (
             connections.probe_openai_compatible
             if connection_type == "openai_compatible"
             else connections.probe_a2a
         )
-        result = probe(validated, api_key=api_key, timeout=timeout)
+        try:
+            result = probe(validated, api_key=api_key, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001 - the probe reports, it does not raise
+            self._log_probe(
+                "agent_probe_failed",
+                agent_id=agent_id,
+                connection_type=connection_type,
+                endpoint=validated,
+                reason=type(exc).__name__,
+            )
+            raise
+
         completion: dict[str, Any] | None = None
-        selected_model = str(overrides.get("model") or row.get("model") or "").strip()
         if result["ok"] and connection_type == "openai_compatible" and selected_model:
             completion = connections.probe_completion(
                 validated, model=selected_model, api_key=api_key, timeout=timeout
@@ -707,20 +776,26 @@ class AgentService:
                 result["message"] = (
                     f"Endpoint answers, but the model call failed. {completion['message']}"
                 )
-        with self.registry.connect() as conn:
-            conn.execute(
-                text(
-                    "UPDATE agents SET last_test_status = :status, last_test_message = :message,"
-                    " last_tested_at = :now WHERE id = :id"
-                ),
-                {
-                    "status": result["status"],
-                    "message": result["message"][:500],
-                    "now": utcnow(),
-                    "id": agent_id,
-                },
-            )
+
+        self._log_probe(
+            "agent_probe_finished" if result["ok"] else "agent_probe_failed",
+            agent_id=agent_id,
+            connection_type=connection_type,
+            endpoint=validated,
+            model=selected_model,
+            status=result["status"],
+            latency_ms=result.get("latency_ms"),
+            models=len(result.get("models") or []),
+            completion_status=(completion or {}).get("status"),
+            reason=None if result["ok"] else result["message"][:200],
+        )
         return result
+
+    @staticmethod
+    def _log_probe(event: str, **fields: Any) -> None:
+        started_or_finished = event in {"agent_probe_started", "agent_probe_finished"}
+        level = logging.INFO if started_or_finished else logging.WARNING
+        logger.log(level, json.dumps({"event": event, **fields}, ensure_ascii=False))
 
 
 __all__ = ["AgentService", "RoleTemplateService"]
