@@ -1025,3 +1025,65 @@ refused in 0.28 s, chunked 40 MiB cut off at the proxy without a crash. `caddy v
 This is the first time the whole stack ran, and it found what unit tests could not: the backend image
 was missing `httpx` (a runtime import in `services/runtime.py`) and relied on a transitive `anyio`.
 Fixed in `requirements.txt`; `requirements-dev.txt` no longer duplicates `httpx`.
+
+## Documentation split into public_docs
+
+The README had grown to 627 lines with three per-OS installation walkthroughs, security rules and
+agent instructions in one file. Owner's request: keep only Tralala-specific install steps there and
+link to the official guides for Python, Node, pnpm and Docker, then move the rest into
+`public_docs/`.
+
+- `public_docs/Installation.md` (new) — prerequisites as a table of links to python.org, nodejs.org,
+  pnpm.io, git-scm.com and docs.docker.com; Docker route with the volume and TLS tables and the
+  Tailscale recipe; from-source route (one set of commands plus a shell-difference table instead of
+  three near-identical walkthroughs); first sign-in; upgrading and dev reset; the commands CI runs;
+  where the data lives.
+- `public_docs/Troubleshooting.md` (new) — the old list plus what this session learned: the Caddy
+  proxy and certificate cases, Tailscale, `409 board_files_busy`, the platform profile, a restore that
+  reports `attachments.skipped`, the process lock, `413 payload_too_large`, and the e2e runner.
+- `public_docs/Security_defaults.md` (new) — a "before you expose it" checklist, then accounts,
+  sessions, agent keys, what no token can do, secrets, request/response behaviour, data and history,
+  and the limits of these defaults.
+- `public_docs/Agent_usage.md` (new) — worker vs role agent, how to get a key and which scopes to
+  pick, connecting over MCP (including the client JSON), the thirteen tools with their scopes, a
+  session that works, what a worker cannot do, and retry semantics.
+- `README.md` is 123 lines: what it is, a "start here" table, two quick starts, condensed features,
+  layout, known limitations, licence.
+
+Stale claims fixed while moving the text: "27 Playwright journeys" → 28; "not yet wired into a CI
+workflow" (CI exists); "no attachments" (the API exists, the UI does not); "Vite proxies /api, /docs
+and /openapi.json" (also `/mcp` and `/llms.txt`); the nginx `client_max_body_size` wording; the guard
+path `frontend/scripts/check-client-build.mjs`. `CONTRIBUTING.md` now points at the installation guide
+and runs the same commands as CI; `AGENTS.md` layout lists `public_docs/`.
+
+A link checker over README, CONTRIBUTING, AGENTS and the four public docs confirms every relative link
+and anchor resolves.
+
+## practical_commands.md and the missing repositories journey
+
+Owner asked for a command reference split into three layers (Frontend, Backend, DB) with one line of
+explanation per command, covering start/stop on a workstation or a server, unit and Playwright tests,
+updates for Python/SQLite/React and "get latest" from this repository.
+
+- `public_docs/practical_commands.md` (new): stack start/stop (Docker and from source), Layer 1
+  Frontend (install, dev, typecheck, vitest, Playwright incl. single spec, headed, last-failed,
+  `E2E_KEEP_DATA`, report, env vars), Layer 2 Backend (venv, pip, uvicorn dev and container form,
+  pytest by file/test/keyword, ruff, dev reset), Layer 3 Database (no alembic.ini — migrations are
+  automatic; read-only Python queries for board count, status, `alembic_version`, `pragma
+  integrity_check`; the validate/migrate/backup/restore endpoints; the WAL-on-network warning), and
+  an Updating section (git fetch/pull/tags, dependency upgrades for React/Vite/TypeScript and for
+  FastAPI/SQLAlchemy/httpx, Python and SQLite notes). Linked from README, Installation and
+  Troubleshooting.
+- Playwright was already installed and the suite covered every page except **`/settings/repositories`**,
+  so one journey was missing rather than the tooling: added `frontend/e2e/repositories.spec.ts` — add a
+  repository (URL only, no token), see "no token" and the branch, edit without duplicating, remove; and
+  a member sees "Only an administrator manages repository access" with no create button.
+- `playwright.config.ts` now also finds `.venv/bin/python`, so `pnpm test:e2e` works without
+  `E2E_PYTHON` on macOS/Linux as it already did on Windows.
+- Two documented commands were wrong and are corrected: the HTML report needs `--reporter=html`
+  locally (CI adds it), and the repository has no tags yet, so `git tag` answers nothing and `master`
+  is the version.
+
+Verification: 30 Playwright journeys pass in 1.6 min (28 old + 2 new), 37 unit tests pass, `tsc
+--noEmit` clean, and a link checker over README/CONTRIBUTING/AGENTS plus the five public docs resolves
+every relative link and anchor.

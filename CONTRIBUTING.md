@@ -56,20 +56,24 @@ We keep signed agreements on file and never publish them.
 - Schema changes need an Alembic revision under `backend/migrations/{registry,board}` plus tests for
   fresh install, upgrade from the previous revision, data preservation and failure recovery.
 - Update the relevant file in `docs/` when you change behaviour, and add a record under
-  `docs/decisions/` for anything a future maintainer would otherwise have to re-derive.
+  `docs/decisions/` for anything a future maintainer would otherwise have to re-derive. Anything a
+  user or operator follows ? installation, troubleshooting, security defaults, agent usage ? lives in
+  `public_docs/` and must stay true as well.
 
 ## Validation
 
-Run the smallest relevant command before pushing; CI runs the full set.
+Set up the environment once with [public_docs/Installation.md](public_docs/Installation.md), then run
+the smallest relevant command before pushing. CI runs the full set.
 
 ```powershell
 # backend, from backend/
 ..\.venv\Scripts\python.exe -m pytest
-..\.venv\Scripts\python.exe -m ruff check app
+..\.venv\Scripts\python.exe -m ruff check app tests migrations
 
 # frontend, from frontend/
 pnpm test
 pnpm typecheck
+pnpm build          # includes the client build guard
 ```
 
 Please do not open a pull request with a failing backend test, a ruff finding or a type error.

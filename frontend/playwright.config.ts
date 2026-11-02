@@ -11,10 +11,16 @@ const FRONTEND_PORT = Number(process.env.E2E_FRONTEND_PORT ?? 5273);
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 const FRONTEND_URL = `http://127.0.0.1:${FRONTEND_PORT}`;
 
-const venvPython = path.join(repoRoot, ".venv", "Scripts", "python.exe");
+const venvCandidates = [
+  path.join(repoRoot, ".venv", "Scripts", "python.exe"), // Windows layout
+  path.join(repoRoot, ".venv", "bin", "python"), // macOS / Linux layout
+];
+// A bare `python3` works only when the virtual environment is active, so prefer the repository's
+// own interpreter whenever it exists.
 const python =
   process.env.E2E_PYTHON ??
-  (existsSync(venvPython) ? venvPython : process.platform === "win32" ? "python" : "python3");
+  venvCandidates.find((candidate) => existsSync(candidate)) ??
+  (process.platform === "win32" ? "python" : "python3");
 
 const dataDir = path.join(here, "e2e", ".data");
 const adminPassword = process.env.E2E_ADMIN_PASSWORD ?? "e2e-password";
