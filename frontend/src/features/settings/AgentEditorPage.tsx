@@ -69,6 +69,9 @@ export function AgentEditorPage() {
   const [timeoutSeconds, setTimeoutSeconds] = useState("30");
   const [enabled, setEnabled] = useState(true);
   const [testResult, setTestResult] = useState<AgentTestResult | null>(null);
+  // What the endpoint says it serves, filled by the connection test. Kept in state rather than on
+  // the agent: it is a hint for the form, not part of the agent's configuration.
+  const testModels = testResult?.models ?? [];
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
@@ -364,14 +367,28 @@ export function AgentEditorPage() {
           <Field
             label="Model identifier"
             htmlFor="agent-model"
-            hint={connectionType === "a2a" ? "Optional. The A2A agent chooses its own model." : undefined}
+            hint={
+              connectionType === "a2a"
+                ? "Optional. The A2A agent chooses its own model."
+                : testModels.length > 0
+                  ? `${testModels.length} model(s) reported by the endpoint — pick one, or type a name it accepts.`
+                  : "Run the connection test to see which models the endpoint offers."
+            }
           >
             <Input
               id="agent-model"
               value={model}
               onChange={(event) => setModel(event.target.value)}
               placeholder={connectionType === "a2a" ? "" : "llama-3.1-8b-instruct"}
+              list={testModels.length > 0 ? "agent-model-options" : undefined}
             />
+            {testModels.length > 0 ? (
+              <datalist id="agent-model-options">
+                {testModels.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            ) : null}
           </Field>
           <Field
             label={stored?.has_api_key ? "Replace API key" : "API key (optional)"}
@@ -434,6 +451,8 @@ export function AgentEditorPage() {
         {testResult ? (
           <div
             role="status"
+            aria-label="Connection test result"
+            aria-live="polite"
             className={`rounded-lg border p-2 text-xs ${
               testResult.ok
                 ? "border-[var(--success,var(--primary))] text-[var(--foreground)]"
@@ -445,9 +464,15 @@ export function AgentEditorPage() {
               {testResult.latency_ms !== null ? ` · ${testResult.latency_ms} ms` : ""}
             </p>
             <p>{testResult.message}</p>
+            {testResult.completion ? (
+              <p className="mt-1">
+                Model call: {testResult.completion.status} · {testResult.completion.message}
+              </p>
+            ) : null}
             {testResult.models.length > 0 ? (
               <p className="mt-1 text-[var(--muted-foreground)]">
                 {testResult.models.slice(0, 8).join(", ")}
+                {testResult.models.length > 8 ? ` (+${testResult.models.length - 8} more)` : ""}
               </p>
             ) : null}
           </div>

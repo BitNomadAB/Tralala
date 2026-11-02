@@ -687,6 +687,26 @@ class AgentService:
             else connections.probe_a2a
         )
         result = probe(validated, api_key=api_key, timeout=timeout)
+        completion: dict[str, Any] | None = None
+        selected_model = str(overrides.get("model") or row.get("model") or "").strip()
+        if result["ok"] and connection_type == "openai_compatible" and selected_model:
+            completion = connections.probe_completion(
+                validated, model=selected_model, api_key=api_key, timeout=timeout
+            )
+            result = {**result, "completion": completion}
+            if completion["ok"]:
+                result["message"] = (
+                    f"{result['message']}; model {selected_model} answered "
+                    f"in {completion['latency_ms']} ms"
+                )
+            else:
+                # The list answered, the model call did not: say so, and keep the model list so the
+                # form can still offer what the endpoint knows.
+                result["ok"] = False
+                result["status"] = completion["status"]
+                result["message"] = (
+                    f"Endpoint answers, but the model call failed. {completion['message']}"
+                )
         with self.registry.connect() as conn:
             conn.execute(
                 text(

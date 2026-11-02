@@ -31,6 +31,10 @@ Worth knowing when you look at the dashboard:
 - **A held file no longer half-deletes a board.** Host filesystem behaviour follows
   `TRALALA_PLATFORM_PROFILE`, and a board delete that cannot remove its files answers
   `409 board_files_busy` with the leftover directory.
+- **The connection test also calls the model.** It used to check only that the endpoint answered;
+  a wrong model name passed the test and failed the first generation. It now sends one real
+  completion, reports the provider's sentence when that is refused, and offers the model names
+  it found as suggestions.
 - **A failed generation now says why.** A provider rejection used to read only "HTTP 400", and the
   message lived in a toast that disappeared; the Loop's document dialog shows the last run for the
   purpose, with the provider's own sentence, until it is retried.

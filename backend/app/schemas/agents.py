@@ -122,9 +122,21 @@ class AgentTestRequest(StrictModel):
     timeout_seconds: int | None = Field(default=None, ge=1, le=600)
 
 
+class AgentCompletionResult(OutModel):
+    """The tiny real chat completion behind a connection test."""
+
+    ok: bool
+    status: str
+    message: str
+    latency_ms: int | None = None
+
+
 class AgentTestResult(OutModel):
     ok: bool
     status: str
     message: str
     latency_ms: int | None = None
     models: list[str] = Field(default_factory=list)
+    # Present for an OpenAI-compatible endpoint with a model set: listing models does not prove the
+    # model call works, which is the difference between a green test and a failed generation.
+    completion: AgentCompletionResult | None = None

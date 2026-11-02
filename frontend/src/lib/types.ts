@@ -130,6 +130,13 @@ export interface AgentTestResult {
   message: string;
   latency_ms: number | null;
   models: string[];
+  /** The tiny real chat completion behind the test; absent for an A2A agent. */
+  completion?: {
+    ok: boolean;
+    status: string;
+    message: string;
+    latency_ms: number | null;
+  } | null;
 }
 
 export type LoopStage =

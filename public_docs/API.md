@@ -345,7 +345,13 @@ projection: enabled agents with `id`, `name` and role only, no endpoint, model o
 
 `POST /agents/{id}/test` probes `GET {base_url}/models` for OpenAI-compatible endpoints and the A2A
 agent card (`/.well-known/agent.json`) for `a2a`, then records `last_test_status`,
-`last_test_message` and `last_tested_at`.
+`last_test_message` and `last_tested_at`. When an OpenAI-compatible agent has a model, the probe
+also sends **one real chat completion** (`max_tokens: 16`, `temperature: 0`) and reports it as
+`completion`. The model list proves the endpoint answers; only the completion proves that the model
+name exists and that the parameters a generation sends are accepted, which is the difference between
+a green test and a run that fails with `400`. A refused completion fails the test and carries the
+provider's own sentence, while `models` still comes back so the form can offer the names the
+endpoint knows.
 
 **Role snapshot rule:** `role_templates` and `agents` are separate resources. Editing a template
 changes *future* work; every discussion persists `AgentService.role_snapshot(...)` (template id and

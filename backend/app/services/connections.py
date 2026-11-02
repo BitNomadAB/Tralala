@@ -149,6 +149,69 @@ def probe_openai_compatible(
     }
 
 
+def probe_completion(
+    base_url: str, *, model: str, api_key: str | None, timeout: float
+) -> dict[str, Any]:
+    """Send the smallest real chat completion, to prove the model call actually works.
+
+    Listing models shows the endpoint answers; it says nothing about whether the model name exists
+    or whether the parameters Tralala sends are accepted. That gap is exactly a green test next to a
+    generation that fails with ``HTTP 400``, so the answer is one tiny request that costs a handful
+    of tokens. The provider's own sentence is carried through when it refuses.
+    """
+    import httpx
+
+    from .runtime import provider_error
+
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Answer with the single word: ok"},
+            {"role": "user", "content": "ping"},
+        ],
+        "max_tokens": 16,
+        "temperature": 0,
+    }
+    started = time.monotonic()
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+            response = client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+    except Exception as exc:  # noqa: BLE001 - network failures are reported, not raised
+        return {
+            "ok": False,
+            "status": "unreachable",
+            "message": f"The model call did not reach the endpoint ({type(exc).__name__})",
+            "latency_ms": int((time.monotonic() - started) * 1000),
+        }
+    latency = int((time.monotonic() - started) * 1000)
+    if response.status_code >= 400:
+        return {
+            "ok": False,
+            "status": f"http_{response.status_code}",
+            "message": f"The model call was refused: {provider_error(response)}",
+            "latency_ms": latency,
+        }
+    try:
+        answer = response.json()["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        return {
+            "ok": False,
+            "status": "malformed_response",
+            "message": "The model call answered, but not with a chat completion",
+            "latency_ms": latency,
+        }
+    preview = " ".join(str(answer or "").split())[:60]
+    return {
+        "ok": True,
+        "status": "completed",
+        "message": f"Model {model} answered" + (f": {preview}" if preview else ""),
+        "latency_ms": latency,
+    }
+
+
 def probe_a2a(base_url: str, *, api_key: str | None, timeout: float) -> dict[str, Any]:
     """Fetch the agent card. A JSON body with a name is treated as a valid A2A agent."""
     url = base_url if base_url.endswith(".json") else f"{base_url}/.well-known/agent.json"

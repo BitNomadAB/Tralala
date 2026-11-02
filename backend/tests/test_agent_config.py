@@ -253,14 +253,104 @@ def test_agent_connection_test_records_result(api: Api, monkeypatch: pytest.Monk
             "models": ["local-model"],
         }
 
+    def fake_completion(
+        base_url: str, *, model: str, api_key: str | None, timeout: float
+    ) -> dict[str, Any]:
+        assert model == "local-model"
+        return {
+            "ok": True,
+            "status": "completed",
+            "message": f"Model {model} answered: ok",
+            "latency_ms": 40,
+        }
+
     monkeypatch.setattr(connections, "probe_openai_compatible", fake_probe)
+    monkeypatch.setattr(connections, "probe_completion", fake_completion)
     result = api.data(api.post(f"/api/v1/agents/{agent['id']}/test", json={}))
     assert result["ok"] is True
     assert result["models"] == ["local-model"]
+    assert result["completion"]["status"] == "completed"
+    assert "local-model answered" in result["message"]
 
     refreshed = api.data(api.get(f"/api/v1/agents/{agent['id']}"))
     assert refreshed["last_test_status"] == "connected"
     assert refreshed["last_tested_at"] is not None
+
+
+def test_a_green_model_list_does_not_hide_a_refused_model_call(
+    api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Listing models answers; the model call is what a generation actually does."""
+    agent = _agent(api, name="Half Bot")
+
+    def fake_probe(base_url: str, *, api_key: str | None, timeout: float) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "connected",
+            "message": "Connected; 2 model(s) reported",
+            "latency_ms": 9,
+            "models": ["one", "two"],
+        }
+
+    def refused(
+        base_url: str, *, model: str, api_key: str | None, timeout: float
+    ) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "status": "http_400",
+            "message": "The model call was refused: HTTP 400: Model Not Exist",
+            "latency_ms": 11,
+        }
+
+    monkeypatch.setattr(connections, "probe_openai_compatible", fake_probe)
+    monkeypatch.setattr(connections, "probe_completion", refused)
+    result = api.data(api.post(f"/api/v1/agents/{agent['id']}/test", json={}))
+
+    assert result["ok"] is False
+    assert result["status"] == "http_400"
+    assert "Model Not Exist" in result["message"]
+    # The model list still comes back, so the form can offer what the endpoint does know.
+    assert result["models"] == ["one", "two"]
+
+    refreshed = api.data(api.get(f"/api/v1/agents/{agent['id']}"))
+    assert refreshed["last_test_status"] == "http_400"
+
+
+def test_an_a2a_agent_is_not_probed_with_a_chat_completion(
+    api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    role = _role_by_key(api, "qa_engineer")
+    agent = api.data(
+        api.post(
+            "/api/v1/agents",
+            json={
+                "name": "Remote",
+                "connection_type": "a2a",
+                "base_url": "http://127.0.0.1:9001",
+                "model": "ignored",
+                "role_template_id": role["id"],
+            },
+        )
+    )
+
+    def fake_card(base_url: str, *, api_key: str | None, timeout: float) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "connected",
+            "message": "Agent card found for Remote",
+            "latency_ms": 5,
+            "models": [],
+        }
+
+    def unexpected(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("an A2A agent must not be sent a chat completion")
+
+    monkeypatch.setattr(connections, "probe_a2a", fake_card)
+    monkeypatch.setattr(connections, "probe_completion", unexpected)
+    result = api.data(api.post(f"/api/v1/agents/{agent['id']}/test", json={}))
+
+    assert result["ok"] is True
+    assert result["completion"] is None
 
 
 def test_agent_duplicate_does_not_clone_credentials(api: Api) -> None:
