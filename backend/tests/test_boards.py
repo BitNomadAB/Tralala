@@ -188,3 +188,30 @@ def test_path_traversal_board_ids_are_rejected(api: Api) -> None:
     for candidate in ("..%2F..%2Fetc", "00000000-0000-0000-0000-000000000000"):
         response = api.get(f"/api/v1/boards/{candidate}")
         assert response.status_code == 404
+
+
+def test_board_counts_come_from_the_board_itself_and_can_be_skipped(
+    api: Api, board: dict[str, Any]
+) -> None:
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
+    for title in ("First", "Second"):
+        api.data(
+            api.post(
+                f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+                json={"list_id": lists[0]["id"], "title": title},
+            )
+        )
+
+    counted = api.data(api.get("/api/v1/boards"))
+    assert counted[0]["loop_count"] == 1
+    assert counted[0]["list_count"] == 5
+    assert counted[0]["card_count"] == 2
+
+    # Every count is a query inside that board's own database, so a dashboard with many boards can
+    # ask for the list alone: the numbers are then zero rather than measured.
+    listed = api.data(api.get("/api/v1/boards", params={"with_counts": "false"}))
+    assert listed[0]["id"] == board["id"]
+    assert listed[0]["loop_count"] == 0
+    assert listed[0]["card_count"] == 0

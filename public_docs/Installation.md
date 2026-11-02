@@ -18,14 +18,18 @@ than this document:
 
 | Component | Version | Official install guide |
 | --- | --- | --- |
-| Python | 3.13 or newer | <https://www.python.org/downloads/> |
+| Python | 3.13 (3.13 and 3.14 are tested; 3.13 is the version of record) | <https://www.python.org/downloads/> |
 | Node.js | 22 LTS or newer | <https://nodejs.org/en/download> |
 | pnpm | the version in `frontend/package.json` (`packageManager`) | <https://pnpm.io/installation> |
 | Git | recent | <https://git-scm.com/downloads> |
 | Docker + Compose | optional, for the container route | <https://docs.docker.com/get-docker/> |
 
-`backend/pyproject.toml` requires Python `>=3.13`, so a newer interpreter (3.14) is fine. The
-shortest route to the pinned pnpm is `corepack enable`; on Windows that may need an elevated shell.
+`backend/pyproject.toml` accepts Python `>=3.13,<3.15`. Use **3.13** unless you have a reason not
+to: it is what the container image runs, so the container route and a local venv then behave
+identically. On Ubuntu 24.04 the system interpreter is older than 3.13, so install one first, for
+example with `uv python install 3.13` or the deadsnakes PPA, and create the venv with that
+interpreter. The shortest route to the pinned pnpm is `corepack enable`; on Windows that may need
+an elevated shell.
 
 ## Docker (recommended)
 

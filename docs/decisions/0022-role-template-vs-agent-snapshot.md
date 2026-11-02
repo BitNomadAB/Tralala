@@ -1,6 +1,9 @@
-# Decision: role templates are shared, agent role prompts are snapshotted
+# 0022 ? Role templates are shared, agent prompts are snapshotted
 
-Status: accepted (2026-10-30)
+- Status: accepted
+- Date: 2026-10-30
+- Context: `services/roles.py` (templates), `services/agents.py` (identity, connection,
+  `role_snapshot`), every discussion, mention and generation run
 
 ## Context
 

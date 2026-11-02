@@ -135,7 +135,7 @@ username.
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/boards?q=&status=&sort=&order=&limit=&offset=` | `boards:read` |
+| GET | `/boards?q=&status=&sort=&order=&limit=&offset=&with_counts=` | `boards:read` |
 | POST | `/boards` (`Idempotency-Key` supported) | `boards:write` |
 | GET | `/boards/{board_id}` | `boards:read` |
 | PATCH | `/boards/{board_id}` | `boards:write` |
@@ -352,7 +352,7 @@ agent card (`/.well-known/agent.json`) for `a2a`, then records `last_test_status
 **Role snapshot rule:** `role_templates` and `agents` are separate resources. Editing a template
 changes *future* work; every discussion persists `AgentService.role_snapshot(...)` (template id and
 name, template `updated_at`, effective prompt, SHA-256, timestamp) so history stays explainable. See
-[decisions/0001](decisions/0001-role-template-vs-agent-snapshot.md).
+[decisions/0001](decisions/0022-role-template-vs-agent-snapshot.md).
 
 ### Discussions
 
@@ -506,7 +506,6 @@ lists render without a cross-database join; every change is written to the activ
 | POST | `/boards/{board_id}/cards/{card_id}/move` (`version`, `list_id`, `position`) | `cards:write` |
 | POST | `/boards/{board_id}/cards/{card_id}/archive` | `cards:write` |
 | POST | `/boards/{board_id}/cards/{card_id}/restore` | `cards:write` |
-| POST | `/boards/{board_id}/cards/{card_id}/transfer` (`version`, `target_board_id`, `target_list_id`) | `cards:write` |
 
 ### Labels, checklists, comments
 
@@ -621,6 +620,19 @@ Content-Type: application/json
 unavailable.
 
 
+## Cost of the board list
+
+`loop_count`, `list_count` and `card_count` live inside each board's own database, so measuring them
+for the whole list means opening every board file. The registry therefore remembers the last
+measurement (`board_stats`) and drops it whenever the board is written to, so a page of boards costs
+one registry read instead of one open per row. `TRALALA_BOARD_COUNTS_CACHE_SECONDS` (default 60) is
+the backstop for a board file changed outside the app; `0` measures on every list. A caller that
+only needs names can pass `with_counts=false`, which opens no board at all and reports zeros.
+
+With 100 boards a page of 100 rows costs 15 ms once the counters are known against 1337 ms when each
+board has to be opened. See
+[decision 0023](decisions/0023-board-counters-cached-in-the-registry.md).
+
 ## Timestamps and sizes
 
 - `due_at` and `due_before` accept an ISO 8601 date (`2027-01-15`) or timestamp
@@ -637,12 +649,12 @@ unavailable.
   (default 256 MiB). An archive that expands past either limit is refused with
   `422 validation_failed` and its member named in `details`.
 
-## Cross-board transfer semantics
+## No cross-Loop or cross-board transfer
 
-`POST /boards/{board_id}/cards/{card_id}/transfer` copies the card into the target board and then
-deletes the source copy. If the final delete fails, the source card is archived and the response
-reports `finalized: false` with a warning; an `card.transfer_incomplete` activity entry records the
-cause. Operators reconcile such cards deliberately.
+There is no transfer endpoint. Moving a Ticket between Loops or Boards would bypass the approved
+plan it belongs to, so the operation is refused rather than implemented: a caller that reaches the
+service directly gets `409 plan_change_required` with the reason. The supported path is a new Loop
+with its own Info, analysis and RoadMap ? or a person recreating the Ticket deliberately.
 
 
 ## Board schema state

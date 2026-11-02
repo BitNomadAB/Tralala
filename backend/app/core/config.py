@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     max_request_bytes: int = 8 * 1024 * 1024
     rate_limit_per_minute: int = 600
     board_idle_close_seconds: int = 300
+    # How long a measured set of board counters is reused before it is measured again. A write to a
+    # board drops its row immediately; this only bounds a file changed outside the app. 0 disables
+    # the cache and measures on every list.
+    board_counts_cache_seconds: int = 60
     default_lists: str = "Backlog,Todo,In Progress,Review,Done"
     bootstrap_username: str = "admin"
     bootstrap_password: str = "admin"

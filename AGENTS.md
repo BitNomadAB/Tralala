@@ -27,7 +27,7 @@ message broker.
 4. **No direct SQLite access from the API/client.** Agents and the frontend only use `/api/v1`.
 5. **Actor identity comes from authentication**, never from a request body. Audit entries record
    the authenticated actor id and type.
-6. **Card mutations are version-checked.** `PATCH`/move/transfer require the expected `version`
+6. **Card mutations are version-checked.** `PATCH` and move require the expected `version`
    and return `409 version_conflict` on mismatch.
 7. **Timestamps are ISO 8601.** Validate them at the schema boundary (`core/dates.py`); never
    accept free text for `due_at` or due-date filters.
@@ -70,12 +70,12 @@ message broker.
 
 ```
 backend/app/{api,core,models,repositories,schemas,services,storage,security,migrations}
-frontend/src/{app,components,features,api,webmcp,hooks,themes,tests}
+frontend/src/{app,components,features,lib,webmcp,themes,tests}
 public_docs/     what a user or operator follows: installation, onboarding, commands, architecture,
                  troubleshooting, security, agent usage
 docs/            API, database notes, the Loop workflow and decisions
-.ralph/          prd.json, progress.txt, prompt.md (Ralph Loop state)
-scripts/ralph/   loop harness
+.ralph/          progress.txt (the running log) and the Loop implementation specification
+scripts/         run-playwright.mjs, the isolated Playwright runner
 ```
 
 `models/`, `repositories/` and `security/` are reserved for code that is promoted out of
@@ -107,7 +107,10 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 
 ## Conventions
 
-- Python: 3.13+, typed, ruff-clean (line length 100), no blocking work in async paths.
+- Python: **3.13 is the version of record** ? the container image, CI's primary job and your
+  virtual environment all run it, so a local run means what CI means. CI also runs 3.14, and
+  `requires-python` allows it; anything newer is untested and needs a CI leg before it is claimed.
+  Typed, ruff-clean (line length 100), no blocking work in async paths.
 - TypeScript: strict, no `any` unless justified, semantic CSS variables from `src/index.css`.
 - API: JSON envelope `{success, data, request_id, meta}`; errors `{success:false, error, request_id}`.
   Unknown request fields are rejected (`extra="forbid"`). Timestamps are ISO 8601 UTC.
@@ -128,8 +131,8 @@ A story is complete only when:
 - user-journey changes extend `frontend/e2e/*.spec.ts`,
 - no existing test regressed.
 
-Never mark a story complete because code was written. Record failures in `.ralph/progress.txt`
-and leave the story pending.
+Never mark work complete because code was written. Append what you did and anything still open to
+`.ralph/progress.txt`; an open item stays open until a test proves it closed.
 
 ## Security invariants
 
@@ -157,6 +160,7 @@ the company. See `docs/decisions/0009-source-available-licensing-and-contributio
 - A contribution that cannot be covered by a signed CLA must not be merged — under this licence a
   merged pull request can make the code unsellable.
 - A dependency under a copyleft licence is a decision, not a detail: record it in `docs/decisions/`.
-  The current set is MIT, ISC, BSD, Apache-2.0, PSF, MIT-0 and MPL-2.0 only.
+  The current set is MIT, ISC, BSD, 0BSD, Apache-2.0, PSF, MIT-0, MPL-2.0 and CC-BY-4.0 (the last
+  only for `caniuse-lite`, which is data with an attribution notice and no code). Nothing copyleft.
 - Never publish signed contributor agreements in the repository.
 

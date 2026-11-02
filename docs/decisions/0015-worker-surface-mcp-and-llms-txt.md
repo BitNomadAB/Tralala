@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-11-02
-- **Context:** Role templates and agent snapshots ([0001](0001-role-template-vs-agent-snapshot.md)),
+- **Context:** Role templates and agent snapshots ([0001](0022-role-template-vs-agent-snapshot.md)),
   WebMCP as an adapter ([0004](0004-webmcp-adapter.md)), board agent membership
   ([0012](0012-board-agent-membership.md)), organisation-wide profiles
   ([0013](0013-organisation-wide-agent-profiles.md))

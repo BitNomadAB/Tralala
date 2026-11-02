@@ -22,8 +22,8 @@ facts that explain most surprises:
   <https://pnpm.io/installation>.
 - **`pnpm install` picks the wrong package manager** — this repository is pnpm-only; the version is
   pinned in `frontend/package.json` under `packageManager`.
-- **Python is too old** — `backend/pyproject.toml` requires `>=3.13`. Check with `python --version`;
-  the error appears at install time, not at run time.
+- **Python is too old** — `backend/pyproject.toml` requires `>=3.13,<3.15`, and 3.13 is the version
+  of record. Check with `python --version`; the error appears at install time, not at run time.
 
 ## Sign-in and accounts
 

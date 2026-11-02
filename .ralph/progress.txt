@@ -1121,3 +1121,51 @@ guides plus the intended order of work in a Loop.
 Verification: 30 Playwright journeys pass (1.4 min), 37 unit tests pass, `tsc --noEmit` clean, and a
 link checker over README/CONTRIBUTING/AGENTS, six public docs and three reference docs resolves every
 relative link and anchor.
+
+## 2026-11-02 - review findings before first deployment
+
+Fixed what the external review found, before installing on the Ubuntu box.
+
+- Removed the last transfer drift: the `docs/api.md` row and section and rule 6 in `AGENTS.md` now
+  say there is no cross-Loop or cross-board transfer, matching the router.
+- Corrected the layout block in `AGENTS.md` (`frontend/src` has app, components, features, lib,
+  webmcp, themes, tests; no `api` or `hooks` directory).
+- Deleted the stale Ralph files (`.ralph/prd.json`, `.ralph/prompt.md`, `scripts/ralph/`). The story
+  tracker no longer exists; `progress.txt` is the log and `AGENTS.md` says so.
+- Renumbered the duplicate decision to `0022-role-template-vs-agent-snapshot.md`.
+- Pinned `starlette>=1.10,<2`, added `httpx2` to the dev requirements: the TestClient deprecation
+  warning is gone.
+- Board list: `_counts` is one statement with three scalar subqueries instead of three queries, and
+  `GET /boards` accepts `with_counts=false` for a caller that only needs names. Documented in
+  `docs/api.md` (new "Cost of the board list") and `public_docs/Architecture.md`; the 100-board
+  measurement is still open, the honest fix is a cached counter in the registry.
+- `AGENTS.md` licence set now lists 0BSD and CC-BY-4.0 (the latter only for `caniuse-lite`, data
+  with an attribution notice).
+- `public_docs/Security_defaults.md` gained an "Accepted risks, on purpose" section: members read
+  built-in role prompts, discussion budgets are per run rather than per token, board list measures
+  each row.
+
+Verification: `ruff check` clean, 353 pytest tests pass (one new board-count test), `tsc --noEmit`
+clean, 37 vitest tests pass, link check over 35 markdown files finds nothing broken.
+
+## 2026-11-02 - one Python version, cached counters, chunked bundle
+
+Three follow-ups from the last review round.
+
+- **One Python version.** The dev venv ran 3.14 while CI and the image ran 3.13. 3.13 is now the
+  version of record: `.venv` was rebuilt on 3.13.1, `requires-python` is `>=3.13,<3.15`, CI runs a
+  3.13 and a 3.14 leg so the range is proven rather than assumed, and AGENTS/Installation/
+  practical_commands/Troubleshooting say which one is which.
+- **Board counters are cached (decision 0023).** New registry table `board_stats` (Alembic
+  `0014_board_stats`), `services/board_stats.py`, and a single `on_write` hook in
+  `BoardDatabaseManager` that drops a board's row after any committed write plus on close and delete.
+  `TRALALA_BOARD_COUNTS_CACHE_SECONDS` (default 60) is the backstop; `with_counts=false` stays.
+  Measured with 100 boards: 1337 ms cold, 15 ms warm, 13 ms without counts.
+- **The bundle is split.** `vite.config.ts` gains `manualChunks` (react, router, query, icons,
+  vendor): largest chunk 223 kB instead of 672 kB, and framework hashes stay stable across app
+  changes. The client build guard still passes.
+
+Also corrected `docs/database.md`, which still listed registry head 0006 and board head 0008.
+
+Verification: ruff clean, 358 pytest tests pass (4 counter tests + 1 registry migration test), 37
+vitest tests, `tsc --noEmit`, `pnpm build` (7 chunks, guard ok), 30 Playwright journeys.

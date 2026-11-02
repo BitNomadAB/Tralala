@@ -13,7 +13,6 @@ data/
 frontend/src/*.tsbuildinfo
 *.tsbuildinfo
 .devdata/
-.ralph/iteration-context.md
 frontend/test-results/
 frontend/playwright-report/
 frontend/e2e/.data/

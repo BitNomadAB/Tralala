@@ -57,7 +57,7 @@ second if you want your own coding agent to drive Tralala.
    agent settings.
 
 An agent is a reader and discussion partner: it never authenticates, never moves a Ticket and never
-changes code. See [decisions/0001](../docs/decisions/0001-role-template-vs-agent-snapshot.md).
+changes code. See [decisions/0001](../docs/decisions/0022-role-template-vs-agent-snapshot.md).
 
 ### 3b. A worker key, so your own coding agent can read and update Tralala
 

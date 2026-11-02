@@ -12,6 +12,23 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // One 672 kB chunk meant every deploy invalidated the whole bundle for a browser cache that
+        // had already downloaded React. Splitting the frameworks out keeps their hashes stable
+        // across application changes and removes the chunk-size warning.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react";
+          if (id.includes("react-router")) return "router";
+          if (id.includes("@tanstack")) return "query";
+          if (id.includes("lucide-react")) return "icons";
+          return "vendor";
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

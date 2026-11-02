@@ -13,7 +13,7 @@ The stack has three layers; the commands below are grouped by layer, with the st
 | Layer | Technology | Where |
 | --- | --- | --- |
 | Frontend | React 19 + Vite 6 + TypeScript, served by Caddy in a container | `frontend/` |
-| Backend | FastAPI + SQLAlchemy on Python 3.13+ | `backend/` |
+| Backend | FastAPI + SQLAlchemy on Python 3.13 (3.14 also tested) | `backend/` |
 | Database | one SQLite file per board, plus `registry.sqlite` | `<data>/` |
 
 ## The stack: start, stop, watch
@@ -103,7 +103,7 @@ Run these from `backend/`.
 | `pip install -r requirements-dev.txt` | Install backend dependencies, including the test tools. |
 | `pip install --upgrade -r requirements-dev.txt` | Upgrade them to the newest allowed versions. |
 | `pip list --outdated` | Show what could be upgraded; read before upgrading a production install. |
-| `python --version` | Check the interpreter; `pyproject.toml` requires 3.13 or newer. |
+| `python --version` | Check the interpreter; `pyproject.toml` accepts 3.13 and 3.14, and 3.13 is the version of record. |
 | `python -m uvicorn app.main:create_app --factory --port 8000 --reload` | Development server. |
 | `python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log --no-server-header` | What the container runs: no reload, no banner advertising the server. |
 | `python -m pytest` | The whole backend suite — the primary gate. |
@@ -203,7 +203,7 @@ provider calls and the event stream need them). `requirements-dev.txt` adds pyte
 
 | Command | What it does |
 | --- | --- |
-| `python --version` | Anything 3.13 or newer works. |
+| `python --version` | 3.13 is the version of record; 3.14 is also tested. |
 | `python -c "import sqlite3; print(sqlite3.sqlite_version)"` | SQLite is compiled into Python; there is no separate package to update. |
 | `python -m venv .venv --upgrade` | Re-point an existing virtual environment at a newer interpreter. |
 | `python -m pip install --upgrade pip` | Keep pip itself current before upgrading anything else. |

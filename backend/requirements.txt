@@ -1,5 +1,8 @@
 fastapi>=0.115,<1
 uvicorn[standard]>=0.32,<1
+# Imported directly (run_in_threadpool, StarletteHTTPException), so pin it here rather than leave it
+# to whatever FastAPI resolves.
+starlette>=1.10,<2
 sqlalchemy>=2.0.36,<3
 alembic>=1.14,<2
 pydantic-settings>=2.6,<3

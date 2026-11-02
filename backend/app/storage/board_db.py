@@ -4,7 +4,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
@@ -38,6 +38,14 @@ class BoardDatabaseManager:
         self._fts: dict[str, bool] = {}
         self._lock = RLock()
         self._board_locks: dict[str, RLock] = {}
+        # Called after a committed write, and after closing or deleting a board, so a cache of
+        # derived board content can be dropped from one place instead of every service.
+        self.on_write: Callable[[str], None] | None = None
+
+    def _notify_write(self, board_id: str) -> None:
+        hook = self.on_write
+        if hook is not None:
+            hook(board_id)
 
     @staticmethod
     def validate_board_id(board_id: str) -> str:
@@ -151,6 +159,7 @@ class BoardDatabaseManager:
                 yield conn
             with self._lock:
                 self._last_used[board_id] = time.monotonic()
+            self._notify_write(board_id)
 
     @contextmanager
     def reader(self, board_id: str) -> Iterator[Connection]:
@@ -160,6 +169,8 @@ class BoardDatabaseManager:
                 yield conn
 
     def close(self, board_id: str) -> None:
+        # Restoring a backup closes the board and replaces the file, which no transaction reports.
+        self._notify_write(board_id)
         with self._board_lock(board_id), self._lock:
             engine = self._engines.pop(board_id, None)
             self._last_used.pop(board_id, None)

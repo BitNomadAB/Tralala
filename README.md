@@ -90,7 +90,7 @@ frontend/src/{app,features,lib,webmcp,themes}     React UI, typed API client, We
 frontend/Caddyfile                                web tier: SPA, API proxy, TLS
 public_docs/                                      installation, onboarding, commands, architecture, security, agents
 docs/                                             architecture, API, database, decisions
-.ralph/                                           prd.json, progress.txt, prompt.md
+.ralph/                                           progress.txt (log) and the Loop specification
 ```
 
 Read [AGENTS.md](AGENTS.md) before changing code: it holds the architecture rules and the

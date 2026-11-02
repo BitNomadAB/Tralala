@@ -9,6 +9,7 @@ the registry and board schemas are separate migration chains managed by the Migr
 | Table | Purpose |
 | --- | --- |
 | `boards` | Global board metadata: id, name, description, status (`active`, `archived`, `maintenance`, `error`, `migration_failed`), timestamps, `archived_at`, `schema_version`, `schema_revision` |
+| `board_stats` | Last measured Loop, list and Ticket counters per board, with `measured_at`. A cache of numbers that live in the board database, not their source of truth: a row is dropped whenever the board is written to and re-measured after `TRALALA_BOARD_COUNTS_CACHE_SECONDS` |
 | `actors` | Human, agent and service identities (`type`, `name`, `created_at`, `disabled_at`) |
 | `user_credentials` | Password hashes (scrypt), role (`admin`, `member`) and the per-account appearance (`theme_mode`, `theme_kit`) |
 | `sessions` | Server-side sessions: hash of the session id, actor, expiry, last seen and revocation |
@@ -26,6 +27,8 @@ columns. Creating a Loop copies the defaults into Loop-owned columns, and templa
 future Loops only.
 
 Indexes: `boards(status)`, `api_credentials(actor_id)`.
+
+`board_stats` rows cascade from `boards`, so deleting a board removes its counters.
 
 ## boards/{uuid}/board.sqlite
 
@@ -71,8 +74,8 @@ Two independent Alembic chains live under `backend/migrations`:
 
 | Chain | Database | Version table | Head (current) |
 | --- | --- | --- | --- |
-| `registry` | `data/registry.sqlite` | `alembic_version` | `0006_user_preferences` |
-| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0008_loops` |
+| `registry` | `data/registry.sqlite` | `alembic_version` | `0014_board_stats` |
+| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0009_loop_agent_preferences` |
 
 - The baseline revisions (`0001_registry_initial`, `0001_board_initial`) reproduce the schema that
   shipped before Alembic. A database that predates version tracking (no `alembic_version`) is

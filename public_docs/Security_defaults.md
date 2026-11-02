@@ -117,3 +117,19 @@ tools. Approvals bind to exact document revision ids, so a changed input invalid
   endpoint that forgets it would be a defect, which is why the guarantees live in one layer.
 
 Report a security issue to <tralala@bitnomad.se> rather than in a public issue.
+
+## Accepted risks, on purpose
+
+These are known and deliberately left as they are. Read them before you decide your own posture.
+
+- **Members can read built-in role prompts.** Anyone who may read agents can see the role text a
+  board profile was created from. It is guidance for an external agent, not a secret rule, so it is
+  treated as content rather than a credential. Left open in the anti-reverse-engineering analysis
+  (`analysis/anti-reverse-engineering-analysis/`, finding MEDIUM-1) and in the decision log.
+- **Discussion budgets are per run, not per token.** There is no per-token rate limit, because the
+  deployment is a private network with known agents. A run is capped at four rounds and by
+  `TRALALA_DISCUSSION_TOKEN_BUDGET` and `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`.
+- **The board counters are cached in the registry.** They are measured from each board and dropped
+  when that board is written to, so the dashboard does not open every board file. The numbers can be
+  at most `TRALALA_BOARD_COUNTS_CACHE_SECONDS` stale if a board file is changed behind the app's
+  back. Nothing leaks; it is a cost trade-off, not a permission.

@@ -414,6 +414,55 @@ def test_registry_upgrade_gives_existing_tokens_an_owner_slot(settings: Settings
         engine.dispose()
 
 
+def test_registry_upgrade_adds_the_counter_cache(settings: Settings) -> None:
+    """0014 adds the cached board counters; a board created before it keeps its row."""
+    from app.storage.sqlite import create_sqlite_engine
+
+    settings.ensure_dirs()
+    engine = create_sqlite_engine(settings.registry_path)
+    try:
+        with engine.begin() as conn:
+            runner.upgrade("registry", conn, "0013_credential_owner")
+            now = "2026-11-01T00:00:00Z"
+            board_id = str(uuid.uuid4())
+            conn.execute(
+                text(
+                    "INSERT INTO boards (id, name, description, status, created_at,"
+                    " updated_at, archived_at, schema_version)"
+                    " VALUES (:id, 'Before the cache', '', 'active', :now, :now, NULL, 1)"
+                ),
+                {"id": board_id, "now": now},
+            )
+            runner.upgrade("registry", conn, "head")
+
+            assert (
+                conn.execute(
+                    text("SELECT name FROM boards WHERE id = :id"), {"id": board_id}
+                ).scalar_one()
+                == "Before the cache"
+            )
+            columns = {
+                row[1]
+                for row in conn.exec_driver_sql("PRAGMA table_info(board_stats)").fetchall()
+            }
+            assert {"board_id", "loop_count", "list_count", "card_count", "measured_at"} <= columns
+            # Nothing is measured yet: a missing row simply means "measure on the next list".
+            assert conn.execute(text("SELECT COUNT(*) FROM board_stats")).scalar_one() == 0
+
+            conn.execute(
+                text(
+                    "INSERT INTO board_stats (board_id, loop_count, list_count, card_count,"
+                    " measured_at) VALUES (:id, 1, 2, 3, :now)"
+                ),
+                {"id": board_id, "now": now},
+            )
+            conn.execute(text("DELETE FROM boards WHERE id = :id"), {"id": board_id})
+            # The counters belong to the board row and go with it.
+            assert conn.execute(text("SELECT COUNT(*) FROM board_stats")).scalar_one() == 0
+    finally:
+        engine.dispose()
+
+
 def test_registry_upgrade_keeps_customized_roles_and_agent_references(settings: Settings) -> None:
     """0011 rebuilds role_templates; a customized prompt and every agent reference must survive."""
     from app.storage.sqlite import create_sqlite_engine

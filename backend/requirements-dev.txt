@@ -2,3 +2,5 @@
 pytest>=8.3,<10
 pytest-asyncio>=0.24,<2
 ruff>=0.8,<1
+# Starlette 1.x serves its TestClient from httpx2 and warns when only httpx is installed.
+httpx2>=2.16,<3

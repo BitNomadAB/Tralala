@@ -550,5 +550,47 @@ class Registry:
         with self.connect() as conn:
             conn.execute(text("DELETE FROM boards WHERE id = :id"), {"id": board_id})
 
+    # --- board counters ----------------------------------------------------------
+
+    def board_stats(self, board_ids: list[str]) -> dict[str, dict[str, Any]]:
+        if not board_ids:
+            return {}
+        placeholders = ", ".join(f":id{index}" for index in range(len(board_ids)))
+        params = {f"id{index}": value for index, value in enumerate(board_ids)}
+        rows = self.read(f"SELECT * FROM board_stats WHERE board_id IN ({placeholders})", params)
+        return {row["board_id"]: row for row in rows}
+
+    def store_board_stats(
+        self, board_id: str, loop_count: int, list_count: int, card_count: int, *, measured_at: str
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO board_stats"
+                    " (board_id, loop_count, list_count, card_count, measured_at)"
+                    " VALUES (:id, :loops, :lists, :cards, :measured_at)"
+                    " ON CONFLICT(board_id) DO UPDATE SET"
+                    "  loop_count = excluded.loop_count,"
+                    "  list_count = excluded.list_count,"
+                    "  card_count = excluded.card_count,"
+                    "  measured_at = excluded.measured_at"
+                ),
+                {
+                    "id": board_id,
+                    "loops": loop_count,
+                    "lists": list_count,
+                    "cards": card_count,
+                    "measured_at": measured_at,
+                },
+            )
+
+    def forget_board_stats(self, board_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(text("DELETE FROM board_stats WHERE board_id = :id"), {"id": board_id})
+
+    def forget_all_board_stats(self) -> None:
+        with self.connect() as conn:
+            conn.execute(text("DELETE FROM board_stats"))
+
     def dispose(self) -> None:
         self.engine.dispose()

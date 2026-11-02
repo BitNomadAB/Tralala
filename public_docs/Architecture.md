@@ -149,7 +149,7 @@ SQLite has no cross-file transactions, so:
   connection, sealed credential, template reference or override). Discussions, mentions and
   generation runs persist `AgentService.role_snapshot(...)`, so later template edits cannot rewrite
   what an agent was told; see
-  [decisions/0001](../docs/decisions/0001-role-template-vs-agent-snapshot.md).
+  [decisions/0001](../docs/decisions/0022-role-template-vs-agent-snapshot.md).
 
 ## Loop workflow
 
@@ -192,6 +192,16 @@ The human-facing order of a Loop is in [Onboarding](Onboarding.md#the-order-of-w
 Lists and cards use integer `position` values spaced by 1024. Inserts target the midpoint between
 neighbours; when no integer gap remains the scope is normalized to `1024, 2048, …`. This keeps
 reorders O(1) writes in the common case and bounds normalization to rare, list-scoped rewrites.
+
+## Cost of listing boards
+
+Board counters (`loop_count`, `list_count`, `card_count`) live in each board's own database, so a
+naive list would open one file per row. The registry keeps the last measurement in `board_stats`,
+drops it when that board is written to, and re-measures after `TRALALA_BOARD_COUNTS_CACHE_SECONDS`:
+the numbers still come from the board, but the dashboard pays for one registry read. `GET /boards`
+accepts `with_counts=false` for a caller that only needs names. Measured with 100 boards: 1337 ms
+with no cache, 15 ms once the counters are known, 13 ms with the flag. See
+[decision 0023](../docs/decisions/0023-board-counters-cached-in-the-registry.md).
 
 ## Concurrency and idempotency
 

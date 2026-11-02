@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from ..core.config import Settings
 from ..core.context import ActorContext
-from ..core.errors import Conflict, NotFound, ServiceUnavailable, ValidationFailure
+from ..core.errors import Conflict, NotFound, ValidationFailure
 from ..core.platform import copy_file, remove_file, remove_tree, retry_io
 from ..schemas.boards import BoardCreate, BoardUpdate
 from ..storage.board_db import BoardDatabaseManager
@@ -19,6 +19,7 @@ from ..storage.registry import Registry
 from ..storage.schema import runner
 from ..storage.sqlite import snapshot_database, utcnow
 from .activity import log_activity
+from .board_stats import BoardStatsCache
 from .common import (
     archive_file_name,
     position_for_index,
@@ -62,10 +63,12 @@ class BoardService:
         boards: BoardDatabaseManager,
         migrations: Any | None = None,
         templates: Any | None = None,
+        stats: BoardStatsCache | None = None,
     ) -> None:
         self.settings = settings
         self.registry = registry
         self.boards = boards
+        self.stats = stats or BoardStatsCache(settings, registry, boards)
         self.migrations = migrations
         self.templates = templates
         self.repositories: Any | None = None
@@ -91,39 +94,22 @@ class BoardService:
         return self.templates.resolve(template_id)
 
     def _counts(self, board_id: str) -> tuple[int, int, int]:
-        try:
-            with self.boards.reader(board_id) as conn:
-                loops = conn.execute(
-                    text(
-                        "SELECT COUNT(*) FROM loops WHERE archived_at IS NULL"
-                        " AND completed_at IS NULL"
-                    )
-                ).scalar_one()
-                lists = conn.execute(
-                    text("SELECT COUNT(*) FROM lists WHERE archived_at IS NULL")
-                ).scalar_one()
-                cards = conn.execute(
-                    text("SELECT COUNT(*) FROM cards WHERE archived_at IS NULL")
-                ).scalar_one()
-            return int(loops), int(lists), int(cards)
-        except (NotFound, ServiceUnavailable):
-            # A board whose schema is mid-repair must still appear in the dashboard.
-            return 0, 0, 0
+        return self.stats.counts(board_id)
 
     def serialize(
         self,
         row: dict[str, Any],
         *,
         with_counts: bool = True,
+        count_map: dict[str, tuple[int, int, int]] | None = None,
         repository_map: dict[str, list[str]] | None = None,
         agent_map: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         entry = dict(row)
         entry.setdefault("schema_revision", None)
         if with_counts:
-            entry["loop_count"], entry["list_count"], entry["card_count"] = self._counts(
-                row["id"]
-            )
+            counts = (count_map or {}).get(row["id"]) or self._counts(row["id"])
+            entry["loop_count"], entry["list_count"], entry["card_count"] = counts
         else:
             entry.setdefault("loop_count", 0)
             entry.setdefault("list_count", 0)
@@ -178,6 +164,7 @@ class BoardService:
         order: str = "desc",
         limit: int = 50,
         offset: int = 0,
+        with_counts: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
         clauses: list[str] = []
         params: dict[str, Any] = {}
@@ -206,9 +193,18 @@ class BoardService:
         )
         repository_map = self._repository_ids_by_board()
         agent_map = self._agent_ids_by_board()
+        # One lookup for the whole page: the counters come from the registry cache, so a board file
+        # is only opened when its counters are missing or stale.
+        count_map = self.stats.counts_for([row["id"] for row in page]) if with_counts else None
         return (
             [
-                self.serialize(row, repository_map=repository_map, agent_map=agent_map)
+                self.serialize(
+                    row,
+                    with_counts=with_counts,
+                    count_map=count_map,
+                    repository_map=repository_map,
+                    agent_map=agent_map,
+                )
                 for row in page
             ],
             int(total["total"] if total else 0),

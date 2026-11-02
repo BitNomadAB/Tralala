@@ -22,6 +22,7 @@ async def list_boards(
     status: Annotated[str | None, Query()] = None,
     sort: Annotated[str, Query()] = "updated_at",
     order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
+    with_counts: Annotated[bool, Query()] = True,
 ) -> dict:
     ctx.actor.require("boards:read")
     items, total = ctx.services.board.list(
@@ -31,6 +32,7 @@ async def list_boards(
         order=order,
         limit=page.limit,
         offset=page.offset,
+        with_counts=with_counts,
     )
     return ok(
         request,
