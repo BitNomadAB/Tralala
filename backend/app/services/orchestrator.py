@@ -62,7 +62,11 @@ class Orchestrator:
 
     def _context(self, conn: Any, thread: dict[str, Any], limit: int = 20) -> list[dict[str, str]]:
         card = conn.execute(
-            text("SELECT title, description, priority FROM cards WHERE id = :id"),
+            text(
+                "SELECT c.id, c.title, c.description, c.priority, c.ticket_key,"
+                " l.key AS loop_key, l.name AS loop_name"
+                " FROM cards c LEFT JOIN loops l ON l.id = c.loop_id WHERE c.id = :id"
+            ),
             {"id": thread["card_id"]},
         ).mappings().first()
         history = _rows(
@@ -73,8 +77,13 @@ class Orchestrator:
             {"id": thread["id"], "limit": limit},
         )
         history.reverse()
+        # A card gets its key when a plan is published, so a thread on an unplanned ticket names the
+        # id instead. Either way the agent is told which ticket it is looking at.
         ticket = (
-            f"Ticket: {card['title']}\nPriority: {card['priority']}\n"
+            f"Loop: {card['loop_name'] or '(unknown)'} ({card['loop_key'] or 'no key'})\n"
+            f"Ticket: {card['title']}\n"
+            f"Ticket id: {card['id']} (key: {card['ticket_key'] or 'not keyed yet'})\n"
+            f"Priority: {card['priority']}\n"
             f"Description:\n{(card['description'] or '(empty)')[:4000]}"
             if card
             else "Ticket: (missing)"

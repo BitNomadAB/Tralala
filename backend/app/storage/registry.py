@@ -202,6 +202,67 @@ class Registry:
         )
         return int(row["total"]) if row else 0
 
+    # --- enrolment invites -----------------------------------------------------
+
+    def create_invite(
+        self,
+        *,
+        actor_id: str,
+        token_hash: str,
+        created_by_actor_id: str,
+        expires_at: str,
+    ) -> dict[str, Any]:
+        invite_id = str(uuid.uuid4())
+        now = utcnow()
+        with self.connect() as conn:
+            # One live invite per account: a new link replaces an unused older one.
+            conn.execute(
+                text("DELETE FROM user_invites WHERE actor_id = :id AND used_at IS NULL"),
+                {"id": actor_id},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO user_invites (id, actor_id, token_hash, created_by_actor_id,"
+                    " created_at, expires_at, used_at)"
+                    " VALUES (:id, :actor_id, :token_hash, :created_by, :now, :expires_at, NULL)"
+                ),
+                {
+                    "id": invite_id,
+                    "actor_id": actor_id,
+                    "token_hash": token_hash,
+                    "created_by": created_by_actor_id,
+                    "now": now,
+                    "expires_at": expires_at,
+                },
+            )
+        return {
+            "id": invite_id,
+            "actor_id": actor_id,
+            "created_at": now,
+            "expires_at": expires_at,
+        }
+
+    def invite_by_token_hash(self, token_hash: str) -> dict[str, Any] | None:
+        return self.read_one(
+            "SELECT i.*, a.name, a.disabled_at FROM user_invites i"
+            " JOIN actors a ON a.id = i.actor_id WHERE i.token_hash = :hash",
+            {"hash": token_hash},
+        )
+
+    def mark_invite_used(self, invite_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                text("UPDATE user_invites SET used_at = :now WHERE id = :id"),
+                {"id": invite_id, "now": utcnow()},
+            )
+
+    def pending_invite(self, actor_id: str) -> dict[str, Any] | None:
+        return self.read_one(
+            "SELECT id, created_at, expires_at FROM user_invites"
+            " WHERE actor_id = :id AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+            {"id": actor_id},
+        )
+
     # --- sessions ---------------------------------------------------------------
 
     def create_session(
@@ -308,6 +369,7 @@ class Registry:
         token_hash: str,
         scopes: list[str],
         expires_at: str | None,
+        owner_actor_id: str | None = None,
     ) -> dict[str, Any]:
         credential_id = str(uuid.uuid4())
         now = utcnow()
@@ -315,12 +377,15 @@ class Registry:
             conn.execute(
                 text(
                     "INSERT INTO api_credentials"
-                    " (id, actor_id, name, token_hash, scopes, created_at, expires_at)"
-                    " VALUES (:id, :actor_id, :name, :token_hash, :scopes, :now, :expires_at)"
+                    " (id, actor_id, owner_actor_id, name, token_hash, scopes, created_at,"
+                    "  expires_at)"
+                    " VALUES (:id, :actor_id, :owner, :name, :token_hash, :scopes, :now,"
+                    " :expires_at)"
                 ),
                 {
                     "id": credential_id,
                     "actor_id": actor_id,
+                    "owner": owner_actor_id,
                     "name": name,
                     "token_hash": token_hash,
                     "scopes": json.dumps(scopes),
@@ -331,6 +396,7 @@ class Registry:
         return {
             "id": credential_id,
             "actor_id": actor_id,
+            "owner_actor_id": owner_actor_id,
             "name": name,
             "scopes": scopes,
             "created_at": now,
@@ -339,16 +405,70 @@ class Registry:
             "last_used_at": None,
         }
 
-    def list_credentials(self) -> list[dict[str, Any]]:
+    def list_credentials(self, owner_actor_id: str | None = None) -> list[dict[str, Any]]:
+        """Tokens with their owner; ``owner_actor_id`` narrows the list to one person."""
+        clause = " WHERE c.owner_actor_id = :owner" if owner_actor_id else ""
         rows = self.read(
-            "SELECT c.id, c.actor_id, a.name AS actor_name, c.name, c.scopes, c.created_at,"
+            "SELECT c.id, c.actor_id, c.owner_actor_id, a.name AS actor_name,"
+            " o.name AS owner_name, c.name, c.scopes, c.created_at,"
             " c.expires_at, c.last_used_at, c.revoked_at"
             " FROM api_credentials c JOIN actors a ON a.id = c.actor_id"
-            " ORDER BY c.created_at DESC"
+            " LEFT JOIN actors o ON o.id = c.owner_actor_id"
+            f"{clause}"
+            " ORDER BY c.created_at DESC",
+            {"owner": owner_actor_id} if owner_actor_id else {},
         )
         for row in rows:
             row["scopes"] = json.loads(row["scopes"])
         return rows
+
+    def credential(self, credential_id: str) -> dict[str, Any] | None:
+        return self.read_one(
+            "SELECT c.*, a.name AS actor_name FROM api_credentials c"
+            " JOIN actors a ON a.id = c.actor_id WHERE c.id = :id",
+            {"id": credential_id},
+        )
+
+    def credential_owner_counts(self) -> dict[str, dict[str, Any]]:
+        """Live token count and last use per owner, for the user list."""
+        rows = self.read(
+            "SELECT owner_actor_id, COUNT(*) AS live, MAX(last_used_at) AS last_used_at"
+            " FROM api_credentials"
+            " WHERE owner_actor_id IS NOT NULL AND revoked_at IS NULL"
+            " GROUP BY owner_actor_id"
+        )
+        return {str(row["owner_actor_id"]): row for row in rows}
+
+    def revoke_credentials_by_owner(self, owner_actor_id: str) -> list[str]:
+        """Revoke every live token one person issued; returns the agent actor ids behind them."""
+        now = utcnow()
+        with self.connect() as conn:
+            actor_ids = [
+                str(record[0])
+                for record in conn.execute(
+                    text(
+                        "SELECT actor_id FROM api_credentials"
+                        " WHERE owner_actor_id = :owner AND revoked_at IS NULL"
+                    ),
+                    {"owner": owner_actor_id},
+                )
+            ]
+            conn.execute(
+                text(
+                    "UPDATE api_credentials SET revoked_at = :now"
+                    " WHERE owner_actor_id = :owner AND revoked_at IS NULL"
+                ),
+                {"owner": owner_actor_id, "now": now},
+            )
+            for actor_id in actor_ids:
+                conn.execute(
+                    text(
+                        "UPDATE actors SET disabled_at = :now"
+                        " WHERE id = :id AND disabled_at IS NULL"
+                    ),
+                    {"id": actor_id, "now": now},
+                )
+        return actor_ids
 
     def credential_by_token_hash(self, token_hash: str) -> dict[str, Any] | None:
         return self.read_one(

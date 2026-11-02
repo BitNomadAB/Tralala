@@ -83,6 +83,28 @@ class UserOut(OutModel):
     role: str
     created_at: str
     disabled: bool = False
+    agent_access_count: int = 0
+    agent_access_last_used_at: str | None = None
+
+
+class InviteCreate(StrictModel):
+    """How long the enrolment link stays valid; the default keeps it to three days."""
+
+    expires_in_hours: int = Field(default=72, ge=1, le=24 * 30)
+
+
+class InviteCreated(OutModel):
+    user_id: str
+    user_name: str
+    token: str
+    path: str
+    expires_at: str
+    warning: str = "Send this link once; it is not retrievable later."
+
+
+class EnrolRequest(StrictModel):
+    token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    password: Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
 
 class CredentialCreate(StrictModel):
@@ -95,6 +117,8 @@ class CredentialOut(OutModel):
     id: str
     actor_id: str
     actor_name: str | None = None
+    owner_actor_id: str | None = None
+    owner_name: str | None = None
     name: str
     scopes: list[str]
     created_at: str

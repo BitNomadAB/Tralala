@@ -1,4 +1,4 @@
-# Ralph progress log
+﻿# Ralph progress log
 
 Append-only. Newest entries at the bottom. Never rewrite history; correct mistakes with a new entry.
 
@@ -630,3 +630,176 @@ Fix in `features/discussions/DiscussionsPage.tsx`:
 Verified: `typecheck`, `pnpm test` 35/35, `pnpm build`, `pnpm test:e2e` 26/26 (the discussions journeys
 are part of the suite), and a live round trip: board → new discussion → ticket picked → created →
 thread opened.
+
+## 2026-11-01 ? Enrolment links instead of e-mail verification
+
+`docs/decisions/0014-enrolment-links-instead-of-email-verification.md`. The problem behind the Loop
+"Email verification" was not a missing mail server: an administrator created accounts with an initial
+password, so the administrator knew every password, and no public sign-up exists to verify.
+
+- Registry revision `0012_user_invites`: `user_invites` (hashed token, `expires_at`, `used_at`,
+  cascade from `actors`). One live invite per account: a new link deletes the unused one.
+- `AuthService.create_invite` (needs `users:admin`, returns the token once) and `accept_invite`
+  (validates the hash, expiry, used flag and password rules, sets the password, revokes other
+  sessions, signs in). `POST /users/{id}/invite` and public, throttled `POST /auth/enrol`; new setting
+  `TRALALA_INVITE_TTL_HOURS` (72 h) and generic codes `invite_invalid` / `invite_used` /
+  `invite_expired` so a caller cannot learn whether a token ever existed.
+- A rejected password does **not** burn the link: validation runs before the invite is marked used.
+- Frontend: the invitation icon in Settings ? Users opens a dialog with the one-time link and a copy
+  button; `/enrol` is a public page (token prefilled from the query, paste-able otherwise) that sets
+  the password and lands the person signed in; the login page links to it. `AuthProvider` gained
+  `refresh` so a flow that signs in outside the login form can update the session.
+
+Verification: `tests/test_invites.py` (8 tests: sets own password, single use, expired, unknown token,
+only administrators, replacement link, weak password retried, disabled account refused); `ruff`
+clean, full backend suite green. Frontend `typecheck` green, `pnpm test` 35/35, `pnpm build` green,
+`pnpm test:e2e` 26/26 plus the new `users.spec.ts` journey (27 in total once the suite includes it).
+Live: issued a link for a demo user, opened it in the browser, set a password and landed on the
+boards page signed in as that user.
+
+## 2026-11-01 ? EM001 reframed: from e-mail verification to account enrolment
+
+The Loop asked for e-mail verification, which this product does not need (no public sign-up, no e-mail
+infrastructure since 0007). Its content now describes the problem the invite feature solves:
+
+- Renamed **Email verification -> Account enrolment** (the allocated key `EM001` is frozen by design).
+- Goal replaced: "An administrator must never give a person their password. A person joins by
+  claiming a one-time invitation link and choosing their own password."
+- Info written as revision 1 (`ready_for_review`): outcome, scope, non-goals (no e-mail, no public
+  sign-up, no recovery without an administrator, SSO/passkeys noted as follow-ups), constraints (the
+  link is a short-lived bearer secret, hashed at rest, delivered by the operator) and acceptance
+  criteria that match the eight backend tests and the new e2e journey.
+
+Verified in the UI: the board list shows EM001 Account enrolment with the new goal, and the Loop's Info
+tab renders revision 1.
+
+## 2026-11-01 ? Role prompts reference the assigned Loop or discussion, not a fixed product name
+
+The factory prompts named the product and the subject in the text itself ("for a Tralala Loop", "one
+existing Tralala ticket", "registered in Tralala"). They now refer softly and rely on the identifiers
+that are supplied when the agent is asked:
+
+- `app/seeds/role_seeds.json` version 2: the discussion preamble speaks of "one existing ticket" and
+  says the message names the ticket, its Loop and the installation, and that an identity must never be
+  guessed. The Analytics agent opens with "for the Loop you are asked about" and states that the Loop
+  name and key, the board and the readable repositories arrive with the request. Coordinator and
+  Architect say "this installation" instead of the product name. No prompt contains "Tralala" any more.
+- Identifiers are now part of the call context: a discussion round gets `Loop: <name> (<key>)`,
+  `Ticket: <title>` and `Ticket id: <uuid> (key: not keyed yet)` (a card is keyed when a plan is
+  published); a mention job gets the same lines; a generation run names the board as well as the Loop.
+- `RoleTemplateService.seed_defaults` now keeps **unedited** built-ins in step with the factory text, so
+  a prompt rewrite reaches an existing installation; a customized built-in keeps its prompt and only its
+  factory copy moves, which is what *restore defaults* restores. Scope still follows the seed.
+
+Verification: `test_role_seeds.py` (no prompt names the product, the preamble points at the given
+context, an untouched built-in follows a rewrite, a customized one keeps its text but gains the new
+default), `test_orchestrator.py` (a round names Loop, ticket title and ticket id while the role text
+names neither), `test_mentions.py` extended the same way; `ruff` clean and the full backend suite green.
+
+## 2026-11-02 - Worker surface: /llms.txt, /mcp and one tool catalogue
+
+An external worker (an agent outside the installation, holding a token) is now a first-class client:
+it can read a Board and a Loop, understand the task from the documents, claim a Ticket, move it
+between columns and ask the local agents. The local role agents stay readers: they are invoked by a
+run, never authenticate, and never touch a Ticket.
+
+- `services/agent_tools.py` is the single catalogue: name, description, JSON Schema, required scope
+  and a handler that calls the same services as REST. Seven tools: `read_board`, `read_loop`,
+  `read_ticket`, `assign_ticket`, `move_ticket`, `comment_ticket`, `ask_agents`. Board/list
+  creation, Ticket creation, archiving, document writing and every human gate are absent by design.
+- `POST /mcp` speaks MCP over JSON-RPC 2.0 (Streamable HTTP): `initialize`, `tools/list`,
+  `tools/call`, `ping`; notifications answer `202`; `GET /mcp` answers `405`. Every method is
+  authenticated, and `tools/list` is filtered to the scopes the token holds, so a worker never sees
+  a capability it may not use. A refused tool is `-32602`; a failed tool returns `isError: true`
+  carrying the API error code, so `version_conflict` and `human_action_required` surface as data.
+- `GET /llms.txt` is the public bootstrap: envelope, Loop lifecycle, the rules that never change,
+  the tool list and the REST equivalents. No ids, no data, no secrets. nginx and the Vite dev proxy
+  now route `/llms.txt` and `/mcp` to the backend, so an agent that tries `/llms.txt` gets text
+  instead of the SPA shell with a 200.
+- `GET /boards/{board_id}/actors` (`boards:read`) returns `people` (enabled humans, the only lookup
+  a token cannot otherwise perform) and `agents` (enabled board profiles, honouring the board's
+  selection). Without it `assign_ticket` could not name anybody: a token is its own agent actor and
+  holds neither `users:admin` nor `agents:read`.
+- `CardService.locate` resolves the owning Loop from a Ticket id, so board-level callers stop
+  guessing; `move_ticket` accepts a column name and reads the version itself, retrying once when a
+  concurrent write wins.
+- `read_ticket` returns `allowed_actions` derived from the Ticket (archived, human-only, planned but
+  not ready) plus the Loop's `execution_allowed` for context - a manual Ticket in a draft Loop is
+  still movable, which the API always allowed.
+
+Verification: `tests/test_agent_tools.py` (12 tests) covers the public bootstrap, the 401 without a
+token, scope-filtered `tools/list`, `read_board`/`read_loop`/`read_ticket`, assign+move+comment by
+column name, the out-of-scope refusal, an unknown tool, `ask_agents` both with and without an agent,
+and the actors lookup not leaking credentials. Full backend suite and ruff green.
+
+## 2026-11-02 - The worker can start work: create_loop, write_info, run_analysis
+
+A person and their worker agree an intent in a sentence, and the worker now opens the Loop, records
+the intent and asks for the analysis without the person retyping anything.
+
+- `create_loop(board_id, name, goal?, columns?)` - `loops:write`, defaults to the board's Loop columns.
+- `write_info(board_id, loop_id, content, note?, expected_revision_id?)` - `loops:write`. A token may
+  write Info **only while the Loop is `draft` or `analysis_review`** (`WORKER_INFO_STAGES` in
+  `LoopDocumentService.save_info`); after that it is `403 human_action_required` with the stage in
+  `details`, because a new revision would invalidate approvals. Decision 0016. Revisions stay
+  immutable, attributed (`author_actor_type: agent`) and hashed.
+- `run_analysis(board_id, loop_id, agent_id?, instructions?, wait_seconds?)` - `loops:generate`.
+  Starts the analysis generation run and returns the run plus the analysis document state; an
+  optional bounded poll (`wait_seconds`, max 120) saves a round trip. The candidate is approved by a
+  person, never by the tool.
+- `mcp.py` now runs every handler in the threadpool (`run_in_threadpool`): handlers touch SQLite and
+  may poll a run, so they must not block the event loop.
+- `tests/test_loops.py`: `test_agents_cannot_write_info` became
+  `test_a_worker_may_seed_info_before_planning` plus
+  `test_a_worker_cannot_change_info_once_planning_started`. `tests/test_agent_tools.py` gained
+  `test_create_loop_write_info_and_run_analysis` and the expected tool list now names all ten.
+
+Verification: full backend suite green, ruff clean; the flow was also driven live over MCP against
+`.devdata` (create loop, seed Info, run analysis) before the throwaway board was removed.
+
+## 2026-11-02 - Interaction agent access: owned, member-issued, revocable by disabling the account
+
+A member no longer needs an administrator to get a key for their own agent, and an administrator can
+finally see and stop it.
+
+- Registry revision `0013_credential_owner`: `api_credentials.owner_actor_id` (nullable, so existing
+  tokens keep working and show as installation-wide). The token stays its own `agent` actor, so audit
+  names the machine; ownership is recorded next to it.
+- `MEMBER_TOKEN_SCOPES` (core/context.py): read boards, work Loops and Tickets, comment, ask agents.
+  A member may only grant those (`422 forbidden_scope` otherwise); an admin keeps any grantable
+  scope. A personal key must carry an expiry (`422 expiry_required`, default 30 days, ceiling
+  `TRALALA_MEMBER_TOKEN_MAX_DAYS`) and is capped at `TRALALA_MEMBER_TOKEN_LIMIT` live keys
+  (`409 agent_access_limit`).
+- `GET /credentials` is role-aware (own list, or everything for an admin, `?owner_id=` narrows);
+  `GET /credentials/mine` is the explicit own list; rotate/revoke allowed for the owner or an admin,
+  anything else `404`.
+- `PATCH /users/{id}` with `disabled: true` now also revokes every token that person issued and
+  disables the agent actors behind them; re-enabling does not resurrect a revoked key.
+  `GET /users` gains `agent_access_count` and `agent_access_last_used_at`.
+- `GET /meta` publishes `member_token_scopes`, `member_token_limits` and `can_issue_tokens`.
+- UI: a single `InteractionAccessCard` for everyone ("Interaction agent access": name, scopes,
+  last used, expiry, rotate/revoke, plus a copy-ready MCP block), and an admin-only "All agent
+  access" list; the Users card shows the per-person count and spells out what Disable does.
+- Tests: `tests/test_interaction_access.py` (8 tests: member token drives MCP, forbidden scopes,
+  expiry, cap, own-list isolation, rotate/revoke ownership, admin count + disable revokes,
+  meta vocabulary), plus updated `test_accounts.py` and a new e2e journey.
+
+Decision: `docs/decisions/0017-interaction-agent-access-ownership.md`.
+
+## 2026-11-02 - In-card guide: "How do I connect my computer?"
+
+The interaction-access card now carries the five steps a person follows at their own machine, in the
+same collapsible style as the repository token guide:
+
+1. create the key for this machine and tick only the scopes the agent needs;
+2. copy the token (shown once, stored hashed);
+3. paste the `mcp.json` template (`https://<Your URL>/mcp` and a Copy button - the guide carries no host of its own, so it reads the same on every installation);
+4. ask the agent to read a board - `401` means the key is wrong/revoked/expired, `403` a missing
+   scope;
+5. watch "last used" to confirm it is that machine connecting, and revoke when done.
+
+`frontend/src/features/settings/AgentAccessGuide.tsx` keeps the words general (no installation name or host,
+no example token), and the snippet comes from `lib/agentAccess.ts`, so the card and the guide cannot
+show different endpoints. The duplicate config block that used to sit below the list is gone; the
+guide owns it. Verified in the running UI (expanded guide screenshots) and by extending the member
+e2e journey to open the guide and assert its steps.

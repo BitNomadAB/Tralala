@@ -370,6 +370,50 @@ def test_registry_upgrade_keeps_the_repository_assignment(settings: Settings) ->
 
 
 
+def test_registry_upgrade_gives_existing_tokens_an_owner_slot(settings: Settings) -> None:
+    """0013 adds ownership; a token issued before it must keep working and stay ownerless."""
+    from app.storage.sqlite import create_sqlite_engine
+
+    settings.ensure_dirs()
+    engine = create_sqlite_engine(settings.registry_path)
+    try:
+        with engine.begin() as conn:
+            runner.upgrade("registry", conn, "0012_user_invites")
+            now = "2026-11-01T00:00:00Z"
+            actor_id = str(uuid.uuid4())
+            credential_id = str(uuid.uuid4())
+            conn.execute(
+                text(
+                    "INSERT INTO actors (id, type, name, created_at, disabled_at)"
+                    " VALUES (:id, 'agent', 'legacy token', :now, NULL)"
+                ),
+                {"id": actor_id, "now": now},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO api_credentials (id, actor_id, name, token_hash, scopes,"
+                    " created_at, expires_at)"
+                    " VALUES (:id, :actor, 'legacy token', 'hash', '[\"boards:read\"]', :now, NULL)"
+                ),
+                {"id": credential_id, "actor": actor_id, "now": now},
+            )
+            runner.upgrade("registry", conn, "head")
+
+            row = conn.execute(
+                text("SELECT owner_actor_id, scopes FROM api_credentials WHERE id = :id"),
+                {"id": credential_id},
+            ).one()
+            assert row[0] is None
+            assert row[1] == '["boards:read"]'
+            columns = {
+                row[1]
+                for row in conn.exec_driver_sql("PRAGMA table_info(api_credentials)").fetchall()
+            }
+            assert "owner_actor_id" in columns
+    finally:
+        engine.dispose()
+
+
 def test_registry_upgrade_keeps_customized_roles_and_agent_references(settings: Settings) -> None:
     """0011 rebuilds role_templates; a customized prompt and every agent reference must survive."""
     from app.storage.sqlite import create_sqlite_engine

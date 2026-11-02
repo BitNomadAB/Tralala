@@ -77,5 +77,5 @@ Please do not open a pull request with a failing backend test, a ruff finding or
 ## Reporting security issues
 
 Do **not** open a public issue for a security problem. Report it privately to
-security@bitnomad.se with steps to reproduce, affected version or commit, and impact. We aim to
+tralala@bitnomad.se with steps to reproduce, affected version or commit, and impact. We aim to
 acknowledge within five business days.

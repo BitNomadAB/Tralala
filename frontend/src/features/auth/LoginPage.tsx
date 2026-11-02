@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
@@ -80,6 +80,13 @@ export function LoginPage() {
           First run uses the administrator credentials configured on the server. If none was
           configured, the server generated one and wrote it to
           <code> data/.bootstrap-password</code>.
+        </p>
+        <p className="text-[11px] text-[var(--muted-foreground)]">
+          Got an invitation link? Open it directly, or{" "}
+          <Link className="underline" to="/enrol">
+            enter its token here
+          </Link>
+          .
         </p>
       </form>
     </main>

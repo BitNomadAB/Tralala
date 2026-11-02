@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from conftest import Api
+from sqlalchemy import text
 
 from app.services import role_defaults, runtime
 
@@ -187,3 +188,66 @@ def test_the_default_agent_skips_an_organisation_profile(
             break
         time.sleep(0.05)
     assert used["agent"]["id"] == worker["id"]
+
+
+def test_the_factory_prompts_never_name_the_product() -> None:
+    """A profile refers to the Loop or discussion it is given, never to a fixed product name."""
+    for role in role_defaults.BUILTIN_ROLES:
+        assert "Tralala" not in role["prompt"], role["key"]
+    analytics = next(r for r in role_defaults.BUILTIN_ROLES if r["key"] == "analytics_agent")
+    assert "the Loop you are asked about" in analytics["prompt"]
+    assert "given to you with the request" in analytics["prompt"]
+
+
+def test_the_discussion_preamble_points_at_the_given_context() -> None:
+    document = json.loads(role_defaults.SEED_PATH.read_text(encoding="utf-8"))
+    preamble = document["discussion_preamble"]
+    assert "Tralala" not in preamble
+    assert "The message you receive names the ticket" in preamble
+    assert "never guess an identity" in preamble
+
+
+def test_an_untouched_builtin_follows_the_factory_text(api: Api) -> None:
+    """A prompt rewrite has to reach an installation that never edited the role."""
+    services = api.client.app.state.services
+    roles = api.data(api.get("/api/v1/role-templates"))
+    builtin = next(entry for entry in roles if entry["builtin_key"] == "analytics_agent")
+    with services.registry.connect() as conn:
+        conn.execute(
+            text(
+                "UPDATE role_templates SET system_prompt = 'Old factory text',"
+                " default_system_prompt = 'Old factory text' WHERE id = :id"
+            ),
+            {"id": builtin["id"]},
+        )
+
+    services.role_templates.seed_defaults()
+
+    refreshed = api.data(api.get(f"/api/v1/role-templates/{builtin['id']}"))
+    assert refreshed["system_prompt"] != "Old factory text"
+    assert "the Loop you are asked about" in refreshed["system_prompt"]
+    assert refreshed["customized"] is False
+
+
+def test_a_customized_builtin_keeps_its_prompt_but_gains_the_new_default(api: Api) -> None:
+    services = api.client.app.state.services
+    roles = api.data(api.get("/api/v1/role-templates"))
+    builtin = next(entry for entry in roles if entry["builtin_key"] == "qa_engineer")
+    api.data(
+        api.patch(
+            f"/api/v1/role-templates/{builtin['id']}",
+            json={"system_prompt": "Our own QA voice, edited by a person."},
+        )
+    )
+
+    services.role_templates.seed_defaults()
+
+    refreshed = api.data(api.get(f"/api/v1/role-templates/{builtin['id']}"))
+    assert refreshed["system_prompt"] == "Our own QA voice, edited by a person."
+    assert refreshed["customized"] is True
+
+    restored = api.data(
+        api.post(f"/api/v1/role-templates/{builtin['id']}/restore-defaults")
+    )
+    assert restored["system_prompt"] != "Our own QA voice, edited by a person."
+    assert "Tralala" not in restored["system_prompt"]

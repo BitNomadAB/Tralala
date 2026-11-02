@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
-from ...core.errors import Unauthorized
+from ...core.errors import Unauthorized, ValidationFailure
 from ...core.security import CSRF_COOKIE, SESSION_COOKIE
 from ...schemas.auth import (
     ActorOut,
     CredentialCreate,
     CredentialCreated,
     CredentialOut,
+    EnrolRequest,
     LoginRequest,
     LoginResponse,
     PasswordChange,
@@ -72,6 +73,47 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
         request,
         {"actor": result["actor"], "csrf_token": result["csrf_token"]},
     )
+
+
+@router.post("/auth/enrol", response_model=Envelope[LoginResponse])
+async def enrol(payload: EnrolRequest, request: Request, response: Response) -> dict:
+    """Use a one-time invitation link: set the password and start a session.
+
+    Public by design (the person has no session yet), so it is throttled like login and answers with
+    the same generic messages rather than revealing whether a link ever existed.
+    """
+    services = request.app.state.services
+    address = client_address(request)
+    throttle = request.app.state.login_throttle
+    request.app.state.rate_limiter.check(f"enrol:{address}")
+    token_key = f"invite:{address}"
+    throttle.check(token_key, f"enrol-ip:{address}")
+    try:
+        result = services.auth.accept_invite(payload.token, payload.password)
+    except (Unauthorized, ValidationFailure):
+        throttle.record_failure(token_key, f"enrol-ip:{address}")
+        raise
+    throttle.reset(token_key)
+    max_age = services.settings.session_ttl_seconds
+    response.set_cookie(
+        SESSION_COOKIE,
+        result["session"],
+        max_age=max_age,
+        httponly=True,
+        samesite="lax",
+        secure=services.settings.cookie_secure,
+        path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE,
+        result["csrf_token"],
+        max_age=max_age,
+        httponly=False,
+        samesite="lax",
+        secure=services.settings.cookie_secure,
+        path="/",
+    )
+    return ok(request, {"actor": result["actor"], "csrf_token": result["csrf_token"]})
 
 
 @router.post("/auth/logout", response_model=Envelope[dict])
@@ -138,9 +180,12 @@ async def scopes(ctx: Annotated[RequestContext, Depends(get_context)], request: 
 
 @router.get("/credentials", response_model=Envelope[list[CredentialOut]])
 async def list_credentials(
-    ctx: Annotated[RequestContext, Depends(get_context)], request: Request
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+    owner_id: Annotated[str | None, Query(max_length=64)] = None,
 ) -> dict:
-    return ok(request, ctx.services.auth.list_credentials(ctx.actor))
+    """Your own agent access; an administrator may list everybody's, optionally for one person."""
+    return ok(request, ctx.services.auth.list_credentials(ctx.actor, owner_id=owner_id))
 
 
 @router.post("/credentials", response_model=Envelope[CredentialCreated], status_code=201)
@@ -175,6 +220,15 @@ async def revoke_credential(
     if not revoked:
         raise Unauthorized("Credential not found or already revoked")
     return ok(request, {"id": credential_id, "revoked": True})
+
+
+@router.get("/credentials/mine", response_model=Envelope[list[CredentialOut]])
+async def list_my_credentials(
+    ctx: Annotated[RequestContext, Depends(get_context)], request: Request
+) -> dict:
+    """Explicit alias for a person's own agent access, whatever their role."""
+    owner = ctx.actor.actor_id
+    return ok(request, ctx.services.auth.list_credentials(ctx.actor, owner_id=owner))
 
 
 __all__ = ["router"]

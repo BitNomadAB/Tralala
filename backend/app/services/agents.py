@@ -48,24 +48,44 @@ class RoleTemplateService:
     # --- seeding ---------------------------------------------------------------
 
     def seed_defaults(self) -> int:
-        """Insert missing built-ins. Existing rows are never overwritten."""
+        """Insert missing built-ins and keep unedited ones in step with the seed.
+
+        A built-in the user has not touched follows the factory text, so a prompt rewrite reaches
+        an existing installation. A customized built-in keeps its own prompt; only its factory copy
+        moves, which is what "restore defaults" restores. Scope always follows the seed.
+        """
         created = 0
         now = utcnow()
         with self.registry.connect() as conn:
             for role in BUILTIN_ROLES:
                 existing = conn.execute(
-                    text("SELECT id FROM role_templates WHERE builtin_key = :key"),
+                    text(
+                        "SELECT id, system_prompt, default_system_prompt FROM role_templates"
+                        " WHERE builtin_key = :key"
+                    ),
                     {"key": role["key"]},
-                ).first()
+                ).mappings().first()
                 if existing is not None:
-                    # Every built-in was a board profile before scope existed; keep the seed as the
-                    # source of truth for the scope so an upgrade lands on the right value.
+                    untouched = (
+                        existing["system_prompt"] == existing["default_system_prompt"]
+                    )
                     conn.execute(
                         text(
-                            "UPDATE role_templates SET scope = :scope"
-                            " WHERE builtin_key = :key AND scope != :scope"
+                            "UPDATE role_templates SET scope = :scope,"
+                            " default_system_prompt = :prompt,"
+                            " system_prompt = CASE WHEN :untouched THEN :prompt"
+                            " ELSE system_prompt END,"
+                            " updated_at = CASE WHEN :untouched AND system_prompt != :prompt"
+                            " THEN :now ELSE updated_at END"
+                            " WHERE builtin_key = :key"
                         ),
-                        {"key": role["key"], "scope": role["scope"]},
+                        {
+                            "key": role["key"],
+                            "scope": role["scope"],
+                            "prompt": role["prompt"],
+                            "untouched": 1 if untouched else 0,
+                            "now": now,
+                        },
                     )
                     continue
                 conn.execute(
@@ -321,6 +341,42 @@ class AgentService:
                 " FROM agents a LEFT JOIN role_templates r ON r.id = a.role_template_id"
                 " WHERE a.enabled = 1 ORDER BY a.name"
             )
+        ]
+
+    def assignable_people(self) -> list[dict[str, Any]]:
+        """Enabled people, as a worker needs them to assign a Ticket to someone.
+
+        A token belongs to its own agent actor, so it cannot look people up elsewhere: this is the
+        only list a worker token may read, and it carries no password, session or role detail
+        beyond the role name an assignee list needs.
+        """
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "type": "user",
+                "role": row.get("role"),
+            }
+            for row in self.registry.list_users()
+            if row.get("disabled_at") is None
+        ]
+
+    def askable_agents(self, board_id: str) -> list[dict[str, Any]]:
+        """Enabled board profiles a worker may ask, honouring the board's selection.
+
+        A board that lists no agents keeps the documented "any board profile" behaviour, so an
+        older board still answers.
+        """
+        selected = set(self.agent_ids(board_id))
+        return [
+            {
+                "id": entry["id"],
+                "name": entry["name"],
+                "role_template_name": entry.get("role_template_name"),
+            }
+            for entry in self.directory()
+            if entry["role_template_scope"] != "organisation"
+            and (not selected or entry["id"] in selected)
         ]
 
     # --- role resolution (the architecture seam) -------------------------------

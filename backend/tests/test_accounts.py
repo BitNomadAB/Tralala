@@ -112,10 +112,13 @@ def test_member_has_the_same_access_but_cannot_manage_users(api: Api) -> None:
     )
     assert board.status_code == 201
     assert client.get("/api/v1/users").status_code == 403
-    assert client.get("/api/v1/credentials").status_code == 403
+    # A member keeps hold of their own agent access, but sees nothing of anybody else's.
+    mine = client.get("/api/v1/credentials")
+    assert mine.status_code == 200
+    assert mine.json()["data"] == []
 
 
-def test_only_admin_manages_global_keys(api: Api) -> None:
+def test_a_member_manages_only_their_own_agent_access(api: Api) -> None:
     created = api.data(
         api.post(
             "/api/v1/users",
@@ -127,14 +130,32 @@ def test_only_admin_manages_global_keys(api: Api) -> None:
     client = api.client
     client.cookies.clear()
     assert _login(client, "kim", "member-password-1").status_code == 200
-    assert (
-        client.post(
-            "/api/v1/credentials",
-            json={"name": "member-token", "scopes": ["boards:read"]},
-            headers=_csrf(client),
-        ).status_code
-        == 403
+    issued = client.post(
+        "/api/v1/credentials",
+        json={"name": "kim desktop", "scopes": ["boards:read", "loops:write"]},
+        headers=_csrf(client),
     )
+    assert issued.status_code == 201, issued.text
+    mine = issued.json()["data"]
+    assert mine["owner_actor_id"] == created["id"]
+    assert mine["expires_at"]
+
+    wide = client.post(
+        "/api/v1/credentials",
+        json={"name": "too wide", "scopes": ["boards:write"]},
+        headers=_csrf(client),
+    )
+    assert wide.status_code == 422
+    assert wide.json()["error"]["code"] == "forbidden_scope"
+
+    # The administrator sees the member's access, and may revoke it.
+    all_tokens = api.data(api.get("/api/v1/credentials"))
+    assert [entry["name"] for entry in all_tokens] == ["kim desktop"]
+    assert all_tokens[0]["owner_name"] == "kim"
+    api.data(api.post(f"/api/v1/credentials/{mine['id']}/revoke"))
+
+    other = client.post(f"/api/v1/credentials/{mine['id']}/revoke", headers=_csrf(client))
+    assert other.status_code == 404
 
 
 def test_the_last_admin_cannot_be_demoted(api: Api) -> None:

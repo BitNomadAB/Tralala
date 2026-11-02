@@ -276,15 +276,37 @@ def test_lists_of_another_loop_are_rejected(
 # --- documents and permissions ----------------------------------------------------
 
 
-def test_agents_cannot_write_info(api: Api, board: dict[str, Any], loop: dict[str, Any]) -> None:
+def test_a_worker_may_seed_info_before_planning(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    """A person and their agent agree the intent; the worker writes it while it is speculative."""
     headers = _agent_headers(api, ["loops:write"])
-    response = api.post(
+    response = api.put(
         f"{_base(api, board, loop)}/documents/info",
-        json={"content": "Written by an agent"},
+        json={"content": "Written by the worker, agreed with the developer"},
         headers=headers,
     )
-    assert response.status_code in {403, 405}
-    assert _documents(api, board, loop)["documents"]["info"]["state"] == "empty"
+    assert response.status_code == 200, response.text
+    info = _documents(api, board, loop)["documents"]["info"]
+    assert info["current_content"] == "Written by the worker, agreed with the developer"
+    assert info["state"] == "ready_for_review"
+
+
+def test_a_worker_cannot_change_info_once_planning_started(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    _ready_loop(api, board, loop)
+    headers = _agent_headers(api, ["loops:write"])
+    response = api.put(
+        f"{_base(api, board, loop)}/documents/info",
+        json={"content": "Requirements changed by an agent"},
+        headers=headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "human_action_required"
+    assert _documents(api, board, loop)["documents"]["info"]["current_content"].startswith(
+        "Users must confirm"
+    )
 
 
 def test_info_changes_make_approvals_and_execution_stale(

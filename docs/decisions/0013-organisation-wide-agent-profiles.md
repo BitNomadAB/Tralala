@@ -54,6 +54,27 @@ code change and there was no single file that said which profiles an installatio
    *All repositories*, `Contents: Read-only`), and the Architect prompt says to state plainly when a
    registered repository is unreadable instead of guessing.
 
+## Amendment — prompts name the context, not the installation
+
+A role prompt is a job description, not a letter. It is written once and reused for every Loop, every
+ticket and every installation, so it must not name the product, a board or a Loop: those change per
+call and a hard-coded name would be wrong the moment the prompt is reused elsewhere or the product is
+renamed or white-labelled.
+
+The factory prompts therefore refer softly ("the Loop you are asked about", "one existing ticket",
+"this installation", "every repository registered here") and the identifiers arrive with the request:
+
+- a discussion round and a mention job state `Loop: <name> (<key>)`, `Ticket: <title>` and
+  `Ticket id: <uuid> (key: …)`,
+- a generation run states the board and the Loop as well,
+- the shared preamble says the message names the ticket, its Loop and the installation, and that the
+  agent must never guess an identity it was not given.
+
+`RoleTemplateService.seed_defaults` reconciles the **factory copy** of every built-in on startup and
+only follows a rewritten prompt into an installation when the stored prompt still equals that factory
+copy. A customized built-in keeps its own text — the operator's edits are never overwritten — and
+*restore defaults* now yields the current factory prompt rather than the one from first install.
+
 ## Consequences
 
 - The question "which agents may touch this board" keeps one answer (board profiles), and "who sees
@@ -63,8 +84,11 @@ code change and there was no single file that said which profiles an installatio
 - The Architect's usefulness depends on the token: with an organisation-wide read token it can
   compare repositories; without it, it must say what it could not see. Its analysis is advice; the
   repository work itself still happens per board.
-- Adding a profile is now editing a JSON file. Nothing in the seed overwrites an existing template's
-  prompt, so a customized built-in survives an upgrade; only `scope` is reconciled for built-ins.
+- Adding a profile is now editing a JSON file. An unedited built-in follows the seed on upgrade;
+  a customized built-in keeps its own prompt and only its factory copy moves, and `scope` is
+  reconciled for built-ins.
+- A prompt never has to be revised because a board, a Loop, an installation or the product name
+  changed: it is told those when it is asked. What changes per call is data, not prompt text.
 - Prompt text is duplicated nowhere: the shared discussion preamble lives once in the seed file and
   is expanded into the roles that use it.
 

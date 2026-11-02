@@ -147,6 +147,28 @@ async def export_board(
     )
 
 
+@router.get("/boards/{board_id}/actors", response_model=Envelope[dict])
+async def list_board_actors(
+    board_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict:
+    """Who a worker may assign (`people`) and who it may ask (`agents`).
+
+    A token is its own agent actor and cannot read the user list, so this is the one lookup that
+    makes assignment possible without an administrator session.
+    """
+    ctx.actor.require("boards:read")
+    ctx.services.board.require_row(board_id)
+    return ok(
+        request,
+        {
+            "people": ctx.services.agent.assignable_people(),
+            "agents": ctx.services.agent.askable_agents(board_id),
+        },
+    )
+
+
 @router.get("/boards/{board_id}/validate", response_model=Envelope[dict])
 async def validate_board(
     board_id: str,

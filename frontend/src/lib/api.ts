@@ -1,6 +1,7 @@
 ﻿import type {
   ActivityEntry,
   Actor,
+  ApiMeta,
   Agent,
   AgentDirectoryEntry,
   AgentTestResult,
@@ -22,6 +23,7 @@
   GenerationRun,
   HistoryDetail,
   HistorySummary,
+  InviteCreated,
   Label,
   Loop,
   LoopAgentPreferences,
@@ -184,8 +186,8 @@ export const api = {
     return json(await request<Actor>("/auth/me"));
   },
 
-  async meta(): Promise<{ scopes: string[]; token_scopes: string[] }> {
-    return json(await request<{ scopes: string[]; token_scopes: string[] }>("/meta"));
+  async meta(): Promise<ApiMeta> {
+    return json(await request<ApiMeta>("/meta"));
   },
 
   async updatePreferences(payload: {
@@ -1153,8 +1155,13 @@ export const api = {
     return json(await request<ActivityEntry[]>(`/boards/${boardId}/activity?${query.toString()}`));
   },
 
-  async listCredentials(): Promise<Credential[]> {
-    return json(await request<Credential[]>("/credentials"));
+  async listCredentials(ownerId?: string): Promise<Credential[]> {
+    const suffix = ownerId ? `?owner_id=${encodeURIComponent(ownerId)}` : "";
+    return json(await request<Credential[]>(`/credentials${suffix}`));
+  },
+
+  async listMyCredentials(): Promise<Credential[]> {
+    return json(await request<Credential[]>("/credentials/mine"));
   },
 
   async createCredential(payload: {
@@ -1195,6 +1202,24 @@ export const api = {
     payload: { role?: Role; disabled?: boolean },
   ): Promise<UserAccount> {
     return json(await request<UserAccount>(`/users/${userId}`, { method: "PATCH", body: payload }));
+  },
+
+  async inviteUser(userId: string, expiresInHours?: number): Promise<InviteCreated> {
+    return json(
+      await request<InviteCreated>(`/users/${userId}/invite`, {
+        method: "POST",
+        body: expiresInHours ? { expires_in_hours: expiresInHours } : {},
+      }),
+    );
+  },
+
+  async enrol(token: string, password: string): Promise<{ actor: Actor; csrf_token: string }> {
+    return json(
+      await request<{ actor: Actor; csrf_token: string }>("/auth/enrol", {
+        method: "POST",
+        body: { token, password },
+      }),
+    );
   },
 
   async resetUserPassword(userId: string, newPassword: string): Promise<void> {

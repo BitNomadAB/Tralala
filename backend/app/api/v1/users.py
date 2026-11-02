@@ -4,7 +4,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
-from ...schemas.auth import UserCreate, UserOut, UserPasswordReset, UserUpdate
+from ...schemas.auth import (
+    InviteCreate,
+    InviteCreated,
+    UserCreate,
+    UserOut,
+    UserPasswordReset,
+    UserUpdate,
+)
 from ...schemas.envelope import Envelope
 from ..deps import RequestContext, get_context, ok
 
@@ -56,4 +63,19 @@ async def reset_user_password(
 ) -> dict:
     return ok(
         request, ctx.services.auth.reset_password(ctx.actor, user_id, payload.new_password)
+    )
+
+
+@router.post("/users/{user_id}/invite", response_model=Envelope[InviteCreated], status_code=201)
+async def invite_user(
+    user_id: str,
+    payload: InviteCreate,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict:
+    return ok(
+        request,
+        ctx.services.auth.create_invite(
+            ctx.actor, user_id, expires_in_hours=payload.expires_in_hours
+        ),
     )

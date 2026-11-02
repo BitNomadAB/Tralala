@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Plus, Power } from "lucide-react";
+import { Copy, KeyRound, Link2, Plus, Power } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
-import { ROLES, type Role, type UserAccount } from "@/lib/types";
+import { ROLES, type InviteCreated, type Role, type UserAccount } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 
 export function UsersCard({ currentUserId }: { currentUserId: string }) {
@@ -20,6 +20,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const [role, setRole] = useState<Role>("member");
   const [resetting, setResetting] = useState<UserAccount | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [invited, setInvited] = useState<InviteCreated | null>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["users"] });
 
@@ -67,7 +68,14 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
     onError: onError("Could not reset the password"),
   });
 
+  const inviteMutation = useMutation({
+    mutationFn: (userId: string) => api.inviteUser(userId),
+    onSuccess: (invite) => setInvited(invite),
+    onError: onError("Could not create an invitation link"),
+  });
+
   const users = usersQuery.data ?? [];
+  const inviteLink = invited ? `${window.location.origin}${invited.path}` : "";
 
   return (
     <div className="card-surface p-5">
@@ -78,8 +86,9 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
         </Button>
       </div>
       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-        Everyone who signs in can work with boards, agents and discussions. Only administrators can
-        manage accounts.
+        Everyone who signs in can work with boards, agents and discussions, and manage their own
+        agent access. Only administrators manage accounts; disabling somebody also revokes the agent
+        access they issued.
       </p>
 
       <ul className="mt-3 divide-y divide-[var(--border)]">
@@ -94,7 +103,13 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
                 {user.id === currentUserId ? " (you)" : ""}
               </p>
               <p className="text-[11px] text-[var(--muted-foreground)]">
-                Created {formatDateTime(user.created_at)}
+                Created {formatDateTime(user.created_at)} ·{" "}
+                {user.agent_access_count === 1
+                  ? "1 agent access"
+                  : `${user.agent_access_count} agent accesses`}
+                {user.agent_access_last_used_at
+                  ? ` · last used ${formatDateTime(user.agent_access_last_used_at)}`
+                  : ""}
               </p>
             </div>
             <Select
@@ -117,6 +132,16 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
             <Button
               size="icon"
               variant="ghost"
+              aria-label={`Create an invitation link for ${user.name}`}
+              title="Invitation link"
+              disabled={user.disabled || inviteMutation.isPending}
+              onClick={() => inviteMutation.mutate(user.id)}
+            >
+              <Link2 size={14} />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
               aria-label={`Reset password for ${user.name}`}
               title="Reset password"
               onClick={() => setResetting(user)}
@@ -127,7 +152,11 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
               size="icon"
               variant="ghost"
               aria-label={`${user.disabled ? "Enable" : "Disable"} ${user.name}`}
-              title={user.disabled ? "Enable" : "Disable"}
+              title={
+                user.disabled
+                  ? "Enable: the person can sign in again; revoked agent access stays revoked"
+                  : "Disable: signs the person out and revokes their agent access"
+              }
               onClick={() =>
                 updateMutation.mutate({ userId: user.id, disabled: !user.disabled })
               }
@@ -192,6 +221,35 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(invited)} onOpenChange={(open) => !open && setInvited(null)}>
+        <DialogContent
+          title={`Invitation link for ${invited?.user_name ?? ""}`}
+          description="Send it once through a channel you already trust. The link sets the password and signs the person in."
+        >
+          <div className="flex flex-col gap-3">
+            <Field label="Link" htmlFor="invite-link" hint="Shown once; a new link replaces it.">
+              <Input id="invite-link" value={inviteLink} readOnly onFocus={(event) => event.currentTarget.select()} />
+            </Field>
+            <p className="text-[11px] text-[var(--muted-foreground)]">
+              Valid until {invited ? formatDateTime(invited.expires_at) : ""}. Anyone with the link can
+              claim the account until it is used or a new link is created.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(inviteLink);
+                  toast.push({ title: "Link copied", variant: "success" });
+                }}
+              >
+                <Copy size={14} /> Copy
+              </Button>
+              <Button onClick={() => setInvited(null)}>Done</Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

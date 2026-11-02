@@ -34,17 +34,21 @@ with `409 plan_change_required` until a replacement plan is approved.
 
 | Action | Who | Endpoint |
 | --- | --- | --- |
-| Write Info | Signed-in person | `PUT …/documents/info` |
+| Write Info | Signed-in person, or a worker token while the Loop is `draft` / `analysis_review` | `PUT …/documents/info` |
 | Approve or reject analysis | Signed-in person | `POST …/reviews/analysis` |
 | Approve or reject RoadMap (publishes Tickets) | Signed-in person | `POST …/reviews/roadmap` |
 | Confirm a human-only Ticket | Signed-in person | `POST …/cards/{card_id}/confirm` |
 | Accept implementation | Signed-in person | `POST …/completion` |
 | Accept QA and finalize | Signed-in person | `POST …/qa/decision` |
 
+Info is the intent a person and their worker agree on, so the worker that agreed it may write it —
+but only while the Loop is still speculative (`draft` or `analysis_review`). Once planning has
+started a new Info revision would invalidate approvals, so the edit returns
+`403 human_action_required` for a token and stays a person's decision.
+
 Agents may generate candidates, move eligible Tickets, record results and comment. An agent token
-is rejected with `403 human_action_required` for every action in the lower half of the table, even
-when it holds the scope. WebMCP registers inspection, generation and permitted Ticket tools, never
-these decisions.
+is rejected with `403 human_action_required` for every other action in the table, even when it holds
+the scope. WebMCP registers inspection, generation and permitted Ticket tools, never these decisions.
 
 ## The agent and its repository context
 
@@ -87,6 +91,12 @@ server refuses the rest with `422 agent_scope_organisation`. Their input is the 
 board list, the Loop overviews and the whole repository list — which is also why they live in
 `registry.sqlite` next to the roles and agents they reason about. The Architect expects one read-only
 token that reaches every repository; the token guide in the repository dialog describes that variant.
+
+Every role prompt describes a job, not one board or installation. An agent learns what it is working on
+from the request that asks it: a generation run states the board and the Loop, and a discussion round or
+a mention states `Loop: <name> (<key>)`, `Ticket: <title>` and `Ticket id: <uuid> (key: …)` on top of the
+thread. The shared discussion preamble tells the agent to use those identifiers and never to invent one
+it was not given.
 
 ## Identities
 

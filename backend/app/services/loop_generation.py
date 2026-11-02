@@ -320,6 +320,7 @@ class LoopGenerationService:
             captured = {
                 "purpose": request.purpose,
                 "instructions": request.instructions,
+                "board_name": self.board_service.require_row(board_id)["name"],
                 "context": context,
                 "context_hash": request_fingerprint(context),
                 "source_revisions": {
@@ -460,9 +461,11 @@ class LoopGenerationService:
         context = json.dumps(captured["context"], ensure_ascii=False)
         if len(context) > MAX_OUTPUT_CHARS:
             context = context[:MAX_OUTPUT_CHARS] + "\n… (context truncated)"
+        board_name = captured.get("board_name") or "(unknown board)"
         lines = [
             f"Purpose: {captured['purpose']}",
             f"Loop: {captured['context'].get('loop_name')} ({captured['context'].get('loop_key')})",
+            f"Board: {board_name}",
         ]
         if captured.get("source_revisions"):
             lines.append("Captured revisions: " + json.dumps(captured["source_revisions"]))

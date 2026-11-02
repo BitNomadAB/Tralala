@@ -46,6 +46,23 @@ def scopes_for_role(role: str | None) -> frozenset[str]:
     return ROLE_SCOPES.get(role or "", ROLE_SCOPES[ROLE_MEMBER])
 
 
+# What a person's own agent may hold. A member manages their own "interaction agent access", so the
+# token vocabulary is limited to working the boards: structure, agents, accounts and tokens stay
+# with the admin role. An admin-issued token may still hold any grantable scope.
+MEMBER_TOKEN_SCOPES: tuple[str, ...] = (
+    "boards:read",
+    "cards:read",
+    "cards:write",
+    "comments:write",
+    "loops:read",
+    "loops:write",
+    "loops:generate",
+    "history:read",
+    "discussions:read",
+    "discussions:write",
+)
+
+
 @dataclass(slots=True)
 class ActorContext:
     actor_id: str

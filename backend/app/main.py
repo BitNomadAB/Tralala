@@ -15,6 +15,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .api import mcp as mcp_routes
 from .api.deps import get_context
 from .api.v1 import agents as agent_routes
 from .api.v1 import attachments as attachment_routes
@@ -131,7 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response = await call_next(request)
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
         response.headers["X-Request-ID"] = request.state.request_id
-        if request.url.path.startswith("/api/"):
+        if request.url.path.startswith("/api/") or request.url.path == "/mcp":
             response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -209,10 +210,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/meta", tags=["system"])
     async def meta(request: Request) -> dict:
-        get_context(request)
-        from .core.context import SCOPES
+        ctx = get_context(request)
+        from .core.context import MEMBER_TOKEN_SCOPES, SCOPES
         from .schemas.auth import Scope
 
+        settings = request.app.state.settings
         return {
             "success": True,
             "data": {
@@ -221,6 +223,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # The token schema is the only authority for what a token may hold, so the
                 # Settings page reads the grantable subset from here instead of keeping a copy.
                 "token_scopes": [str(scope) for scope in get_args(Scope)],
+                # A member manages their own agent access inside this narrower vocabulary.
+                "member_token_scopes": list(MEMBER_TOKEN_SCOPES),
+                "member_token_limits": {
+                    "live": settings.member_token_limit,
+                    "default_days": settings.member_token_default_days,
+                    "max_days": settings.member_token_max_days,
+                },
+                "can_issue_tokens": ctx.actor.is_user,
                 "features": {
                     "webmcp": "client-side capability detection",
                     "fts5": sqlite_supports_fts5(),
@@ -250,6 +260,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user_routes.router,
     ):
         app.include_router(router, prefix="/api/v1")
+    # The worker surface sits at the origin, not under /api/v1: `/mcp` is where an MCP client
+    # looks, and `/llms.txt` is the convention a URL-only agent tries first.
+    app.include_router(mcp_routes.router)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

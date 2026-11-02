@@ -8,6 +8,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (username: string, password: string) => Promise<Actor>;
   logout: () => Promise<void>;
+  refresh: () => Promise<Actor | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -58,10 +59,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [loginMutation],
   );
   const logout = useCallback(() => logoutMutation.mutateAsync(), [logoutMutation]);
+  /** Re-read the session, for flows that sign in outside the login form (an invitation link). */
+  const refresh = useCallback(async () => {
+    const actor = await fetchActor();
+    queryClient.setQueryData(["me"], actor);
+    return actor;
+  }, [queryClient]);
 
   const value = useMemo(
-    () => ({ actor: data ?? null, loading: isLoading, login, logout }),
-    [data, isLoading, login, logout],
+    () => ({ actor: data ?? null, loading: isLoading, login, logout, refresh }),
+    [data, isLoading, login, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

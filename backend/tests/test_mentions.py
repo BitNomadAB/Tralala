@@ -190,6 +190,8 @@ def test_context_contains_ticket_labels_checklists_and_recent_comments(
 
     prompt = captured["messages"][0]["content"]
     assert "Ticket: Checkout retry storm" in prompt
+    assert "Loop: " in prompt
+    assert f"Ticket id: {card['id']}" in prompt
     assert "The checkout retries forever under load." in prompt
     assert "Priority: high" in prompt
     assert "Labels: reliability" in prompt

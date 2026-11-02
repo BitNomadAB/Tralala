@@ -114,7 +114,7 @@ first instance. **Counsel to confirm forum and whether arbitration is preferred.
 
 ## 11. Signatures
 
-Sign and return by e-mail to legal@bitnomad.se, or sign electronically. Signed agreements are kept
+Sign and return by e-mail to tralala@bitnomad.se, or sign electronically. Signed agreements are kept
 by BitNomad and are **not** published in this repository.
 
 ### 11.1 Individual

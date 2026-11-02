@@ -4,6 +4,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { ThemeProvider } from "@/themes/ThemeProvider";
 import { AmbientBackground } from "./AmbientBackground";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
+import { EnrolPage } from "@/features/auth/EnrolPage";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { AppLayout } from "./AppLayout";
 import { DashboardPage } from "@/features/boards/DashboardPage";
@@ -61,6 +62,7 @@ export function App() {
             <BrowserRouter>
               <Routes>
                 <Route path="/login" element={<LoginRoute />} />
+                <Route path="/enrol" element={<EnrolPage />} />
                 <Route
                   element={
                     <RequireAuth>

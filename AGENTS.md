@@ -60,7 +60,12 @@ message broker.
     `core/secrets.py`; responses and logs expose only `has_api_key` and a short hint. Endpoints are
     validated by `services/connections.validate_endpoint` (no metadata/link-local targets, no
     embedded credentials, no redirects).
-
+13. **The worker surface is one catalogue.** `services/agent_tools.py` is the only description of
+    what an external worker token may call; `/mcp` and `/llms.txt` are generated from it and every
+    handler calls a service. Adding a capability is a catalogue entry plus a handler — never a new
+    transport with its own rules — and a tool may be narrower than a scope, never wider. The local
+    role agents stay readers: a run invokes them, they never authenticate, and they never change a
+    Ticket.
 ## Repository layout
 
 ```
@@ -127,6 +132,8 @@ and leave the story pending.
 ## Security invariants
 
 - API tokens and passwords are stored hashed only. Tokens are returned once.
+- Every token records the account that issued it (`owner_actor_id`). A member may only grant
+  `MEMBER_TOKEN_SCOPES`, and disabling an account revokes the access it issued.
 - Cookie-authenticated mutations require the CSRF double-submit header.
 - Scopes are enforced server-side on every request; WebMCP only registers tools the actor may use.
 - Card text is never interpreted as instructions or executed; only `http(s)` links are rendered.

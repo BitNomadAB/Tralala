@@ -6,14 +6,20 @@
 React UI ──────────────┐
                       │
 WebMCP ── React ───────┼── FastAPI ── Services ── Repositories/storage
-                      │                              │
-External AI ─ REST ────┘                              ├── registry.sqlite
-                                                      └── boards/{uuid}/board.sqlite
+                      │        │                     │
+External AI ─ REST ────┘        └─ /mcp ──┐           ├── registry.sqlite
+                                          │           └── boards/{uuid}/board.sqlite
+                            /llms.txt ────┘
 ```
 
-One modular Python monolith. Every interface (React UI, WebMCP adapter, external agents over
-REST) reaches the same service functions; no business rule is duplicated in the frontend or in
-WebMCP tool definitions.
+One modular Python monolith. Every interface (React UI, WebMCP adapter, external workers over REST
+or MCP) reaches the same service functions; no business rule is duplicated in the frontend, in the
+WebMCP tool definitions or in the MCP catalogue.
+
+The worker surface has one source: `backend/app/services/agent_tools.py` describes the tools an
+external agent may call (name, description, JSON Schema, required scope, handler). `/mcp` serves it
+and `/llms.txt` summarises it; both end in the same service calls the REST routes use. The browser
+WebMCP adapter stays a separate, UI-contextual surface for a person's own session.
 
 ### Authoritative hierarchy
 
@@ -41,6 +47,7 @@ planning groups, not Kanban columns. See [loops.md](loops.md) for the workflow i
 | Schemas | `backend/app/schemas` | Pydantic v2 request/response validation |
 | Core | `backend/app/core` | Settings, errors, security primitives, actor context, rate limiting |
 | Seeds | `backend/app/seeds` | Factory data seeded into a new registry, currently the role templates |
+| Worker tools | `backend/app/services/agent_tools.py` | The curated catalogue an external worker may call, served by `/mcp` and summarised by `/llms.txt` |
 
 ### Frontend layers
 
@@ -251,12 +258,19 @@ channel (`queued` → `running` → `completed`/`failed`) and work runs on an in
 migration layer degrades gracefully and search falls back to `LIKE`. The search response reports
 which engine answered so agents can reason about result quality.
 
-## WebMCP
+## WebMCP and the worker surface
 
 `getModelContext()` feature-detects `document.modelContext` / `navigator.modelContext`. Each UI
 context registers only its tools through `createRegistry`, which uses an `AbortController` and
 `unregisterTool` (when available) for cleanup. Tools are filtered by the authenticated actor's
 scopes before registration, and every tool calls the typed REST client — never the database.
+
+An agent outside the browser cannot see WebMCP at all, so the same capability idea has a second
+transport: `POST /mcp` speaks MCP over JSON-RPC 2.0 with a Bearer token, and `GET /llms.txt` is the
+public plain-text bootstrap that explains the product, the Loop lifecycle and the rules. Both come
+from `services/agent_tools.py`, which is the one description of what a worker token may call. The
+local role agents are not part of that surface: a run invokes them, they never authenticate, and
+they never change a Ticket.
 
 ## Operational notes
 

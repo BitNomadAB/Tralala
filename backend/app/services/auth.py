@@ -5,7 +5,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..core.config import Settings
-from ..core.context import ROLE_ADMIN, ROLES, ActorContext, scopes_for_role
+from ..core.context import (
+    MEMBER_TOKEN_SCOPES,
+    ROLE_ADMIN,
+    ROLES,
+    ActorContext,
+    scopes_for_role,
+)
 from ..core.errors import Conflict, Forbidden, NotFound, Unauthorized, ValidationFailure
 from ..core.security import (
     create_session_value,
@@ -191,10 +197,15 @@ class AuthService:
         return {"changed": True, "revoked_sessions": revoked}
 
     def list_users(self, actor: ActorContext) -> list[dict[str, Any]]:
+        """Accounts with how many live agent accesses each one holds."""
         actor.require("users:admin")
+        counts = self.registry.credential_owner_counts()
         users = self.registry.list_users()
         for user in users:
             user["disabled"] = user["disabled_at"] is not None
+            entry = counts.get(str(user["id"])) or {}
+            user["agent_access_count"] = int(entry.get("live") or 0)
+            user["agent_access_last_used_at"] = entry.get("last_used_at")
         return users
 
     def create_user(
@@ -230,16 +241,22 @@ class AuthService:
         if disabled is True:
             self.registry.disable_actor(user_id)
             self.registry.revoke_actor_sessions(user_id)
+            # A person's agent access is an extension of their account: disabling the account must
+            # stop every agent acting on its behalf, or the disable is only half a switch.
+            self.registry.revoke_credentials_by_owner(user_id)
         elif disabled is False:
             self.registry.enable_actor(user_id)
         updated = self.registry.user_by_id(user_id)
         assert updated is not None
+        counts = self.registry.credential_owner_counts().get(str(user_id)) or {}
         return {
             "id": updated["id"],
             "name": updated["name"],
             "role": updated["role"],
             "created_at": updated["created_at"],
             "disabled": updated["disabled_at"] is not None,
+            "agent_access_count": int(counts.get("live") or 0),
+            "agent_access_last_used_at": counts.get("last_used_at"),
         }
 
     def reset_password(
@@ -254,6 +271,51 @@ class AuthService:
         revoked = self.registry.revoke_actor_sessions(user_id)
         return {"id": user_id, "revoked_sessions": revoked}
 
+    # --- enrolment invites -----------------------------------------------------
+
+    def create_invite(
+        self, actor: ActorContext, user_id: str, *, expires_in_hours: int | None = None
+    ) -> dict[str, Any]:
+        """Issue a one-time enrolment link. The token is returned once and stored hashed."""
+        actor.require("users:admin")
+        record = self.registry.user_by_id(user_id)
+        if record is None:
+            raise NotFound("User not found")
+        if record["disabled_at"] is not None:
+            raise Conflict("A disabled account cannot be invited", code="user_disabled")
+        hours = int(expires_in_hours or self.settings.invite_ttl_hours)
+        token = generate_token()
+        invite = self.registry.create_invite(
+            actor_id=user_id,
+            token_hash=hash_token(token),
+            created_by_actor_id=actor.actor_id,
+            expires_at=_iso_after(hours * 60 * 60),
+        )
+        return {
+            "user_id": user_id,
+            "user_name": record["name"],
+            "token": token,
+            "path": f"/enrol?token={token}",
+            "expires_at": invite["expires_at"],
+        }
+
+    def accept_invite(self, token: str, password: str) -> dict[str, Any]:
+        """Set the password from a valid invite, mark it used and sign the person in."""
+        record = self.registry.invite_by_token_hash(hash_token(token))
+        if record is None:
+            raise Unauthorized("This invitation link is not valid", code="invite_invalid")
+        if record["used_at"] is not None:
+            raise Unauthorized("This invitation link was already used", code="invite_used")
+        if record["expires_at"] < utcnow():
+            raise Unauthorized("This invitation link has expired", code="invite_expired")
+        if record["disabled_at"] is not None:
+            raise Unauthorized("This account is disabled", code="user_disabled")
+        self.validate_password(password, username=record["name"])
+        self.registry.set_user_password(record["actor_id"], hash_password(password))
+        self.registry.mark_invite_used(record["id"])
+        self.registry.revoke_actor_sessions(record["actor_id"])
+        return self.login(record["name"], password)
+
     # --- API credentials -------------------------------------------------------
 
     def _credential_expiry(self, expires_in_days: int | None) -> str | None:
@@ -265,7 +327,14 @@ class AuthService:
             return None
         return _iso_after(days * 24 * 60 * 60)
 
-    def _issue(self, actor: ActorContext, payload: CredentialCreate) -> dict[str, Any]:
+    def _issue(
+        self,
+        actor: ActorContext,
+        payload: CredentialCreate,
+        *,
+        owner_actor_id: str | None = None,
+        expires_at: str | None = None,
+    ) -> dict[str, Any]:
         unknown = [scope for scope in payload.scopes if scope not in _token_scopes()]
         if unknown:
             raise ValidationFailure("Unknown scope requested", details={"unknown_scopes": unknown})
@@ -273,47 +342,115 @@ class AuthService:
         token = generate_token()
         credential = self.registry.create_credential(
             actor_id=agent["id"],
+            owner_actor_id=owner_actor_id if owner_actor_id is not None else actor.actor_id,
             name=payload.name,
             token_hash=hash_token(token),
             scopes=payload.scopes,
-            expires_at=self._credential_expiry(payload.expires_in_days),
+            expires_at=(
+                expires_at
+                if expires_at is not None
+                else self._credential_expiry(payload.expires_in_days)
+            ),
         )
         credential["actor_name"] = agent["name"]
+        credential["owner_name"] = actor.actor_name
         credential["token"] = token
         return credential
 
+    def _member_policy(self, actor: ActorContext, payload: CredentialCreate) -> int | None:
+        """A person's own agent access: within the member vocabulary, capped and time-boxed."""
+        outside = [scope for scope in payload.scopes if scope not in MEMBER_TOKEN_SCOPES]
+        if outside:
+            raise ValidationFailure(
+                "A personal agent access cannot hold these scopes; ask an administrator for a "
+                "wider token",
+                code="forbidden_scope",
+                details={"outside": outside, "allowed": list(MEMBER_TOKEN_SCOPES)},
+            )
+        live = len(
+            [
+                entry
+                for entry in self.registry.list_credentials(owner_actor_id=actor.actor_id)
+                if entry["revoked_at"] is None
+            ]
+        )
+        limit = int(self.settings.member_token_limit)
+        if live >= limit:
+            raise Conflict(
+                f"You already have {live} agent accesses; revoke one before creating another",
+                code="agent_access_limit",
+                details={"limit": limit, "live": live},
+            )
+        if payload.expires_in_days is not None and payload.expires_in_days <= 0:
+            raise ValidationFailure(
+                "A personal agent access needs an expiry date",
+                code="expiry_required",
+                details={"max_days": int(self.settings.member_token_max_days)},
+            )
+        days = (
+            int(payload.expires_in_days)
+            if payload.expires_in_days is not None
+            else int(self.settings.member_token_default_days)
+        )
+        return min(days, int(self.settings.member_token_max_days))
+
     def create_credential(self, actor: ActorContext, payload: CredentialCreate) -> dict[str, Any]:
-        actor.require("credentials:admin")
-        return self._issue(actor, payload)
+        """Any signed-in person may issue an agent access; only an admin may issue a wide one."""
+        if actor.is_admin:
+            return self._issue(actor, payload)
+        days = self._member_policy(actor, payload)
+        assert days is not None
+        return self._issue(
+            actor,
+            payload,
+            owner_actor_id=actor.actor_id,
+            expires_at=_iso_after(days * 24 * 60 * 60),
+        )
+
+    def _owned_or_admin(self, actor: ActorContext, credential_id: str) -> dict[str, Any]:
+        credential = self.registry.credential(credential_id)
+        if credential is None or credential["revoked_at"] is not None:
+            raise NotFound("Credential not found or already revoked")
+        if not actor.is_admin and credential.get("owner_actor_id") != actor.actor_id:
+            # A member must not learn whether somebody else's token exists.
+            raise NotFound("Credential not found or already revoked")
+        return credential
 
     def rotate_credential(self, actor: ActorContext, credential_id: str) -> dict[str, Any]:
-        actor.require("credentials:admin")
-        existing = self.registry.read_one(
-            "SELECT * FROM api_credentials WHERE id = :id AND revoked_at IS NULL",
-            {"id": credential_id},
-        )
-        if existing is None:
-            raise NotFound("Credential not found or already revoked")
+        existing = self._owned_or_admin(actor, credential_id)
         scopes = json.loads(existing["scopes"])
         name = f"{str(existing['name'])[:180]} (rotated)"
-        issued = self._issue(
-            actor,
-            CredentialCreate(name=name, scopes=scopes, expires_in_days=None),
-        )
+        owner = existing.get("owner_actor_id")
+        if actor.is_admin:
+            issued = self._issue(
+                actor,
+                CredentialCreate(name=name, scopes=scopes, expires_in_days=None),
+                owner_actor_id=owner,
+            )
+        else:
+            days = self._member_policy(
+                actor, CredentialCreate(name=name, scopes=scopes, expires_in_days=None)
+            )
+            issued = self._issue(
+                actor,
+                CredentialCreate(name=name, scopes=scopes, expires_in_days=None),
+                owner_actor_id=actor.actor_id,
+                expires_at=_iso_after(int(days or 1) * 24 * 60 * 60),
+            )
         self.revoke_credential(actor, credential_id)
         return issued
 
-    def list_credentials(self, actor: ActorContext) -> list[dict[str, Any]]:
-        actor.require("credentials:admin")
-        return self.registry.list_credentials()
+    def list_credentials(
+        self, actor: ActorContext, *, owner_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """The caller's own agent access, or every token when an administrator asks."""
+        if actor.is_admin:
+            return self.registry.list_credentials(owner_actor_id=owner_id)
+        return self.registry.list_credentials(owner_actor_id=actor.actor_id)
 
     def revoke_credential(self, actor: ActorContext, credential_id: str) -> bool:
-        actor.require("credentials:admin")
+        credential = self._owned_or_admin(actor, credential_id)
         revoked = self.registry.revoke_credential(credential_id)
         if revoked:
-            credential = self.registry.read_one(
-                "SELECT actor_id FROM api_credentials WHERE id = :id", {"id": credential_id}
-            )
-            if credential:
-                self.registry.disable_actor(credential["actor_id"])
+            self.registry.disable_actor(credential["actor_id"])
         return revoked

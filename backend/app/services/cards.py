@@ -132,6 +132,23 @@ class CardService:
 
     # --- queries ---------------------------------------------------------------
 
+    def locate(self, board_id: str, card_id: str) -> tuple[str, dict[str, Any]]:
+        """Which Loop owns a Ticket.
+
+        Board-level callers (the worker tools) are handed a Ticket id and nothing else, so the
+        owning Loop is resolved here instead of being guessed. The row is returned so a caller can
+        use its version without a second read.
+        """
+        self.board_service.require_row(board_id)
+        with self.boards.reader(board_id) as conn:
+            row = one(conn, "SELECT * FROM cards WHERE id = :id", {"id": card_id})
+            if row is None:
+                raise NotFound("Ticket not found")
+            loop = one(conn, "SELECT id FROM loops WHERE id = :id", {"id": row["loop_id"]})
+            if loop is None:
+                raise NotFound("Ticket not found")
+            return str(row["loop_id"]), dict(row)
+
     def get(self, board_id: str, loop_id: str, card_id: str) -> dict[str, Any]:
         self.board_service.require_row(board_id)
         with self.boards.reader(board_id) as conn:

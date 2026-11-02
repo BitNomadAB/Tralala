@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import text
 
 from ..core.context import ActorContext
-from ..core.errors import Conflict, ValidationFailure, VersionConflict
+from ..core.errors import Conflict, Forbidden, ValidationFailure, VersionConflict
 from ..schemas.loops import (
     AnalysisPayload,
     ApprovalRequest,
@@ -35,6 +35,11 @@ ANALYSIS_SCOPE_KINDS = ("info", "analysis_ai", "analysis")
 ROADMAP_SCOPE_KINDS = ("info", "analysis_ai", "analysis", "roadmap_ai", "roadmap")
 MATERIAL_FINDING_CATEGORIES = {"risk", "blocker", "legal", "security", "question"}
 MAX_DOCUMENT_PAYLOAD = 200_000
+
+# A worker may seed or refine Info while the Loop is still speculative — the phase in which a person
+# and their agent agree on what to build. Once planning has started, changing the input invalidates
+# approvals, so the edit belongs to a signed-in person.
+WORKER_INFO_STAGES = frozenset({"draft", "analysis_review"})
 
 
 def content_hash(value: str) -> str:
@@ -415,12 +420,17 @@ class LoopDocumentService:
     def save_info(
         self, actor: ActorContext, board_id: str, loop_id: str, payload: InfoRevisionWrite
     ) -> dict[str, Any]:
-        actor.require_human("Editing Loop Info")
         actor.require("loops:write")
         self.board_service.ensure_active(board_id)
         with self.boards.session(board_id) as conn:
             loop = self.loops.require_loop_row(conn, board_id, loop_id)
             self.loops.ensure_writable(loop)
+            if not actor.is_user and loop["stage"] not in WORKER_INFO_STAGES:
+                raise Forbidden(
+                    "Info is a person's decision once the Loop is being planned",
+                    code="human_action_required",
+                    details={"stage": loop["stage"], "action": "Editing Loop Info"},
+                )
             current = one(
                 conn,
                 "SELECT * FROM loop_documents WHERE loop_id = :id AND kind = 'info'"

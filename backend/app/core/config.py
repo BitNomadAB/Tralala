@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = 12 * 60 * 60
     password_min_length: int = 8
     credential_default_ttl_days: int = 90
+    member_token_limit: int = 10
+    member_token_default_days: int = 30
+    member_token_max_days: int = 365
+    invite_ttl_hours: int = 72
     trust_proxy_headers: bool = False
     cookie_secure: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

@@ -1,4 +1,4 @@
-﻿# Tralala
+﻿# Tralala (Work in progress, if you care about your data dont use this just yet.)
 
 Tralala is a self-hosted, AI-native planning and delivery application. Humans work with Loops inside
 Boards; agents get the same capabilities through a documented REST API (and, where the browser
@@ -36,6 +36,15 @@ Two things keep this honest:
 
 Change the password before the instance is reachable by anyone else, and never run a network-facing
 instance on the shared test password.
+
+### Invite people instead of sharing a password
+
+An administrator creates the account under **Settings → Users** and presses the **invitation link**
+icon next to it. The dialog shows a one-time link (`/enrol?token=…`) that is displayed once; send it
+through a channel you already trust. The person opens it, chooses their own password and is signed
+in — you never know that password, and the link stops working as soon as it is used (or replaced by a
+new one, after `TRALALA_INVITE_TTL_HOURS`, default 72 hours). Tralala sends no e-mail; delivery is
+yours. See [decisions/0014](docs/decisions/0014-enrolment-links-instead-of-email-verification.md).
 
 ## Features
 
@@ -436,7 +445,7 @@ cd ..\frontend; pnpm test; pnpm build
 ```
 
 `pnpm build` also runs the client build guard (no source maps, no server-only strings).
-`pnpm test:e2e` runs the 26 Playwright journeys against an isolated stack (backend `:8077` with
+`pnpm test:e2e` runs the 27 Playwright journeys against an isolated stack (backend `:8077` with
 `frontend/e2e/.data`, Vite `:5273`). The stack starts from an empty data directory on every run, so
 a previous run's boards and appearance preferences cannot change the result (`E2E_KEEP_DATA=1`
 keeps them for inspection). It reuses whichever Playwright install already exists (local
@@ -496,29 +505,44 @@ Chromium when no browser build is present; override with `PLAYWRIGHT_CLI=<path t
 
 ## Agent usage
 
-```bash
-# 1. Create an agent token in Settings -> New token (or POST /api/v1/credentials with an
-#    admin session). The raw token is shown once.
-export TRALALA_TOKEN="trl_..."
+An agent that works with Tralala rather than inside it — a coding agent on a developer's machine —
+needs two things: the URL and a token.
 
-# 2. Take the ids from GET /api/v1/boards, GET /api/v1/boards/<id>/loops and
-#    GET /api/v1/boards/<id>/loops/<loop>/lists
-export BOARD="<board-uuid>"
-export LOOP="<loop-uuid>"
-export TODO="<todo-list-uuid>"
-
-# 3. Create a Ticket in the Loop as the agent
-curl -s -X POST "http://localhost:8000/api/v1/boards/$BOARD/loops/$LOOP/cards" \
-  -H "Authorization: Bearer $TRALALA_TOKEN" -H "Content-Type: application/json" \
-  -H "Idempotency-Key: 7c1f" \
-  -d '{"list_id":"'"$TODO"'","title":"Implement auth","priority":"high","labels":["backend"]}'
+```text
+GET  /llms.txt                  # public bootstrap: envelope, Loop lifecycle, rules, tool list
+POST /mcp                       # the curated worker tools, MCP over JSON-RPC 2.0 (Bearer)
+GET  /api/v1/boards/<id>/actors  # people you may assign, agents you may ask
 ```
 
-Agent capabilities covered by the API: discover boards and Loops, inspect metadata, list Ticket
-columns and Tickets, search, create/update/move Tickets, submit Analysis and RoadMap candidates, read
-readiness, update checklists, comment, read activity, find overdue work, archive. Approving a
-document, confirming a human Ticket, accepting QA and finalizing a Loop stay with a signed-in person.
-Card text is never treated as instructions and cannot elevate permissions.
+```bash
+# 1. Create an "interaction agent access" key in Settings -> New agent access. Any signed-in person
+#    may issue one for their own machine; it is shown once and belongs to that account. A worker
+#    needs boards:read, loops:read, cards:read, cards:write, comments:write, discussions:read and
+#    discussions:write; add loops:write and loops:generate to start Loops and analyses.
+export TRALALA_TOKEN="trl_..."
+
+# 2. Take the ids from the tools - never guess one.
+curl -s -X POST "http://localhost:8000/mcp" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_board",
+       "arguments":{"board_id":"<board-uuid>"}}}'
+```
+
+The ten worker tools are `read_board`, `read_loop`, `read_ticket`, `create_loop`, `write_info`,
+`run_analysis`, `assign_ticket`, `move_ticket`, `comment_ticket` and `ask_agents`. Together they let a
+person and their agent agree an intent, open a Loop for it, write the Info while the Loop is still
+speculative, ask the agents for an Analysis and then track the Tickets it produces. They cannot
+create boards or Tickets, archive anything, write a RoadMap, or approve a gate; changing Info after
+planning has started is a person's decision. The REST API stays available for everything else:
+discover boards and Loops, list columns and Tickets, search, submit Analysis and RoadMap candidates,
+read readiness, update checklists, read activity, find overdue work. Approving a document, confirming
+a human Ticket, accepting QA and finalizing a Loop stay with a signed-in person, and card text is
+never treated as instructions.
+
+The local role agents are readers and discussion partners: a run invokes them, they never
+authenticate, and they never change a Ticket or a line of code. The worker surface is described in
+[docs/api.md](docs/api.md) and decided in
+[docs/decisions/0015-worker-surface-mcp-and-llms-txt.md](docs/decisions/0015-worker-surface-mcp-and-llms-txt.md).
 
 ## Layout
 
@@ -534,7 +558,8 @@ Read `AGENTS.md` before changing code. Architecture decisions live in `docs/deci
 
 ## Known limitations
 
-- Single-user self-hosted mode: one local account, multiple agent tokens. No user management UI.
+- Accounts are administrator-provisioned: there is no self-registration, and a person joins through an
+  invitation link. One backend process per data directory, multiple worker tokens.
 - Run one backend process per data directory: rate limiting, board locks and SQLite writes assume a
   single writer (no horizontal scaling yet).
 - Search and board views page at 200 items; deeper result sets use `offset`/`limit` or filters.
@@ -554,7 +579,7 @@ environmental organizations and government institutions.
 
 **Any commercial use requires a commercial licence from BitNomad AB** — including internal use in a
 business and evaluating the software for a commercial purpose. Contact
-[legal@bitnomad.se](mailto:legal@bitnomad.se) for terms.
+[tralala@bitnomad.se](mailto:tralala@bitnomad.se) for terms.
 
 Copyright 2026 BitNomad AB. Attribution and the required notice are in [NOTICE](NOTICE).
 
@@ -562,6 +587,6 @@ Contributions are welcome. Because the project is licensed to different recipien
 terms, non-trivial contributions require a signed [Contributor License Agreement](CLA.md) — you keep
 your copyright and grant BitNomad AB the right to relicense your work — plus a DCO sign-off on each
 commit (`git commit -s`). Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and report security issues
-privately to [security@bitnomad.se](mailto:security@bitnomad.se) rather than in a public issue.
+privately to [tralala@bitnomad.se](mailto:tralala@bitnomad.se) rather than in a public issue.
 
 

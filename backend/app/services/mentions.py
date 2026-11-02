@@ -513,8 +513,9 @@ class MentionService:
         card = conn.execute(
             text(
                 "SELECT c.title, c.description, c.priority, c.due_at, c.completed_at,"
-                " l.name AS list"
-                " FROM cards c LEFT JOIN lists l ON l.id = c.list_id WHERE c.id = :id"
+                " c.ticket_key, l.name AS list, lp.key AS loop_key, lp.name AS loop_name"
+                " FROM cards c LEFT JOIN lists l ON l.id = c.list_id"
+                " LEFT JOIN loops lp ON lp.id = c.loop_id WHERE c.id = :id"
             ),
             {"id": job["card_id"]},
         ).mappings().first()
@@ -562,7 +563,9 @@ class MentionService:
         history = self._decorate_actors(history)
 
         lines = [
+            f"Loop: {card['loop_name'] or '(unknown)'} ({card['loop_key'] or 'no key'})",
             f"Ticket: {card['title']}",
+            f"Ticket id: {job['card_id']} (key: {card['ticket_key'] or 'not keyed yet'})",
             f"List: {card['list'] or '(unknown)'}",
             f"Priority: {card['priority']}",
             f"Due: {card['due_at'] or 'none'}",

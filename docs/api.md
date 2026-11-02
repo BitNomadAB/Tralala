@@ -4,6 +4,13 @@ Base path `/api/v1`. Interactive documentation: `/docs`, machine description: `/
 Both require a session by default (`TRALALA_DOCS_REQUIRE_AUTH`) and disappear entirely when
 `TRALALA_ENABLE_DOCS=false`; bearer-token agents can fetch the schema with their token.
 
+Two more entry points live at the origin rather than under `/api/v1`:
+
+| Path | Auth | Purpose |
+| --- | --- | --- |
+| `/llms.txt` | public | Plain-text bootstrap: envelope, Loop lifecycle, rules and the worker tools. Contains no ids or data. |
+| `/mcp` | Bearer | The curated worker catalogue over MCP (JSON-RPC 2.0, Streamable HTTP). The tool list is filtered to the scopes the token holds. |
+
 ## Envelope
 
 Success:
@@ -31,9 +38,11 @@ Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_
 `human_action_required`, `invalid_dependency_graph`, `ticket_blocked`, `plan_change_required`,
 `generation_input_changed`, `generation_unavailable`, `generation_in_progress`, `qa_incomplete`.
 
-Human-only decisions (Info edits, analysis approval, RoadMap approval, confirming a human-only
-Ticket, accepting QA and finalizing a Loop) reject agent tokens with `403 human_action_required`
-even when the token holds the scope.
+Human-only decisions (analysis approval, RoadMap approval, confirming a human-only Ticket,
+accepting QA and finalizing a Loop) reject agent tokens with `403 human_action_required` even when
+the token holds the scope. Info is the exception on purpose: a worker may write it while the Loop is
+still `draft` or `analysis_review`, because that is the intent it agreed with its person; once
+planning has started the edit is refused the same way.
 
 ## Authentication
 
@@ -74,27 +83,47 @@ keys. API tokens may hold every scope except `credentials:admin` and `users:admi
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/health` | Liveness |
-| GET | `/meta` | API version, `scopes`, `token_scopes` (the subset a token may hold), feature flags (authenticated) |
+| GET | `/meta` | API version, `scopes`, `token_scopes` (the subset a token may hold), `member_token_scopes` and `member_token_limits` (what a person may grant themselves), feature flags (authenticated) |
 
 ### Auth and credentials
 
 | Method | Path | Scope |
 | --- | --- | --- |
 | POST | `/auth/login` | public; throttled per username and client address |
+| POST | `/auth/enrol` (`{"token","password"}`) | public; claims an invitation link, sets the password and starts a session |
 | POST | `/auth/logout` | authenticated; revokes the stored session |
 | POST | `/auth/password` | authenticated user; revokes every session |
 | GET | `/auth/me` | authenticated; returns `role`, effective `scopes` and the account's `preferences` |
 | GET | `/auth/scopes` | authenticated; the caller's effective scopes |
 | GET | `/auth/preferences` | signed-in account; `theme_mode` and `theme_kit` (null when unset) |
 | PUT | `/auth/preferences` | signed-in account; partial update of `theme_mode` / `theme_kit` |
-| GET | `/users` | `users:admin` |
+| GET | `/users` | `users:admin`; includes `agent_access_count` and `agent_access_last_used_at` per account |
 | POST | `/users` (`{"name","password","role"}`) | `users:admin` |
-| PATCH | `/users/{id}` (`{"role","disabled"}`) | `users:admin`; the last administrator is protected |
+| PATCH | `/users/{id}` (`{"role","disabled"}`) | `users:admin`; the last administrator is protected. `disabled: true` also revokes every token that account issued |
 | POST | `/users/{id}/password` (`{"new_password"}`) | `users:admin`; revokes the user's sessions |
-| GET | `/credentials` | `credentials:admin` |
-| POST | `/credentials` | `credentials:admin` (returns the raw token once; defaults to 90 days) |
-| POST | `/credentials/{id}/rotate` | `credentials:admin`; issues a new token and revokes the old one |
-| POST | `/credentials/{id}/revoke` | `credentials:admin` |
+| POST | `/users/{id}/invite` (`{"expires_in_hours"}` optional, default 72) | `users:admin`; returns a one-time enrolment token once |
+| GET | `/credentials` | signed-in person; own access, or every token with `credentials:admin` (`?owner_id=` narrows it) |
+| GET | `/credentials/mine` | signed-in person; their own access whatever their role |
+| POST | `/credentials` | signed-in person; an admin may grant any grantable scope, a member only `member_token_scopes` |
+| POST | `/credentials/{id}/rotate` | the owner or `credentials:admin`; issues a new token and revokes the old one |
+| POST | `/credentials/{id}/revoke` | the owner or `credentials:admin` |
+
+A token is a person's **interaction agent access**: it is created as its own `agent` actor, records
+`owner_actor_id`, and is shown once. An administrator may grant any scope a token can hold. A member
+may only grant `member_token_scopes` (published by `GET /meta`), is capped at
+`TRALALA_MEMBER_TOKEN_LIMIT` live tokens, must give an expiry (default 30 days,
+`TRALALA_MEMBER_TOKEN_DEFAULT_DAYS`, never beyond `TRALALA_MEMBER_TOKEN_MAX_DAYS`), and may rotate or
+revoke only their own. Asking for a grantable but non-member scope is `422 forbidden_scope`; asking
+for one no token may hold is `422 validation_failed`; the cap answers `409 agent_access_limit` and a
+missing expiry `422 expiry_required`.
+
+An invitation link is the recommended way to hand over an account: the administrator creates the
+user, `POST /users/{id}/invite` returns a token that is stored only as a hash, and the link
+(`/enrol?token=...`) sets the person's own password. It is single use, expires
+(`TRALALA_INVITE_TTL_HOURS`), replaces any unused earlier link, and answers `invite_invalid`,
+`invite_used` or `invite_expired` without revealing whether a token existed. Tralala sends no e-mail;
+the operator delivers the link. See
+[decisions/0014](decisions/0014-enrolment-links-instead-of-email-verification.md).
 
 Logins are rate limited per client address and backed off per username after repeated failures
 (`429 rate_limited` with `details.retry_after_seconds`). Passwords must be at least
@@ -117,6 +146,7 @@ username.
 | POST | `/boards/import` (raw zip body) | `boards:admin` |
 | GET | `/boards/{board_id}/validate` | `boards:read` |
 | POST | `/boards/{board_id}/migrate` (retry a failed schema migration) | `boards:admin` |
+| GET | `/boards/{board_id}/actors` (`people` to assign, `agents` to ask) | `boards:read` |
 | GET/POST | `/boards/{board_id}/backups` | `boards:read` / `boards:write` |
 | POST | `/boards/{board_id}/backups/{name}/restore` (verifies the backup before replacing data) | `boards:admin` |
 | POST | `/boards/{board_id}/templates` (`{"name","description"}`; snapshots the board's lists and labels) | `boards:write` |
@@ -213,7 +243,15 @@ Twelve built-in roles are seeded on startup from `backend/app/seeds/role_seeds.j
 (`lead_developer`, `project_manager`, `product_owner`, `backend_developer`, `frontend_developer`,
 `qa_engineer`, `security_engineer`, `ux_designer`, `customer`, `analytics_agent`, `coordinator`,
 `architect`). Built-ins carry `built_in: true` and a factory copy of their prompt, so edits are
-reversible. `customized` is true while `system_prompt` differs from the factory text.
+reversible. `customized` is true while `system_prompt` differs from the factory text. On startup an
+unedited built-in follows a rewritten factory prompt, so prompt improvements reach an existing
+installation; a customized built-in keeps its own text and only its factory copy moves, which is what
+`restore-defaults` restores.
+
+A role prompt describes a job, never one particular board, Loop or installation: the identifiers an
+agent works on (the Loop name and key, the ticket title and id, the board, the readable repositories)
+are supplied in the request that asks it to work. Prompts must therefore not hard-code a product or
+subject name.
 The agent's role prompt is the first part of every Loop generation prompt, followed by the purpose
 contract and the JSON schema, and the whole composed text is what a run snapshots.
 
@@ -457,6 +495,40 @@ counters and the error text only, so clients refetch the comment instead of read
 | GET | `/boards/{board_id}/search?q=&label=&priority=&overdue=&completed=&list_id=&include_archived=` | `cards:read` |
 | GET | `/search?q=` (all active boards) | `cards:read` |
 | GET | `/boards/{board_id}/activity?entity_type=&entity_id=&actor_type=&action=` | `boards:read` |
+
+## Worker tools (MCP and `/llms.txt`)
+
+`backend/app/services/agent_tools.py` holds one catalogue: a name, a description, a JSON Schema, the
+scope it needs and a handler that calls the same services as the routes above. `/mcp` serves it as
+MCP tools (`initialize`, `tools/list`, `tools/call`, `ping`; notifications answer `202`), and
+`/llms.txt` summarises it. The browser WebMCP adapter is a separate surface for a person's own
+session and is not generated from this catalogue yet. A tool is listed only when the
+calling token holds its scope, and `tools/call` re-checks it before the handler runs.
+
+| Tool | Scope | What it does |
+| --- | --- | --- |
+| `read_board` | `boards:read` | Loops with stage, `execution_allowed` and `blocked_reason`, the people you may assign, the agents you may ask |
+| `read_loop` | `loops:read` | Goal, Info/Analysis/RoadMap documents, plan with per-Ticket readiness, Kanban columns |
+| `read_ticket` | `cards:read` | Acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
+| `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
+| `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
+| `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
+| `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
+| `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
+| `comment_ticket` | `comments:write` | Add a progress note, finding or blocker |
+| `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the messages and positions |
+
+The flow a person and their worker use to start work is `create_loop` → `write_info` →
+`run_analysis` → the person approves the analysis → `read_loop`/`read_ticket` to work the Tickets it
+produces. Every step stays inside the same gates: the analysis and the RoadMap are candidates until a
+signed-in person approves them, and a cancelled or completed Loop is read-only.
+
+Deliberately absent: board and list structure changes, Ticket creation or archiving, RoadMap and QA
+writes, provider configuration and the approval decisions themselves.
+
+Calling a tool the token may not use is a JSON-RPC error (`-32602`) rather than a silent downgrade.
+A tool that fails returns `isError: true` with the API error code in the text content, so a client
+sees `version_conflict` or `human_action_required` instead of a broken transport.
 
 ## Example: create a card
 

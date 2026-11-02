@@ -27,6 +27,14 @@ export default defineConfig({
         target: apiProxyTarget,
         changeOrigin: false,
       },
+      "/llms.txt": {
+        target: apiProxyTarget,
+        changeOrigin: false,
+      },
+      "/mcp": {
+        target: apiProxyTarget,
+        changeOrigin: false,
+      },
     },
   },
   test: {

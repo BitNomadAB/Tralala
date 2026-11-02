@@ -162,3 +162,34 @@ def test_human_review_approve_veto_and_rework(
         )
     )
     assert approved["status"] == "approved"
+
+
+def test_a_discussion_names_the_loop_and_ticket_it_is_about(
+    api: Api, board: dict[str, Any], monkeypatch: Any
+) -> None:
+    """The role prompt stays generic; the identifiers come from the thread at call time."""
+    agent = _agent(api, "Context Bot", "lead_developer")
+    discussion = _discussion(api, board, [agent])
+    captured: dict[str, Any] = {}
+
+    def capture(settings: Any, agent_row: dict[str, Any], *, system_prompt: str, messages: list):
+        captured["system_prompt"] = system_prompt
+        captured["messages"] = messages
+        return _fake_runtime({"Context Bot": "agree"})(
+            settings, agent_row, system_prompt=system_prompt, messages=messages
+        )
+
+    monkeypatch.setattr(runtime, "call_agent", capture)
+    api.data(
+        api.post(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/start", json={})
+    )
+
+    prompt = captured["messages"][0]["content"]
+    ticket = api.data(api.get(f"/api/v1/boards/{board['id']}/tickets"))[0]
+    assert f"Loop: {ticket['loop_name']} ({ticket['loop_key']})" in prompt
+    assert "Ticket: Session strategy" in prompt
+    assert f"Ticket id: {ticket['id']}" in prompt
+    assert "Discussion goal: Which session strategy?" in prompt
+    # The role text itself names neither the ticket nor the product.
+    assert "Tralala" not in captured["system_prompt"]
+    assert ticket["id"] not in captured["system_prompt"]

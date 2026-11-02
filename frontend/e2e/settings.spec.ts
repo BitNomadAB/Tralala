@@ -77,16 +77,18 @@ test.describe("settings", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme-kit", "carenomad");
   });
 
-  test("issues and revokes an agent token", async ({ page }) => {
+  test("issues and revokes an interaction agent access", async ({ page }) => {
     await login(page);
     await page.getByRole("link", { name: "Settings" }).click();
     const agentName = uniqueName("Agent");
 
-    await page.getByRole("button", { name: "New token" }).click();
-    const dialog = page.getByRole("dialog", { name: "New agent token" });
+    await page.getByRole("button", { name: "New access key" }).click();
+    const dialog = page.getByRole("dialog", { name: "New interaction agent access" });
     await dialog.getByLabel("Agent name").fill(agentName);
+    // The scope list arrives with /meta; wait for it so the click hits a rendered checkbox.
+    await expect(dialog.getByLabel("boards:read")).toBeVisible();
     await dialog.getByLabel("cards:write").check();
-    await dialog.getByRole("button", { name: "Create token" }).click();
+    await dialog.getByRole("button", { name: "Create access" }).click();
 
     const issued = page.getByRole("dialog", { name: "Copy this token now" });
     const token = await issued.getByLabel("New API token").inputValue();
@@ -95,6 +97,7 @@ test.describe("settings", () => {
 
     const row = page.getByRole("listitem").filter({ hasText: agentName });
     await expect(row).toContainText("boards:read, cards:read, cards:write");
+    await expect(row).toContainText("never used");
     await expect(row.getByText("active", { exact: true })).toBeVisible();
 
     await row.getByRole("button", { name: `Revoke ${agentName}` }).click();
