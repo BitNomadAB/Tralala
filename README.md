@@ -401,9 +401,34 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The UI is served at <http://localhost:8080>; `/api`, `/docs` and `/openapi.json` are proxied to
-the backend container. Data lives in the `tralala-data` volume, so `docker compose down` keeps it
-and `docker compose down -v` removes it.
+The UI is served at <http://localhost:8080> by Caddy, which also proxies `/api`, `/docs`,
+`/openapi.json`, `/mcp` and `/llms.txt` to the backend container. Data lives in the `tralala-data`
+volume, so `docker compose down` keeps it and `docker compose down -v` removes it. Certificates, if
+Caddy obtains them, live in `tralala-caddy-data`.
+
+### TLS
+
+TLS is configuration in the web container, not a second service. `TRALALA_SITE_ADDRESS` decides:
+
+| Value | Behaviour |
+| --- | --- |
+| `:80` (default) | Plain HTTP. Right behind Tailscale Serve, a load balancer or any other terminator. |
+| `tralala.example.com` | Automatic HTTPS: a public CA for a public name, Caddy's own local CA for a private one. Publish 443 (`TRALALA_HTTPS_PORT=443`) and leave 80 reachable for the ACME challenge and the redirect. |
+
+Set `TRALALA_COOKIE_SECURE=true` once the site is served over HTTPS, and keep
+`TRALALA_TRUST_PROXY_HEADERS=true` (the compose default): Caddy is the only caller of the backend,
+so trusting its `X-Forwarded-For` is what keeps the sign-in throttle keyed on the real client.
+
+Behind Tailscale the simplest setup is the default `:80` plus `tailscale serve`:
+
+```bash
+docker compose up -d --build
+sudo tailscale serve --bg 8080      # https://<host>.<tailnet>.ts.net -> 127.0.0.1:8080
+```
+
+Verify the three surfaces through the tunnel before trusting it: `/` (the UI), `/llms.txt` (plain
+text, not the SPA shell) and `/mcp` with a key from Settings.
+
 
 ## Where the data lives
 
@@ -503,13 +528,14 @@ Chromium when no browser build is present; override with `PLAYWRIGHT_CLI=<path t
 - `/api/v1/meta` and `/api/v1/auth/scopes` require authentication; API responses carry
   `Cache-Control: no-store`; 401 responses advertise `WWW-Authenticate: Bearer`.
 - API errors never echo server paths or driver text; details stay in the server log.
-- The production bundle is checked by `scripts/check-client-build.mjs` for source maps and
+- The production bundle is checked by `frontend/scripts/check-client-build.mjs` for source maps and
   server-only strings as part of `pnpm build`.
 - Every active board is snapshotted automatically every `TRALALA_BACKUP_INTERVAL_HOURS` (default 24,
   `0` disables it), and only the newest `TRALALA_BACKUP_KEEP` snapshots (default 10) are kept. Files
   outside the `backup-<timestamp>.sqlite` pattern are never pruned. Automatic snapshots log
   `backup_created` / `backup_failed` with the board id.
-- Containers start uvicorn with `--no-server-header` and nginx with `server_tokens off`.
+- Containers start uvicorn with `--no-server-header`, and Caddy removes its own `Server` header, so
+  neither tier advertises its product or version.
 
 ## Agent usage
 

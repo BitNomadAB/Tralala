@@ -49,7 +49,7 @@ That external worker had no usable entry point. It could call REST, but:
    model as data it can act on.
 4. **`GET /llms.txt` is public and boring.** It names the envelope, the Loop lifecycle, the rules
    that never change, the tool list and the REST equivalents, and contains no ids, no data and no
-   secrets. It is served at the origin, above the SPA fallback, in nginx and in the Vite dev proxy;
+   secrets. It is served at the origin, above the SPA fallback, in Caddy and in the Vite dev proxy;
    a probe of an unknown path that happens to be a convention must not answer with HTML.
 5. **`GET /boards/{board_id}/actors` closes the assignment gap.** A token cannot read `/users`
    (`users:admin`) or `/agents` (`agents:read`, not grantable to tokens), so the board publishes two

@@ -1,4 +1,4 @@
-﻿services:
+services:
   backend:
     build:
       context: ./backend
@@ -8,6 +8,9 @@
       TRALALA_BOOTSTRAP_USERNAME: ${TRALALA_BOOTSTRAP_USERNAME:-admin}
       TRALALA_BOOTSTRAP_PASSWORD: ${TRALALA_BOOTSTRAP_PASSWORD:?set TRALALA_BOOTSTRAP_PASSWORD in .env}
       TRALALA_COOKIE_SECURE: ${TRALALA_COOKIE_SECURE:-false}
+      # Caddy is the only thing that talks to the backend, so trusting its X-Forwarded-For is what
+      # keeps the sign-in throttle keyed on the real client instead of on the proxy.
+      TRALALA_TRUST_PROXY_HEADERS: ${TRALALA_TRUST_PROXY_HEADERS:-true}
       TRALALA_CORS_ORIGINS: ""
       TRALALA_RATE_LIMIT_PER_MINUTE: ${TRALALA_RATE_LIMIT_PER_MINUTE:-600}
       TRALALA_ENABLE_DOCS: ${TRALALA_ENABLE_DOCS:-true}
@@ -29,8 +32,19 @@
   frontend:
     build:
       context: ./frontend
+    environment:
+      # `:80` serves plain HTTP (behind Tailscale Serve or another TLS terminator). A hostname makes
+      # Caddy obtain a certificate itself: a public CA for a public name, its local CA otherwise.
+      TRALALA_SITE_ADDRESS: ${TRALALA_SITE_ADDRESS:-:80}
+      TRALALA_BACKEND: backend:8000
     ports:
       - "${TRALALA_HTTP_PORT:-8080}:80"
+      # Only used when TRALALA_SITE_ADDRESS is an HTTPS address.
+      - "${TRALALA_HTTPS_PORT:-8443}:443"
+    volumes:
+      # Certificates and ACME state must survive a restart, or every deploy re-issues them.
+      - tralala-caddy-data:/data
+      - tralala-caddy-config:/config
     depends_on:
       backend:
         condition: service_healthy
@@ -38,3 +52,5 @@
 
 volumes:
   tralala-data:
+  tralala-caddy-data:
+  tralala-caddy-config:

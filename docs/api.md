@@ -463,7 +463,8 @@ it describes, so the log is always ahead of (never behind) the stream.
 
 Allowlist: `.docx .ppt .pptx .xlsx .pdf .txt .md .json .jpg .jpeg .png .gif`. The extension and the
 first bytes must agree (ZIP for OOXML, `%PDF`, PNG/JPEG/GIF signatures, UTF-8 for text). Size limits:
-`TRALALA_ATTACHMENT_MAX_BYTES` (default 10 MiB per file) and `TRALALA_BOARD_ATTACHMENT_MAX_BYTES`
+`TRALALA_ATTACHMENT_MAX_BYTES` (default 8 MiB per file, the same as the request ceiling) and
+`TRALALA_BOARD_ATTACHMENT_MAX_BYTES`
 (default 200 MiB per board). Bytes are stored as `data/boards/{uuid}/attachments/{attachment_id}.bin`;
 the original filename is metadata only and is sanitized (no separators, no leading dots).
 
@@ -625,10 +626,12 @@ unavailable.
 - `due_at` and `due_before` accept an ISO 8601 date (`2027-01-15`) or timestamp
   (`2027-01-15T09:30:00Z`). Dates are normalized to midnight UTC; free text is rejected with
   `422 validation_failed` so due-date filters stay correct.
-- Request bodies are limited by `TRALALA_MAX_REQUEST_BYTES` (default 8 MiB, matching the bundled
-  nginx `client_max_body_size`). The backend counts the bytes as they arrive, so a chunked request
-  without a `Content-Length` header is refused with `413 payload_too_large` like any other; requests
-  rejected by nginx itself return an HTML error page, not the JSON envelope.
+- Request bodies are limited by `TRALALA_MAX_REQUEST_BYTES` (default 8 MiB), and the bundled Caddy
+  sits one step above it (`request_body max_size 9MB`) so the backend's answer is the one a client
+  normally sees. The backend counts the bytes as they arrive, so a chunked request without a
+  `Content-Length` header is refused with `413 payload_too_large` like any other. A chunked body past
+  the proxy ceiling is cut off at the proxy instead: the connection closes, so a client should never
+  send more than it declared.
 - A board archive is accepted up to 8 MiB compressed, but each member is also bounded after
   decompression: `manifest.json` to 1 MiB and `board.sqlite` to `TRALALA_BOARD_IMPORT_MAX_BYTES`
   (default 256 MiB). An archive that expands past either limit is refused with

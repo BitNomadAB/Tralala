@@ -974,3 +974,54 @@ split, retry-then-succeed, single attempt on EACCES, idempotent removal, busy bo
 returns the relative leftover, archive-name guard, lock primitive), backend suite green three times
 in a row, ruff clean, frontend typecheck + 37 tests green, and the setting rejects an unknown value at
 startup.
+## Web tier: nginx out, Caddy in
+
+Owner request: replace nginx with Caddy so TLS is configuration instead of a second service.
+
+- `frontend/Caddyfile` (new) replaces `frontend/nginx.conf` (deleted). `TRALALA_SITE_ADDRESS` decides
+  transport: `:80` (default, behind Tailscale Serve or any terminator) or a hostname, which makes
+  Caddy obtain and renew the certificate itself (public CA, or its local CA for a private name).
+  `TRALALA_BACKEND` is the upstream. One header policy for the whole origin, CSP included, `-Server`,
+  `encode zstd gzip`, `/assets/*` immutable, and `/mcp` + `/llms.txt` matched before the SPA fallback.
+- `frontend/Dockerfile` ends in `caddy:2-alpine`; the healthcheck asks Caddy's loopback admin API
+  whether the configuration is live, so it works for HTTP and HTTPS site addresses alike.
+- `docker-compose.yml`: site address and upstream are passed through, 443 is published
+  (`TRALALA_HTTPS_PORT`), Caddy's `/data` and `/config` are volumes so certificates survive a
+  redeploy, and `TRALALA_TRUST_PROXY_HEADERS` now defaults to `true` — Caddy is the backend's only
+  caller, so the sign-in throttle keys on the real client.
+- Body limits finally agree: Caddy allows `9MB`, the backend keeps `TRALALA_MAX_REQUEST_BYTES` at
+  8 MiB and answers in the JSON envelope, and `TRALALA_ATTACHMENT_MAX_BYTES` dropped from 10 MiB to
+  8 MiB because a file cannot exceed the body carrying it.
+- **Found and fixed a broken container build**: `pnpm build` ran the client guard as
+  `node ../scripts/check-client-build.mjs`, but the image only copies `frontend/`, so `docker build`
+  had been failing since the guard was added. The guard now lives in `frontend/scripts/` (package.json,
+  README updated) and `docker build ./frontend` succeeds.
+- CI gained an `images` job that builds both containers and asserts the tier's contract: `/` and a
+  deep client route answer 200, CSP present, `Server` absent.
+
+**Second deploy blocker found by the first real `docker compose up`:** the backend image could not
+start ? `services/runtime.py` imports `httpx` for provider and A2A calls, but `httpx` was listed only
+in `requirements-dev.txt`, and `anyio` (imported by the event-stream endpoint) was transitive only.
+Both are runtime dependencies now, and the compose job in CI builds both images.
+
+Verified by building and running the image against the real backend through Caddy: SPA, `/llms.txt`
+(text, not the shell), `/api/v1/health`, `POST /mcp` 401 in the JSON envelope, deep route, asset with
+`Cache-Control: public, immutable` + gzip, key created via the proxy then used on `/mcp` (tools
+filtered by scope) and revoked, board create/archive/delete through the proxy, 40 MiB declared body
+refused in 0.28 s, chunked 40 MiB cut off at the proxy without a crash. `caddy validate` passes for
+`:80` and for a hostname address.
+## Compose smoke test of the whole stack
+
+`docker compose up -d --build` on a scratch project (`tralalasmoke`) with throwaway secrets:
+
+- backend healthy, web container healthy, all through Caddy's proxy: `/` 200 text/html,
+  `/llms.txt` 200 text/plain, `/api/v1/health` 200 JSON, a deep client route 200 text/html,
+  `POST /mcp` 401 in the JSON envelope.
+- A full round trip: sign-in via the proxy, key issued with the UI's own scopes, `tools/list`
+  (6 tools, `read_discussion` and `ask_agents` present), a `read_board` call through MCP returning
+  the board just created, then the key revoked and the board archived.
+- The scratch stack and its three volumes were removed afterwards.
+
+This is the first time the whole stack ran, and it found what unit tests could not: the backend image
+was missing `httpx` (a runtime import in `services/runtime.py`) and relied on a transitive `anyio`.
+Fixed in `requirements.txt`; `requirements-dev.txt` no longer duplicates `httpx`.

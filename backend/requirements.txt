@@ -4,3 +4,7 @@ sqlalchemy>=2.0.36,<3
 alembic>=1.14,<2
 pydantic-settings>=2.6,<3
 cryptography>=43,<47
+# Provider and A2A calls (services/runtime.py) and endpoint checks use httpx at runtime.
+httpx>=0.28,<1
+# Used directly by the event-stream endpoint; starlette pulls it in, but the app imports it.
+anyio>=4,<5

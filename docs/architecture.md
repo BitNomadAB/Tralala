@@ -290,7 +290,11 @@ they never change a Ticket.
   the structured migration report.
 - Backups use SQLite's online-backup API; restore snapshots the backup into the live database file
   and re-validates.
-- Docker Compose mounts a single data volume; the frontend container proxies `/api` to the backend.
+- Docker Compose mounts a single data volume; the web container (Caddy) serves the built SPA and
+  proxies `/api`, `/docs`, `/openapi.json`, `/mcp` and `/llms.txt` to the backend, adding one security
+  header policy for the whole origin. TLS is configuration there rather than a second service:
+  `TRALALA_SITE_ADDRESS` selects plain HTTP or automatic HTTPS, and certificates live in their own
+  volume so a redeploy does not re-issue them.
 - Run exactly one backend process per data directory. SQLite writes, the in-memory rate limiter and
   the per-board locks assume a single writer; horizontal scaling needs a shared coordination store.
   Startup takes an operating-system file lock on `data/.process.lock`, so an overlapping restart or

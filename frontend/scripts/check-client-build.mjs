@@ -3,14 +3,15 @@
  * Client build guard for anti-reverse-engineering checks.
  *
  * Fails the build when the shipped browser bundle contains source maps or text that belongs to
- * the server only. Runs after `vite build` and has no dependencies.
+ * the server only. Runs after `vite build` and has no dependencies, so it also works inside the
+ * container image build, where only this package is present.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const distDir = path.resolve(scriptDir, "..", "frontend", "dist");
+const distDir = path.resolve(scriptDir, "..", "dist");
 
 const FORBIDDEN = [
   { text: "dev-insecure-secret-change-me", reason: "published fallback session secret" },

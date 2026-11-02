@@ -58,6 +58,35 @@ jobs:
       - name: Production build
         run: pnpm build
 
+  images:
+    name: Container images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The web tier is configuration (Caddyfile) plus a static build, and nothing in the unit tests
+      # touches it: building the image is what proves the Caddyfile is valid and that the client
+      # build guard can find its script inside the build context.
+      - name: Build the web image
+        run: docker build -t tralala-web:ci ./frontend
+      - name: Serve the shell and the worker surface
+        run: |
+          docker run -d --name web -p 8080:80 -e TRALALA_BACKEND=backend:8000 tralala-web:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ >/dev/null; then break; fi
+            sleep 1
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" = "200"
+          # A deep client route answers with the shell, not with 404.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/boards/x/discussions)" = "200"
+          # The security policy and the removed Server header are part of the contract.
+          curl -sI http://127.0.0.1:8080/ | grep -qi "content-security-policy"
+          ! curl -sI http://127.0.0.1:8080/ | grep -qi "^server:"
+      - name: Build the backend image
+        run: docker build -t tralala-backend:ci ./backend
+      - name: Logs on failure
+        if: failure()
+        run: docker logs web || true
+
   e2e:
     name: Journeys (Playwright)
     runs-on: ubuntu-latest

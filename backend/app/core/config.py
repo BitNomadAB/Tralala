@@ -43,7 +43,9 @@ class Settings(BaseSettings):
     discussion_max_rounds: int = 4
     discussion_token_budget: int = 200_000
     discussion_time_budget_seconds: int = 900
-    attachment_max_bytes: int = 10 * 1024 * 1024
+    # A file cannot exceed the request body that carries it, so this tracks max_request_bytes
+    # rather than promising a size the request ceiling would refuse.
+    attachment_max_bytes: int = 8 * 1024 * 1024
     board_attachment_max_bytes: int = 200 * 1024 * 1024
     board_import_max_bytes: int = 256 * 1024 * 1024
     # How the host filesystem behaves: auto (the real OS), windows, posix, or network for a board

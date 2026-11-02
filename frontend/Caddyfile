@@ -1,0 +1,66 @@
+# Tralala's web tier: the built SPA, the API and the worker surface, in front of one backend.
+#
+# TRALALA_SITE_ADDRESS decides what Caddy listens on and how it gets a certificate:
+#   :80                  plain HTTP (default; behind Tailscale Serve or another TLS terminator)
+#   tralala.example.com  automatic HTTPS - a public CA for a public name, Caddy's local CA otherwise
+#   http://:8080         a non-default port while testing
+#
+# TRALALA_BACKEND is the upstream; compose supplies the service name.
+{
+	# The admin API stays on the container's loopback. It is how the healthcheck asks Caddy whether
+	# the configuration is live, and it is not reachable from another container.
+	admin localhost:2019
+}
+
+{$TRALALA_SITE_ADDRESS::80} {
+	root * /srv
+	encode zstd gzip
+
+	# One policy for the whole origin. A proxied response keeps the backend's own headers, and a
+	# static file gets the same ones instead of none.
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+	}
+
+	# An outer guard only: the backend counts the bytes it receives and answers 413 inside the JSON
+	# envelope, so this ceiling sits one step above TRALALA_MAX_REQUEST_BYTES.
+	request_body {
+		max_size 9MB
+	}
+
+	# The worker surface lives at the origin, so it is matched before the SPA fallback: an agent
+	# fetching /llms.txt must get text, not index.html with a 200.
+	@worker path /mcp /llms.txt
+	handle @worker {
+		reverse_proxy {$TRALALA_BACKEND:backend:8000}
+	}
+
+	handle /api/* {
+		reverse_proxy {$TRALALA_BACKEND:backend:8000}
+	}
+
+	# /docs and its assets, plus the OpenAPI document the Swagger UI loads.
+	handle /docs* {
+		reverse_proxy {$TRALALA_BACKEND:backend:8000}
+	}
+
+	handle /openapi.json {
+		reverse_proxy {$TRALALA_BACKEND:backend:8000}
+	}
+
+	@assets path /assets/*
+	handle @assets {
+		header Cache-Control "public, immutable"
+		file_server
+	}
+
+	# A client-side route must answer with the shell, not with 404.
+	handle {
+		try_files {path} {path}/ /index.html
+		file_server
+	}
+}
