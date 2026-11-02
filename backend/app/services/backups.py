@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import re
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,10 +32,13 @@ class BackupService:
         items = []
         for file in sorted(directory.glob("*.sqlite"), reverse=True):
             stat = file.stat()
+            sidecar = self._attachments_sidecar(board_id, file)
             items.append(
                 {
                     "name": file.name,
                     "size_bytes": stat.st_size,
+                    "has_attachments": sidecar.exists(),
+                    "attachments_size_bytes": sidecar.stat().st_size if sidecar.exists() else 0,
                     "created_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC)
                     .replace(microsecond=0)
                     .isoformat()
@@ -50,12 +55,98 @@ class BackupService:
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / name
         snapshot_database(self.boards.path(board_id), target)
+        attachments = self._archive_attachments(board_id, target)
         return {
             "name": name,
             "size_bytes": target.stat().st_size,
+            "attachments": attachments,
             "created_at": utcnow(),
             "verification": self._check_file(target),
         }
+
+    def _attachments_sidecar(self, board_id: str, snapshot: Path) -> Path:
+        """The files that belong to a snapshot, as one zip next to it."""
+        return snapshot.with_name(f"{snapshot.stem}-attachments.zip")
+
+    def _archive_attachments(self, board_id: str, snapshot: Path) -> dict[str, Any]:
+        directory = self.boards.attachments_dir(board_id)
+        files = (
+            sorted(file for file in directory.glob("*") if file.is_file())
+            if directory.exists()
+            else []
+        )
+        sidecar = self._attachments_sidecar(board_id, snapshot)
+        if not files:
+            if sidecar.exists():
+                sidecar.unlink()
+            return {"files": 0, "size_bytes": 0}
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for file in files:
+                archive.write(file, f"attachments/{file.name}")
+        sidecar.write_bytes(buffer.getvalue())
+        return {"files": len(files), "size_bytes": sidecar.stat().st_size}
+
+    def _restore_attachments(self, board_id: str, snapshot_name: str) -> dict[str, Any]:
+        sidecar = self._attachments_sidecar(board_id, self._directory(board_id) / snapshot_name)
+        if not sidecar.exists():
+            # Older snapshots carry no files; existing ones are left alone rather than deleted.
+            return {"restored": 0, "skipped": True}
+        directory = self.boards.attachments_dir(board_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        restored = 0
+        with zipfile.ZipFile(sidecar) as archive:
+            for entry in archive.namelist():
+                if not entry.startswith("attachments/"):
+                    continue
+                name = Path(entry).name
+                if not name:
+                    continue
+                (directory / name).write_bytes(archive.read(entry))
+                restored += 1
+        return {"restored": restored, "skipped": False}
+
+    def prune(self, board_id: str, keep: int) -> list[str]:
+        """Delete the oldest snapshots beyond ``keep``.
+
+        Only files matching ``BACKUP_PATTERN`` are candidates: an operator may keep a hand-made copy
+        in the same directory, and this must never delete it.
+        """
+        self.board_service.require_row(board_id)
+        if keep <= 0:
+            return []
+        directory = self._directory(board_id)
+        if not directory.exists():
+            return []
+        snapshots = sorted(
+            file
+            for file in directory.iterdir()
+            if file.is_file() and BACKUP_PATTERN.match(file.name)
+        )
+        # Names carry the UTC timestamp, so lexical order is chronological order.
+        stale = snapshots[:-keep] if len(snapshots) > keep else []
+        removed = []
+        for file in stale:
+            try:
+                file.unlink()
+                removed.append(file.name)
+            except OSError:
+                continue
+            sidecar = self._attachments_sidecar(board_id, file)
+            if sidecar.exists():
+                try:
+                    sidecar.unlink()
+                except OSError:
+                    pass
+        return removed
+
+    def newest_age_hours(self, board_id: str) -> float | None:
+        """Hours since the newest snapshot, or None when the board has never been backed up."""
+        items = self.list(board_id)
+        if not items:
+            return None
+        newest = datetime.fromisoformat(items[0]["created_at"].replace("Z", "+00:00"))
+        return (datetime.now(UTC) - newest).total_seconds() / 3600
 
     @staticmethod
     def _check_file(path: Path) -> dict[str, Any]:
@@ -92,8 +183,14 @@ class BackupService:
             self.boards.close(board_id)
             snapshot_database(source, destination)
             self.boards.close(board_id)
+            attachments = self._restore_attachments(board_id, name)
         report = self.validate(board_id)
-        return {"restored_from": name, "board_id": board_id, "verification": report}
+        return {
+            "restored_from": name,
+            "board_id": board_id,
+            "attachments": attachments,
+            "verification": report,
+        }
 
     def validate(self, board_id: str) -> dict[str, Any]:
         self.board_service.require_row(board_id)

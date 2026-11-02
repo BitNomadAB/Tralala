@@ -29,6 +29,7 @@ from .common import one, request_fingerprint, rows, run_idempotent
 from .loop_documents import LoopDocumentService
 from .loop_links import LoopWorkflowLinks
 from .loops import LoopService
+from .runtime import EXECUTABLE_CONNECTION_TYPES
 
 logger = logging.getLogger("tralala.loop_generation")
 
@@ -182,13 +183,14 @@ class LoopGenerationService:
                 code="generation_unavailable",
                 details={"hint": "Configure an OpenAI-compatible agent in Settings"},
             )
-        if row.get("connection_type") != "openai_compatible":
+        connection_type = str(row.get("connection_type") or "openai_compatible")
+        if connection_type not in EXECUTABLE_CONNECTION_TYPES:
             raise ServiceUnavailable(
                 "This connection type cannot execute generation requests",
                 code="generation_unavailable",
                 details={
                     "connection_type": row.get("connection_type"),
-                    "supported": ["openai_compatible"],
+                    "supported": list(EXECUTABLE_CONNECTION_TYPES),
                 },
             )
         return row
@@ -243,7 +245,9 @@ class LoopGenerationService:
         board_clause = f" AND a.id IN ({placeholders})" if board_agents else ""
         select = (
             "SELECT a.* FROM agents a LEFT JOIN role_templates r ON r.id = a.role_template_id"
-            " WHERE a.enabled = 1 AND a.connection_type = 'openai_compatible'"
+            " WHERE a.enabled = 1 AND a.connection_type IN ("
+            + ", ".join(f"'{value}'" for value in EXECUTABLE_CONNECTION_TYPES)
+            + ")"
             " AND COALESCE(r.scope, 'board') != 'organisation'"
         )
         row = self.registry.read_one(

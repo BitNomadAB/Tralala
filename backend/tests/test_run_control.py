@@ -269,7 +269,8 @@ def test_pause_holds_the_loop_and_resume_continues(
     api: Api, board: dict[str, Any], monkeypatch: Any
 ) -> None:
     agent = _agent(api, "Pause Bot")
-    discussion = _discussion(api, board, [agent], max_rounds=4)
+    # Enough rounds that the run cannot finish on its own before the pause lands on a loaded CI box.
+    discussion = _discussion(api, board, [agent], max_rounds=8)
     monkeypatch.setattr(runtime, "call_agent", _runtime({"Pause Bot": "disagree"}, delay=0.12))
 
     base, runs_url = _urls(board, discussion)
@@ -292,7 +293,7 @@ def test_pause_holds_the_loop_and_resume_continues(
     assert resumed["run_status"] == "running"
     final = _wait(api, f"{runs_url}/{run_id}", lambda run: run["status"] != "running")
     assert final["status"] == "completed"
-    assert final["rounds_completed"] == 4
+    assert final["rounds_completed"] == 8
 
 
 def test_stop_ends_the_run_and_blocks_new_work(

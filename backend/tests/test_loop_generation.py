@@ -289,16 +289,39 @@ def test_generation_uses_the_agent_the_caller_picks(
 
 
 def test_generation_refuses_an_agent_that_cannot_reach_a_model(
-    api: Api, board: dict[str, Any], loop: dict[str, Any]
+    api: Api, board: dict[str, Any], loop: dict[str, Any], monkeypatch: Any
 ) -> None:
     disabled = _agent_named(api, "paused agent", enabled=False)
     a2a = _agent_named(api, "a2a agent", connection_type="a2a")
     api.data(api.put(f"{_base(board, loop)}/documents/info", json={"content": "Intent"}))
-    attempts = ((disabled["id"], "Agent is disabled"), (a2a["id"], "connection type"))
-    for agent_id, expected in attempts:
-        response = api.post(
+    refused = api.post(
+        f"{_base(board, loop)}/generation-runs",
+        json={"purpose": "analysis", "agent_id": disabled["id"]},
+    )
+    assert refused.status_code in {422, 503}, refused.text
+    assert "Agent is disabled" in refused.text, refused.text
+
+    # An A2A agent speaks a transport the runtime can execute, so it must generate like any other
+    # agent instead of being refused at selection.
+    used: list[str] = []
+
+    def fake_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        used.append(str(agent_row["connection_type"]))
+        return {
+            "ok": True,
+            "error": None,
+            "text": "```json\n" + _analysis_json() + "\n```",
+            "model": "test-model",
+            "usage": {"total_tokens": 5},
+        }
+
+    monkeypatch.setattr(runtime, "call_completion", fake_call)
+    started = api.data(
+        api.post(
             f"{_base(board, loop)}/generation-runs",
-            json={"purpose": "analysis", "agent_id": agent_id},
+            json={"purpose": "analysis", "agent_id": a2a["id"]},
         )
-        assert response.status_code in {422, 503}, response.text
-        assert expected in response.text, response.text
+    )
+    run = _wait_run(api, f"{_base(board, loop)}/generation-runs", started["id"])
+    assert run["status"] == "completed", run
+    assert used == ["a2a"]

@@ -8,6 +8,7 @@ user input.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -85,7 +86,7 @@ class AttachmentService:
     # --- storage -------------------------------------------------------------
 
     def directory(self, board_id: str) -> Path:
-        path = self.boards.path(board_id).parent / "attachments"
+        path = self.boards.attachments_dir(board_id)
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -176,6 +177,36 @@ class AttachmentService:
         attachment_id = str(uuid4())
         stored = f"{attachment_id}.bin"
         now = utcnow()
+        # The file lands on disk before the row names it: a crash then leaves an unreferenced file
+        # (invisible, prunable) instead of a row whose attachment can never be downloaded.
+        target = self.file_path(board_id, stored)
+        staging = target.with_name(f".{attachment_id}.uploading")
+        try:
+            staging.write_bytes(data)
+            os.replace(staging, target)
+        except OSError as exc:
+            staging.unlink(missing_ok=True)
+            raise ValidationFailure("Could not store the uploaded file") from exc
+        try:
+            return self._insert_upload(
+                actor, board_id, attachment_id, stored, name, extension, data, now, card_id
+            )
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+
+    def _insert_upload(
+        self,
+        actor: ActorContext,
+        board_id: str,
+        attachment_id: str,
+        stored: str,
+        name: str,
+        extension: str,
+        data: bytes,
+        now: str,
+        card_id: str,
+    ) -> dict[str, Any]:
         with self.boards.session(board_id) as conn:
             card = conn.execute(
                 text("SELECT id FROM cards WHERE id = :id"), {"id": card_id}
@@ -222,15 +253,6 @@ class AttachmentService:
                     "size_bytes": len(data),
                 },
             )
-        try:
-            self.file_path(board_id, stored).write_bytes(data)
-        except OSError as exc:
-            with self.boards.session(board_id) as conn:
-                conn.execute(
-                    text("UPDATE attachments SET deleted_at = :now WHERE id = :id"),
-                    {"now": utcnow(), "id": attachment_id},
-                )
-            raise ValidationFailure("Could not store the uploaded file") from exc
         return self.get(board_id, attachment_id)
 
     def delete(self, actor: ActorContext, board_id: str, attachment_id: str) -> None:

@@ -147,8 +147,19 @@ username.
 | GET | `/boards/{board_id}/validate` | `boards:read` |
 | POST | `/boards/{board_id}/migrate` (retry a failed schema migration) | `boards:admin` |
 | GET | `/boards/{board_id}/actors` (`people` to assign, `agents` to ask) | `boards:read` |
-| GET/POST | `/boards/{board_id}/backups` | `boards:read` / `boards:write` |
-| POST | `/boards/{board_id}/backups/{name}/restore` (verifies the backup before replacing data) | `boards:admin` |
+| GET/POST | `/boards/{board_id}/backups` | `boards:read` / `boards:write`; each item reports `has_attachments` and `attachments_size_bytes` |
+| POST | `/boards/{board_id}/backups/{name}/restore` (verifies the backup, then restores the database **and** its files) | `boards:admin` |
+
+A snapshot is a pair: `backup-<UTC>.sqlite` plus, when the board has uploaded files,
+`backup-<UTC>-attachments.zip`. Restoring replaces both, and pruning removes the pair together. A
+snapshot from before this existed has no sidecar and restores the database while leaving the current
+files untouched.
+
+Snapshots are also taken automatically: `BackupScheduler` checks every active board and snapshots any
+whose newest `backup-<UTC>.sqlite` is older than `TRALALA_BACKUP_INTERVAL_HOURS` (default 24, `0`
+disables it), then prunes all but the newest `TRALALA_BACKUP_KEEP` (default 10). It runs in the
+backend process (one process per data directory) and logs `backup_created` / `backup_failed` with the
+board id; files that do not match the backup pattern are never deleted.
 | POST | `/boards/{board_id}/templates` (`{"name","description"}`; snapshots the board's lists and labels) | `boards:write` |
 
 `POST /boards` accepts an optional `template_id`. When present, the template's description, list
@@ -382,6 +393,13 @@ Run statuses: `running`, `paused`, `stopped`, `completed`, `failed`, `budget_exh
 participant fails, when answers repeat (duplicate guard), or when a budget is exhausted. Thread
 `run_state` mirrors `idle`/`running`/`paused`/`stopped` for the UI.
 
+A position is read only from an explicit verdict — a JSON field `verdict`/`position`, a
+`Verdict: AGREE|DISAGREE|ABSTAIN` line, or a line that holds nothing else — so a sentence such as
+"I do not AGREE" counts as no vote rather than agreement, and an unreadable answer records
+`abstain`. Participants answer one after another within a round and each one is shown the answers
+already given in that round; in a `roundtable` thread consensus additionally requires that an
+earlier round produced answers, because whoever opens a thread has read nobody.
+
 Posting a human message answers it automatically in `roundtable` and `autonomous` threads: the
 message starts one background round (one pass over the participants). In a `manual` thread nothing
 runs unless the message opts in with `@agents` (or a participant's display name), which starts the
@@ -427,6 +445,12 @@ first bytes must agree (ZIP for OOXML, `%PDF`, PNG/JPEG/GIF signatures, UTF-8 fo
 `TRALALA_ATTACHMENT_MAX_BYTES` (default 10 MiB per file) and `TRALALA_BOARD_ATTACHMENT_MAX_BYTES`
 (default 200 MiB per board). Bytes are stored as `data/boards/{uuid}/attachments/{attachment_id}.bin`;
 the original filename is metadata only and is sanitized (no separators, no leading dots).
+
+The file is written to a staging name and moved into place before the row that names it is inserted,
+so a crash can only leave an unreferenced file (invisible and harmless), never a row whose bytes are
+missing; a rejected upload removes what it staged. A board's directory is the unit of deletion and
+duplication: deleting a board removes `board.sqlite` and `attachments/` together, and duplicating it
+copies both.
 
 ### Ticket assignment
 
@@ -507,16 +531,19 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 
 | Tool | Scope | What it does |
 | --- | --- | --- |
-| `read_board` | `boards:read` | Loops with stage, `execution_allowed` and `blocked_reason`, the people you may assign, the agents you may ask |
+| `read_board` | `boards:read`, `loops:read` | Loops with stage, `execution_allowed` and `blocked_reason`, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | Goal, Info/Analysis/RoadMap documents, plan with per-Ticket readiness, Kanban columns |
 | `read_ticket` | `cards:read` | Acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
 | `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
 | `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
+| `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the messages and positions |
+| `read_discussion` | `discussions:read` | Read a thread with its messages and each agent's position |
+| `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |
 
 The flow a person and their worker use to start work is `create_loop` → `write_info` →
 `run_analysis` → the person approves the analysis → `read_loop`/`read_ticket` to work the Tickets it
@@ -526,9 +553,17 @@ signed-in person approves them, and a cancelled or completed Loop is read-only.
 Deliberately absent: board and list structure changes, Ticket creation or archiving, RoadMap and QA
 writes, provider configuration and the approval decisions themselves.
 
-Calling a tool the token may not use is a JSON-RPC error (`-32602`) rather than a silent downgrade.
-A tool that fails returns `isError: true` with the API error code in the text content, so a client
-sees `version_conflict` or `human_action_required` instead of a broken transport.
+A tool lists **every** scope it needs, and `tools/list` hides a tool unless the token holds all of
+them ? advertising a call that would fail is worse than not advertising it. Calling a tool the token
+may not use is a JSON-RPC error (`-32602`) rather than a silent downgrade. A tool that fails returns
+`isError: true` with the API error code in the text content, so a client sees `version_conflict` or
+`human_action_required` instead of a broken transport.
+
+Retries are safe where they matter. `create_loop` accepts an `idempotency_key` and replays the first
+answer for the same key; `write_info` returns the current revision unchanged when the content is
+identical; `comment_ticket` and `ask_agents` recognise the same actor repeating the same content or
+question within five minutes and return the existing comment or thread (`deduplicated: true`) instead
+of writing a second one.
 
 ## Example: create a card
 

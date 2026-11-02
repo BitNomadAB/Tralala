@@ -12,30 +12,27 @@ App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / Ro
 - Spec: `Tralala — Product Requirements & Technical Architecture Specification v1.0`
 - Development method: Ralph Loop (`.ralph/`, `AGENTS.md`)
 
-## Test version: the administrator account
+## The administrator account
 
-This build is a **test version**, so every instance started from the instructions below uses the same
-administrator account. Nothing else has to be configured to get in:
+There is no shared password. On first start the server creates `admin` with a **unique generated
+password** and writes it, owner-only, to `<data>/.bootstrap-password`:
 
-| Username | Password |
-| --- | --- |
-| `admin` | `tralala-dev-1` |
+```powershell
+Get-Content .devdata\.bootstrap-password    # or ./data/.bootstrap-password
+```
 
-Sign in at <http://localhost:5173>, then change it under **Settings → Your password** (fields
-"Current password" and "New password", at least 8 characters). A password change revokes every
-session, including your own, so sign in again with the new one.
+Sign in at <http://localhost:5173> with `admin` and that value, then change it under
+**Settings ? Your password** (at least 8 characters) and delete the file. A password change revokes
+every session, including your own, so sign in again with the new one.
 
-Two things keep this honest:
-
-- The value is not a built-in default. It works because `TRALALA_BOOTSTRAP_PASSWORD=tralala-dev-1` is
-  set in `.env` (see [`.env.example`](.env.example)) or in the process environment. With no value, or
-  with a placeholder such as `admin` or `change-me`, the server generates a random password into
-  `<data>/.bootstrap-password` on first start.
-- It only applies while no user exists. Once you have changed the password, the bootstrap value is
-  ignored for that installation.
-
-Change the password before the instance is reachable by anyone else, and never run a network-facing
-instance on the shared test password.
+- Set `TRALALA_BOOTSTRAP_PASSWORD` only for a **disposable local test install**; it is honoured only
+  while no account exists. `admin`, `password`, `change-me`, `changeme` and the old published
+  `tralala-dev-1` are all treated as empty, so copying an old `.env` still yields a generated one.
+- `docker compose` refuses to start without an explicit `TRALALA_BOOTSTRAP_PASSWORD`, because the
+  compose file marks it required ? pick your own, never a documented value.
+- If the file is missing and no password was set, the account was created earlier: reset it with
+  `POST /api/v1/users/{id}/password` from an administrator session, or delete `registry.sqlite` in a
+  throwaway install.
 
 ### Invite people instead of sharing a password
 
@@ -189,7 +186,8 @@ Create `backend\.env` (gitignored) with:
 ```ini
 TRALALA_SECRET_KEY=replace-with-a-long-random-string
 TRALALA_BOOTSTRAP_USERNAME=admin
-TRALALA_BOOTSTRAP_PASSWORD=tralala-dev-1
+# Leave empty: the generated administrator password lands in ..\data\.bootstrap-password
+TRALALA_BOOTSTRAP_PASSWORD=
 TRALALA_DATA_DIR=..\data
 ```
 
@@ -220,7 +218,8 @@ pnpm dev
 
 ### 9. Open the application
 
-<http://localhost:5173> - sign in as `admin` with the test password from [Test version](#test-version-the-administrator-account). API documentation:
+<http://localhost:5173> - sign in as `admin` with the password from `<data>/.bootstrap-password`
+([The administrator account](#the-administrator-account)). API documentation:
 <http://localhost:5173/docs> after sign-in. Stop both processes with `Ctrl+C`.
 
 ## Install and run on Ubuntu / Debian (bash)
@@ -284,7 +283,8 @@ cd frontend && pnpm install && cd ..
 cat > backend/.env <<'EOF'
 TRALALA_SECRET_KEY=replace-with-a-long-random-string
 TRALALA_BOOTSTRAP_USERNAME=admin
-TRALALA_BOOTSTRAP_PASSWORD=tralala-dev-1
+# Leave empty: the generated administrator password lands in ../data/.bootstrap-password
+TRALALA_BOOTSTRAP_PASSWORD=
 TRALALA_DATA_DIR=../data
 EOF
 ```
@@ -309,7 +309,8 @@ pnpm dev
 
 ### 9. Open the application
 
-<http://localhost:5173> - sign in as `admin` with the test password from [Test version](#test-version-the-administrator-account). API documentation:
+<http://localhost:5173> - sign in as `admin` with the password from `<data>/.bootstrap-password`
+([The administrator account](#the-administrator-account)). API documentation:
 <http://localhost:5173/docs> after sign-in. Stop both processes with `Ctrl+C`.
 
 ## Install and run on macOS (zsh/bash)
@@ -361,7 +362,8 @@ cd frontend && pnpm install && cd ..
 cat > backend/.env <<'EOF'
 TRALALA_SECRET_KEY=replace-with-a-long-random-string
 TRALALA_BOOTSTRAP_USERNAME=admin
-TRALALA_BOOTSTRAP_PASSWORD=tralala-dev-1
+# Leave empty: the generated administrator password lands in ../data/.bootstrap-password
+TRALALA_BOOTSTRAP_PASSWORD=
 TRALALA_DATA_DIR=../data
 EOF
 ```
@@ -386,15 +388,16 @@ pnpm dev
 
 ### 8. Open the application
 
-<http://localhost:5173> - sign in as `admin` with the test password from [Test version](#test-version-the-administrator-account). API documentation:
+<http://localhost:5173> - sign in as `admin` with the password from `<data>/.bootstrap-password`
+([The administrator account](#the-administrator-account)). API documentation:
 <http://localhost:5173/docs> after sign-in. Stop both processes with `Ctrl+C`.
 
 ## Run with Docker (any operating system)
 
 ```bash
 cp .env.example .env
-# the copied file already carries the shared test password (README: "Test version"); set
-# TRALALA_SECRET_KEY to a long random string, then start and change the password after sign-in
+# then set TRALALA_SECRET_KEY and TRALALA_BOOTSTRAP_PASSWORD to your own long random values;
+# compose refuses to start without the latter, which is the point
 docker compose up --build
 ```
 
@@ -476,21 +479,22 @@ Chromium when no browser build is present; override with `PLAYWRIGHT_CLI=<path t
 
 - The session secret is generated per install (`<data>/.session-secret`, owner-only) when
   `TRALALA_SECRET_KEY` is unset; the published fallback is never used.
-- The application ships no built-in password: without an explicit
-  `TRALALA_BOOTSTRAP_PASSWORD` (and for placeholders such as `admin` or `change-me`) a random
-  password is written once to `<data>/.bootstrap-password`. In this **test version** the value in
-  [`.env.example`](.env.example) is a shared starting password, so change it on first sign-in
-  ([Test version](#test-version-the-administrator-account)); it is honoured only while no account
-  exists.
+- The application ships no built-in password and the example environment file contains none: without
+  an explicit `TRALALA_BOOTSTRAP_PASSWORD` a unique password is generated on first start and written
+  once to `<data>/.bootstrap-password` (owner-only). Published or placeholder values ? including the
+  `tralala-dev-1` this repository used to document ? are treated as empty
+  ([The administrator account](#the-administrator-account)).
 - Sessions are rows in the registry; logout, a password change, a role change and disabling an
   account revoke them. Expired sessions are purged at startup.
 - Sign-in is throttled per username and per client address with exponential backoff
   (`X-Forwarded-For` is only trusted with `TRALALA_TRUST_PROXY_HEADERS=true`).
 - Passwords need at least 8 characters (`TRALALA_PASSWORD_MIN_LENGTH`, the floor is 8) and cannot
   equal the username. Changing your own password requires the current one and signs out every device.
-- API tokens expire after 90 days by default (`TRALALA_CREDENTIAL_DEFAULT_TTL_DAYS`, `0` for none),
-  can be rotated with one click, and can never hold `credentials:admin` or `users:admin`. Only
-  administrators see and manage them.
+- A person's own agent access expires after 30 days by default (`TRALALA_MEMBER_TOKEN_DEFAULT_DAYS`,
+  ceiling `TRALALA_MEMBER_TOKEN_MAX_DAYS`), is capped at `TRALALA_MEMBER_TOKEN_LIMIT` live keys, and
+  can be revoked at any time; disabling an account revokes the keys it issued. An administrator may
+  issue a wider token (90 days by default, `TRALALA_CREDENTIAL_DEFAULT_TTL_DAYS`, `0` for none). No
+  token can ever hold `credentials:admin` or `users:admin`.
 - Provider keys are sealed with a key derived from the session secret. After rotating
   `TRALALA_SECRET_KEY`, set `TRALALA_PREVIOUS_SECRET_KEY` for one start: stored keys are re-sealed
   with the new secret, then the old value can be removed.
@@ -501,6 +505,10 @@ Chromium when no browser build is present; override with `PLAYWRIGHT_CLI=<path t
 - API errors never echo server paths or driver text; details stay in the server log.
 - The production bundle is checked by `scripts/check-client-build.mjs` for source maps and
   server-only strings as part of `pnpm build`.
+- Every active board is snapshotted automatically every `TRALALA_BACKUP_INTERVAL_HOURS` (default 24,
+  `0` disables it), and only the newest `TRALALA_BACKUP_KEEP` snapshots (default 10) are kept. Files
+  outside the `backup-<timestamp>.sqlite` pattern are never pruned. Automatic snapshots log
+  `backup_created` / `backup_failed` with the board id.
 - Containers start uvicorn with `--no-server-header` and nginx with `server_tokens off`.
 
 ## Agent usage
@@ -528,10 +536,11 @@ curl -s -X POST "http://localhost:8000/mcp" \
        "arguments":{"board_id":"<board-uuid>"}}}'
 ```
 
-The ten worker tools are `read_board`, `read_loop`, `read_ticket`, `create_loop`, `write_info`,
-`run_analysis`, `assign_ticket`, `move_ticket`, `comment_ticket` and `ask_agents`. Together they let a
-person and their agent agree an intent, open a Loop for it, write the Info while the Loop is still
-speculative, ask the agents for an Analysis and then track the Tickets it produces. They cannot
+The thirteen worker tools are `read_board`, `read_loop`, `read_ticket`, `create_loop`, `write_info`,
+`run_analysis`, `run_roadmap`, `assign_ticket`, `move_ticket`, `comment_ticket`, `ask_agents`,
+`read_discussion` and `reply_discussion`. Together they let a person and their agent agree an intent,
+open a Loop for it, write the Info while the Loop is still speculative, ask the agents for an Analysis
+and a RoadMap, discuss in one thread and then track the Tickets the plan produces. They cannot
 create boards or Tickets, archive anything, write a RoadMap, or approve a gate; changing Info after
 planning has started is a person's decision. The REST API stays available for everything else:
 discover boards and Loops, list columns and Tickets, search, submit Analysis and RoadMap candidates,

@@ -60,7 +60,8 @@ class Orchestrator:
         self.boards = board_service.boards
         self.events = events
 
-    def _context(self, conn: Any, thread: dict[str, Any], limit: int = 20) -> list[dict[str, str]]:
+    def _context(self, conn: Any, thread: dict[str, Any], limit: int = 20) -> tuple[str, str]:
+        """Return the ticket briefing and the stored transcript the prompt is built from."""
         card = conn.execute(
             text(
                 "SELECT c.id, c.title, c.description, c.priority, c.ticket_key,"
@@ -92,17 +93,26 @@ class Orchestrator:
             f"[{entry['author_name']} · {entry['author_type']}] {entry['content'][:1500]}"
             for entry in history
         )
-        return [
-            {
-                "role": "user",
-                "content": (
-                    f"{ticket}\n\nDiscussion goal: {thread['goal']}\n\n"
-                    f"Transcript so far:\n{transcript}\n\n"
-                    "Respond with your analysis from your role. End with a single verdict word: "
-                    "AGREE, DISAGREE or ABSTAIN."
-                ),
-            }
-        ]
+        return ticket, transcript
+
+    @staticmethod
+    def _prompt(
+        ticket: str, thread: dict[str, Any], transcript: str, in_round: list[str]
+    ) -> dict[str, str]:
+        sections = [ticket, f"Discussion goal: {thread['goal']}"]
+        sections.append(f"Transcript so far:\n{transcript or '(nothing yet)'}")
+        if in_round:
+            # Agents answer one after another, so each one can respond to what was just said instead
+            # of everyone replying to the previous round in parallel.
+            sections.append(
+                "Answers earlier in this round, before yours:\n" + "\n\n".join(in_round)
+            )
+        sections.append(
+            "Respond with your analysis from your role and name the agent you are answering. "
+            "End with one line exactly like `Verdict: AGREE`, `Verdict: DISAGREE` or "
+            "`Verdict: ABSTAIN`, followed by a one-sentence reason."
+        )
+        return {"role": "user", "content": "\n\n".join(sections)}
 
     def _run_state(self, board_id: str, run_id: str) -> tuple[str, int]:
         with self.boards.reader(board_id) as conn:
@@ -149,7 +159,16 @@ class Orchestrator:
                 " ORDER BY joined_at",
                 {"id": discussion_id},
             )
-            messages = self._context(conn, thread)
+            ticket, transcript = self._context(conn, thread)
+            # Counted before the round runs: a roundtable may only conclude once some earlier round
+            # produced answers, otherwise a unanimous first round means everyone guessed alike.
+            prior_answers = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM discussion_messages"
+                    " WHERE discussion_id = :id AND author_type = 'agent' AND deleted_at IS NULL"
+                ),
+                {"id": discussion_id},
+            ).scalar_one()
 
         registry = self.board_service.registry
         _, tokens_before = self._run_state(board_id, run_id)
@@ -173,7 +192,10 @@ class Orchestrator:
                 conn, discussion_id=discussion_id, type=type, payload=payload
             )
 
+        in_round: list[str] = []
+
         for participant in participants:
+            messages = [self._prompt(ticket, thread, transcript, in_round)]
             status, _ = self._run_state(board_id, run_id)
             if status != "running":
                 interrupted = status
@@ -221,6 +243,7 @@ class Orchestrator:
                     )
                 emit(failed_event)
                 continue
+            in_round.append(f"[{participant['display_name']} · agent] {result['text'][:1500]}")
             digest = content_hash(result["text"])
             round_tokens = usage_tokens(result)
             tokens += round_tokens
@@ -348,10 +371,14 @@ class Orchestrator:
         latest: dict[str, str] = {}
         for vote in votes:
             latest.setdefault(vote["participant_id"], vote["position"])
+        # In a roundtable the agents are meant to review each other, so agreement in the opening
+        # round cannot be consensus: whoever answered first had read nobody.
+        needs_review_round = thread.get("mode") == "roundtable" and len(participants) > 1
         unanimous = (
             bool(latest)
             and set(latest.values()) == {"agree"}
             and set(latest) == {p["participant_id"] for p in participants}
+            and (not needs_review_round or prior_answers > 0)
         )
 
         return {

@@ -1,4 +1,4 @@
-﻿# Ralph progress log
+# Ralph progress log
 
 Append-only. Newest entries at the bottom. Never rewrite history; correct mistakes with a new entry.
 
@@ -803,3 +803,67 @@ no example token), and the snippet comes from `lib/agentAccess.ts`, so the card 
 show different endpoints. The duplicate config block that used to sit below the list is gone; the
 guide owns it. Verified in the running UI (expanded guide screenshots) and by extending the member
 e2e journey to open the guide and assert its steps.
+
+## 2026-11-02 - Review round: worker-surface correctness, CI, backups, roadmap and discussions
+
+Worked through the list from the read-only review, in the order agreed.
+
+1. **Worker surface correctness.**
+   - `/llms.txt` no longer says "ask an administrator for a token" or "90 days by default": it names
+     Settings -> New access key, the member default of 30 days, the 365-day ceiling and the fact that
+     disabling an account revokes the keys it issued.
+   - `AgentTool.scope` became `scopes: tuple[str, ...]`. `read_board` needs `boards:read` **and**
+     `loops:read`, and `tools/list`/`tools/call` now filter on all of them, so a tool that would fail
+     is never advertised (`missing_scopes` helper).
+   - Retries no longer duplicate work: `create_loop` takes an `idempotency_key`, `write_info` returns
+     the current revision when the content is identical, and `comment_ticket`/`ask_agents` recognise
+     the same actor repeating the same content/question inside five minutes
+     (`deduplicated: true`).
+2. **Four new tools** (13 total): `run_roadmap` (RoadMap candidate once the analysis is approved),
+   `read_discussion` and `reply_discussion` (a question becomes a conversation instead of a thread
+   per question).
+3. **Scheduled backups.** `BackupService.prune`/`newest_age_hours` plus `BackupScheduler`: every
+   active board whose newest snapshot is older than `TRALALA_BACKUP_INTERVAL_HOURS` (default 24,
+   `0` off) is snapshotted, keeping `TRALALA_BACKUP_KEEP` (default 10). In-process daemon thread,
+   first check after 30 s, hourly afterwards, per-board failures logged and never fatal. Foreign files
+   in the backup directory are never deleted.
+4. **CI.** `.github/workflows/ci.yml`: backend (ruff + pytest), frontend (typecheck, unit tests,
+   build with the client guard) and a Playwright job that installs Chromium and uploads the report on
+   failure.
+
+Tests added: scope-filtering refusal, idempotent `create_loop`, deduplicated `write_info`/comment,
+`run_roadmap` precondition, discussion follow-up, backup pruning + scheduler due/skip + disabled.
+Verification: full backend suite green, ruff clean, frontend typecheck/unit/build green, Playwright
+28/28.
+
+## Review findings and the bug list
+
+Worked the three review findings (published bootstrap password, backups/export without attachments,
+A2A never executed) and then `.ralph/potential-bugs.txt`:
+
+- **Bootstrap password.** No shared password ships. `INSECURE_BOOTSTRAP_PASSWORDS` blocks the old
+  placeholder everywhere, README and `.env.example` carry blanks, and the administrator password is
+  generated on first install into `<data>/.bootstrap-password`
+  (`test_a_published_password_never_becomes_the_administrator_password`).
+- **Files travel with the database.** A backup is a `backup-<UTC>.sqlite` plus a
+  `backup-<UTC>-attachments.zip` sidecar; restore, prune and listing treat them as a pair, and board
+  export/import carries `attachments/`. Decision 0019.
+- **A2A executes** (`call_a2a`: Agent Card, `message/send`, parts/artifacts/status extraction) with a
+  loopback stub in `tests/test_a2a_runtime.py`. Decision 0018.
+- **Board deletion and duplication.** A board is its directory: deleting removes the database and the
+  uploaded files under the board lock, disk before the registry row so a failed delete is retryable;
+  duplicating copies the files too.
+- **Verdicts.** A position now comes only from a JSON `verdict`/`position`, a `Verdict:` line or a
+  line holding nothing else, so "I do not AGREE" is not agreement and an unreadable answer abstains.
+- **Roundtable discussion.** Participants answer one after another and each prompt carries the
+  answers already given in that round; consensus in a `roundtable` thread additionally requires that
+  an earlier round produced answers.
+- **Attachments on the way in and out.** Uploads stage the bytes and move them into place before the
+  row is inserted (and clean up when rejected); a mention prompt now carries a bounded excerpt of up
+  to three text-like attachments.
+- **Transports.** `runtime.EXECUTABLE_CONNECTION_TYPES` is the single list; `loop_generation` accepts
+  every executable transport, so an A2A agent can generate.
+
+Tests added: board deletion with attachments, duplicate keeps files, rejected upload leaves no file,
+verdict parsing (negation, JSON, labelled line), in-round context, roundtable review round, A2A
+generation. Verification: backend suite green, ruff clean.

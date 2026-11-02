@@ -131,10 +131,13 @@ def test_initialize_and_tools_list_are_scope_filtered(
         "create_loop",
         "write_info",
         "run_analysis",
+        "run_roadmap",
         "assign_ticket",
         "move_ticket",
         "comment_ticket",
         "ask_agents",
+        "read_discussion",
+        "reply_discussion",
     }
 
 
@@ -365,3 +368,107 @@ def test_create_loop_write_info_and_run_analysis(api: Api, client: TestClient) -
     assert payload["run"]["status"] in {"queued", "running", "failed", "completed"}
     assert payload["analysis"]["state"] in {"empty", "ready_for_review", "draft"}
 
+
+def test_read_board_is_not_offered_without_the_loop_scope(
+    api: Api, client: TestClient, board: dict[str, Any]
+) -> None:
+    """A tool that would fail on a missing scope must not be advertised in the first place."""
+    token = _token(api, ["boards:read"], "board-only")
+    listed = _rpc(client, token, "tools/list").json()["result"]["tools"]
+    assert [tool["name"] for tool in listed] == []
+    refused = _rpc(
+        client,
+        token,
+        "tools/call",
+        {"name": "read_board", "arguments": {"board_id": board["id"]}},
+    ).json()
+    assert "loops:read" in refused["error"]["message"]
+
+
+def test_a_retried_create_loop_does_not_clone_the_loop(api: Api, client: TestClient) -> None:
+    board = api.data(api.post("/api/v1/boards", json={"name": "Retry board"}))
+    token = _token(api, WRITE_SCOPES, "retrier")
+    arguments = {
+        "board_id": board["id"],
+        "name": "Account enrolment",
+        "idempotency_key": "retry-1",
+    }
+    first = _call(client, token, "create_loop", arguments)["structuredContent"]["loop"]
+    second = _call(client, token, "create_loop", arguments)["structuredContent"]["loop"]
+    assert first["id"] == second["id"]
+    loops = api.data(api.get(f"/api/v1/boards/{board['id']}/loops"))
+    assert len(loops) == 1
+
+
+def test_a_repeated_write_and_comment_are_not_duplicated(
+    api: Api, client: TestClient, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    token = _token(api, WRITE_SCOPES, "repeater")
+    info = {"board_id": board["id"], "loop_id": loop["id"], "content": "One intent."}
+    first = _call(client, token, "write_info", info)["structuredContent"]
+    again = _call(client, token, "write_info", info)["structuredContent"]
+    assert again["deduplicated"] is True
+    assert again["revision_number"] == first["revision_number"] == 1
+
+    ticket = _ticket(api, board, loop, "Repeat me")
+    comment = {"board_id": board["id"], "card_id": ticket["id"], "content": "Working on it."}
+    one = _call(client, token, "comment_ticket", comment)["structuredContent"]
+    two = _call(client, token, "comment_ticket", comment)["structuredContent"]
+    assert two["deduplicated"] is True
+    assert one["id"] == two["id"]
+
+
+def test_run_roadmap_reports_the_missing_approval(
+    api: Api, client: TestClient, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    _agent(api, "Roadmap agent")
+    api.data(
+        api.put(
+            f"/api/v1/boards/{board['id']}/loops/{loop['id']}/documents/info",
+            json={"content": "Intent"},
+        )
+    )
+    token = _token(api, WRITE_SCOPES, "roadmapper")
+    result = _call(
+        client, token, "run_roadmap", {"board_id": board["id"], "loop_id": loop["id"]}
+    )
+    assert result["isError"] is True
+    assert "approval_required" in result["content"][0]["text"]
+
+
+def test_a_question_becomes_a_conversation(
+    api: Api, client: TestClient, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    _agent(api, "Debate agent")
+    ticket = _ticket(api, board, loop, "Ask twice")
+    token = _token(api, WRITE_SCOPES, "asker")
+    arguments = {
+        "board_id": board["id"],
+        "card_id": ticket["id"],
+        "question": "Is a queue needed?",
+    }
+    first = _call(client, token, "ask_agents", arguments)["structuredContent"]
+    retried = _call(client, token, "ask_agents", arguments)["structuredContent"]
+    assert retried.get("deduplicated") is True
+    assert retried["discussion_id"] == first["discussion_id"]
+
+    read = _call(
+        client,
+        token,
+        "read_discussion",
+        {"board_id": board["id"], "discussion_id": first["discussion_id"]},
+    )["structuredContent"]
+    assert read["messages"][0]["content"] == "Is a queue needed?"
+
+    replied = _call(
+        client,
+        token,
+        "reply_discussion",
+        {
+            "board_id": board["id"],
+            "discussion_id": first["discussion_id"],
+            "content": "Follow-up: what about the retry path?",
+        },
+    )["structuredContent"]
+    assert any("retry path" in message["content"] for message in replied["messages"])
+    assert len(replied["messages"]) > len(read["messages"])

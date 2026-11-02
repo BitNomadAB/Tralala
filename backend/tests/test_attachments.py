@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from conftest import Api, loop_id
 
@@ -206,3 +207,20 @@ def test_disabled_agent_cannot_be_assigned(api: Api, board: dict[str, Any]) -> N
         json={"version": card["version"], "assignee_actor_id": "not-a-real-id"},
     )
     assert unknown.status_code == 422
+
+
+def test_a_rejected_upload_leaves_no_file_behind(
+    api: Api, board: dict[str, Any], settings: Any
+) -> None:
+    missing = api.post(
+        f"/api/v1/boards/{board['id']}/attachments",
+        params={"card_id": str(uuid4()), "filename": "notes.txt"},
+        content=b"body",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert missing.status_code == 404
+    # The file is written before the row names it, so a rejected upload must clean up after itself
+    # instead of leaving an unreferenced blob in the board directory.
+    directory = Path(settings.data_dir) / "boards" / board["id"] / "attachments"
+    leftovers = list(directory.glob("*")) if directory.exists() else []
+    assert leftovers == []

@@ -135,6 +135,55 @@ def test_delete_requires_archive_and_matching_name(api: Api, board: dict[str, An
     assert api.get(f"/api/v1/boards/{board['id']}").status_code == 404
 
 
+def _upload_note(api: Api, board: dict[str, Any]) -> dict[str, Any]:
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
+    card = api.data(
+        api.post(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+            json={"list_id": lists[0]["id"], "title": "Attachment host"},
+        )
+    )
+    return api.data(
+        api.post(
+            f"/api/v1/boards/{board['id']}/attachments",
+            params={"card_id": card["id"], "filename": "notes.txt"},
+            content=b"board file body",
+            headers={"Content-Type": "text/plain"},
+        )
+    )
+
+
+def test_deleting_a_board_with_attachments_removes_the_whole_directory(
+    api: Api, board: dict[str, Any], settings: Any
+) -> None:
+    attachment = _upload_note(api, board)
+    directory = Path(settings.data_dir) / "boards" / board["id"]
+    assert (directory / "attachments" / f"{attachment['id']}.bin").exists()
+    api.data(api.post(f"/api/v1/boards/{board['id']}/archive"))
+    deleted = api.delete(f"/api/v1/boards/{board['id']}", json={"confirm_name": board["name"]})
+    assert api.data(deleted)["deleted"] is True
+    # A board is its database plus its files; leaving either behind both leaks data and leaves a
+    # row that can never be opened again.
+    assert not directory.exists()
+
+
+def test_duplicating_a_board_copies_its_attachments(
+    api: Api, board: dict[str, Any], settings: Any
+) -> None:
+    attachment = _upload_note(api, board)
+    duplicate = api.data(api.post(f"/api/v1/boards/{board['id']}/duplicate"))
+    copied = (
+        Path(settings.data_dir)
+        / "boards"
+        / duplicate["id"]
+        / "attachments"
+        / f"{attachment['id']}.bin"
+    )
+    assert copied.read_bytes() == b"board file body"
+
+
 def test_path_traversal_board_ids_are_rejected(api: Api) -> None:
     for candidate in ("..%2F..%2Fetc", "00000000-0000-0000-0000-000000000000"):
         response = api.get(f"/api/v1/boards/{candidate}")

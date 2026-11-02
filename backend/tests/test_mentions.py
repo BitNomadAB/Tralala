@@ -198,6 +198,9 @@ def test_context_contains_ticket_labels_checklists_and_recent_comments(
     assert "- Acceptance: [ ] Backoff is capped" in prompt
     assert "Earlier human note" in prompt
     assert "trace.txt (text/plain" in prompt
+    # The agent gets the note's text, not just its name: a mentioned agent that cannot read the
+    # attached trace cannot answer the question about it.
+    assert "stack trace" in prompt
     assert f"@{agent['name']} what should we do?" in prompt
     assert "QA Engineer" in captured["system_prompt"]
 

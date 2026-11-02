@@ -21,7 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..core.config import Settings
 from ..core.errors import ApiError
-from ..services.agent_tools import tool_catalog
+from ..services.agent_tools import missing_scopes, tool_catalog
 from .deps import RequestContext, get_context
 
 router = APIRouter(tags=["mcp"])
@@ -54,7 +54,7 @@ def _tool_payload(ctx: RequestContext) -> list[dict[str, Any]]:
             "inputSchema": tool.input_schema,
         }
         for tool in tool_catalog().values()
-        if ctx.actor.has_scope(tool.scope)
+        if not missing_scopes(tool, ctx.actor)
     ]
 
 
@@ -129,9 +129,10 @@ async def mcp_endpoint(request: Request) -> Response:
         tool = tool_catalog().get(name)
         if tool is None:
             return JSONResponse(_error(message_id, -32602, f"Unknown tool: {name}"))
-        if not ctx.actor.has_scope(tool.scope):
+        missing = missing_scopes(tool, ctx.actor)
+        if missing:
             return JSONResponse(
-                _error(message_id, -32602, f"Missing required scope: {tool.scope}")
+                _error(message_id, -32602, "Missing required scope: " + ", ".join(missing))
             )
         try:
             # Handlers touch SQLite and may poll a generation run, so they never run on the event
@@ -167,15 +168,17 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "## 1. Authenticate",
         "",
-        "Ask an administrator for an API token (Settings -> New token). Send it on every call:",
+        "Create a key in Settings -> New access key: any signed-in person may issue agent access",
+        "for their own machine, and an administrator can issue a wider one. Send it on every call:",
         "",
         "```",
         "Authorization: Bearer <token>",
         "```",
         "",
-        "Tokens are per installation and expire (90 days by default). Cookie sessions are for",
-        "people in a browser: they also need the `X-CSRF-Token` header on writes. A token never",
-        "needs it.",
+        "A personal key expires (30 days by default, at most 365); an administrator's token",
+        "defaults to 90. A token that a person issued is revoked when their account is disabled.",
+        "Cookie sessions are for people in a browser: they also need the `X-CSRF-Token` header on",
+        "writes, which a token never needs.",
         "",
         "## 2. Envelope",
         "",
@@ -212,7 +215,8 @@ def render_bootstrap(settings: Settings) -> str:
         "",
     ]
     for tool in tools.values():
-        lines.append(f"### {tool.name} (scope `{tool.scope}`)")
+        required = ", ".join(f"`{scope}`" for scope in tool.scopes)
+        lines.append(f"### {tool.name} (requires {required})")
         lines.append("")
         lines.append(tool.description)
         properties = tool.input_schema.get("properties", {})
@@ -236,6 +240,7 @@ def render_bootstrap(settings: Settings) -> str:
         "- `PATCH /api/v1/boards/{board_id}/loops/{loop_id}/cards/{card_id}` (assignee, version)",
         "- `POST /api/v1/boards/{board_id}/loops/{loop_id}/cards/{card_id}/move`",
         "- `POST /api/v1/boards/{board_id}/loops/{loop_id}/cards/{card_id}/comments`",
+        "- `POST /api/v1/boards/{board_id}/loops/{loop_id}/generation-runs` (analysis or roadmap)",
         "- `POST /api/v1/boards/{board_id}/discussions`, then `.../discussions/{id}/start`",
         "- `GET /api/v1/boards/{board_id}/actors` (people to assign, agents to ask)",
         "",
@@ -243,7 +248,9 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "The agents registered here read and advise; they never change a Ticket and never touch",
         "code. Ask them through a discussion on the Ticket: create the thread with the question as",
-        "`goal`, then start one round. `ask_agents` does both in a single call.",
+        "`goal`, then start one round. `ask_agents` does both in a single call; `reply_discussion`",
+        "continues the same thread and `read_discussion` re-reads it, so a question can become a",
+        "conversation instead of a new thread per question.",
         "",
         "## 8. Limits",
         "",

@@ -18,17 +18,22 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ..core.context import ActorContext
-from ..core.errors import Forbidden, NotFound, ValidationFailure, VersionConflict
+from ..core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
 from ..schemas.cards import CardMove, CardUpdate
-from ..schemas.discussions import DiscussionCreate
+from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from ..schemas.loops import GenerationRequest, InfoRevisionWrite, LoopCreate
 from ..schemas.subresources import CommentCreate
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
+
+# A retried call arrives seconds later; a deliberate repeat rarely does. This window is what tells
+# them apart without a shared idempotency store.
+DEDUPE_WINDOW_SECONDS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +42,7 @@ class AgentTool:
 
     name: str
     description: str
-    scope: str
+    scopes: tuple[str, ...]
     input_schema: dict[str, Any]
     handler: Callable[[Services, ActorContext, dict[str, Any]], dict[str, Any]]
 
@@ -62,6 +67,15 @@ def _text(value: Any) -> str | None:
         return None
     cleaned = str(value).strip()
     return cleaned or None
+
+
+def _seconds_since(timestamp: str) -> float:
+    """Age of an ISO 8601 timestamp in seconds; a malformed one counts as ancient."""
+    try:
+        moment = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return float("inf")
+    return (datetime.now(UTC) - moment).total_seconds()
 
 
 def _require(args: dict[str, Any], key: str) -> str:
@@ -326,6 +340,19 @@ def _comment_ticket(
     content = _require(args, "content")
     # Resolving the Ticket proves it belongs to this board before anything is written.
     _ticket_location(services, board_id, card_id)
+    for existing in services.comment.list(board_id, card_id):
+        if (
+            existing["actor_id"] == actor.actor_id
+            and existing["content"] == content
+            and _seconds_since(existing["created_at"]) < DEDUPE_WINDOW_SECONDS
+        ):
+            return {
+                "id": existing["id"],
+                "actor": existing["actor_name"],
+                "content": existing["content"],
+                "created_at": existing["created_at"],
+                "deduplicated": True,
+            }
     created = services.comment.create(
         actor, board_id, card_id, CommentCreate(content=content)
     )
@@ -351,7 +378,12 @@ def _create_loop(
         if isinstance(columns, list) and columns
         else None,
     )
-    loop, _ = services.loop.create(actor, board_id, payload)
+    loop, _ = services.loop.create(
+        actor,
+        board_id,
+        payload,
+        idempotency_key=_text(args.get("idempotency_key")),
+    )
     return {
         "loop": {
             "id": loop["id"],
@@ -372,6 +404,16 @@ def _write_info(
     board_id = _require(args, "board_id")
     loop_id = _require(args, "loop_id")
     content = _require(args, "content")
+    current = services.loop_document.documents(board_id, loop_id)["documents"]["info"]
+    if current["current_content"] == content:
+        return {
+            "loop_id": loop_id,
+            "revision_number": current["current_revision_number"],
+            "revision_id": current["current_revision_id"],
+            "state": current["state"],
+            "deduplicated": True,
+            "next_step": "Call run_analysis to have an agent turn this Info into findings.",
+        }
     documents = services.loop_document.save_info(
         actor,
         board_id,
@@ -437,6 +479,126 @@ def _run_analysis(
     }
 
 
+def _run_roadmap(
+    services: Services, actor: ActorContext, args: dict[str, Any]
+) -> dict[str, Any]:
+    actor.require("loops:generate")
+    board_id = _require(args, "board_id")
+    loop_id = _require(args, "loop_id")
+    run, _ = services.loop_generation.start(
+        actor,
+        board_id,
+        loop_id,
+        GenerationRequest(
+            purpose="roadmap",
+            agent_id=_text(args.get("agent_id")),
+            instructions=_text(args.get("instructions")) or "",
+        ),
+    )
+    run_id = str(run["id"])
+    wait = max(0, min(int(args.get("wait_seconds") or 0), 120))
+    deadline = time.monotonic() + wait
+    while wait and run["status"] in {"queued", "running"} and time.monotonic() < deadline:
+        time.sleep(0.5)
+        run = services.loop_generation.get(board_id, loop_id, run_id)
+    documents = services.loop_document.documents(board_id, loop_id)
+    roadmap = documents["documents"]["roadmap_ai"]
+    return {
+        "run": {
+            "id": run_id,
+            "status": run["status"],
+            "error_code": run.get("error_code"),
+            "error_message": run.get("error_message"),
+            "agent": run.get("agent_name"),
+        },
+        "roadmap": {
+            "state": roadmap["state"],
+            "revision_number": roadmap["current_revision_number"],
+            "revision_id": roadmap["current_revision_id"],
+        },
+        "next_step": (
+            "The RoadMap is a candidate: a person approves it, and that approval publishes the "
+            "Tickets. Read it with read_loop."
+        ),
+    }
+
+
+def _thread_view(thread: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "discussion_id": thread["id"],
+        "title": thread["title"],
+        "status": thread["status"],
+        "goal": thread["goal"],
+        "card_id": thread.get("card_id"),
+        "run_state": thread.get("run_state"),
+        "messages": [
+            {
+                "id": message["id"],
+                "author": message["author_name"],
+                "author_type": message["author_type"],
+                "content": message["content"],
+                "created_at": message["created_at"],
+            }
+            for message in thread.get("messages", [])
+        ],
+        "positions": [
+            {
+                "agent": vote["display_name"],
+                "position": vote["position"],
+                "justification": vote["justification"],
+            }
+            for vote in thread.get("votes", [])
+        ],
+    }
+
+
+def _read_discussion(
+    services: Services, actor: ActorContext, args: dict[str, Any]
+) -> dict[str, Any]:
+    actor.require("discussions:read")
+    board_id = _require(args, "board_id")
+    discussion_id = _require(args, "discussion_id")
+    return _thread_view(services.discussion.get(board_id, discussion_id))
+
+
+def _reply_discussion(
+    services: Services, actor: ActorContext, args: dict[str, Any]
+) -> dict[str, Any]:
+    actor.require("discussions:write")
+    board_id = _require(args, "board_id")
+    discussion_id = _require(args, "discussion_id")
+    content = _require(args, "content")
+    detail = services.discussion.add_message(
+        actor,
+        board_id,
+        discussion_id,
+        DiscussionMessageCreate(
+            content=content, parent_message_id=_text(args.get("parent_message_id"))
+        ),
+    )
+    run: dict[str, Any] | None = None
+    if bool(args.get("run", True)) and detail["status"] not in {"closed", "decided"}:
+        try:
+            run = services.run.start(
+                actor, board_id, discussion_id, rounds=1, autonomous=False
+            )
+        except Conflict as error:
+            # A run already active is not a failure: the message is posted and the caller can poll.
+            run = {"status": "running", "stop_reason": error.code}
+    thread = services.discussion.get(board_id, discussion_id)
+    view = _thread_view(thread)
+    view["run"] = (
+        {
+            "id": run.get("run_id"),
+            "status": run.get("run_status") or run.get("status"),
+            "stop_reason": run.get("stop_reason"),
+        }
+        if run
+        else None
+    )
+    return view
+
+
 def _ask_agents(
     services: Services, actor: ActorContext, args: dict[str, Any]
 ) -> dict[str, Any]:
@@ -455,6 +617,20 @@ def _ask_agents(
             "the board.",
             code="no_agents_available",
         )
+    recent = [
+        *services.discussion.list(board_id, status="open", limit=50),
+        *services.discussion.list(board_id, status="discussing", limit=50),
+    ]
+    for existing in recent:
+        if (
+            existing.get("card_id") == card_id
+            and existing.get("goal") == question
+            and existing.get("created_by_actor_id") == actor.actor_id
+            and _seconds_since(existing["created_at"]) < DEDUPE_WINDOW_SECONDS
+        ):
+            view = _thread_view(services.discussion.get(board_id, existing["id"]))
+            view["deduplicated"] = True
+            return view
     rounds = args.get("rounds")
     thread = services.discussion.create(
         actor,
@@ -512,7 +688,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "List the Loops of a board with their stage, whether execution is allowed, the "
                 "people you can assign, and the agents you can ask. Start here."
             ),
-            scope="boards:read",
+            scopes=("boards:read", "loops:read"),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -532,7 +708,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "phase and Ticket readiness, and the Kanban columns. Use this to understand the "
                 "task before touching a Ticket."
             ),
-            scope="loops:read",
+            scopes=("loops:read",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -553,7 +729,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "Read one Ticket with acceptance criteria, evidence, checklist, comments, "
                 "current column, version and the actions that are allowed right now."
             ),
-            scope="cards:read",
+            scopes=("cards:read",),
             input_schema=_object(
                 {"board_id": _BOARD_ID, "card_id": _CARD_ID},
                 required=["board_id", "card_id"],
@@ -566,7 +742,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "Set or clear the owner of a Ticket. Use a person id from read_board; the "
                 "Ticket's current version is read for you."
             ),
-            scope="cards:write",
+            scopes=("cards:write",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -588,7 +764,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "its name, and reads the Ticket version for you; omit version unless you need "
                 "strict optimistic concurrency."
             ),
-            scope="cards:write",
+            scopes=("cards:write",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -604,7 +780,7 @@ def tool_catalog() -> dict[str, AgentTool]:
         AgentTool(
             name="comment_ticket",
             description="Add a comment to a Ticket: progress, findings or a blocker.",
-            scope="comments:write",
+            scopes=("comments:write",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -621,7 +797,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "Create a Loop on a board: the place where one coherent change is planned and "
                 "tracked. Columns default to the board's Loop columns."
             ),
-            scope="loops:write",
+            scopes=("loops:write",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -632,6 +808,9 @@ def tool_catalog() -> dict[str, AgentTool]:
                         "items": {"type": "string"},
                         "description": "Optional Kanban column names, in order",
                     },
+                    "idempotency_key": _string(
+                        "Send the same key when you retry, so a timeout cannot create a second Loop"
+                    ),
                 },
                 required=["board_id", "name"],
             ),
@@ -644,7 +823,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "while the Loop is still draft or under analysis review; once planning has started "
                 "the edit belongs to a signed-in person."
             ),
-            scope="loops:write",
+            scopes=("loops:write",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -668,7 +847,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "generation run and the state of the analysis; the candidate is approved by a "
                 "person, never by an agent."
             ),
-            scope="loops:generate",
+            scopes=("loops:generate",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -687,12 +866,36 @@ def tool_catalog() -> dict[str, AgentTool]:
             handler=_run_analysis,
         ),
         AgentTool(
+            name="run_roadmap",
+            description=(
+                "Ask a board agent for the RoadMap candidate of a Loop whose analysis is approved. "
+                "Approving the RoadMap is a person's decision and publishes the Tickets."
+            ),
+            scopes=("loops:generate",),
+            input_schema=_object(
+                {
+                    "board_id": _BOARD_ID,
+                    "loop_id": _string("Loop identifier"),
+                    "agent_id": _string("Optional agent to run; defaults to the Loop's choice"),
+                    "instructions": _string("Optional extra direction for this run"),
+                    "wait_seconds": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 120,
+                        "description": "Poll the run for up to this long before returning",
+                    },
+                },
+                required=["board_id", "loop_id"],
+            ),
+            handler=_run_roadmap,
+        ),
+        AgentTool(
             name="ask_agents",
             description=(
                 "Ask the local agents a question about one Ticket and read their answers. They "
                 "read and advise; they never change the Ticket."
             ),
-            scope="discussions:write",
+            scopes=("discussions:write",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
@@ -711,12 +914,55 @@ def tool_catalog() -> dict[str, AgentTool]:
             ),
             handler=_ask_agents,
         ),
+        AgentTool(
+            name="read_discussion",
+            description=(
+                "Read one discussion thread with its messages and each agent's position. Use it "
+                "after ask_agents to re-read answers, or before replying."
+            ),
+            scopes=("discussions:read",),
+            input_schema=_object(
+                {
+                    "board_id": _BOARD_ID,
+                    "discussion_id": _string("Discussion identifier from ask_agents"),
+                },
+                required=["board_id", "discussion_id"],
+            ),
+            handler=_read_discussion,
+        ),
+        AgentTool(
+            name="reply_discussion",
+            description=(
+                "Post a follow-up in an existing thread and, unless run is false, let the agents "
+                "answer it in the same thread. This is how a question becomes a conversation."
+            ),
+            scopes=("discussions:write",),
+            input_schema=_object(
+                {
+                    "board_id": _BOARD_ID,
+                    "discussion_id": _string("Discussion identifier from ask_agents"),
+                    "content": _string("Your follow-up question or finding"),
+                    "parent_message_id": _string("Optional message being answered"),
+                    "run": {
+                        "type": "boolean",
+                        "description": "Start one answering round; defaults to true",
+                    },
+                },
+                required=["board_id", "discussion_id", "content"],
+            ),
+            handler=_reply_discussion,
+        ),
     ]
     return {tool.name: tool for tool in tools}
 
 
+def missing_scopes(tool: AgentTool, actor: ActorContext) -> tuple[str, ...]:
+    """Scopes the tool needs that the actor does not hold; empty means it may run."""
+    return tuple(scope for scope in tool.scopes if not actor.has_scope(scope))
+
+
 def describe_scope(tool: AgentTool) -> str:
-    return f"Requires scope `{tool.scope}`."
+    return "Requires " + ", ".join(f"`{scope}`" for scope in tool.scopes) + "."
 
 
 def run_tool(
@@ -730,11 +976,13 @@ def run_tool(
     tool = tool_catalog().get(name)
     if tool is None:
         raise NotFound("Unknown tool", code="unknown_tool", details={"tool": name})
-    if not actor.has_scope(tool.scope):
+    missing = missing_scopes(tool, actor)
+    if missing:
         raise Forbidden(
-            f"Missing required scope: {tool.scope}", details={"required_scope": tool.scope}
+            "Missing required scope: " + ", ".join(missing),
+            details={"required_scopes": list(missing)},
         )
     return tool.handler(services, actor, args or {})
 
 
-__all__ = ["AgentTool", "tool_catalog", "run_tool", "describe_scope"]
+__all__ = ["AgentTool", "tool_catalog", "run_tool", "describe_scope", "missing_scopes"]

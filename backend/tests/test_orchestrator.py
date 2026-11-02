@@ -23,7 +23,13 @@ def _agent(api: Api, name: str, role_key: str) -> dict[str, Any]:
     )
 
 
-def _discussion(api: Api, board: dict[str, Any], agents: list[dict[str, Any]]) -> dict[str, Any]:
+def _discussion(
+    api: Api,
+    board: dict[str, Any],
+    agents: list[dict[str, Any]],
+    *,
+    mode: str = "manual",
+) -> dict[str, Any]:
     lists = api.data(
         api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
     )
@@ -39,6 +45,7 @@ def _discussion(api: Api, board: dict[str, Any], agents: list[dict[str, Any]]) -
             json={
                 "card_id": card["id"],
                 "goal": "Which session strategy?",
+                "mode": mode,
                 "participant_ids": [agent["id"] for agent in agents],
             },
         )
@@ -124,6 +131,93 @@ def test_extract_position_parses_the_trailing_verdict() -> None:
     assert verdict == "disagree"
     assert justification == "Use sessions."
     assert runtime.extract_position("No verdict here")[0] == "abstain"
+
+
+def test_extract_position_never_reads_a_negation_as_agreement() -> None:
+    # Matching the bare word anywhere made "I do not AGREE" a vote for agreement, which is how a
+    # discussion reached consensus while its agents disagreed.
+    assert runtime.extract_position("I do not AGREE with this proposal.")[0] == "abstain"
+    assert runtime.extract_position("Honestly, I can not AGREE here.\nIt leaks.")[0] == "abstain"
+    assert runtime.extract_position("Some AGREE, some do not.")[0] == "abstain"
+
+
+def test_extract_position_prefers_a_structured_verdict() -> None:
+    answer = (
+        "The plan is sound but the rollback is missing.\n"
+        '{"verdict": "disagree", "reasoning": "No rollback path for the migration."}'
+    )
+    assert runtime.extract_position(answer) == (
+        "disagree",
+        "No rollback path for the migration.",
+    )
+
+
+def test_extract_position_uses_the_last_labelled_line() -> None:
+    answer = (
+        "My first reading said AGREE.\n"
+        "Then I checked the storage layer.\n"
+        "Verdict: DISAGREE\nI still think the shape is right."
+    )
+    assert runtime.extract_position(answer)[0] == "disagree"
+
+
+def test_each_agent_sees_the_answers_from_its_own_round(
+    api: Api, board: dict[str, Any], monkeypatch: Any
+) -> None:
+    lead = _agent(api, "Lead5", "lead_developer")
+    qa = _agent(api, "Qa5", "qa_engineer")
+    discussion = _discussion(api, board, [lead, qa])
+    prompts: list[tuple[str, str]] = []
+
+    def call(settings: Any, agent_row: dict[str, Any], *, system_prompt: str, messages: list):
+        prompts.append((agent_row["name"], messages[-1]["content"]))
+        return {
+            "ok": True,
+            "error": None,
+            "text": f"{agent_row['name']} says: use server sessions.\nVerdict: AGREE",
+            "verdict": "agree",
+            "justification": "server sessions",
+            "model": "test-model",
+            "usage": {},
+        }
+
+    monkeypatch.setattr(runtime, "call_agent", call)
+    url = f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/start"
+    api.data(api.post(url, json={}))
+    first, second = prompts
+    assert first[0] == "Lead5" and second[0] == "Qa5"
+    assert "Answers earlier in this round" not in first[1]
+    assert "Lead5 says: use server sessions" in second[1]
+
+
+def test_a_roundtable_needs_a_review_round_before_consensus(
+    api: Api, board: dict[str, Any], monkeypatch: Any
+) -> None:
+    lead = _agent(api, "Lead6", "lead_developer")
+    qa = _agent(api, "Qa6", "qa_engineer")
+    discussion = _discussion(api, board, [lead, qa], mode="roundtable")
+    passes: dict[str, int] = {}
+
+    def call(settings: Any, agent_row: dict[str, Any], *, system_prompt: str, messages: list):
+        name = agent_row["name"]
+        passes[name] = passes.get(name, 0) + 1
+        return {
+            "ok": True,
+            "error": None,
+            "text": f"{name} says: use server sessions (pass {passes[name]}).\nVerdict: AGREE",
+            "verdict": "agree",
+            "justification": "server sessions",
+            "model": "test-model",
+            "usage": {},
+        }
+
+    monkeypatch.setattr(runtime, "call_agent", call)
+    url = f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/start"
+
+    first = api.data(api.post(url, json={}))
+    assert first["status"] == "discussing"
+    second = api.data(api.post(url, json={}))
+    assert second["status"] == "consensus_proposed"
 
 
 def test_human_review_approve_veto_and_rework(

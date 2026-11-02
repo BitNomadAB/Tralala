@@ -39,7 +39,11 @@ SECRET_FILE_NAME = ".session-secret"
 BOOTSTRAP_PASSWORD_FILE_NAME = ".bootstrap-password"
 
 # Shipped/placeholder values treated as "no password chosen".
-INSECURE_BOOTSTRAP_PASSWORDS = frozenset({"admin", "password", "change-me", "changeme", ""})
+# Values that must never become an administrator password. The last one is the shared test password
+# this repository used to publish: an operator who copies an old .env still gets a generated one.
+INSECURE_BOOTSTRAP_PASSWORDS = frozenset(
+    {"admin", "password", "change-me", "changeme", "tralala-dev-1", ""}
+)
 
 
 SESSION_COOKIE = "tralala_session"

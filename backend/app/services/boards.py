@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import zipfile
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -418,6 +420,7 @@ class BoardService:
         )
         try:
             snapshot_database(self.boards.path(board_id), self.boards.path(new_id))
+            self._copy_attachments(board_id, new_id)
             with self.boards.session(new_id) as conn:
                 conn.execute(
                     text("UPDATE board_metadata SET id = :id, updated_at = :now WHERE rowid = 1"),
@@ -449,13 +452,13 @@ class BoardService:
             raise Conflict("Archive the board before permanently deleting it")
         if confirm_name.strip() != row["name"]:
             raise ValidationFailure("Confirmation name does not match the board name")
-        self.boards.delete_database(board_id)
+        # Order matters: everything on disk goes first, so an interrupted delete leaves a row that
+        # can be deleted again rather than a row pointing at files that no longer exist.
+        with self.boards.locked(board_id):
+            self.boards.delete_database(board_id)
         backup_dir = self.settings.backups_dir / board_id
         if backup_dir.exists():
-            for file in backup_dir.iterdir():
-                if file.is_file():
-                    file.unlink()
-            backup_dir.rmdir()
+            shutil.rmtree(backup_dir, ignore_errors=False)
         self.registry.delete_board_row(board_id)
 
     # --- export / import -------------------------------------------------------
@@ -477,6 +480,11 @@ class BoardService:
                 "schema_version": row["schema_version"],
             },
         }
+        attachments = self._attachment_files(board_id)
+        manifest["attachments"] = {
+            "files": len(attachments),
+            "bytes": sum(file.stat().st_size for file in attachments),
+        }
         buffer = io.BytesIO()
         snapshot = self.boards.path(board_id).with_suffix(".export.sqlite")
         try:
@@ -484,10 +492,31 @@ class BoardService:
             with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr("manifest.json", json.dumps(manifest, indent=2))
                 archive.write(snapshot, "board.sqlite")
+                # The database and its uploaded files are one unit; an export without them is a
+                # board that cannot be restored in full.
+                for file in attachments:
+                    archive.write(file, f"attachments/{file.name}")
         finally:
             if snapshot.exists():
                 snapshot.unlink()
         return buffer.getvalue()
+
+    def _copy_attachments(self, source_board_id: str, target_board_id: str) -> int:
+        """A duplicated board keeps its uploaded files, or every attachment row points nowhere."""
+        files = self._attachment_files(source_board_id)
+        if not files:
+            return 0
+        directory = self.boards.attachments_dir(target_board_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        for file in files:
+            shutil.copy2(file, directory / file.name)
+        return len(files)
+
+    def _attachment_files(self, board_id: str) -> list[Path]:
+        directory = self.boards.attachments_dir(board_id)
+        if not directory.exists():
+            return []
+        return sorted(file for file in directory.glob("*") if file.is_file())
 
     def import_archive(self, actor: ActorContext, data: bytes) -> dict[str, Any]:
         actor.require("boards:admin")
@@ -509,6 +538,38 @@ class BoardService:
                     details={"supported": EXPORT_FORMAT_VERSION},
                 )
             board_bytes = archive.read("board.sqlite")
+            attachment_entries = [
+                entry
+                for entry in archive.namelist()
+                if entry.startswith("attachments/") and not entry.endswith("/")
+            ]
+            declared = int((manifest.get("attachments") or {}).get("bytes") or 0)
+            limit = int(self.settings.board_attachment_max_bytes)
+            if declared > limit or len(attachment_entries) > 1000:
+                raise ValidationFailure(
+                    "Board archive carries more attachments than this installation accepts",
+                    details={"bytes": declared, "files": len(attachment_entries)},
+                )
+            attachments: list[tuple[str, bytes]] = []
+            seen: set[str] = set()
+            total = 0
+            for entry in attachment_entries:
+                name = Path(entry).name
+                if not name or name in seen:
+                    raise ValidationFailure(
+                        "Board archive contains an invalid attachment entry",
+                        details={"entry": entry},
+                    )
+                seen.add(name)
+                # The manifest is written by the exporter, so the real entries are measured too:
+                # a hand-made archive could otherwise declare nothing and carry any amount.
+                total += archive.getinfo(entry).file_size
+                if total > limit:
+                    raise ValidationFailure(
+                        "Board archive carries more attachments than this installation accepts",
+                        details={"bytes": total, "files": len(attachment_entries)},
+                    )
+                attachments.append((name, archive.read(entry)))
 
         new_id = str(uuid4())
         name = str(manifest.get("board", {}).get("name") or "Imported board")[:200]
@@ -518,6 +579,11 @@ class BoardService:
             destination = self.boards.path(new_id)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(board_bytes)
+            if attachments:
+                directory = self.boards.attachments_dir(new_id)
+                directory.mkdir(parents=True, exist_ok=True)
+                for name, payload in attachments:
+                    (directory / name).write_bytes(payload)
             with self.boards.reader(new_id) as conn:
                 quick_check = conn.exec_driver_sql("PRAGMA quick_check").scalar_one()
                 if quick_check != "ok":

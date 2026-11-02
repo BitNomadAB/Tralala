@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 import uuid
 from collections.abc import Iterator
@@ -47,6 +48,10 @@ class BoardDatabaseManager:
 
     def path(self, board_id: str) -> Path:
         return self.settings.boards_dir / self.validate_board_id(board_id) / "board.sqlite"
+
+    def attachments_dir(self, board_id: str) -> Path:
+        """Where one board's uploaded files live; the database and its files are one unit."""
+        return self.settings.boards_dir / self.validate_board_id(board_id) / "attachments"
 
     def exists(self, board_id: str) -> bool:
         try:
@@ -164,14 +169,16 @@ class BoardDatabaseManager:
                 engine.dispose()
 
     def delete_database(self, board_id: str) -> None:
+        """Remove everything this board owns: its database and its uploaded files.
+
+        The directory is the unit, because a board is a database plus its attachments. Removing only
+        the SQLite files used to fail on ``rmdir`` as soon as an attachment existed, which left the
+        row behind with no database to open.
+        """
         self.close(board_id)
         directory = self.path(board_id).parent
         if directory.exists():
-            for suffix in ("", "-wal", "-shm"):
-                candidate = directory / f"board.sqlite{suffix}"
-                if candidate.exists():
-                    candidate.unlink()
-            directory.rmdir()
+            shutil.rmtree(directory, ignore_errors=False)
 
     def close_all(self) -> None:
         with self._lock:

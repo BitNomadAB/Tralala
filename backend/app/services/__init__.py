@@ -12,6 +12,7 @@ from ..storage.registry import Registry
 from .agents import AgentService, RoleTemplateService
 from .attachments import AttachmentService
 from .auth import AuthService
+from .backup_scheduler import BackupScheduler
 from .backups import BackupService
 from .boards import BoardService
 from .cards import CardService
@@ -84,6 +85,11 @@ class Services:
         self.comment = CommentService(self.board)
         self.search = SearchService(self.board, self.card)
         self.backup = BackupService(self.board)
+        self.backup_scheduler = BackupScheduler(
+            self.backup,
+            interval_hours=settings.backup_interval_hours,
+            keep=settings.backup_keep,
+        )
         self.attachment = AttachmentService(self.board)
         self.auth = AuthService(settings, self.registry)
         self.discussion = DiscussionService(self.board, self.agent)
@@ -118,6 +124,7 @@ class Services:
         self.board.recover()
         self.migration_reports = self.migrations.migrate_all_boards()
         self.recover_async_work()
+        self.backup_scheduler.start()
 
     def recover_async_work(self) -> int:
         """Resolve runs and mention jobs interrupted by the previous process stopping."""
@@ -137,6 +144,7 @@ class Services:
         return recovered
 
     def shutdown(self) -> None:
+        self.backup_scheduler.stop()
         self.run.shutdown()
         self.mention.shutdown()
         self.loop_generation.shutdown()

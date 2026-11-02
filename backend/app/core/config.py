@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     member_token_limit: int = 10
     member_token_default_days: int = 30
     member_token_max_days: int = 365
+    backup_interval_hours: int = 24
+    backup_keep: int = 10
     invite_ttl_hours: int = 72
     trust_proxy_headers: bool = False
     cookie_secure: bool = False

@@ -38,6 +38,12 @@ WORKER_THREADS = 2
 MAX_MENTIONS_PER_COMMENT = 5
 RECENT_COMMENTS = 20
 CONTEXT_CHARS = 4000
+# A mentioned agent should be able to read the notes that were uploaded with the ticket, but not
+# swallow a whole file: only text-like attachments, and only a bounded head of each.
+TEXT_ATTACHMENT_TYPES = {"application/json", "application/xml", "application/x-yaml"}
+ATTACHMENT_EXCERPTS = 3
+ATTACHMENT_EXCERPT_BYTES = 200_000
+ATTACHMENT_EXCERPT_CHARS = 2_000
 
 
 def _rows(conn: Any, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -341,7 +347,7 @@ class MentionService:
                 return
             started = time.monotonic()
             with self.boards.reader(board_id) as conn:
-                messages = self._messages(conn, job)
+                messages = self._messages(conn, job, board_id)
             if messages is None:
                 self._fail(board_id, job_id, "comment_deleted")
                 return
@@ -509,7 +515,9 @@ class MentionService:
 
     # --- context -------------------------------------------------------------
 
-    def _messages(self, conn: Any, job: dict[str, Any]) -> list[dict[str, str]] | None:
+    def _messages(
+        self, conn: Any, job: dict[str, Any], board_id: str
+    ) -> list[dict[str, str]] | None:
         card = conn.execute(
             text(
                 "SELECT c.title, c.description, c.priority, c.due_at, c.completed_at,"
@@ -556,7 +564,8 @@ class MentionService:
         history.reverse()
         attachments = _rows(
             conn,
-            "SELECT original_filename, content_type, size_bytes FROM attachments"
+            "SELECT original_filename, content_type, size_bytes, stored_filename"
+            " FROM attachments"
             " WHERE card_id = :id AND deleted_at IS NULL ORDER BY created_at",
             {"id": job["card_id"]},
         )
@@ -582,12 +591,18 @@ class MentionService:
                 )
                 lines.append(f"- {checklist['title']}: {rendered or '(no items)'}")
         if attachments:
-            lines.append("Attachments (metadata only):")
+            lines.append("Attachments:")
+            excerpts = 0
             for attachment in attachments[:20]:
                 lines.append(
                     f"- {attachment['original_filename']} ({attachment['content_type']},"
                     f" {attachment['size_bytes']} bytes)"
                 )
+                if excerpts < ATTACHMENT_EXCERPTS:
+                    excerpt = self._attachment_excerpt(board_id, attachment)
+                    if excerpt:
+                        excerpts += 1
+                        lines.append("  content:\n" + excerpt)
         transcript = "\n".join(
             f"[{entry.get('actor_name') or 'Unknown'} · {entry.get('actor_type') or 'user'}]"
             f" {str(entry['content'])[:1000]}"
@@ -605,6 +620,32 @@ class MentionService:
             "mention other agents."
         )
         return [{"role": "user", "content": "\n\n".join(sections)}]
+
+    def _attachment_excerpt(self, board_id: str, attachment: dict[str, Any]) -> str:
+        """Head of a text attachment, for the agent that was mentioned on its ticket.
+
+        Binary formats stay metadata only: extracting them would need a parser per format, and a
+        mention should never attach megabytes to a prompt.
+        """
+        content_type = str(attachment.get("content_type") or "")
+        if not (content_type.startswith("text/") or content_type in TEXT_ATTACHMENT_TYPES):
+            return ""
+        if int(attachment.get("size_bytes") or 0) > ATTACHMENT_EXCERPT_BYTES:
+            return ""
+        stored = str(attachment.get("stored_filename") or "")
+        if not stored:
+            return ""
+        path = self.boards.attachments_dir(board_id) / stored
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            return ""
+        text = raw.decode("utf-8", errors="replace").strip()
+        if not text:
+            return ""
+        if len(text) <= ATTACHMENT_EXCERPT_CHARS:
+            return text
+        return text[:ATTACHMENT_EXCERPT_CHARS] + "\n(truncated)"
 
     def _decorate_actors(self, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
         missing = {
