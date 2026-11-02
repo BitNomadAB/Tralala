@@ -20,8 +20,8 @@ App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / Ro
 | know what is protected and what is my decision | [public_docs/Security_defaults.md](public_docs/Security_defaults.md) |
 | see what changed for someone upgrading | [public_docs/Release_notes.md](public_docs/Release_notes.md) |
 | connect a coding agent to it | [public_docs/Agent_usage.md](public_docs/Agent_usage.md) |
-| understand the design | [public_docs/Architecture.md](public_docs/Architecture.md), [docs/decisions/](docs/decisions) |
-| call the API | [docs/api.md](docs/api.md) |
+| understand the design | [public_docs/Architecture.md](public_docs/Architecture.md) |
+| call the API | [public_docs/API.md](public_docs/API.md) |
 
 Prerequisites and the installation of Python, Node, pnpm and Docker live in the installation guide,
 with links to each tool's own documentation — those change more often than this repository does.
@@ -89,13 +89,13 @@ is no shared password. See [the first sign-in](public_docs/Installation.md#first
 backend/app/{api,core,schemas,services,storage}   FastAPI service layer and SQLite storage
 frontend/src/{app,features,lib,webmcp,themes}     React UI, typed API client, WebMCP adapter
 frontend/Caddyfile                                web tier: SPA, API proxy, TLS
-public_docs/                                      installation, onboarding, commands, architecture, security, agents
-docs/                                             architecture, API, database, decisions
-.ralph/                                           progress.txt (log) and the Loop specification
+public_docs/                                      everything a user or operator follows, incl. API + Loops
+docs/                                             maintainer notes: the database and schema reference
 ```
 
 Read [AGENTS.md](AGENTS.md) before changing code: it holds the architecture rules and the
-verification contract. Decisions are recorded in [docs/decisions/](docs/decisions).
+verification contract. The decision log and the review reports are working documents that stay on the
+machine that produced them; they are not part of the repository.
 
 ## Known limitations
 

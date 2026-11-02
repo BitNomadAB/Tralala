@@ -3,7 +3,7 @@
 Tralala is installed and you are signed in as `admin`. This is what to do next, in the order that
 avoids going back: make the account yours, bring in one person, connect one agent, connect one
 repository, then run one Loop end to end. Each section is short on purpose; the why lives in
-[Architecture.md](Architecture.md) and the rules in [docs/loops.md](../docs/loops.md).
+[Architecture.md](Architecture.md) and the rules in [Loops.md](Loops.md).
 
 ```
 1 account -> 2 people -> 3 agent -> 4 repository
@@ -57,7 +57,7 @@ second if you want your own coding agent to drive Tralala.
    agent settings.
 
 An agent is a reader and discussion partner: it never authenticates, never moves a Ticket and never
-changes code. See [decisions/0001](../docs/decisions/0022-role-template-vs-agent-snapshot.md).
+changes code.
 
 ### 3b. A worker key, so your own coding agent can read and update Tralala
 

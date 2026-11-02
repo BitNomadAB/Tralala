@@ -55,10 +55,9 @@ We keep signed agreements on file and never publish them.
 - Behavioural changes need an API-level test; user-journey changes extend `frontend/e2e/*.spec.ts`.
 - Schema changes need an Alembic revision under `backend/migrations/{registry,board}` plus tests for
   fresh install, upgrade from the previous revision, data preservation and failure recovery.
-- Update the relevant file in `docs/` when you change behaviour, and add a record under
-  `docs/decisions/` for anything a future maintainer would otherwise have to re-derive. Anything a
-  user or operator follows ? installation, troubleshooting, security defaults, agent usage ? lives in
-  `public_docs/` and must stay true as well.
+- Update the relevant file in `public_docs/` when you change behaviour: installation,
+  troubleshooting, security defaults, agent usage, the API and the Loop workflow all live there,
+  and they must never link into the working documents under `docs/`, `analysis/` or `.ralph/`.
 
 ## Validation
 

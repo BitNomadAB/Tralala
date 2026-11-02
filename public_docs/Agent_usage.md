@@ -134,9 +134,8 @@ that step.
 ## 7. The REST API is still there
 
 Anything that is not a tool — search, checklists, activity, readiness, exports, backups, board
-settings — is `/api/v1/...` with the same Bearer token, and [docs/api.md](../docs/api.md) documents
-it. `/llms.txt` is the short version an agent can read without being told anything.
+settings — is `/api/v1/...` with the same key, documented in [API.md](API.md). `/llms.txt` is the
+short version an agent can read without being told anything.
 
-The catalogue is decided in
-[decisions/0015](../docs/decisions/0015-worker-surface-mcp-and-llms-txt.md); the key model in
-[decisions/0017](../docs/decisions/0017-interaction-agent-access-ownership.md).
+The catalogue is decided on the server: `/mcp` advertises only the tools the key may use, and a key
+acts as its own agent identity, owned by the person who issued it.

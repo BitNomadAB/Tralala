@@ -83,7 +83,7 @@ Two independent Alembic chains live under `backend/migrations`:
 - Revision `0008_loops` is a structural redesign, not a data migration. A board database that still
   contains lists or cards refuses to upgrade and reports the development reset command; an empty
   database from an earlier revision upgrades normally. There is no preservation path for
-  pre-Loop development data (see [loops.md](loops.md#clean-schema-transition)).
+  pre-Loop development data (see [Loops.md](../public_docs/Loops.md#clean-schema-transition)).
 - New boards are created by upgrading an empty file to the chain head (`runner.create_schema`), so
   they always start at the latest schema.
 - Existing boards are migrated **eagerly at startup**, sequentially, before the app accepts
@@ -93,7 +93,7 @@ Two independent Alembic chains live under `backend/migrations`:
   `data/backups/{board}/backup-<UTC>-pre-migration.sqlite` with SQLite's online backup API and
   integrity-checked. The snapshot is kept on success and on failure.
 - `registry` revision `0002` rebuilds the `boards` table with `batch_alter_table` to extend the
-  status `CHECK` with `migration_failed` and to add `schema_revision` ? SQLite cannot alter a
+  status `CHECK` with `migration_failed` and to add `schema_revision` — SQLite cannot alter a
   `CHECK` constraint in place.
 - After upgrading, the manager runs `PRAGMA integrity_check` and `PRAGMA foreign_key_check`; any
   failure (or any exception) rolls back the schema transaction and marks the board

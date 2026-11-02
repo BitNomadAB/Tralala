@@ -40,8 +40,8 @@ message broker.
    never write DDL anywhere else. Use `batch_alter_table` for SQLite table reconstruction. The
    Migration Manager (`storage/migration_manager.py`) applies revisions; it takes a verified
    pre-migration backup, validates integrity and marks a failed board `migration_failed`.
-10. **No new infrastructure** without a documented decision in `docs/decisions/` that proves a
-    requirement.
+10. **No new infrastructure** without a documented decision in `docs/decisions/` (a local, untracked
+    working document) that proves a requirement.
 11a. **Planning decisions are human decisions.** Approving analysis or a RoadMap, editing Info,
     confirming a human-only Ticket, accepting implementation or QA, and finalizing a Loop reject
     agent tokens (`403 human_action_required`) regardless of scope, and are never registered as
@@ -71,11 +71,15 @@ message broker.
 ```
 backend/app/{api,core,models,repositories,schemas,services,storage,security,migrations}
 frontend/src/{app,components,features,lib,webmcp,themes,tests}
-public_docs/     what a user or operator follows: installation, onboarding, commands, architecture,
-                 troubleshooting, security, agent usage
-docs/            API, database notes, the Loop workflow and decisions
-.ralph/          progress.txt (the running log) and the Loop implementation specification
+public_docs/     everything a user or operator follows: installation, onboarding, commands,
+                 architecture, troubleshooting, security, agent usage, the API and the Loop workflow
+docs/            maintainer notes that stay in the repository: the database and schema reference
 scripts/         run-playwright.mjs, the isolated Playwright runner
+
+# Untracked working documents, ignored by git and never linked from a public document:
+#   docs/decisions/   why the code looks the way it does
+#   analysis/         the review reports
+#   .ralph/           progress.txt (the running log) and the Loop implementation specification
 ```
 
 `models/`, `repositories/` and `security/` are reserved for code that is promoted out of
@@ -107,7 +111,7 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 
 ## Conventions
 
-- Python: **3.13 is the version of record** ? the container image, CI's primary job and your
+- Python: **3.13 is the version of record** — the container image, CI's primary job and your
   virtual environment all run it, so a local run means what CI means. CI also runs 3.14, and
   `requires-python` allows it; anything newer is untested and needs a CI leg before it is claimed.
   Typed, ruff-clean (line length 100), no blocking work in async paths.
@@ -132,7 +136,11 @@ A story is complete only when:
 - no existing test regressed.
 
 Never mark work complete because code was written. Append what you did and anything still open to
-`.ralph/progress.txt`; an open item stays open until a test proves it closed.
+`.ralph/progress.txt` (untracked, local); an open item stays open until a test proves it closed.
+
+A public document must never link into `docs/decisions/`, `analysis/` or `.ralph/`: those folders are
+not shipped, so a link from `public_docs/`, `README.md` or `CONTRIBUTING.md` is broken for everyone
+else. State the rule instead of pointing at where it was decided.
 
 ## Security invariants
 
@@ -148,7 +156,8 @@ Never mark work complete because code was written. Append what you did and anyth
 
 This project is **source-available, not open source**: it ships under the PolyForm Noncommercial
 License 1.0.0 and BitNomad AB sells commercial licences alongside it, so every line must be owned by
-the company. See `docs/decisions/0009-source-available-licensing-and-contributions.md`.
+the company. The licence analysis and the open legal questions are recorded in the local decision
+log (`docs/decisions/0009`, untracked).
 
 - Never describe the project as open source — not in code, docs, UI copy, commit messages or release
   notes.
@@ -159,7 +168,7 @@ the company. See `docs/decisions/0009-source-available-licensing-and-contributio
   request; the licence and its `Required Notice:` line must survive in every redistribution.
 - A contribution that cannot be covered by a signed CLA must not be merged — under this licence a
   merged pull request can make the code unsellable.
-- A dependency under a copyleft licence is a decision, not a detail: record it in `docs/decisions/`.
+- A dependency under a copyleft licence is a decision, not a detail: record it in the decision log.
   The current set is MIT, ISC, BSD, 0BSD, Apache-2.0, PSF, MIT-0, MPL-2.0 and CC-BY-4.0 (the last
   only for `caniuse-lite`, which is data with an attribution notice and no code). Nothing copyleft.
 - Never publish signed contributor agreements in the repository.

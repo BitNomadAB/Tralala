@@ -123,8 +123,7 @@ user, `POST /users/{id}/invite` returns a token that is stored only as a hash, a
 (`/enrol?token=...`) sets the person's own password. It is single use, expires
 (`TRALALA_INVITE_TTL_HOURS`), replaces any unused earlier link, and answers `invite_invalid`,
 `invite_used` or `invite_expired` without revealing whether a token existed. Tralala sends no e-mail;
-the operator delivers the link. See
-[decisions/0014](decisions/0014-enrolment-links-instead-of-email-verification.md).
+the operator delivers the link.
 
 Logins are rate limited per client address and backed off per username after repeated failures
 (`429 rate_limited` with `details.retry_after_seconds`). Passwords must be at least
@@ -299,8 +298,7 @@ about with `repository_ids`, so one repository can serve several boards and a bo
 `Contents: read` for that repository; it is sealed with the same mechanism as provider keys,
 returned only as `has_token`/`token_hint`, never logged, and re-sealed when the session secret
 rotates. `check` reports `ok`, `unauthorized`, `not_found`, `forbidden`, `branch_missing` or
-`unreachable` and stores the last outcome on the record. See
-[decisions/0011](decisions/0011-repository-access-for-analysis-agents.md).
+`unreachable` and stores the last outcome on the record.
 
 `GET /repositories` and `GET /repositories/{id}` are readable with `boards:read`, but a caller without
 `boards:admin` gets the entry without `token_hint`, `last_checked_at`, `last_check_status` and
@@ -351,8 +349,8 @@ agent card (`/.well-known/agent.json`) for `a2a`, then records `last_test_status
 
 **Role snapshot rule:** `role_templates` and `agents` are separate resources. Editing a template
 changes *future* work; every discussion persists `AgentService.role_snapshot(...)` (template id and
-name, template `updated_at`, effective prompt, SHA-256, timestamp) so history stays explainable. See
-[decisions/0001](decisions/0022-role-template-vs-agent-snapshot.md).
+name, template `updated_at`, effective prompt, SHA-256, timestamp) so history stays explainable.
+Editing a template therefore changes future work and never rewrites a past discussion.
 
 ### Discussions
 
@@ -575,7 +573,7 @@ Deliberately absent: board and list structure changes, Ticket creation or archiv
 writes, provider configuration and the approval decisions themselves.
 
 A tool lists **every** scope it needs, and `tools/list` hides a tool unless the token holds all of
-them ? advertising a call that would fail is worse than not advertising it. Calling a tool the token
+them — advertising a call that would fail is worse than not advertising it. Calling a tool the token
 may not use is a JSON-RPC error (`-32602`) rather than a silent downgrade. A tool that fails returns
 `isError: true` with the API error code in the text content, so a client sees `version_conflict` or
 `human_action_required` instead of a broken transport.
@@ -629,9 +627,8 @@ one registry read instead of one open per row. `TRALALA_BOARD_COUNTS_CACHE_SECON
 the backstop for a board file changed outside the app; `0` measures on every list. A caller that
 only needs names can pass `with_counts=false`, which opens no board at all and reports zeros.
 
-With 100 boards a page of 100 rows costs 15 ms once the counters are known against 1337 ms when each
-board has to be opened. See
-[decision 0023](decisions/0023-board-counters-cached-in-the-registry.md).
+With 100 boards a page of 100 rows costs 15 ms once the counters are known, against 1337 ms when
+each board has to be opened.
 
 ## Timestamps and sizes
 
@@ -654,7 +651,7 @@ board has to be opened. See
 There is no transfer endpoint. Moving a Ticket between Loops or Boards would bypass the approved
 plan it belongs to, so the operation is refused rather than implemented: a caller that reaches the
 service directly gets `409 plan_change_required` with the reason. The supported path is a new Loop
-with its own Info, analysis and RoadMap ? or a person recreating the Ticket deliberately.
+with its own Info, analysis and RoadMap — or a person recreating the Ticket deliberately.
 
 
 ## Board schema state

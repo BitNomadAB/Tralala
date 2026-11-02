@@ -3,9 +3,7 @@
 **Tralala — BitNomad AB**
 
 > **Template status:** this document is a draft prepared for the project. It must be reviewed by
-> qualified legal counsel in Sweden before it is first relied upon. See
-> `docs/decisions/0009-source-available-licensing-and-contributions.md` for the open legal
-> questions.
+> qualified legal counsel in Sweden before it is first relied upon.
 
 By submitting a Contribution to the Project, You accept and agree to the following terms for Your
 present and future Contributions. Except for the licenses granted in this agreement, You retain all

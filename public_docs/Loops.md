@@ -71,9 +71,8 @@ is no longer available falls back to the board default.
 
 Which code that agent may look at is decided on the same dialog: the repositories from
 **Settings -> GitHub repositories** (`repository_ids`). A repository can serve several boards, and a
-board can list several. The token behind each repository is read-only and sealed; see
-[decisions/0011](decisions/0011-repository-access-for-analysis-agents.md) and
-[decisions/0012](decisions/0012-board-agent-membership.md).
+board can list several. The token behind each repository is read-only and sealed, and an agent sees
+only the repositories of the boards it serves.
 
 ## Board profiles and organisation profiles
 
@@ -161,10 +160,8 @@ conversation is about instead of an inferred default Loop.
 
 ## Clean schema transition
 
-A database that predates Loop ownership cannot be converted in place; the reasoning and the
-release requirement that follows from it are recorded in
-[decisions/0010](decisions/0010-loop-schema-transition-and-development-reset.md). Startup stops with
-an actionable message, the board is marked `migration_failed`, and the board page offers a retry and
+A database that predates Loop ownership cannot be converted in place. Startup stops with an
+actionable message, the board is marked `migration_failed`, and the board page offers a retry and
 the export archive. Reset development data explicitly:
 
 ```powershell

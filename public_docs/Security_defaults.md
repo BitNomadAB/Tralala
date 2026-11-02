@@ -27,7 +27,7 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
   username. Changing your own password requires the current one and signs out every device.
 - People join through an **invitation link** that the administrator shows once
   (`/enrol?token=…`, valid for `TRALALA_INVITE_TTL_HOURS`, default 72). Tralala sends no e-mail, so
-  delivery is yours. See [decisions/0014](../docs/decisions/0014-enrolment-links-instead-of-email-verification.md).
+  delivery is yours.
 - Roles are `admin` and `member`. A member holds every scope except `users:admin` and
   `credentials:admin`, which stay with the administrator; no token of any kind can hold those or the
   `agents:*` administrative scopes.
@@ -55,7 +55,7 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
 - A key is identity: it is not bound to a device and there is no per-token rate limit. The intended
   deployment is a local machine or an internal network with approved models, not the open internet.
   Cost is bounded per discussion instead: at most four rounds, with a default token and time budget
-  per run. See [decisions/0017](../docs/decisions/0017-interaction-agent-access-ownership.md).
+  per run, and every key belongs to the account that issued it.
 
 ## What no token can do
 
@@ -73,8 +73,7 @@ tools. Approvals bind to exact document revision ids, so a changed input invalid
 - Agent endpoints are validated when saved: `http`/`https` only, no embedded credentials, no
   redirects, and never link-local, multicast or reserved addresses. Private and loopback addresses
   are allowed on purpose (`TRALALA_AGENTS_ALLOW_PRIVATE_ENDPOINTS`, default `true`) because a
-  self-hosted install points at a model on its own network. See
-  [decisions/0018](../docs/decisions/0018-a2a-execution.md).
+  self-hosted install points at a model on its own network.
 
 ## Requests, responses and errors
 
@@ -95,7 +94,7 @@ tools. Approvals bind to exact document revision ids, so a changed input invalid
 ## Data and history
 
 - A board is its directory: the database and the uploaded files, moved, copied, backed up, exported
-  and deleted as one unit ([decisions/0019](../docs/decisions/0019-board-files-travel-with-the-database.md)).
+  and deleted as one unit.
 - A completed Loop is read-only: finalization writes an immutable, hashed snapshot to `loop_history`
   in the same transaction and blocks every later mutation path.
 - Uploaded files are allowlisted by extension and content signature, capped per file and per board,
@@ -124,8 +123,8 @@ These are known and deliberately left as they are. Read them before you decide y
 
 - **Members can read built-in role prompts.** Anyone who may read agents can see the role text a
   board profile was created from. It is guidance for an external agent, not a secret rule, so it is
-  treated as content rather than a credential. Left open in the anti-reverse-engineering analysis
-  (`analysis/anti-reverse-engineering-analysis/`, finding MEDIUM-1) and in the decision log.
+  treated as content rather than a credential. Accepted on purpose: a member who cannot see the
+  shape of a role cannot tune one.
 - **Discussion budgets are per run, not per token.** There is no per-token rate limit, because the
   deployment is a private network with known agents. A run is capped at four rounds and by
   `TRALALA_DISCUSSION_TOKEN_BUDGET` and `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`.

@@ -18,3 +18,10 @@ frontend/playwright-report/
 frontend/e2e/.data/
 test-results/
 playwright-report/
+
+# Working documents: kept on the machine that produced them, never shipped. The decision log explains
+# why the code looks like it does, `analysis/` holds the review reports, and `.ralph/` is the loop
+# state. A public document must never link into any of them.
+docs/decisions/
+analysis/
+.ralph/

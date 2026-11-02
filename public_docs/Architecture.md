@@ -2,14 +2,14 @@
 
 How Tralala is put together: one service layer, one database per board, one worker surface. Read this
 after [Installation](Installation.md) and [Onboarding](Onboarding.md); the product rules themselves
-live in [docs/loops.md](../docs/loops.md) and the endpoint reference in [docs/api.md](../docs/api.md).
+live in [Loops.md](Loops.md) and the endpoint reference in [API.md](API.md).
 
 | Question | Where |
 | --- | --- |
-| what a Loop is and in which order work happens | [docs/loops.md](../docs/loops.md) |
-| the exact request/response contract | [docs/api.md](../docs/api.md) |
-| tables, revisions and integrity rules | [docs/database.md](../docs/database.md) |
-| why a decision was taken | [docs/decisions/](../docs/decisions) |
+| what a Loop is and in which order work happens | [Loops.md](Loops.md) |
+| the exact request/response contract | [API.md](API.md) |
+| tables, revisions and integrity rules | the *Storage model* section below |
+| why something is built the way it is | the reasoning paragraph in the section that describes it |
 | what an external agent may call | [Agent_usage.md](Agent_usage.md) and `GET /llms.txt` |
 
 ## Overview
@@ -88,7 +88,7 @@ planning groups, not Kanban columns.
   agent preference per purpose and activity.
 - `data/boards/{uuid}/attachments/{attachment_id}.bin` holds the uploaded files of that board. The
   directory and the database are one unit: deleting a board removes both, duplicating it copies both,
-  and an export carries both ([decisions/0019](../docs/decisions/0019-board-files-travel-with-the-database.md)).
+  and an export carries both.
 - `data/backups/{uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite` holds consistent snapshots, each with an
   optional `backup-YYYYMMDDTHHMMSSZ-attachments.zip` partner that carries the board's files at that
   moment. Restoring and pruning treat the pair as one.
@@ -148,8 +148,7 @@ SQLite has no cross-file transactions, so:
 - AI roles are split in two on purpose: `role_templates` (shared, editable) and `agents` (identity,
   connection, sealed credential, template reference or override). Discussions, mentions and
   generation runs persist `AgentService.role_snapshot(...)`, so later template edits cannot rewrite
-  what an agent was told; see
-  [decisions/0001](../docs/decisions/0022-role-template-vs-agent-snapshot.md).
+  what an agent was told.
 
 ## Loop workflow
 
@@ -200,8 +199,7 @@ naive list would open one file per row. The registry keeps the last measurement 
 drops it when that board is written to, and re-measures after `TRALALA_BOARD_COUNTS_CACHE_SECONDS`:
 the numbers still come from the board, but the dashboard pays for one registry read. `GET /boards`
 accepts `with_counts=false` for a caller that only needs names. Measured with 100 boards: 1337 ms
-with no cache, 15 ms once the counters are known, 13 ms with the flag. See
-[decision 0023](../docs/decisions/0023-board-counters-cached-in-the-registry.md).
+with no cache, 15 ms once the counters are known, 13 ms with the flag.
 
 ## Concurrency and idempotency
 
@@ -252,8 +250,7 @@ the "one backend process per data directory" rule intact.
   round per message). A `manual` thread requires an explicit `@agents` (or participant name)
   mention or an explicit run. The message insert publishes first and the run is requested after it
   commits; a running or closed thread simply keeps the message.
-- Startup reconciliation follows
-  [decisions/0002](../docs/decisions/0002-multi-database-consistency.md): runs left
+- Startup reconciliation: runs left
   `running`/`paused` fail with `process_restart`, their thread `run_state` returns to `idle`,
   interrupted mention jobs fail as retryable and queued ones resume. A crash therefore never leaves
   a thread that refuses new runs, review or retry.
@@ -334,9 +331,8 @@ from `services/agent_tools.py`, which is the one description of what a worker to
 thirteen tools covering reading a board, a Loop and a Ticket, assigning and moving a Ticket,
 commenting, creating a Loop, writing Info, running the analysis and the RoadMap, and the three
 discussion tools. The local role agents are not part of that surface: a run invokes them, they never
-authenticate, and they never change a Ticket. See
-[decisions/0015](../docs/decisions/0015-worker-surface-mcp-and-llms-txt.md) and
-[Agent_usage.md](Agent_usage.md).
+authenticate, and they never change a Ticket. [Agent_usage.md](Agent_usage.md) lists what each
+tool may do.
 
 ## Operational notes
 
@@ -368,8 +364,7 @@ authenticate, and they never change a Ticket. See
   always follows the real operating system. Windows refuses to delete a file another process holds
   open, so a board deletion or an attachment replace is retried briefly there; POSIX removes the name
   and leaves an open file alive, so it is not. Nothing outside `core/platform.py` inspects the
-  operating system for file behaviour; see
-  [decisions/0020](../docs/decisions/0020-one-platform-profile-for-host-filesystem-behaviour.md).
+  operating system for file behaviour.
 - A board database must stay on local disk, or on a share that implements POSIX byte-range locking.
   SQLite's WAL mode keeps a `-shm` file that assumes shared memory between processes, so a board
   directory on NFS/SMB can answer `disk I/O error` even with `TRALALA_PLATFORM_PROFILE=network`.

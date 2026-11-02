@@ -207,9 +207,8 @@ docker compose up -d --build                   # Docker installs only
 
 Schema migrations run at startup before requests are served, each board is snapshotted first, and a
 board that fails is marked `migration_failed` with an admin retry endpoint. There is no ad-hoc DDL
-and no manual migration step; schema changes are Alembic revisions, described in
-[docs/database.md](../docs/database.md#schema-migrations-alembic). The workflow itself is in
-[docs/loops.md](../docs/loops.md).
+and no manual migration step; schema changes are Alembic revisions. The workflow itself is in
+[Loops.md](Loops.md).
 
 Revision `0008_loops` is a structural redesign: a populated pre-Loop database is refused rather than
 converted. For a throwaway development install, reset explicitly and deliberately:
@@ -260,8 +259,7 @@ already exists and only downloads Chromium when no browser build is present
 | `<data>/.process.lock` | OS file lock proving one backend process owns this directory |
 
 A board is its directory: deleting a board removes its database and its files together, duplicating
-it copies both, and a backup is the database plus its files. See
-[decisions/0019](../docs/decisions/0019-board-files-travel-with-the-database.md).
+it copies both, and a backup is the database plus its files.
 
 Read [Architecture.md](Architecture.md) for how the pieces fit together, and
 [Onboarding.md](Onboarding.md) for what to do in the first hour.
