@@ -40,8 +40,12 @@ class Settings(BaseSettings):
     enable_docs: bool = True
     docs_require_auth: bool = True
     agents_allow_private_endpoints: bool = True
+    discussion_max_rounds: int = 4
+    discussion_token_budget: int = 200_000
+    discussion_time_budget_seconds: int = 900
     attachment_max_bytes: int = 10 * 1024 * 1024
     board_attachment_max_bytes: int = 200 * 1024 * 1024
+    board_import_max_bytes: int = 256 * 1024 * 1024
 
     @field_validator("data_dir", mode="after")
     @classmethod

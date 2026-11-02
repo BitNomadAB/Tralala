@@ -15,13 +15,15 @@ class DiscussionCreate(StrictModel):
     goal: LongText = Field(min_length=1)
     mode: str = Field(default="manual", pattern="^(manual|roundtable|autonomous)$")
     participant_ids: list[Id] = Field(default_factory=list, max_length=12)
-    max_rounds: int = Field(default=3, ge=1, le=10)
+    # Four rounds is where a discussion still adds something: with sequential answers and a review
+    # round before consensus, a thread either converges by two or repeats itself.
+    max_rounds: int = Field(default=3, ge=1, le=4)
 
 
 class DiscussionRunStart(StrictModel):
     """Run one round by default; ``autonomous`` keeps the loop going until the thread decides."""
 
-    rounds: int | None = Field(default=None, ge=1, le=10)
+    rounds: int | None = Field(default=None, ge=1, le=4)
     autonomous: bool = False
     token_budget: int | None = Field(default=None, ge=0, le=5_000_000)
     time_budget_seconds: int | None = Field(default=None, ge=0, le=3600)

@@ -91,7 +91,7 @@ class BackupService:
         sidecar = self._attachments_sidecar(board_id, self._directory(board_id) / snapshot_name)
         if not sidecar.exists():
             # Older snapshots carry no files; existing ones are left alone rather than deleted.
-            return {"restored": 0, "skipped": True}
+            return {"restored": 0, "skipped": True, "reason": "snapshot_has_no_file_archive"}
         directory = self.boards.attachments_dir(board_id)
         directory.mkdir(parents=True, exist_ok=True)
         restored = 0
@@ -185,12 +185,19 @@ class BackupService:
             self.boards.close(board_id)
             attachments = self._restore_attachments(board_id, name)
         report = self.validate(board_id)
-        return {
+        result: dict[str, Any] = {
             "restored_from": name,
             "board_id": board_id,
             "attachments": attachments,
             "verification": report,
         }
+        if attachments.get("skipped"):
+            # Saying nothing here would let an operator believe the files came back with the
+            # database. The snapshot predates the file archive, so the board keeps its files.
+            result["warning"] = (
+                "This snapshot has no file archive; the board's current uploaded files stayed."
+            )
+        return result
 
     def validate(self, board_id: str) -> dict[str, Any]:
         self.board_service.require_row(board_id)

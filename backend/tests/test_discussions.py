@@ -182,3 +182,71 @@ def test_overview_requires_discussion_scope_for_tokens(api: Api, client: Any) ->
 
     allowed = client.get("/api/v1/discussions/overview")
     assert allowed.status_code == 200
+
+
+def test_the_round_cap_is_four_and_the_schema_says_so(
+    api: Api, board: dict[str, Any]
+) -> None:
+    ticket = _ticket(api, board)
+    agent = _agent(api)
+    body = {
+        "card_id": ticket["id"],
+        "goal": "How many rounds is enough?",
+        "participant_ids": [agent["id"]],
+    }
+    too_many = api.post(
+        f"/api/v1/boards/{board['id']}/discussions",
+        json={**body, "max_rounds": 5},
+    )
+    assert too_many.status_code == 422, too_many.text
+
+    discussion = api.data(
+        api.post(
+            f"/api/v1/boards/{board['id']}/discussions",
+            json={**body, "max_rounds": 4},
+        )
+    )
+    assert discussion["max_rounds"] == 4
+
+    rounds_too_many = api.post(
+        f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/start",
+        json={"rounds": 5},
+    )
+    assert rounds_too_many.status_code == 422, rounds_too_many.text
+
+    # A thread created before the cap keeps its stored value on read but cannot run past the cap.
+    with api.client.app.state.services.boards.session(board["id"]) as conn:
+        conn.execute(
+            text("UPDATE discussion_threads SET max_rounds = 8 WHERE id = :id"),
+            {"id": discussion["id"]},
+        )
+    reloaded = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}")
+    )
+    assert reloaded["max_rounds"] == 8
+
+
+def test_a_run_gets_a_default_budget_when_the_caller_sends_none(
+    api: Api, board: dict[str, Any], settings: Any
+) -> None:
+    ticket = _ticket(api, board)
+    agent = _agent(api)
+    discussion = api.data(
+        api.post(
+            f"/api/v1/boards/{board['id']}/discussions",
+            json={
+                "card_id": ticket["id"],
+                "goal": "What does a run cost?",
+                "participant_ids": [agent["id"]],
+            },
+        )
+    )
+    # One inline round: the agent is unreachable, but the run record already carries its budgets.
+    summary = api.data(
+        api.post(
+            f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/runs",
+            json={"rounds": 1},
+        )
+    )
+    assert summary["run"]["token_budget"] == settings.discussion_token_budget
+    assert summary["run"]["time_budget_seconds"] == settings.discussion_time_budget_seconds

@@ -79,7 +79,9 @@ cache is capped so a host with many boards cannot exhaust file handles.
 
 ## Request lifecycle
 
-1. Middleware assigns `X-Request-ID`, enforces the request-size limit and adds security headers.
+1. Middleware assigns `X-Request-ID`, rejects a declared body over the limit and adds security
+   headers; the endpoints that read raw bytes (`/mcp`, attachment upload, board import) count the
+   bytes as they arrive, so a chunked body without a `Content-Length` header is bounded too.
 2. `get_context` resolves the actor from a bearer token or a signed session cookie (validated
    against the `sessions` row), enforces CSRF for cookie-authenticated mutations, and applies the
    per-actor rate limiter. Session scopes come from the account role: `admin` has every scope,
@@ -177,8 +179,15 @@ the "one backend process per data directory" rule intact.
 - Each round is one pass over the participants and is recorded in `discussion_rounds` with answers,
   failures, repeats, tokens and wall time. `discussion_threads.round_count` is the monotonic round
   counter for the whole thread; `discussion_runs.rounds_completed` counts rounds inside one run.
+  A thread's `max_rounds` defaults to 3 and is capped at 4 — the point where a discussion either
+  converged or started repeating itself — and the cap also applies to a value stored before it
+  existed.
 - Budgets are enforced before a round starts (accumulated time) and after every answer (tokens), so
-  a runaway loop stops instead of spending the whole budget in one round.
+  a runaway loop stops instead of spending the whole budget in one round. A run always has both: when
+  the caller sends none, it takes `TRALALA_DISCUSSION_TOKEN_BUDGET` (default 200 000) and
+  `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS` (default 900), and an operator sets either to `0` to
+  disable that default. The round cap (four) bounds how many calls a question makes; the budgets
+  bound how large each call may be, which is what protects the bill.
 - Duplicate guard: each agent message stores `content_sha256`. When an agent repeats its previous
   answer the message and vote are not inserted again; a round with only repeats ends the run as
   `no_progress`.

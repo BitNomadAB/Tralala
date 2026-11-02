@@ -25,9 +25,32 @@ from .common import (
     store_idempotency,
 )
 
+MANIFEST_MAX_BYTES = 1024 * 1024
 EXPORT_FORMAT_VERSION = 2
 BOARD_SCHEMA_VERSION = runner.revision_count("board")
 ALLOWED_STATUSES = {"active", "archived", "maintenance", "error", "migration_failed"}
+
+
+def _archive_member(archive: zipfile.ZipFile, name: str, limit: int) -> bytes:
+    """Read one member, refusing to expand past ``limit``.
+
+    A zip's compression ratio is the attacker's choice: a few kilobytes can expand to gigabytes when
+    read. The declared size is checked first and the real read is bounded, because a header can lie.
+    """
+    info = archive.getinfo(name)
+    if info.file_size > limit:
+        raise ValidationFailure(
+            "Board archive member is larger than this installation accepts",
+            details={"entry": name, "bytes": info.file_size, "max_bytes": limit},
+        )
+    with archive.open(name) as handle:
+        payload = handle.read(limit + 1)
+    if len(payload) > limit:
+        raise ValidationFailure(
+            "Board archive member is larger than this installation accepts",
+            details={"entry": name, "max_bytes": limit},
+        )
+    return payload
 
 
 class BoardService:
@@ -531,13 +554,15 @@ class BoardService:
                     "Board archive must contain manifest.json and board.sqlite",
                     details={"found": sorted(names)},
                 )
-            manifest = json.loads(archive.read("manifest.json"))
+            manifest = json.loads(_archive_member(archive, "manifest.json", MANIFEST_MAX_BYTES))
             if manifest.get("format_version") != EXPORT_FORMAT_VERSION:
                 raise ValidationFailure(
                     "Unsupported board archive format",
                     details={"supported": EXPORT_FORMAT_VERSION},
                 )
-            board_bytes = archive.read("board.sqlite")
+            board_bytes = _archive_member(
+                archive, "board.sqlite", int(self.settings.board_import_max_bytes)
+            )
             attachment_entries = [
                 entry
                 for entry in archive.namelist()

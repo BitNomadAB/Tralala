@@ -380,7 +380,18 @@ class RunService:
                 if rounds is not None
                 else (int(thread["max_rounds"]) if autonomous else 1)
             )
-            requested = max(1, min(requested, 10))
+            limit = max(1, int(self.settings.discussion_max_rounds))
+            requested = max(1, min(requested, limit))
+            # A round cap bounds how many calls a question makes; the budgets bound how big each
+            # call may be, which is what actually protects the bill. A configured value of 0 turns
+            # the default off, while an explicit 0 from a caller still means "exhaust immediately".
+            if token_budget is None and int(self.settings.discussion_token_budget) > 0:
+                token_budget = int(self.settings.discussion_token_budget)
+            if (
+                time_budget_seconds is None
+                and int(self.settings.discussion_time_budget_seconds) > 0
+            ):
+                time_budget_seconds = int(self.settings.discussion_time_budget_seconds)
             deferred = bool(autonomous or requested > 1) if background is None else background
             conn.execute(
                 text(

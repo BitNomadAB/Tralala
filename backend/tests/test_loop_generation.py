@@ -151,9 +151,17 @@ def test_interrupted_runs_are_marked_failed_at_startup(
         api.post(f"{_base(board, loop)}/generation-runs", json={"purpose": "analysis"})
     )
     time.sleep(0.2)
+    # The run is started in a worker thread; wait until it is actually running before pretending the
+    # process died, otherwise there is nothing to recover and the assertion is a race.
+    run_url = f"{_base(board, loop)}/generation-runs/{started['id']}"
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if api.data(api.get(run_url))["status"] == "running":
+            break
+        time.sleep(0.05)
     recovered = services.loop_generation.recover(board["id"])
     assert recovered >= 1
-    run = api.data(api.get(f"{_base(board, loop)}/generation-runs/{started['id']}"))
+    run = api.data(api.get(run_url))
     assert run["status"] == "failed"
     assert run["error_code"] == "interrupted"
 

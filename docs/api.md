@@ -152,8 +152,9 @@ username.
 
 A snapshot is a pair: `backup-<UTC>.sqlite` plus, when the board has uploaded files,
 `backup-<UTC>-attachments.zip`. Restoring replaces both, and pruning removes the pair together. A
-snapshot from before this existed has no sidecar and restores the database while leaving the current
-files untouched.
+snapshot from before this existed has no sidecar: the database is restored, the board's current files
+are kept, and the restore response says exactly that — `attachments.skipped` is `true`,
+`attachments.reason` is `snapshot_has_no_file_archive`, and a top-level `warning` explains it.
 
 Snapshots are also taken automatically: `BackupScheduler` checks every active board and snapshots any
 whose newest `backup-<UTC>.sqlite` is older than `TRALALA_BACKUP_INTERVAL_HOURS` (default 24, `0`
@@ -380,7 +381,10 @@ the page never ships every thread of every board to the browser.
 { "rounds": 3, "autonomous": true, "token_budget": 20000, "time_budget_seconds": 120 }
 ```
 
-`rounds` defaults to the thread's `max_rounds` in autonomous mode and to `1` otherwise. A request
+`rounds` defaults to the thread's `max_rounds` in autonomous mode and to `1` otherwise. A thread's
+`max_rounds` defaults to `3` and is capped at `4`: a discussion either converges within two rounds or
+starts repeating itself, and the duplicate guard stops it anyway. The cap also applies to a value
+stored before it existed, so an older thread can never run longer than four rounds. A request
 that resolves to a single interactive round runs inline and returns the round summary
 (`status`, `answers`, `votes`, `failures`, `rounds_completed`, `tokens_used`, `elapsed_ms`,
 `run_status`, `stop_reason`); anything longer returns `pending: true` and finishes in the
@@ -388,10 +392,20 @@ background, and the client polls the run. `pause`, `resume` and `stop` answer wi
 and `409` when the transition is not possible (for example pausing a finished run). Only one run
 per thread can be active, and review is rejected (`409`) while a run is running or paused.
 
+The round cap bounds how many calls a question makes; the budgets bound how large each call may be,
+which is what protects the bill. When a caller sends no budget, the run takes
+`TRALALA_DISCUSSION_TOKEN_BUDGET` (default 200 000) and `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`
+(default 900). An operator disables a default by setting it to `0`; an explicit `0` from a caller
+still means "exhaust immediately".
+
 Run statuses: `running`, `paused`, `stopped`, `completed`, `failed`, `budget_exhausted`,
 `no_progress`. A run stops at consensus, when the requested rounds are used up, when every
 participant fails, when answers repeat (duplicate guard), or when a budget is exhausted. Thread
 `run_state` mirrors `idle`/`running`/`paused`/`stopped` for the UI.
+
+A round in which every agent repeated its previous text produced no new argument, so it is reported
+as `no_progress` with `duplicate_answers` and cannot be read as agreement, whatever the recorded
+votes say.
 
 A position is read only from an explicit verdict — a JSON field `verdict`/`position`, a
 `Verdict: AGREE|DISAGREE|ABSTAIN` line, or a line that holds nothing else — so a sentence such as
@@ -605,8 +619,13 @@ unavailable.
   (`2027-01-15T09:30:00Z`). Dates are normalized to midnight UTC; free text is rejected with
   `422 validation_failed` so due-date filters stay correct.
 - Request bodies are limited by `TRALALA_MAX_REQUEST_BYTES` (default 8 MiB, matching the bundled
-  nginx `client_max_body_size`). Requests rejected by nginx itself return an HTML error page, not
-  the JSON envelope.
+  nginx `client_max_body_size`). The backend counts the bytes as they arrive, so a chunked request
+  without a `Content-Length` header is refused with `413 payload_too_large` like any other; requests
+  rejected by nginx itself return an HTML error page, not the JSON envelope.
+- A board archive is accepted up to 8 MiB compressed, but each member is also bounded after
+  decompression: `manifest.json` to 1 MiB and `board.sqlite` to `TRALALA_BOARD_IMPORT_MAX_BYTES`
+  (default 256 MiB). An archive that expands past either limit is refused with
+  `422 validation_failed` and its member named in `details`.
 
 ## Cross-board transfer semantics
 

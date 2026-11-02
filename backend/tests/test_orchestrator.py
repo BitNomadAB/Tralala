@@ -287,3 +287,20 @@ def test_a_discussion_names_the_loop_and_ticket_it_is_about(
     # The role text itself names neither the ticket nor the product.
     assert "Tralala" not in captured["system_prompt"]
     assert ticket["id"] not in captured["system_prompt"]
+
+
+def test_a_round_of_repeated_answers_does_not_decide_the_thread(
+    api: Api, board: dict[str, Any], monkeypatch: Any
+) -> None:
+    lead = _agent(api, "Lead7", "lead_developer")
+    qa = _agent(api, "Qa7", "qa_engineer")
+    discussion = _discussion(api, board, [lead, qa], mode="roundtable")
+    # The same text every time: the second round repeats the first and adds no argument.
+    monkeypatch.setattr(runtime, "call_agent", _fake_runtime({"Lead7": "agree", "Qa7": "agree"}))
+    url = f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}/start"
+
+    assert api.data(api.post(url, json={}))["status"] == "discussing"
+    repeated = api.data(api.post(url, json={}))
+    assert repeated["status"] != "consensus_proposed"
+    reloaded = api.data(api.get(f"/api/v1/boards/{board['id']}/discussions/{discussion['id']}"))
+    assert reloaded["status"] == "discussing"

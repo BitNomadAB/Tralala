@@ -867,3 +867,69 @@ A2A never executed) and then `.ralph/potential-bugs.txt`:
 Tests added: board deletion with attachments, duplicate keeps files, rejected upload leaves no file,
 verdict parsing (negation, JSON, labelled line), in-round context, roundtable review round, A2A
 generation. Verification: backend suite green, ruff clean.
+
+## Hardening round: three analyses and the fixes they justified
+
+Ran the FMEA, ATAM and anti-reverse-engineering skills over the worker surface and acted on the
+FMEA findings. Reports (all validated by their skill checkers):
+
+- `analysis/fmea/2026-11-02-worker-surface-credentials-and-data-durability-hardening.md`
+- `analysis/atam-architecture-analysis/2026-11-02-worker-surface-single-process-durability-and-credential-arch.md`
+- `analysis/anti-reverse-engineering-analysis/2026-11-02-worker-surface-public-bootstrap-and-shipped-client-bundle.md`
+
+Applied:
+
+1. **Bounded bodies.** `app/api/body.py` reads raw bodies by counting bytes while they arrive, so a
+   chunked request without `Content-Length` is refused with `413 payload_too_large`. `/mcp`,
+   attachment upload and board import use it; `/mcp` now authenticates before its body is parsed, so
+   the only unauthenticated entry point no longer parses anything for an anonymous caller.
+   Tests: `test_hardening.py::test_a_body_without_content_length_is_still_bounded` (asserts the
+   request really carries no `content-length`), `test_mcp_authenticates_before_reading_the_body`.
+2. **Archive members are bounded after decompression.** `manifest.json` to 1 MiB and `board.sqlite`
+   to `TRALALA_BOARD_IMPORT_MAX_BYTES` (default 256 MiB), checked from the header *and* the actual
+   read. Test: `test_an_archive_member_cannot_expand_past_the_limit`.
+3. **A round of repeats cannot decide a thread.** `answers` counts stored messages and `repeats`
+   counts identical ones, so "nothing new was said" is `repeats > 0 and answers == 0`; that round is
+   `no_progress`/`duplicate_answers` and can never be read as consensus. Test:
+   `test_a_round_of_repeated_answers_does_not_decide_the_thread`.
+4. **Restore says what it did.** A snapshot without a file sidecar now answers
+   `attachments.reason = snapshot_has_no_file_archive` plus a `warning`, instead of silently keeping
+   the current files. Test: `test_restore_says_when_the_snapshot_has_no_file_archive`.
+5. **The public bootstrap cannot drift.** A test asserts every catalogue tool appears in
+   `/llms.txt` and that the file carries no UUID, e-mail address or local host.
+
+Left as decisions (recorded in the reports, not implemented): per-token rate limiting and a rolling
+use count on `GET /credentials/mine` (ATAM R1/F4, FMEA A5), re-validating a resolved agent address at
+call time (FMEA A6), retrying a locked directory removal (FMEA A7), and the anti-reverse-engineering
+slice that would stop members reading the built-in role prompts (ATRE MEDIUM-1).
+
+Also hardened two flaky tests that the longer suite exposed: the pause/resume journey now runs
+enough rounds that it cannot finish before the pause lands, and the interrupted-generation test waits
+for its run to be `running` before simulating a restart.
+
+Verification: full backend suite green, `ruff check app tests` clean, reports pass their skill
+checkers.
+
+## Discussion cost guard: four rounds and a default budget
+
+Owner decision (2026-11-02): a per-token rate limit is not wanted — the product runs on internal
+networks with staff and approved models, so the per-actor limiter stays a runaway guard and the cost
+control belongs on the thing that spends money.
+
+- `DiscussionCreate.max_rounds` defaults to 3 and is capped at 4; `DiscussionRunStart.rounds` is
+  capped at 4. `RunService` clamps to `TRALALA_DISCUSSION_MAX_ROUNDS`, so a thread stored with a
+  higher value before the cap still cannot run past four (`DiscussionOut.max_rounds` keeps no `le`,
+  otherwise old threads would stop serialising).
+- A run with no budget from the caller takes `TRALALA_DISCUSSION_TOKEN_BUDGET` (default 200 000) and
+  `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS` (default 900); an operator disables a default with `0`,
+  while an explicit `0` from a caller still means "exhaust immediately" (unchanged behaviour).
+- The worker `ask_agents` schema advertises `maximum: 4`, and the run panel offers 1–4 rounds with
+  "Installation default" as the budget placeholder.
+- FMEA A5 and ATAM R1 are marked declined with that reason, and ATAM R1b records the replacement.
+
+Tests: the cap is rejected above 4 on create and on start; a stored thread keeps its value on read
+but cannot exceed the cap; a run with no budget records the configured defaults; run-control tests
+moved from `max_rounds` 5/8 to 4 (the pause test now uses a slower round instead of more rounds).
+
+Verification: backend suite green, ruff clean, frontend typecheck/tests/build green (client guard
+clean), and the live backend rejects `max_rounds: 5` with `422 "Input should be less than or equal to 4"`.

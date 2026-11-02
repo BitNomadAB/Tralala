@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from ...core.errors import PayloadTooLarge
 from ...schemas.boards import BoardCreate, BoardDelete, BoardOut, BoardUpdate
 from ...schemas.envelope import Envelope
+from ..body import read_limited_body
 from ..deps import Pagination, RequestContext, get_context, idempotency_key, ok, pagination
 
 router = APIRouter(tags=["boards"])
@@ -61,11 +62,9 @@ async def import_board(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict:
-    data = await request.body()
+    data = await read_limited_body(request)
     if not data:
         raise PayloadTooLarge("Import payload is empty")
-    if len(data) > ctx.services.settings.max_request_bytes:
-        raise PayloadTooLarge("Import payload exceeds the configured limit")
     board = ctx.services.board.import_archive(ctx.actor, data)
     return ok(request, board)
 

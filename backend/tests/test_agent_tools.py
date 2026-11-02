@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from conftest import Api
@@ -472,3 +473,17 @@ def test_a_question_becomes_a_conversation(
     )["structuredContent"]
     assert any("retry path" in message["content"] for message in replied["messages"])
     assert len(replied["messages"]) > len(read["messages"])
+
+
+def test_the_public_bootstrap_describes_exactly_the_catalogue(api: Api) -> None:
+    from app.api.mcp import render_bootstrap
+    from app.services.agent_tools import tool_catalog
+
+    text = render_bootstrap(api.client.app.state.services.settings)
+    catalogue = tool_catalog()
+    missing = [name for name in catalogue if name not in text]
+    assert missing == [], missing
+    # The bootstrap is public, so it must stay a contract: no ids, no addresses, no tenant data.
+    assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", text)
+    assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", text)
+    assert "127.0.0.1" not in text and "localhost" not in text

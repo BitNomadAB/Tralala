@@ -374,11 +374,16 @@ class Orchestrator:
         # In a roundtable the agents are meant to review each other, so agreement in the opening
         # round cannot be consensus: whoever answered first had read nobody.
         needs_review_round = thread.get("mode") == "roundtable" and len(participants) > 1
+        # A round in which every agent repeated its previous text produced no new argument, so the
+        # existing votes cannot be read as a fresh agreement. `answers` counts stored messages and
+        # `repeats` counts identical ones, so this is "nothing new was said".
+        only_repeats = repeats > 0 and answers == 0
         unanimous = (
             bool(latest)
             and set(latest.values()) == {"agree"}
             and set(latest) == {p["participant_id"] for p in participants}
             and (not needs_review_round or prior_answers > 0)
+            and not only_repeats
         )
 
         return {

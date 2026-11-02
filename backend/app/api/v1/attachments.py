@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from ...core.errors import PayloadTooLarge
 from ...schemas.attachments import AttachmentOut
 from ...schemas.envelope import Envelope
+from ..body import read_limited_body
 from ..deps import RequestContext, get_context, ok
 
 router = APIRouter(tags=["attachments"])
@@ -34,11 +35,9 @@ async def upload_attachment(
     card_id: Annotated[str, Query(max_length=64)],
     filename: Annotated[str, Query(min_length=1, max_length=255)],
 ) -> dict:
-    data = await request.body()
+    data = await read_limited_body(request)
     if not data:
         raise PayloadTooLarge("Uploaded file is empty")
-    if len(data) > ctx.services.settings.max_request_bytes:
-        raise PayloadTooLarge("Upload exceeds the configured request limit")
     attachment = ctx.services.attachment.upload(
         ctx.actor,
         board_id,

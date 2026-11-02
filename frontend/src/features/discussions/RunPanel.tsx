@@ -51,7 +51,8 @@ export function RunPanel({
 }) {
   const toast = useToast();
   const [planning, setPlanning] = useState(false);
-  const [rounds, setRounds] = useState(String(discussion.max_rounds));
+  // The server caps a thread at four rounds; an older thread may still carry a higher value.
+  const [rounds, setRounds] = useState(String(Math.min(discussion.max_rounds, 4)));
   const [autonomous, setAutonomous] = useState(discussion.mode === "autonomous");
   const [tokenBudget, setTokenBudget] = useState("");
   const [timeBudget, setTimeBudget] = useState("");
@@ -233,7 +234,7 @@ export function RunPanel({
                 id="run-rounds"
                 type="number"
                 min={1}
-                max={10}
+                max={4}
                 value={rounds}
                 onChange={(event) => setRounds(event.target.value)}
               />
@@ -253,7 +254,7 @@ export function RunPanel({
                 min={0}
                 value={tokenBudget}
                 onChange={(event) => setTokenBudget(event.target.value)}
-                placeholder="No limit"
+                placeholder="Installation default"
               />
             </Field>
             <Field label="Time budget in seconds (optional)" htmlFor="run-time-budget">
@@ -263,7 +264,7 @@ export function RunPanel({
                 min={0}
                 value={timeBudget}
                 onChange={(event) => setTimeBudget(event.target.value)}
-                placeholder="No limit"
+                placeholder="Installation default"
               />
             </Field>
             <div className="flex justify-end gap-2">

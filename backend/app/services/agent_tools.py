@@ -908,7 +908,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                             "Ask only these agents; omit to ask every agent on the board"
                         ),
                     },
-                    "rounds": {"type": "number", "minimum": 1, "maximum": 10},
+                    "rounds": {"type": "number", "minimum": 1, "maximum": 4},
                 },
                 required=["board_id", "card_id", "question"],
             ),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from conftest import Api, loop_id
@@ -187,3 +188,34 @@ def test_an_export_and_import_keep_the_uploaded_files(api: Api, board: dict[str,
     assert restored.read_bytes() == b"body"
     rows = api.data(api.get(f"/api/v1/boards/{imported['id']}/attachments"))
     assert [entry["original_filename"] for entry in rows] == ["spec.md"]
+
+
+def test_restore_says_when_the_snapshot_has_no_file_archive(
+    api: Api, board: dict[str, Any], settings: Any
+) -> None:
+    lists = api.data(
+        api.get(f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/lists")
+    )
+    card = api.data(
+        api.post(
+            f"/api/v1/boards/{board['id']}/loops/{loop_id(api, board['id'])}/cards",
+            json={"list_id": lists[0]["id"], "title": "Has a file"},
+        )
+    )
+    _upload_attachment(api, board["id"], card["id"], "notes.txt", b"board file body")
+    snapshot = api.data(api.post(f"/api/v1/boards/{board['id']}/backups"))["name"]
+
+    sidecar_name = snapshot.replace(".sqlite", "-attachments.zip")
+    sidecar = Path(settings.data_dir) / "backups" / board["id"] / sidecar_name
+    assert sidecar.exists()
+    sidecar.unlink()
+
+    restored = api.data(
+        api.post(f"/api/v1/boards/{board['id']}/backups/{snapshot}/restore")
+    )
+    assert restored["attachments"]["skipped"] is True
+    assert restored["attachments"]["reason"] == "snapshot_has_no_file_archive"
+    assert "warning" in restored
+    # The files were kept rather than silently dropped, which is what the warning promises.
+    files = api.data(api.get(f"/api/v1/boards/{board['id']}/attachments?card_id={card['id']}"))
+    assert [item["original_filename"] for item in files] == ["notes.txt"]

@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from ..core.config import Settings
 from ..core.errors import ApiError
 from ..services.agent_tools import missing_scopes, tool_catalog
+from .body import read_limited_json
 from .deps import RequestContext, get_context
 
 router = APIRouter(tags=["mcp"])
@@ -84,8 +85,12 @@ def _tool_failure(error: ApiError) -> dict[str, Any]:
 
 @router.post("/mcp")
 async def mcp_endpoint(request: Request) -> Response:
+    # Every method is authenticated, including initialize: an unauthenticated MCP surface would be
+    # a second, undocumented entry point into the installation. The actor is resolved before the
+    # body is read, so an unauthenticated caller cannot make the process parse or buffer anything.
+    ctx = get_context(request)
     try:
-        message = await request.json()
+        message = await read_limited_json(request)
     except ValueError:
         return JSONResponse(_error(None, -32700, "Parse error"), status_code=200)
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
@@ -94,10 +99,6 @@ async def mcp_endpoint(request: Request) -> Response:
     method = message.get("method")
     message_id = message.get("id")
     params = message.get("params") or {}
-
-    # Every method is authenticated, including initialize: an unauthenticated MCP surface would be
-    # a second, undocumented entry point into the installation.
-    ctx = get_context(request)
 
     if "id" not in message:  # notifications/initialized and friends
         return Response(status_code=202)

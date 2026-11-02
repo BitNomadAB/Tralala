@@ -250,7 +250,7 @@ def test_time_budget_stops_further_rounds(
     api: Api, board: dict[str, Any], monkeypatch: Any
 ) -> None:
     agent = _agent(api, "Slow Bot")
-    discussion = _discussion(api, board, [agent], max_rounds=5)
+    discussion = _discussion(api, board, [agent], max_rounds=4)
     monkeypatch.setattr(runtime, "call_agent", _runtime({"Slow Bot": "disagree"}, delay=0.05))
 
     _, runs_url = _urls(board, discussion)
@@ -269,9 +269,10 @@ def test_pause_holds_the_loop_and_resume_continues(
     api: Api, board: dict[str, Any], monkeypatch: Any
 ) -> None:
     agent = _agent(api, "Pause Bot")
-    # Enough rounds that the run cannot finish on its own before the pause lands on a loaded CI box.
-    discussion = _discussion(api, board, [agent], max_rounds=8)
-    monkeypatch.setattr(runtime, "call_agent", _runtime({"Pause Bot": "disagree"}, delay=0.12))
+    # A slow round on the longest thread the API allows, so the run cannot finish before the pause
+    # lands even on a loaded CI box.
+    discussion = _discussion(api, board, [agent], max_rounds=4)
+    monkeypatch.setattr(runtime, "call_agent", _runtime({"Pause Bot": "disagree"}, delay=0.4))
 
     base, runs_url = _urls(board, discussion)
     run_id = api.data(api.post(runs_url, json={"autonomous": True}))["run_id"]
@@ -293,14 +294,14 @@ def test_pause_holds_the_loop_and_resume_continues(
     assert resumed["run_status"] == "running"
     final = _wait(api, f"{runs_url}/{run_id}", lambda run: run["status"] != "running")
     assert final["status"] == "completed"
-    assert final["rounds_completed"] == 8
+    assert final["rounds_completed"] == 4
 
 
 def test_stop_ends_the_run_and_blocks_new_work(
     api: Api, board: dict[str, Any], monkeypatch: Any
 ) -> None:
     agent = _agent(api, "Stop Bot")
-    discussion = _discussion(api, board, [agent], max_rounds=5)
+    discussion = _discussion(api, board, [agent], max_rounds=4)
     monkeypatch.setattr(runtime, "call_agent", _runtime({"Stop Bot": "disagree"}, delay=0.12))
 
     base, runs_url = _urls(board, discussion)

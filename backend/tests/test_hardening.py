@@ -313,3 +313,68 @@ def test_backup_response_does_not_expose_server_paths(
     payload = api.data(api.post(f"/api/v1/boards/{board['id']}/backups"))
     assert "data_dir" not in payload
     assert str(settings.data_dir) not in json.dumps(payload)
+
+
+def _chunked(payload: bytes):
+    """Yield in pieces so httpx sends a chunked body with no ``Content-Length`` header."""
+    for offset in range(0, len(payload), 64 * 1024):
+        yield payload[offset : offset + 64 * 1024]
+
+
+def test_a_body_without_content_length_is_still_bounded(api: Api, board: dict[str, Any]) -> None:
+    oversized = b" " * (9 * 1024 * 1024)
+    upload = api.request(
+        "POST",
+        f"/api/v1/boards/{board['id']}/attachments",
+        params={"card_id": str(uuid.uuid4()), "filename": "notes.txt"},
+        content=_chunked(oversized),
+        headers={"Content-Type": "text/plain"},
+    )
+    # Proves the test is about the missing header: without this the middleware would have refused
+    # the body and the streaming limit would never be exercised.
+    assert "content-length" not in {key.lower() for key in upload.request.headers}
+    assert upload.status_code == 413, upload.text
+    assert upload.json()["error"]["code"] == "payload_too_large"
+
+    imported = api.request(
+        "POST",
+        "/api/v1/boards/import",
+        content=_chunked(oversized),
+        headers={"Content-Type": "application/zip"},
+    )
+    assert imported.status_code == 413, imported.text
+
+    mcp = api.request(
+        "POST",
+        "/mcp",
+        content=_chunked(oversized),
+        headers={"Content-Type": "application/json"},
+    )
+    assert mcp.status_code == 413, mcp.text
+
+
+def test_mcp_authenticates_before_reading_the_body(client: TestClient) -> None:
+    # A parse error would prove the body was read first; an unauthorised answer means the actor is
+    # resolved before anything is parsed or buffered.
+    response = client.post(
+        "/mcp", content=b"{not-json", headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 401, response.text
+
+
+def test_an_archive_member_cannot_expand_past_the_limit(api: Api) -> None:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", " " * (2 * 1024 * 1024))
+        archive.writestr("board.sqlite", b"not-a-database")
+    response = api.request(
+        "POST",
+        "/api/v1/boards/import",
+        content=buffer.getvalue(),
+        headers={"Content-Type": "application/zip"},
+    )
+    assert response.status_code == 422, response.text
+    assert "larger than this installation accepts" in response.text
