@@ -375,8 +375,10 @@ Loop and deep-links the Ticket as `/boards/{board_id}/loops/{loop_id}?card={card
 keep an immutable role snapshot, so later template edits never rewrite what an agent was told.
 
 `GET /discussions/overview` is the Discussions page's first level: one entry per board with
-`discussion_count`, `open_count` and the board's newest `last_activity_at`, ordered newest activity
-first (boards without threads come last, by name). It discloses board metadata, so it requires both
+`discussion_count`, `open_count`, `ticket_count` and the board's newest `last_activity_at`, ordered
+newest activity first (boards without threads come last, by name). `ticket_count` is what lets the
+new-discussion dialog offer a board first and still say which boards cannot host a thread yet, since
+a discussion must reference a Ticket. It discloses board metadata, so it requires both
 `boards:read` and `discussions:read`. The client then loads threads for the selected board only, so
 the page never ships every thread of every board to the browser.
 

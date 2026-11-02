@@ -262,12 +262,25 @@ class DiscussionService:
         with self.boards.reader(board_id) as conn:
             return self.serialize(conn, self._thread(conn, discussion_id), with_detail=True)
 
-    def _discussion_counts(self, board_id: str) -> dict[str, Any]:
+    def _board_counts(self, board_id: str) -> dict[str, Any]:
+        """Threads and Tickets for one board, in a single read.
+
+        The discussion dialog offers a board first and then its Tickets, so a board with no Tickets
+        has to be visible as such without opening it. One statement covers both counts.
+        """
+        empty = {
+            "discussion_count": 0,
+            "open_count": 0,
+            "last_activity_at": None,
+            "ticket_count": 0,
+        }
         try:
             with self.boards.reader(board_id) as conn:
                 row = conn.execute(
                     text(
-                        "SELECT MAX(last_activity_at) AS last_activity_at,"
+                        "SELECT"
+                        " (SELECT COUNT(*) FROM cards WHERE archived_at IS NULL) AS ticket_count,"
+                        " MAX(last_activity_at) AS last_activity_at,"
                         " COUNT(*) AS discussion_count,"
                         " COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0)"
                         " AS open_count"
@@ -276,13 +289,14 @@ class DiscussionService:
                 ).mappings().first()
         except (NotFound, ServiceUnavailable):
             # A board whose schema is mid-repair must still appear in the overview.
-            return {"discussion_count": 0, "open_count": 0, "last_activity_at": None}
-        if row is None or not row["discussion_count"]:
-            return {"discussion_count": 0, "open_count": 0, "last_activity_at": None}
+            return empty
+        if row is None:
+            return empty
         return {
-            "discussion_count": int(row["discussion_count"]),
-            "open_count": int(row["open_count"]),
+            "discussion_count": int(row["discussion_count"] or 0),
+            "open_count": int(row["open_count"] or 0),
             "last_activity_at": row["last_activity_at"],
+            "ticket_count": int(row["ticket_count"] or 0),
         }
 
     def board_overview(self) -> list[dict[str, Any]]:
@@ -297,7 +311,7 @@ class DiscussionService:
                 "board_id": board["id"],
                 "board_name": board["name"],
                 "status": board["status"],
-                **self._discussion_counts(board["id"]),
+                **self._board_counts(board["id"]),
             }
             for board in self.board_service.registry.read(
                 "SELECT id, name, status FROM boards"

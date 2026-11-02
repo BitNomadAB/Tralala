@@ -31,6 +31,33 @@ VERDICT_LONE_LINE = re.compile(
 )
 
 
+def provider_error(response: httpx.Response) -> str:
+    """The status plus the provider's own words, bounded.
+
+    "HTTP 400" alone tells nobody anything: it was the whole message a person saw when a generation
+    silently failed. The provider usually says what it disliked ("model not found", "temperature
+    unsupported"), so that sentence travels with the status. Only the provider's error text is
+    read — never the request, which carries the prompt.
+    """
+    detail = ""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            detail = str(error.get("message") or error.get("code") or "")
+        elif isinstance(error, str):
+            detail = error
+        if not detail:
+            detail = str(body.get("message") or body.get("detail") or "")
+    if not detail:
+        detail = " ".join((response.text or "").split())
+    detail = detail.strip()[:200]
+    return f"HTTP {response.status_code}" + (f": {detail}" if detail else "")
+
+
 def extract_position(text: str) -> tuple[str, str]:
     """Return ``(verdict, justification)`` from an agent answer, defaulting to ``abstain``."""
     structured = _structured_verdict(text)
@@ -152,7 +179,7 @@ def call_a2a(
     except Exception as exc:  # noqa: BLE001 - surfaced as an agent failure
         return {"ok": False, "error": f"{type(exc).__name__}", "text": ""}
     if response.status_code >= 400:
-        return {"ok": False, "error": f"HTTP {response.status_code}", "text": ""}
+        return {"ok": False, "error": provider_error(response), "text": ""}
     try:
         body = response.json()
     except ValueError:
@@ -213,7 +240,7 @@ def call_completion(
     if response.status_code >= 400:
         return {
             "ok": False,
-            "error": f"HTTP {response.status_code}",
+            "error": provider_error(response),
             "text": "",
         }
     try:

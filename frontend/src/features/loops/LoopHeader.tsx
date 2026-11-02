@@ -253,6 +253,7 @@ function LoopDocumentDialog({
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loop.id) });
+    queryClient.invalidateQueries({ queryKey: keys.generationRuns(boardId, loop.id) });
     onChanged();
   };
 
@@ -297,6 +298,18 @@ function LoopDocumentDialog({
   });
   const run = runId ? runQuery.data : undefined;
   const runFinished = run ? ["completed", "failed", "cancelled"].includes(run.status) : false;
+
+  // A failed run used to exist only as a toast that scrolled away, so "I pressed Generate and
+  // nothing happened" was the honest description of a failed provider call. The last run for the
+  // purpose stays on screen instead, with whatever the provider said.
+  const runsQuery = useQuery({
+    queryKey: keys.generationRuns(boardId, loop.id),
+    queryFn: () => api.listGenerationRuns(boardId, loop.id),
+    enabled: tab !== "info",
+    refetchInterval: runId && !runFinished ? 1500 : false,
+  });
+  const purposeRuns = (runsQuery.data ?? []).filter((entry) => entry.purpose === tab);
+  const lastRun = purposeRuns[0];
 
   useEffect(() => {
     if (!runFinished) return;
@@ -428,6 +441,29 @@ function LoopDocumentDialog({
             </Button>
           ) : null}
         </div>
+        {tab !== "info" ? (
+          <p
+            role="status"
+            className={`mt-2 text-[11px] ${
+              lastRun?.status === "failed"
+                ? "text-[var(--destructive)]"
+                : "text-[var(--muted-foreground)]"
+            }`}
+          >
+            {runsQuery.isLoading ? (
+              "Checking the last run…"
+            ) : lastRun ? (
+              <>
+                Last {tab} run {lastRun.status}
+                {lastRun.error_message ? ` — ${lastRun.error_message}` : ""} ·{" "}
+                {new Date(lastRun.created_at).toLocaleString()}
+                {lastRun.agent_name ? ` · ${lastRun.agent_name}` : ""}
+              </>
+            ) : (
+              `No ${tab} run yet for this Loop.`
+            )}
+          </p>
+        ) : null}
 
         <div className="mt-3 flex flex-col gap-4">
           {visible.map((kind) => {

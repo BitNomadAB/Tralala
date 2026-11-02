@@ -146,6 +146,10 @@ def test_board_overview_orders_boards_by_newest_discussion_activity(
     assert latest["discussion_count"] == 1
     assert latest["open_count"] == 1
     assert latest["status"] == "active"
+    # The dialogue offers a board before its Tickets, so the overview has to say which boards have
+    # any: the empty board is the one a person must not be sent into blind.
+    assert latest["ticket_count"] == 1
+    assert overview["items"][2]["ticket_count"] == 0
     assert overview["items"][2]["last_activity_at"] is None
     assert overview["items"][2]["discussion_count"] == 0
 

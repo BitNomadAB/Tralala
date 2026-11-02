@@ -656,6 +656,8 @@ export interface DiscussionBoard {
   discussion_count: number;
   open_count: number;
   last_activity_at: string | null;
+  /** Tickets in the board: a discussion needs one, so a board with none cannot host one yet. */
+  ticket_count: number;
 }
 
 export interface Discussion {

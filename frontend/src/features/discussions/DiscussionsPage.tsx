@@ -26,6 +26,7 @@ export function DiscussionsPage() {
   const [boardId, setBoardId] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [dialogBoardId, setDialogBoardId] = useState("");
   const [ticketId, setTicketId] = useState("");
   const [goal, setGoal] = useState("");
   const [title, setTitle] = useState("");
@@ -47,6 +48,7 @@ export function DiscussionsPage() {
   });
   const boards = boardsQuery.data ?? [];
   const activeBoardEntry = boards.find((entry) => entry.board_id === activeBoard) ?? null;
+  const dialogBoardEntry = boards.find((entry) => entry.board_id === dialogBoardId) ?? null;
 
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: keys.discussions(activeBoard) });
@@ -72,9 +74,9 @@ export function DiscussionsPage() {
   });
   const discussions = discussionsQuery.data ?? [];
   const ticketsQuery = useQuery({
-    queryKey: ["discussion-tickets", activeBoard],
-    queryFn: () => api.listBoardTickets(activeBoard, { limit: 200 }),
-    enabled: Boolean(activeBoard) && creating,
+    queryKey: ["discussion-tickets", dialogBoardId],
+    queryFn: () => api.listBoardTickets(dialogBoardId, { limit: 200 }),
+    enabled: Boolean(dialogBoardId) && creating,
   });
   const detailQuery = useQuery({
     queryKey: ["discussion", activeBoard, selectedId],
@@ -88,7 +90,7 @@ export function DiscussionsPage() {
 
   const createMutation = useMutation({
     mutationFn: () =>
-      api.createDiscussion(activeBoard, {
+      api.createDiscussion(dialogBoardId, {
         card_id: ticketId,
         goal: goal.trim(),
         mode,
@@ -101,9 +103,13 @@ export function DiscussionsPage() {
       setGoal("");
       setTitle("");
       setParticipants([]);
-      setSelectedId(discussion.id);
-      queryClient.invalidateQueries({ queryKey: keys.discussions(activeBoard) });
+      // The dialog can name a board other than the one being viewed, so follow the thread there.
+      const target = dialogBoardId;
+      queryClient.invalidateQueries({ queryKey: keys.discussions(target) });
+      queryClient.invalidateQueries({ queryKey: ["discussion-tickets", target] });
       queryClient.invalidateQueries({ queryKey: keys.discussionBoards });
+      setBoardId(target);
+      setSelectedId(discussion.id);
       toast.push({ title: "Discussion created", variant: "success" });
     },
     onError: (error) =>
@@ -178,9 +184,14 @@ export function DiscussionsPage() {
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Button
-            onClick={() => setCreating(true)}
-            disabled={!activeBoard}
-            title={activeBoard ? undefined : "Select a board first"}
+            onClick={() => {
+              // Open with the board being viewed, so the common case needs no extra click; the
+              // dialog still lists every board, because a thread may belong somewhere else and
+              // because a board with no Tickets yet cannot host one.
+              setDialogBoardId(activeBoard);
+              setTicketId("");
+              setCreating(true);
+            }}
           >
             <Plus size={15} /> New discussion
           </Button>
@@ -441,7 +452,7 @@ export function DiscussionsPage() {
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent
           title="New discussion"
-          description="Every discussion references exactly one existing ticket."
+          description="Pick the board, then one of its tickets. Every discussion references exactly one existing ticket."
         >
           <form
             className="flex flex-col gap-3"
@@ -450,11 +461,35 @@ export function DiscussionsPage() {
               if (ticketId && goal.trim()) createMutation.mutate();
             }}
           >
+            <Field
+              label="Board"
+              htmlFor="discussion-board"
+              hint="A thread belongs to one board. Boards are listed with their ticket count, because a board without tickets cannot host a discussion yet."
+            >
+              <Select
+                id="discussion-board"
+                value={dialogBoardId}
+                onChange={(event) => {
+                  setDialogBoardId(event.target.value);
+                  setTicketId("");
+                }}
+                required
+              >
+                <option value="">Select a board…</option>
+                {boards.map((entry) => (
+                  <option key={entry.board_id} value={entry.board_id}>
+                    {entry.board_name} · {entry.ticket_count}{" "}
+                    {entry.ticket_count === 1 ? "ticket" : "tickets"}
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <Field label="Ticket" htmlFor="discussion-ticket">
               <Select
                 id="discussion-ticket"
                 value={ticketId}
                 onChange={(event) => setTicketId(event.target.value)}
+                disabled={!dialogBoardId || boardTickets.length === 0}
                 required
               >
                 <option value="">Select a ticket…</option>
@@ -467,13 +502,14 @@ export function DiscussionsPage() {
             </Field>
             {ticketsQuery.isLoading ? (
               <p className="text-xs text-[var(--muted-foreground)]">Loading tickets…</p>
-            ) : boardTickets.length === 0 ? (
+            ) : dialogBoardId && boardTickets.length === 0 ? (
               <p className="rounded-lg border border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted-foreground)]">
-                This board has no tickets yet, and a discussion must reference one. Open{" "}
-                <Link className="underline" to={`/boards/${activeBoard}`}>
-                  {activeBoardEntry?.board_name ?? "the board"}
+                {dialogBoardEntry?.board_name ?? "This board"} has no tickets yet, and a discussion
+                must reference one. Open{" "}
+                <Link className="underline" to={`/boards/${dialogBoardId}`}>
+                  {dialogBoardEntry?.board_name ?? "the board"}
                 </Link>{" "}
-                and add a ticket to a Loop, then start the discussion here.
+                and add a ticket to a Loop, or pick another board above.
               </p>
             ) : null}
             <Field label="Title (optional)" htmlFor="discussion-title">
@@ -540,7 +576,10 @@ export function DiscussionsPage() {
               <Button variant="ghost" onClick={() => setCreating(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!ticketId || !goal.trim() || createMutation.isPending}>
+              <Button
+                type="submit"
+                disabled={!ticketId || !goal.trim() || createMutation.isPending}
+              >
                 {createMutation.isPending ? "Creating…" : "Create discussion"}
               </Button>
             </div>
