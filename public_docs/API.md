@@ -273,6 +273,21 @@ subject name.
 The agent's role prompt is the first part of every Loop generation prompt, followed by the purpose
 contract and the JSON schema, and the whole composed text is what a run snapshots.
 
+An analysis or RoadMap run also carries a **repository snapshot**: for every enabled repository linked
+to the board, Tralala resolves the commit at the configured branch, reads the tarball for that commit
+and places a bounded, filtered set of files in the prompt as data — never as instructions. The caps
+are part of the decision (`docs/decisions/0011`, not shipped with the repository): at most 2 MB of
+archive, 200 files and 200 KB of text per repository, 15 s timeout, `github.com`/`api.github.com`/
+`codeload.github.com` only, no clone and no `git` binary. Build output, dependencies, lock files,
+binaries and images are skipped.
+
+A repository that cannot be read does not fail the run: it appears in the snapshot as
+`{id, name, error}` with a class such as `unauthorized`, `not_found`, `rate_limited`, `too_large` or
+`timeout`, and the analysis is expected to say which part of the code it did not see. The run record
+keeps the commit and the file paths (`source_revisions.repositories`); the file contents stay in the
+run's own input, and `GET …/generation-runs/{run_id}` returns only the name, branch, commit,
+file count and `truncated` flag. No token, path or content ever appears in a log line or an error.
+
 `scope` says where a profile works. `board` profiles answer inside one board; `organisation`
 profiles (`coordinator`, `architect`) work across the whole installation and cannot be selected as
 board agents — `agent_ids` on a board rejects them with `422 agent_scope_organisation`. Their input

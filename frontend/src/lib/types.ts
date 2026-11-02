@@ -339,6 +339,16 @@ export interface Loop {
   warnings: Array<{ code: string; message: string; kind?: string; reasons?: string[] }>;
 }
 
+export interface GenerationRunRepository {
+  id: string;
+  name: string;
+  branch: string | null;
+  commit_sha: string | null;
+  file_count: number;
+  truncated: boolean;
+  error?: string;
+}
+
 export interface GenerationRun {
   id: string;
   loop_id: string;
@@ -348,7 +358,8 @@ export interface GenerationRun {
   error_message: string | null;
   attempts: number;
   output: Record<string, unknown>;
-  source_revisions: Record<string, string | null>;
+  /** Document revision ids, plus the repositories the run was based on (name, commit, file count). */
+  source_revisions: Record<string, string | null | GenerationRunRepository[]>;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

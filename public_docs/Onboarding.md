@@ -97,6 +97,14 @@ changes code.
 Without a repository the analysis still works from the Info you write; with one it cites files and
 revisions, which is what makes the RoadMap reviewable.
 
+What an analysis can actually see is **bounded on purpose**: at most 2 MB of archive, 200 files and
+200 KB of text per repository, with build output, dependencies, lock files, binaries and images
+skipped, and only `github.com` is supported. A file the snapshot cut away is a file the analysis must
+list under *open questions* instead of guessing. After a run, the Loop's document dialog shows which
+commit each analysis was based on and how many files it read — "based on acme app @ abc123de, 12
+files" — and a repository that could not be read appears there with its reason (`unauthorized`,
+`not_found`, `rate_limited`, `too_large`, `timeout`).
+
 ## 5. Run one Loop end to end
 
 A **Board** is a project; a **Loop** is one feature or coherent change inside it. Create a board

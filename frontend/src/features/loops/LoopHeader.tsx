@@ -19,6 +19,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { generationAgents } from "@/lib/boardAgents";
 import { renderMarkdown } from "@/lib/markdown";
 import type { Card, DocumentKind, Loop } from "@/lib/types";
+import { describeRunRepositories } from "@/lib/loopRuns";
 import { LoopAgentsDialog } from "./LoopAgentsDialog";
 import { LoopCompletionDialog } from "./LoopCompletionDialog";
 import { LoopPlanDialog } from "./LoopPlanDialog";
@@ -458,6 +459,9 @@ function LoopDocumentDialog({
                 {lastRun.error_message ? ` — ${lastRun.error_message}` : ""} ·{" "}
                 {new Date(lastRun.created_at).toLocaleString()}
                 {lastRun.agent_name ? ` · ${lastRun.agent_name}` : ""}
+                {describeRunRepositories(lastRun) ? (
+                  <>{" · based on "}{describeRunRepositories(lastRun)}</>
+                ) : null}
               </>
             ) : (
               `No ${tab} run yet for this Loop.`

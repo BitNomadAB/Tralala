@@ -41,6 +41,11 @@ Worth knowing when you look at the dashboard:
   a wrong model name passed the test and failed the first generation. It now sends one real
   completion, reports the provider's sentence when that is refused, and offers the model names
   it found as suggestions.
+- **An analysis can read the code, within stated limits.** When a board links repositories, analysis
+  and RoadMap runs carry a snapshot of the branch head — at most 2 MB of archive, 200 files and
+  200 KB of text per repository, filtered for what informs a decision. The prompt names the caps and
+  the commit, and the Loop's document dialog line says which commit the last run used and how many
+  files it read. A repository that cannot be read is reported next to it, not hidden.
 - **A failed generation now says why.** A provider rejection used to read only "HTTP 400", and the
   message lived in a toast that disappeared; the Loop's document dialog shows the last run for the
   purpose, with the provider's own sentence, until it is retried.

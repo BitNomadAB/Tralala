@@ -29,6 +29,7 @@ from .loop_qa import LoopQaService
 from .loops import LoopService
 from .mentions import MentionService
 from .orchestrator import Orchestrator
+from .repo_snapshot import RepositorySnapshotService
 from .repositories import RepositoryService
 from .runs import RunService
 from .search import SearchService
@@ -53,6 +54,7 @@ class Services:
         self.role_templates = RoleTemplateService(self.registry)
         self.agent = AgentService(settings, self.registry, self.role_templates)
         self.repository = RepositoryService(settings, self.registry)
+        self.repo_snapshot = RepositorySnapshotService(self.repository)
         self.board.repositories = self.repository
         self.board.agents = self.agent
         self.loop = LoopService(self.board)
@@ -68,6 +70,7 @@ class Services:
             self.loop_links,
             self.agent,
             self.loop_agents,
+            snapshots=self.repo_snapshot,
         )
         self.loop_qa = LoopQaService(
             self.board, self.loop, self.loop_history, self.loop_links
