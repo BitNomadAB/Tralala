@@ -129,6 +129,11 @@ These are known and deliberately left as they are. Read them before you decide y
 - **Discussion budgets are per run, not per token.** There is no per-token rate limit, because the
   deployment is a private network with known agents. A run is capped at four rounds and by
   `TRALALA_DISCUSSION_TOKEN_BUDGET` and `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`.
+- **An agent endpoint is checked when it is saved, not on every call.** A hostname that passed
+  validation could later resolve to a link-local address. Re-resolving before each provider call is
+  only worth doing where a metadata service is reachable, such as a cloud instance; Tralala is built
+  for a private network or a private Tailscale, so it was declined (FMEA action A6). Do not run it on
+  a cloud host without adding that check.
 - **The board counters are cached in the registry.** They are measured from each board and dropped
   when that board is written to, so the dashboard does not open every board file. The numbers can be
   at most `TRALALA_BOARD_COUNTS_CACHE_SECONDS` stale if a board file is changed behind the app's

@@ -82,7 +82,10 @@ stale, what a human must approve. (3) The evaluation/trace output of real runs.
 - Counterpoint recorded as a rule, not a finding: `AGENTS.md` rule 11 and decision 0013 make role
   prompts editable registry data on purpose, so a person can tune how their agents think. This is a
   product tradeoff that needs an owner decision, not a bug.
-- Verdict: VERIFIED.
+- Owner decision (2026-11-02): **accepted as is.** The prompts stay readable for every member, because
+  the work order and the approval rules are the product, and a member who cannot see the shape of a
+  role cannot tune one. Recorded as an accepted risk in `public_docs/Security_defaults.md`.
+- Verdict: VERIFIED (accepted risk, not fixed).
 
 ### MEDIUM-2 [LEAK]: the public bootstrap describes the whole surface
 

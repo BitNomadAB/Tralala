@@ -1,6 +1,8 @@
 # 0011 — Repository access for analysis agents
 
-- Status: accepted as Model A, slice 1 delivered 2026-11-01; slice 2 (snapshot fetch) pending
+- Status: accepted as Model A, slice 1 delivered 2026-11-01. Slice 2 (snapshot fetch) is deferred by
+  the owner (2026-11-02): it is a feature for a repository agent that needs files it was not given,
+  not a defect, and nothing in the release depends on it. Re-open it when such an agent exists.
 - Date: 2026-11-01
 
 ## Context

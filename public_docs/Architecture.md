@@ -205,7 +205,7 @@ with no cache, 15 ms once the counters are known, 13 ms with the flag. See
 
 ## Concurrency and idempotency
 
-- Cards carry an integer `version`. Update/move/transfer require the expected version and return
+- Cards carry an integer `version`. Update and move require the expected version and return
   `409 version_conflict` with the current version otherwise.
 - `Idempotency-Key` on board/card creation stores a SHA-256 fingerprint plus the response. A replay
   with the same payload returns the stored response; a different payload returns `409

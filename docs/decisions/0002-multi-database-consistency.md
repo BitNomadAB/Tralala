@@ -16,8 +16,11 @@ file, and must never half-delete a user's board.
 2. **Startup recovery** (`BoardService.recover`) converts leftover `maintenance` rows: `active`
    when the database exists, `error` otherwise.
 3. **Duplication/import** follow the same `maintenance → active|error` pattern.
-4. **Cross-board transfer** copies into the target board first and deletes the source second; the
-   response includes `finalized` and a warning if the source could not be removed.
+4. ~~**Cross-board transfer** copies into the target board first and deletes the source second; the
+   response includes `finalized` and a warning if the source could not be removed.~~
+   Superseded: a Ticket cannot cross a Loop or a Board, because that would bypass the destination's
+   approved plan (`409 plan_change_required`, see [api.md](../api.md#no-cross-loop-or-cross-board-transfer)).
+   The copy-then-delete ordering itself still holds for board duplication under rule 3.
 5. **Deletion** requires an archived board plus an exact name confirmation, then removes the
    database, backups and registry row.
 

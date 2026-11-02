@@ -1169,3 +1169,29 @@ Also corrected `docs/database.md`, which still listed registry head 0006 and boa
 
 Verification: ruff clean, 358 pytest tests pass (4 counter tests + 1 registry migration test), 37
 vitest tests, `tsc --noEmit`, `pnpm build` (7 chunks, guard ok), 30 Playwright journeys.
+- Last transfer drift found by hand: `public_docs/Architecture.md` still said update/move/transfer
+  require the expected version, and decision 0002 kept a live-looking cross-board transfer rule.
+  The version rule now covers update and move only, and 0002's rule 4 is struck through and marked
+  superseded (the copy-then-delete ordering still applies to board duplication under rule 3).
+
+## 2026-11-02 - closing the open decisions before deployment
+
+The owner resolved the five open items. Nothing here changes behaviour except the documentation of it.
+
+- **A6 / R6 declined.** Self-hosted on a private network, with no cloud metadata service, so
+  re-resolving an agent hostname before every provider call buys nothing. Marked declined in the FMEA
+  and ATAM reports, and written as an accepted risk in `public_docs/Security_defaults.md` with the
+  warning that a cloud host would need it.
+- **MEDIUM-1 accepted as is.** Members keep reading the built-in role prompts: the work order and the
+  approval rules are the product, and a member who cannot see a role's shape cannot tune one. Owner
+  decision recorded in the ATRE report and in the accepted risks.
+- **Decision 0010 closed.** The revisit before the first public release is answered by a page instead
+  of an import: `public_docs/Release_notes.md` states that pre-Loop data is not migrated, that board
+  archives are format 2 only, and which defaults changed. Linked from the README.
+- **Decision 0011 slice 2 deferred.** Snapshot fetch is a feature for a repository agent that needs
+  files it was not given, not a defect; nothing in the release depends on it.
+- Last transfer drift: `public_docs/Architecture.md` no longer lists transfer in the version rule, and
+  decision 0002 rule 4 is struck through as superseded.
+
+Verification: all three analysis reports pass their own `report.py check`, 56 markdown files checked
+with no broken links.

@@ -1,6 +1,9 @@
 # 0010 — Loop schema transition and the development reset
 
-- Status: accepted by the owner (2026-11-01), **to revisit before the first public release**
+- Status: accepted by the owner (2026-11-01). The revisit before the first public release is done:
+  the reset is kept as the only path, and the consequence is stated for users in
+  [public_docs/Release_notes.md](../../public_docs/Release_notes.md) instead of an import of the old
+  archive format being written.
 - Date: 2026-11-01
 
 ## Context

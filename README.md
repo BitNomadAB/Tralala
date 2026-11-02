@@ -18,6 +18,7 @@ App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / Ro
 | do the first hour: my account, a person, an agent, a repository, one Loop | [public_docs/Onboarding.md](public_docs/Onboarding.md) |
 | fix something that broke | [public_docs/Troubleshooting.md](public_docs/Troubleshooting.md) |
 | know what is protected and what is my decision | [public_docs/Security_defaults.md](public_docs/Security_defaults.md) |
+| see what changed for someone upgrading | [public_docs/Release_notes.md](public_docs/Release_notes.md) |
 | connect a coding agent to it | [public_docs/Agent_usage.md](public_docs/Agent_usage.md) |
 | understand the design | [public_docs/Architecture.md](public_docs/Architecture.md), [docs/decisions/](docs/decisions) |
 | call the API | [docs/api.md](docs/api.md) |
