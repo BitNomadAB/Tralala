@@ -32,8 +32,9 @@ Failure (same shape for every status):
 Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_token`,
 `token_revoked`, `token_expired`, `forbidden`, `csrf_failed`, `not_found`, `conflict`,
 `version_conflict`, `board_archived`, `board_migration_failed`, `board_schema_outdated`,
-`idempotency_key_reused`, `creation_in_progress`, `creation_failed`, `validation_failed`,
-`payload_too_large`, `rate_limited`, and the Loop workflow codes `loop_not_found`,
+`board_files_busy`, `idempotency_key_reused`, `creation_in_progress`, `creation_failed`,
+`validation_failed`, `payload_too_large`, `rate_limited`, and the Loop workflow codes
+`loop_not_found`,
 `loop_required`, `loop_mismatch`, `loop_read_only`, `document_stale`, `approval_required`,
 `human_action_required`, `invalid_dependency_graph`, `ticket_blocked`, `plan_change_required`,
 `generation_input_changed`, `generation_unavailable`, `generation_in_progress`, `qa_incomplete`.
@@ -155,6 +156,12 @@ A snapshot is a pair: `backup-<UTC>.sqlite` plus, when the board has uploaded fi
 snapshot from before this existed has no sidecar: the database is restored, the board's current files
 are kept, and the restore response says exactly that — `attachments.skipped` is `true`,
 `attachments.reason` is `snapshot_has_no_file_archive`, and a top-level `warning` explains it.
+
+Deleting a board removes its database, its uploaded files and its backups before the registry row, so
+an interrupted delete leaves a board that can be deleted again. When the host will not release a file
+(Windows, or a share), the removal is retried briefly and then answered with
+`409 board_files_busy`, naming the leftover directory in `details.leftover` together with `errno`,
+`winerror` and `platform_profile`; the board and its data are untouched.
 
 Snapshots are also taken automatically: `BackupScheduler` checks every active board and snapshots any
 whose newest `backup-<UTC>.sqlite` is older than `TRALALA_BACKUP_INTERVAL_HOURS` (default 24, `0`

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,7 @@ from sqlalchemy import text
 from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ServiceUnavailable, ValidationFailure
+from ..core.platform import copy_file, remove_file, remove_tree, retry_io
 from ..schemas.boards import BoardCreate, BoardUpdate
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
@@ -20,6 +20,7 @@ from ..storage.schema import runner
 from ..storage.sqlite import snapshot_database, utcnow
 from .activity import log_activity
 from .common import (
+    archive_file_name,
     position_for_index,
     request_fingerprint,
     store_idempotency,
@@ -477,11 +478,27 @@ class BoardService:
             raise ValidationFailure("Confirmation name does not match the board name")
         # Order matters: everything on disk goes first, so an interrupted delete leaves a row that
         # can be deleted again rather than a row pointing at files that no longer exist.
+        profile = self.settings.file_profile
         with self.boards.locked(board_id):
-            self.boards.delete_database(board_id)
-        backup_dir = self.settings.backups_dir / board_id
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir, ignore_errors=False)
+            try:
+                self.boards.delete_database(board_id)
+                remove_tree(self.settings.backups_dir / board_id, profile=profile)
+            except OSError as exc:
+                # The board survives on purpose: it still has data, and the operator can retry once
+                # whatever held the file has let go. Naming the leftover directory is the useful
+                # part, and it is relative so the response stays free of absolute paths.
+                raise Conflict(
+                    "The board's files could not all be removed, so the board was not deleted",
+                    code="board_files_busy",
+                    details={
+                        "leftover": f"boards/{board_id}",
+                        "backups_leftover": f"backups/{board_id}",
+                        "reason": type(exc).__name__,
+                        "errno": getattr(exc, "errno", None),
+                        "winerror": getattr(exc, "winerror", None),
+                        "platform_profile": profile,
+                    },
+                ) from exc
         self.registry.delete_board_row(board_id)
 
     # --- export / import -------------------------------------------------------
@@ -510,6 +527,7 @@ class BoardService:
         }
         buffer = io.BytesIO()
         snapshot = self.boards.path(board_id).with_suffix(".export.sqlite")
+        profile = self.settings.file_profile
         try:
             snapshot_database(self.boards.path(board_id), snapshot)
             with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -518,10 +536,13 @@ class BoardService:
                 # The database and its uploaded files are one unit; an export without them is a
                 # board that cannot be restored in full.
                 for file in attachments:
-                    archive.write(file, f"attachments/{file.name}")
+                    retry_io(
+                        "export_attachment",
+                        profile,
+                        lambda file=file: archive.write(file, f"attachments/{file.name}"),
+                    )
         finally:
-            if snapshot.exists():
-                snapshot.unlink()
+            remove_file(snapshot, profile=profile)
         return buffer.getvalue()
 
     def _copy_attachments(self, source_board_id: str, target_board_id: str) -> int:
@@ -531,8 +552,9 @@ class BoardService:
             return 0
         directory = self.boards.attachments_dir(target_board_id)
         directory.mkdir(parents=True, exist_ok=True)
+        profile = self.settings.file_profile
         for file in files:
-            shutil.copy2(file, directory / file.name)
+            copy_file(file, directory / file.name, profile=profile)
         return len(files)
 
     def _attachment_files(self, board_id: str) -> list[Path]:
@@ -579,8 +601,8 @@ class BoardService:
             seen: set[str] = set()
             total = 0
             for entry in attachment_entries:
-                name = Path(entry).name
-                if not name or name in seen:
+                name = archive_file_name(entry)
+                if name in seen:
                     raise ValidationFailure(
                         "Board archive contains an invalid attachment entry",
                         details={"entry": entry},

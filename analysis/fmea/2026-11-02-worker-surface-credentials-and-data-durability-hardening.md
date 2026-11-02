@@ -98,16 +98,21 @@ F13 are guarded and only need the tests that already exist.
 | A4 | F6 | Report in the restore response when a snapshot has no file sidecar and the current files were kept (`attachments.reason` plus a `warning`) | A silent mismatch between database and files | Restore either matches the snapshot or says it does not | done in this session |
 | A5 | F4 | Expose a rolling 7-day use count next to `last_used_at` in `GET /credentials/mine`, so an unused or unexpectedly active key is visible to its owner without an admin | The only signal was a single timestamp | A person can spot a token they are not using | declined by the owner: internal-network deployment, and the per-actor limiter already bounds runaway work |
 | A6 | F10 | Re-resolve the hostname inside `call_a2a` and `call_completion` immediately before the request, check it against the same policy that applied at creation, and connect to the resolved address | Validation happened only at creation | A hostname that now resolves to a blocked address cannot be called | proposed, not done |
-| A7 | F7 | Retry the directory removal once after a short delay, and name the leftover path in the error | Windows file locks | An antivirus scanner holding a file does not require a manual retry | proposed, not done |
+| A7 | F7 | Route every board-file operation through one platform profile: retry only the errors a host can clear on its own, never `EACCES`/`EPERM`/`EROFS`, and answer `409 board_files_busy` with the relative leftover directory | Windows shares a file it may not delete; POSIX fails for different reasons | A held file costs a short wait and an actionable error instead of a half-deleted board, on every host | done in this session (decision 0020) |
 | A8 | F14 | Assert in tests that every tool named in `render_bootstrap` exists in `tool_catalog()` and that every tool is mentioned there | Hand-written prose could drift from the catalogue | The bootstrap cannot go stale silently | done in this session |
 
 A5 was declined by the owner on 2026-11-02: the product runs on internal networks with staff and
 approved models, and the per-actor limiter is a runaway guard rather than defence, so a per-token
 limit would only throttle the legitimate burst. What replaced it is a cost guard on the thing that
 actually spends money: a discussion is capped at four rounds and every run gets a default token and
-time budget (`TRALALA_DISCUSSION_TOKEN_BUDGET`, `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`). A7 is a
-platform workaround whose value depends on how often operators report it; no evidence of it happening
-was found in this session.
+time budget (`TRALALA_DISCUSSION_TOKEN_BUDGET`, `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`).
+
+A7 turned out to be broader than a Windows workaround: the owner asked whether Linux and macOS
+suffer the same failure, and they do not for an open file - POSIX removes the name and keeps the
+inode alive - but they do for permissions, a read-only volume, an immutable flag and a network
+share. It is now one platform profile (`core/platform.py`, `TRALALA_PLATFORM_PROFILE`, decision
+0020) that decides retry policy while the locking mechanism still follows the real operating
+system, and a busy file can no longer leave a board half deleted.
 
 A6 is narrower than it first looks, and the owner's question exposed that. Private and loopback
 endpoints are normal here: a self-hosted installation points an agent at a model on its own network,

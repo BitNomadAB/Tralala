@@ -933,3 +933,44 @@ moved from `max_rounds` 5/8 to 4 (the pause test now uses a slower round instead
 
 Verification: backend suite green, ruff clean, frontend typecheck/tests/build green (client guard
 clean), and the live backend rejects `max_rounds: 5` with `422 "Input should be less than or equal to 4"`.
+
+## A7: one platform profile for host filesystem behaviour
+
+Owner question: does the A7 deletion problem happen on Linux/macOS too? Answer: no for a held file
+(Windows refuses to delete an open file; POSIX removes the name and keeps the inode), but POSIX fails
+for other reasons (EACCES, EROFS, chattr +i, EBUSY on a mount, ENOTEMPTY on NFS/SMB) and has a silent
+failure mode of its own. The owner then asked for one unified flag instead of scattered OS checks.
+
+Decision 0020 (`docs/decisions/0020-one-platform-profile-for-host-filesystem-behaviour.md`):
+
+- `core/platform.py` is the only module that knows the host: `resolve_profile`, `transient_error`,
+  `lock_primitive`, and `remove_tree`/`remove_file`/`replace_file`/`copy_file`/`retry_io`.
+- `TRALALA_PLATFORM_PROFILE` = `auto` (default, the real OS) | `windows` | `posix` | `network`; an
+  unknown value fails at startup. It selects *retry policy* only — the lock primitive and `chmod`
+  still follow the real OS, so a wrong profile can never pick a call the host lacks.
+- Retried: WinError 5/32/145 on Windows; `ENOTEMPTY`/`EBUSY`/`EAGAIN` on POSIX and on `network`.
+  Never retried: `EACCES`, `EPERM`, `EROFS` — a retry cannot change them.
+- A board deletion that still fails answers `409 board_files_busy` with `details.leftover`
+  (`boards/{id}`, relative), `errno`, `winerror` and `platform_profile`; the board keeps its data and
+  the delete can be retried. `board_files_busy` is documented in `docs/api.md`.
+- Routed through the module: board deletion, backup-directory removal, board duplicate (file copy),
+  board export and backup archiving (reading files others may hold), attachment upload
+  (`os.replace`), attachment delete, backup pruning, `app/dev_reset.py`, and the secret file's
+  `chmod` (skipped on Windows, where NTFS has no permission bits). `storage/process_lock.py` now asks
+  `platform.lock_primitive()` instead of testing `os.name`.
+- Archive member names go through `services/common.archive_file_name`, which rejects dot entries and
+  backslashes — Windows treats `\` as a separator and POSIX does not, so one host's harmless name is
+  the other's traversal. Used by board import and by the backup sidecar restore.
+- Documented limitation: `network` does not make SQLite WAL safe on a share; a live board belongs on
+  local disk (architecture operational notes).
+- Fixed a flaky pause/resume test the longer suite exposed (it failed about one full-suite run in
+  three). Wall-clock margins were the wrong tool: the fake runtime now parks every round after the
+  first on a `threading.Event`, so the pause is requested at a known point, `rounds_completed == 2`
+  is asserted exactly, and the resume expectation is deterministic. Five isolated runs and three
+  consecutive full-suite runs stayed green.
+
+Verification: 17 new tests in `tests/test_platform_profile.py` (profile resolution, transient/permanent
+split, retry-then-succeed, single attempt on EACCES, idempotent removal, busy board keeps its data and
+returns the relative leftover, archive-name guard, lock primitive), backend suite green three times
+in a row, ruff clean, frontend typecheck + 37 tests green, and the setting rejects an unknown value at
+startup.

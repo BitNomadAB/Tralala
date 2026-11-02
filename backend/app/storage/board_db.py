@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import time
 import uuid
 from collections.abc import Iterator
@@ -15,6 +14,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from ..core.config import Settings
 from ..core.errors import NotFound, ServiceUnavailable
+from ..core.platform import remove_tree
 from .schema import ensure_fts, runner
 from .sqlite import create_sqlite_engine, utcnow
 
@@ -174,11 +174,14 @@ class BoardDatabaseManager:
         The directory is the unit, because a board is a database plus its attachments. Removing only
         the SQLite files used to fail on ``rmdir`` as soon as an attachment existed, which left the
         row behind with no database to open.
+
+        A host that holds a file open (Windows, or a network share) is retried briefly, because that
+        clears on its own. Anything else raises so the caller can keep the registry row and report
+        the leftover directory instead of pretending the board is gone.
         """
         self.close(board_id)
         directory = self.path(board_id).parent
-        if directory.exists():
-            shutil.rmtree(directory, ignore_errors=False)
+        remove_tree(directory, profile=self.settings.file_profile)
 
     def close_all(self) -> None:
         with self._lock:

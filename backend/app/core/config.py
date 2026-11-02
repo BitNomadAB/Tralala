@@ -46,6 +46,24 @@ class Settings(BaseSettings):
     attachment_max_bytes: int = 10 * 1024 * 1024
     board_attachment_max_bytes: int = 200 * 1024 * 1024
     board_import_max_bytes: int = 256 * 1024 * 1024
+    # How the host filesystem behaves: auto (the real OS), windows, posix, or network for a board
+    # directory on NFS/SMB. It selects retry policy, never the locking mechanism.
+    platform_profile: str = "auto"
+
+    @field_validator("platform_profile", mode="after")
+    @classmethod
+    def _known_profile(cls, value: str) -> str:
+        from .platform import PROFILES, resolve_profile
+
+        cleaned = (value or "auto").strip().lower()
+        if cleaned not in PROFILES:
+            raise ValueError(f"platform_profile must be one of {', '.join(PROFILES)}")
+        return resolve_profile(cleaned)
+
+    @property
+    def file_profile(self) -> str:
+        """The profile every file operation uses; already resolved by the validator."""
+        return self.platform_profile
 
     @field_validator("data_dir", mode="after")
     @classmethod

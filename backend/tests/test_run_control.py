@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -85,6 +86,16 @@ def _runtime(
         }
 
     return call
+
+
+def _wait_until(predicate, *, timeout: float = 10.0) -> None:
+    """Poll a plain condition in this process; used where no API call can report the state."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.01)
+    raise AssertionError("condition never became true")
 
 
 def _urls(board: dict[str, Any], discussion: dict[str, Any]) -> tuple[str, str]:
@@ -269,26 +280,51 @@ def test_pause_holds_the_loop_and_resume_continues(
     api: Api, board: dict[str, Any], monkeypatch: Any
 ) -> None:
     agent = _agent(api, "Pause Bot")
-    # A slow round on the longest thread the API allows, so the run cannot finish before the pause
-    # lands even on a loaded CI box.
     discussion = _discussion(api, board, [agent], max_rounds=4)
-    monkeypatch.setattr(runtime, "call_agent", _runtime({"Pause Bot": "disagree"}, delay=0.4))
+    # The second round blocks until the test opens the gate, so the pause is requested at a known
+    # point instead of racing the loop. Every wait below is deterministic; no sleep decides it.
+    gate = threading.Event()
+    calls = {"n": 0}
+    counter = threading.Lock()
 
-    base, runs_url = _urls(board, discussion)
+    def call(settings: Any, agent_row: dict[str, Any], *, system_prompt: str, messages: list):
+        with counter:
+            calls["n"] += 1
+            take = calls["n"]
+        if take > 1:
+            gate.wait(timeout=10)
+        return {
+            "ok": True,
+            "error": None,
+            "text": f"take {take}: keep going. DISAGREE",
+            "verdict": "disagree",
+            "justification": "keep going",
+            "model": "test-model",
+            "usage": {},
+        }
+
+    monkeypatch.setattr(runtime, "call_agent", call)
+    _, runs_url = _urls(board, discussion)
     run_id = api.data(api.post(runs_url, json={"autonomous": True}))["run_id"]
     _wait(api, f"{runs_url}/{run_id}", lambda run: run["rounds_completed"] >= 1)
+    # Round two is now parked inside the gate, so no further round can start behind us.
+    _wait_until(lambda: calls["n"] >= 2)
 
     paused = api.data(api.post(f"{runs_url}/{run_id}/pause"))
     assert paused["run_status"] == "paused"
     assert paused["run_state"] == "paused"
 
-    settled = _stable(api, f"{runs_url}/{run_id}")
+    gate.set()
+    settled = _wait(
+        api,
+        f"{runs_url}/{run_id}",
+        lambda run: run["status"] == "paused" and run["rounds_completed"] == 2,
+    )
     assert settled["status"] == "paused"
-    completed = settled["rounds_completed"]
-    time.sleep(0.4)
+    assert settled["rounds_completed"] == 2
     still = api.data(api.get(f"{runs_url}/{run_id}"))
     assert still["status"] == "paused"
-    assert still["rounds_completed"] == completed
+    assert still["rounds_completed"] == 2
 
     resumed = api.data(api.post(f"{runs_url}/{run_id}/resume"))
     assert resumed["run_status"] == "running"

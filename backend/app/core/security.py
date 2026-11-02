@@ -14,6 +14,8 @@ import secrets
 import time
 from pathlib import Path
 
+from .platform import PROFILE_WINDOWS, resolve_profile
+
 _SCRYPT_N = 2**14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
@@ -142,10 +144,13 @@ def write_private_file(path: Path, value: str) -> None:
         except OSError:
             pass
         raise
+    if resolve_profile(None) == PROFILE_WINDOWS:  # pragma: no cover - exercised on Windows
+        # NTFS has no permission bits: this would only clear the read-only flag, and the file's
+        # protection comes from the ACL it inherits from its directory.
+        return
     try:
         os.chmod(path, 0o600)
     except OSError:
-        # Windows maps this onto ACL inheritance; nothing more can be done here.
         pass
 
 

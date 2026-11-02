@@ -4,12 +4,13 @@ import hashlib
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from ..core.errors import Conflict
+from ..core.errors import Conflict, ValidationFailure
 from ..storage.sqlite import utcnow
 
 POSITION_GAP = 1024
@@ -280,6 +281,27 @@ def run_idempotent(
     )
     return result, False
 
+
+def archive_file_name(entry: str) -> str:
+    """The bare filename of an archive member, or a rejection.
+
+    A zip entry is attacker-controlled text, and the two hosts disagree about what separates a path:
+    Windows treats ``\\`` as a separator and POSIX does not. Comparing the name to the entry after
+    taking only its last component, and refusing dot entries, keeps the write inside the board's own
+    attachments directory on either host.
+    """
+    name = entry.rsplit("/", 1)[-1]
+    if name in {"", ".", ".."} or "\\" in name or "/" in name or "\x00" in name:
+        raise ValidationFailure(
+            "Board archive contains an invalid attachment entry", details={"entry": entry}
+        )
+    if Path(name).name != name:
+        raise ValidationFailure(
+            "Board archive contains an invalid attachment entry", details={"entry": entry}
+        )
+    return name
+
+
 def require_mutable_card(conn: Connection, card_id: str) -> None:
     """Reject writes to subresources of a Loop that is completed, archived or cancelled.
 
@@ -303,6 +325,7 @@ def require_mutable_card(conn: Connection, card_id: str) -> None:
         raise Conflict(
             "This Loop is read-only", code="loop_read_only", details={"card_id": card_id}
         )
+
 
 def require_mutable_checklist(conn: Connection, checklist_id: str) -> None:
     row = one(conn, "SELECT card_id FROM checklists WHERE id = :id", {"id": checklist_id})

@@ -9,8 +9,10 @@ from typing import Any
 
 from ..core.context import ActorContext
 from ..core.errors import NotFound, ValidationFailure
+from ..core.platform import remove_file, retry_io
 from ..storage.sqlite import snapshot_database, utcnow
 from .boards import BoardService
+from .common import archive_file_name
 
 BACKUP_PATTERN = re.compile(r"^backup-\d{8}T\d{6}Z(?:-[a-z0-9-]+)?\.sqlite$")
 
@@ -81,9 +83,14 @@ class BackupService:
                 sidecar.unlink()
             return {"files": 0, "size_bytes": 0}
         buffer = io.BytesIO()
+        profile = self.settings.file_profile
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for file in files:
-                archive.write(file, f"attachments/{file.name}")
+                retry_io(
+                    "backup_attachment",
+                    profile,
+                    lambda file=file: archive.write(file, f"attachments/{file.name}"),
+                )
         sidecar.write_bytes(buffer.getvalue())
         return {"files": len(files), "size_bytes": sidecar.stat().st_size}
 
@@ -99,9 +106,7 @@ class BackupService:
             for entry in archive.namelist():
                 if not entry.startswith("attachments/"):
                     continue
-                name = Path(entry).name
-                if not name:
-                    continue
+                name = archive_file_name(entry)
                 (directory / name).write_bytes(archive.read(entry))
                 restored += 1
         return {"restored": restored, "skipped": False}
@@ -125,17 +130,21 @@ class BackupService:
         )
         # Names carry the UTC timestamp, so lexical order is chronological order.
         stale = snapshots[:-keep] if len(snapshots) > keep else []
+        # Pruning is best effort: one busy snapshot must not stop the others from being removed, and
+        # a failure is reported by the next listing rather than by an exception here.
+        profile = self.settings.file_profile
         removed = []
         for file in stale:
             try:
-                file.unlink()
-                removed.append(file.name)
+                if not remove_file(file, profile=profile):
+                    continue
             except OSError:
                 continue
+            removed.append(file.name)
             sidecar = self._attachments_sidecar(board_id, file)
             if sidecar.exists():
                 try:
-                    sidecar.unlink()
+                    remove_file(sidecar, profile=profile)
                 except OSError:
                     pass
         return removed

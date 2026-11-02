@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import IO
 
+from ..core.platform import PROFILE_WINDOWS, lock_primitive
+
 LOCK_FILE_NAME = ".process.lock"
 
 
@@ -38,7 +40,7 @@ class DataDirectoryLock:
         handle = open(self.path, "a+b")  # noqa: SIM115 - the handle is held for the process lifetime
         try:
             handle.seek(0)
-            if os.name == "nt":  # pragma: no cover - exercised on Windows
+            if lock_primitive() == PROFILE_WINDOWS:  # pragma: no cover - Windows only
                 import msvcrt
 
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
@@ -68,7 +70,7 @@ class DataDirectoryLock:
         self._handle = None
         try:
             handle.seek(0)
-            if os.name == "nt":  # pragma: no cover - exercised on Windows
+            if lock_primitive() == PROFILE_WINDOWS:  # pragma: no cover - Windows only
                 import msvcrt
 
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)

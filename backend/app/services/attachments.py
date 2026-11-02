@@ -8,7 +8,6 @@ user input.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ from sqlalchemy import text
 
 from ..core.context import ActorContext
 from ..core.errors import NotFound, ValidationFailure
+from ..core.platform import remove_file, replace_file
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -181,9 +181,10 @@ class AttachmentService:
         # (invisible, prunable) instead of a row whose attachment can never be downloaded.
         target = self.file_path(board_id, stored)
         staging = target.with_name(f".{attachment_id}.uploading")
+        profile = self.settings.file_profile
         try:
             staging.write_bytes(data)
-            os.replace(staging, target)
+            replace_file(staging, target, profile=profile)
         except OSError as exc:
             staging.unlink(missing_ok=True)
             raise ValidationFailure("Could not store the uploaded file") from exc
@@ -277,4 +278,4 @@ class AttachmentService:
                 )
         path = self.file_path(board_id, row["stored_filename"])
         if path.exists():
-            path.unlink()
+            remove_file(path, profile=self.settings.file_profile)

@@ -12,11 +12,11 @@ from application startup.
 from __future__ import annotations
 
 import argparse
-import shutil
 from pathlib import Path
 from typing import Any
 
 from .core.config import Settings, get_settings
+from .core.platform import remove_tree
 from .core.security import SECRET_FILE_NAME
 
 
@@ -61,7 +61,7 @@ def reset(settings: Settings, *, confirm: bool) -> dict[str, Any]:
         removed.append(str(registry_path))
     for directory in (settings.boards_dir, settings.backups_dir):
         if directory.exists():
-            shutil.rmtree(directory)
+            remove_tree(directory, profile=settings.file_profile)
             removed.append(str(directory))
     return {"data_dir": overview["data_dir"], "removed": removed}
 

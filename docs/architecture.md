@@ -296,5 +296,17 @@ they never change a Ticket.
   Startup takes an operating-system file lock on `data/.process.lock`, so an overlapping restart or
   a second container fails with an actionable message instead of racing a schema rebuild. The kernel
   releases the lock when the process exits, so no stale lock is left behind.
+- Host differences live in one place: `core/platform.py` plus `TRALALA_PLATFORM_PROFILE`
+  (`auto` | `windows` | `posix` | `network`). The profile decides *retry policy* — which file errors
+  can clear on their own — while the mechanism that talks to the host (the lock primitive, `chmod`)
+  always follows the real operating system. Windows refuses to delete a file another process holds
+  open, so a board deletion or an attachment replace is retried briefly there; POSIX removes the name
+  and leaves an open file alive, so it is not. Nothing outside `core/platform.py` inspects the
+  operating system for file behaviour.
+- A board database must stay on local disk, or on a share that implements POSIX byte-range locking.
+  SQLite's WAL mode keeps a `-shm` file that assumes shared memory between processes, so a board
+  directory on NFS/SMB can answer `disk I/O error` even with `TRALALA_PLATFORM_PROFILE=network`.
+  That profile fixes transient removals, not WAL: a network share is for exports and backups, not for
+  a live board.
 - End-to-end tests (`frontend/e2e`) run through `scripts/run-playwright.mjs`, which reuses a local
   Playwright install and boots an isolated stack (backend `:8077`, Vite `:5273`).
