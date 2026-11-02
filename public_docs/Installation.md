@@ -6,8 +6,8 @@ source**.
 
 - In a hurry: [Docker](#docker-recommended).
 - Developing or debugging the code: [From source](#from-source).
-- Once it runs: [Practical commands](practical_commands.md) for start/stop, tests, database checks and
-  updates.
+- Once it runs: [Onboarding](Onboarding.md) for the first hour, and
+  [Practical commands](practical_commands.md) for start/stop, tests, database checks and updates.
 - Something failing: [Troubleshooting](Troubleshooting.md).
 - Before you expose it: [Security defaults](Security_defaults.md).
 
@@ -259,4 +259,5 @@ A board is its directory: deleting a board removes its database and its files to
 it copies both, and a backup is the database plus its files. See
 [decisions/0019](../docs/decisions/0019-board-files-travel-with-the-database.md).
 
-Read [docs/architecture.md](../docs/architecture.md) for how the pieces fit together.
+Read [Architecture.md](Architecture.md) for how the pieces fit together, and
+[Onboarding.md](Onboarding.md) for what to do in the first hour.

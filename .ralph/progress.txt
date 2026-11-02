@@ -1087,3 +1087,37 @@ updates for Python/SQLite/React and "get latest" from this repository.
 Verification: 30 Playwright journeys pass in 1.6 min (28 old + 2 new), 37 unit tests pass, `tsc
 --noEmit` clean, and a link checker over README/CONTRIBUTING/AGENTS plus the five public docs resolves
 every relative link and anchor.
+
+## Architecture moved to public_docs and Onboarding added
+
+Owner: "understand the design" should point at a public doc, the file renamed `Architecture.md`, tidied
+because much has changed since it was written, and a new `Onboarding.md` with the after-install
+guides plus the intended order of work in a Loop.
+
+- `docs/architecture.md` → `public_docs/Architecture.md` (renamed, moved, cleaned). Cleanups: the
+  diagram now shows the Caddy web tier; a "where to read next" table links loops/api/database/decisions
+  and the agent guide; the storage model gained `boards/{uuid}/attachments/`, the backup sidecar and
+  `.process.lock`; deleting a board is documented as disk-then-row; mentions carry a bounded excerpt of
+  up to three text attachments (they used to say metadata only); the discussion section gained
+  sequential in-round answers, the structured verdict rule and the duplicate-only round; the worker
+  surface names the thirteen tools and links decisions 0015/0018/0019/0020; the operational notes gained
+  the backup scheduler, staged uploads and the platform-profile link. Stale claim fixed: a member holds
+  every scope except `users:admin` **and** `credentials:admin`.
+- `public_docs/Onboarding.md` (new): numbered path 1 account → 2 people → 3 agent → 4 repository →
+  5 one Loop → 6 habits, with the small guides (change the admin password and delete the bootstrap
+  file, invite or create a person, role agent vs worker key, GitHub repository and token, board
+  assignment through **Edit board → Agents / Repositories**) and the order of work inside a Loop as a
+  table (Info → Analysis → RoadMap → Execution → QA → Finalize) plus the three rules that keep it
+  honest.
+- References updated in README, Installation, AGENTS.md layout, and a one-line "since moved" note in
+  today's FMEA/ATAM/ATRE reports.
+- **Found a real UI/backend inconsistency while documenting the agent step:** the board agent picker
+  and `lib/boardAgents.ts` only offered `openai_compatible`, although `loop_generation` accepts every
+  executable transport since decision 0018 — so an A2A agent could generate on the server and never
+  appear in the picker. One exported list (`EXECUTABLE_CONNECTION_TYPES`) now mirrors
+  `runtime.EXECUTABLE_CONNECTION_TYPES` on the client, and the unit test asserts the A2A agent is
+  offered.
+
+Verification: 30 Playwright journeys pass (1.4 min), 37 unit tests pass, `tsc --noEmit` clean, and a
+link checker over README/CONTRIBUTING/AGENTS, six public docs and three reference docs resolves every
+relative link and anchor.

@@ -20,7 +20,7 @@ the product owner).
 quality goals the worker surface demands (availability, security, recoverability, modifiability) are
 supported by the decisions taken for it.
 
-**Sources inspected.** `AGENTS.md`; `docs/architecture.md` (storage model, request lifecycle,
+**Sources inspected.** `AGENTS.md`; `docs/architecture.md` (since moved to `public_docs/Architecture.md`) (storage model, request lifecycle,
 consistency across databases, WebMCP and the worker surface, operational notes);
 `docs/decisions/0001-per-board-sqlite.md`, `0002-multi-database-consistency.md`,
 `0007-accounts-sessions-and-keys.md`, `0012-board-agent-membership.md`, `0015-worker-surface-mcp-and-llms-txt.md`,

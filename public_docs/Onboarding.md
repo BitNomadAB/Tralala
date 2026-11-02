@@ -1,0 +1,135 @@
+# Onboarding
+
+Tralala is installed and you are signed in as `admin`. This is what to do next, in the order that
+avoids going back: make the account yours, bring in one person, connect one agent, connect one
+repository, then run one Loop end to end. Each section is short on purpose; the why lives in
+[Architecture.md](Architecture.md) and the rules in [docs/loops.md](../docs/loops.md).
+
+```
+1 account -> 2 people -> 3 agent -> 4 repository
+   -> 5 one Loop: Info -> Analysis -> RoadMap -> Execution -> QA -> Finalize
+   -> 6 habits
+```
+
+## 1. Make the administrator account yours
+
+**Settings → Your password.** Enter the current password (from `<data>/.bootstrap-password` on a
+fresh install) and a new one of at least 8 characters. Every other session is signed out, including
+yours, so sign in again. Then delete the file — it is a delivery mechanism, not a credential:
+
+```bash
+rm data/.bootstrap-password            # Windows: Remove-Item data\.bootstrap-password
+```
+
+Nothing else on this page is required to start working. The theme kits, backups and appearance
+settings can wait.
+
+## 2. Bring in one other person
+
+1. **Settings → Users → New user** creates the account with a username and an initial password.
+   Choices: `member` (everything except user and credential administration) or `admin`.
+2. Or press the **invitation link** icon next to the account: it shows `/enrol?token=…` once. Send
+   it through a channel you trust; the person chooses their own password and is signed in. You never
+   learn it. The link expires after `TRALALA_INVITE_TTL_HOURS` (default 72) or when replaced.
+3. Switching a person to `member` or `admin` takes effect immediately, and both roles see every board
+   today — private boards are a separate feature, not a setting.
+
+Tralala sends no e-mail. Delivery is yours.
+
+## 3. Connect one agent
+
+Two different things are called "agent". Do the first one if you want AI help inside Tralala; the
+second if you want your own coding agent to drive Tralala.
+
+### 3a. A role agent, so Loops can be analysed and discussed
+
+1. **Settings → Agents → New agent.**
+2. Name it, pick a **role template** (the factory list includes Lead Developer, QA Engineer,
+   Security Engineer, Architect, Project Manager…), and set the **connection**: `openai_compatible`
+   with a base URL and model, or `a2a` with an agent card URL. A local model is fine — private and
+   loopback addresses are allowed on purpose.
+3. Paste the provider **API key** if the endpoint needs one. It is sealed with a key derived from your
+   session secret and never shown again; the list only says `has_api_key` plus a hint.
+4. Press the test action in the agent list to see the round trip.
+5. Make it work on the board: open the board and choose **Edit board → Agents**. An agent a board does
+   not list is never asked on that board; leaving every box unchecked means "any enabled board
+   profile", which is fine for a single-agent install. A Loop can narrow that further in its own
+   agent settings.
+
+An agent is a reader and discussion partner: it never authenticates, never moves a Ticket and never
+changes code. See [decisions/0001](../docs/decisions/0001-role-template-vs-agent-snapshot.md).
+
+### 3b. A worker key, so your own coding agent can read and update Tralala
+
+1. **Settings → New access key.** Name it, pick scopes, create. The token is shown once.
+   For a coding agent take `boards:read`, `loops:read`, `cards:read`, `cards:write`,
+   `comments:write`, `discussions:read`, `discussions:write`; add `loops:write` and
+   `loops:generate` if it should open Loops and run analyses.
+2. Point the agent at `<your URL>/mcp` with `Authorization: Bearer <key>`. `<your URL>/llms.txt`
+   tells it the rest. The full walkthrough, the thirteen tools and their scopes are in
+   [Agent_usage.md](Agent_usage.md).
+3. The key belongs to your account: disable the account and it stops. Revoke it under the same list
+   when a laptop is retired, and check `last_used_at` if you are unsure which key is which.
+
+## 4. Connect one repository (optional, but it is what makes analysis concrete)
+
+1. Create a **fine-grained GitHub token** with *Contents: read* for that repository only.
+2. **Settings → Manage repositories → New repository**: name, `https://github.com/your-org/your-repo`,
+   optional branch, and the token. It is stored sealed and never shown again.
+3. **Test access** proves the token works before you rely on it.
+4. Assign it to the board: open the board → **Edit board → Repositories**. A board may have several;
+   the analysis agents read only what is assigned, and the repository page shows which board uses
+   which repository.
+
+Without a repository the analysis still works from the Info you write; with one it cites files and
+revisions, which is what makes the RoadMap reviewable.
+
+## 5. Run one Loop end to end
+
+A **Board** is a project; a **Loop** is one feature or coherent change inside it. Create a board
+(**New board**), then a Loop inside it (**New Loop** — a name and a broad goal are enough).
+
+### The order of work inside a Loop
+
+| Step | Who | What happens |
+| --- | --- | --- |
+| 1. Info | you, maybe with your worker agent | Write the intent: what to build and why. This is the input everything else is derived from. |
+| 2. Analysis | the analysis agent, approved by you | Generate a technical analysis; read the plain-language view; **approve** it. Approval binds to that exact revision. |
+| 3. RoadMap | an agent, approved by you | Generate a structured RoadMap: numbered Phases and planned Tickets; **approve** it to publish every Ticket at once. |
+| 4. Execution | you and your worker agent | Move Tickets through the Loop's columns, assign them, comment progress. Readiness shows what blocks a Phase. |
+| 5. QA | the QA agent, accepted by you | Ask for a QA Task (scenarios, agent view and human view); **accept implementation**, then **accept QA**. |
+| 6. Finalize | you | The Loop is finalized: an immutable, hashed snapshot lands in History and the Loop becomes read-only. |
+
+Three rules that keep this honest:
+
+- **A person decides.** Approving the analysis and the RoadMap, confirming a human-only Ticket,
+  accepting QA and finalizing are human actions. A token cannot perform them, whatever its scopes.
+- **Changing Info invalidates approvals.** Edit the intent after planning and the Loop returns to
+  `replanning`; the dependent approvals go stale and execution stops until you approve a replacement.
+- **A column named Done completes nothing.** Completion is the acceptance decision, not a move.
+
+### Where to talk instead of writing
+
+Every Ticket has a **discussion**: ask the agents a question, get rounds of answers with positions,
+pause or stop a run, then decide. It is capped at four rounds, with a token and time budget per run,
+so a question cannot quietly spend the afternoon. Use it when you want an opinion *before* writing
+the Info or the plan; use `@Agent` in a comment when you want one answer next to the work.
+
+## 6. Day two: the habits that matter
+
+- **Boards are cheap, Loops are the unit of work.** One Loop per coherent change; do not park a
+  backlog of unrelated Tickets in a Loop you already approved.
+- **Write the Info as if someone else will read it.** The analysis and the RoadMap are only as good
+  as that paragraph.
+- **Watch readiness, not the column name.** The Loop banner and
+  `GET /boards/{id}/loops/{loop_id}/readiness` explain every blocker.
+- **Let your worker comment as it goes.** A Ticket with the findings in it is worth more than one
+  that looks finished.
+- **Backups are automatic** (every 24 h, newest 10 kept). Take one before an upgrade anyway; the
+  commands are in [practical_commands.md](practical_commands.md).
+
+## If something looks wrong
+
+[Troubleshooting.md](Troubleshooting.md) covers the generated password, throttling, a stuck
+migration, a board that will not delete, and an agent that is not reachable. Security defaults and
+what only you can decide: [Security_defaults.md](Security_defaults.md).

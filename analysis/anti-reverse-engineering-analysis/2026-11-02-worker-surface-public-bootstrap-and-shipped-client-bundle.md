@@ -12,7 +12,7 @@
 
 ## Scope
 
-**What was read.** `AGENTS.md`; `README.md`; `docs/architecture.md`; `docs/decisions/0015`-`0019`;
+**What was read.** `AGENTS.md`; `README.md`; `docs/architecture.md` (since moved to `public_docs/Architecture.md`); `docs/decisions/0015`-`0019`;
 `backend/app/main.py`; `backend/app/api/{deps,mcp}.py`; `backend/app/api/v1/{auth,boards,agents,attachments}.py`;
 `backend/app/services/{agent_tools,credentials,boards,attachments,mentions}.py`;
 `backend/app/core/{errors,security,ratelimit,config}.py`; `frontend/nginx.conf`;

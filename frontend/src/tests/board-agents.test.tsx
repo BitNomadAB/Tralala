@@ -24,7 +24,7 @@ function agent(overrides: Partial<Agent> & Pick<Agent, "id" | "name">): Agent {
 }
 
 describe("generationAgents", () => {
-  it("offers every enabled generator when the board lists none", () => {
+  it("offers every enabled generator, whatever transport it speaks, when the board lists none", () => {
     const result = generationAgents(
       [
         agent({ id: "b", name: "Beta" }),
@@ -35,7 +35,9 @@ describe("generationAgents", () => {
       [],
     );
     expect(result.restrictedToBoard).toBe(false);
-    expect(result.agents.map((entry) => entry.name)).toEqual(["Alpha", "Beta"]);
+    // A2A executes a generation request too (the backend accepts every executable transport), so it
+    // belongs in the picker; an organisation profile never does.
+    expect(result.agents.map((entry) => entry.name)).toEqual(["Alpha", "Beta", "Remote"]);
   });
 
   it("narrows the list to the board's agents", () => {

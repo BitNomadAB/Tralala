@@ -71,8 +71,9 @@ message broker.
 ```
 backend/app/{api,core,models,repositories,schemas,services,storage,security,migrations}
 frontend/src/{app,components,features,api,webmcp,hooks,themes,tests}
-public_docs/     what a user or operator follows: installation, troubleshooting, security, agents
-docs/            architecture, API, database notes and decisions
+public_docs/     what a user or operator follows: installation, onboarding, commands, architecture,
+                 troubleshooting, security, agent usage
+docs/            API, database notes, the Loop workflow and decisions
 .ralph/          prd.json, progress.txt, prompt.md (Ralph Loop state)
 scripts/ralph/   loop harness
 ```

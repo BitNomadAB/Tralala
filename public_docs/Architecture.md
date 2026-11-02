@@ -1,23 +1,39 @@
-﻿# Architecture
+# Architecture
+
+How Tralala is put together: one service layer, one database per board, one worker surface. Read this
+after [Installation](Installation.md) and [Onboarding](Onboarding.md); the product rules themselves
+live in [docs/loops.md](../docs/loops.md) and the endpoint reference in [docs/api.md](../docs/api.md).
+
+| Question | Where |
+| --- | --- |
+| what a Loop is and in which order work happens | [docs/loops.md](../docs/loops.md) |
+| the exact request/response contract | [docs/api.md](../docs/api.md) |
+| tables, revisions and integrity rules | [docs/database.md](../docs/database.md) |
+| why a decision was taken | [docs/decisions/](../docs/decisions) |
+| what an external agent may call | [Agent_usage.md](Agent_usage.md) and `GET /llms.txt` |
 
 ## Overview
 
 ```
-React UI ──────────────┐
-                      │
-WebMCP ── React ───────┼── FastAPI ── Services ── Repositories/storage
-                      │        │                     │
-External AI ─ REST ────┘        └─ /mcp ──┐           ├── registry.sqlite
-                                          │           └── boards/{uuid}/board.sqlite
-                            /llms.txt ────┘
+browser ── Caddy ──┬── React UI (built SPA)
+                   │      │
+                   │      ├── WebMCP adapter (in-page tools)
+                   │      └── REST  /api/v1
+                   │
+external agent ────┴── /mcp (JSON-RPC)  ──┬── FastAPI ── Services ── storage
+                                          │                  │
+                            /llms.txt ────┘                  ├── registry.sqlite
+                                                             └── boards/{uuid}/board.sqlite
+                                                                 + attachments/
 ```
 
 One modular Python monolith. Every interface (React UI, WebMCP adapter, external workers over REST
 or MCP) reaches the same service functions; no business rule is duplicated in the frontend, in the
-WebMCP tool definitions or in the MCP catalogue.
+WebMCP tool definitions or in the MCP catalogue. Caddy in front is a web tier, not a second brain: it
+serves the built bundle, proxies the API and terminates TLS.
 
 The worker surface has one source: `backend/app/services/agent_tools.py` describes the tools an
-external agent may call (name, description, JSON Schema, required scope, handler). `/mcp` serves it
+external agent may call (name, description, JSON Schema, required scopes, handler). `/mcp` serves it
 and `/llms.txt` summarises it; both end in the same service calls the REST routes use. The browser
 WebMCP adapter stays a separate, UI-contextual surface for a person's own session.
 
@@ -35,7 +51,7 @@ App (Tralala shell, Board overview)
 A Board contains Loops; a Loop owns its Kanban, columns, Tickets and planning documents. Two Loops
 in one Board never share columns or ordering. The Board stays the storage boundary: `registry.sqlite`
 holds global metadata, `boards/{uuid}/board.sqlite` holds every Loop of that board. Phases are
-planning groups, not Kanban columns. See [loops.md](loops.md) for the workflow itself.
+planning groups, not Kanban columns.
 
 ### Backend layers
 
@@ -45,7 +61,7 @@ planning groups, not Kanban columns. See [loops.md](loops.md) for the workflow i
 | Services | `backend/app/services` | Business rules, transactions, activity logging, ordering |
 | Storage | `backend/app/storage` | SQLite engines, migrations, registry and per-board databases |
 | Schemas | `backend/app/schemas` | Pydantic v2 request/response validation |
-| Core | `backend/app/core` | Settings, errors, security primitives, actor context, rate limiting |
+| Core | `backend/app/core` | Settings, errors, security primitives, actor context, rate limiting, host filesystem profile |
 | Seeds | `backend/app/seeds` | Factory data seeded into a new registry, currently the role templates |
 | Worker tools | `backend/app/services/agent_tools.py` | The curated catalogue an external worker may call, served by `/mcp` and summarised by `/llms.txt` |
 
@@ -54,23 +70,33 @@ planning groups, not Kanban columns. See [loops.md](loops.md) for the workflow i
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | App shell | `frontend/src/app` | Router, providers, layout |
-| Features | `frontend/src/features` | Boards, Loops, Loop Kanban and planning dialogs, history, cards, activity, settings, auth |
+| Features | `frontend/src/features` | Boards, Loops, Loop Kanban and planning dialogs, history, discussions, settings, auth |
 | API client | `frontend/src/lib/api.ts` | Typed REST client, envelope unwrapping, CSRF header |
 | WebMCP | `frontend/src/webmcp` | Capability detection, registry adapter, contextual tools |
 | Theme | `frontend/src/themes` | Theme kits (`data-theme-kit`) x dark/light/system over semantic CSS variables |
+| Web tier | `frontend/Caddyfile` | Static SPA, one security header policy, reverse proxy, TLS |
 
 ## Storage model
 
-- `data/registry.sqlite` holds boards, board templates, role templates, agents, actors, credentials,
-  the repositories a board is about (with their sealed read-only tokens), the `board_repositories`
-  and `board_agents` links between a board and what works on it, and registry-level idempotency
-  records. Secrets live here rather than in a board database, so a board export never carries one.
+- `data/registry.sqlite` holds boards, board templates, role templates, agents, actors, sessions,
+  credentials, the repositories a board is about (with their sealed read-only tokens), the
+  `board_repositories` and `board_agents` links between a board and what works on it, and
+  registry-level idempotency records. Secrets live here rather than in a board database, so a board
+  export never carries one.
 - `data/boards/{uuid}/board.sqlite` holds Loops, their documents, approvals, plans, QA cycles,
-  history, Loop-owned lists, Tickets (cards), labels, checklists, comments, the per-Loop agent
-  preference per purpose and activity.
-- `data/backups/{uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite` holds consistent snapshots.
-- `data/exports/` is reserved for future generated exports; the export endpoint streams the archive.
-- `data/.session-secret` holds the generated per-install session secret when `TRALALA_SECRET_KEY` is unset (owner-only permissions); `data/.bootstrap-password` holds a generated first-administrator password until it is deleted.
+  history, Loop-owned lists, Tickets (cards), labels, checklists, comments, discussions, the per-Loop
+  agent preference per purpose and activity.
+- `data/boards/{uuid}/attachments/{attachment_id}.bin` holds the uploaded files of that board. The
+  directory and the database are one unit: deleting a board removes both, duplicating it copies both,
+  and an export carries both ([decisions/0019](../docs/decisions/0019-board-files-travel-with-the-database.md)).
+- `data/backups/{uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite` holds consistent snapshots, each with an
+  optional `backup-YYYYMMDDTHHMMSSZ-attachments.zip` partner that carries the board's files at that
+  moment. Restoring and pruning treat the pair as one.
+- `data/exports/` is reserved for generated exports; the export endpoint streams the archive instead.
+- `data/.session-secret` holds the generated per-install session secret when `TRALALA_SECRET_KEY` is
+  unset (owner-only permissions); `data/.bootstrap-password` holds a generated first-administrator
+  password until it is deleted; `data/.process.lock` proves that one backend process owns the
+  directory.
 
 Board ids are UUIDs validated before any path is constructed, so user input never reaches the
 filesystem. Each board engine is created with `NullPool`, `foreign_keys=ON`, WAL journaling and a
@@ -79,17 +105,20 @@ cache is capped so a host with many boards cannot exhaust file handles.
 
 ## Request lifecycle
 
-1. Middleware assigns `X-Request-ID`, rejects a declared body over the limit and adds security
+1. Caddy serves the shell or forwards `/api`, `/docs`, `/openapi.json`, `/mcp` and `/llms.txt`, with
+   a streaming body ceiling one step above the backend's own.
+2. Middleware assigns `X-Request-ID`, rejects a declared body over the limit and adds security
    headers; the endpoints that read raw bytes (`/mcp`, attachment upload, board import) count the
    bytes as they arrive, so a chunked body without a `Content-Length` header is bounded too.
-2. `get_context` resolves the actor from a bearer token or a signed session cookie (validated
+3. `get_context` resolves the actor from a bearer token or a signed session cookie (validated
    against the `sessions` row), enforces CSRF for cookie-authenticated mutations, and applies the
    per-actor rate limiter. Session scopes come from the account role: `admin` has every scope,
-   `member` every scope except `users:admin`.
-3. The router validates the payload with a strict Pydantic model and calls a service.
-4. The service authorizes the scope, opens exactly one board transaction, mutates state, writes an
+   `member` every scope except `users:admin` and `credentials:admin`. Authentication happens before
+   `/mcp` parses a body.
+4. The router validates the payload with a strict Pydantic model and calls a service.
+5. The service authorizes the scope, opens exactly one board transaction, mutates state, writes an
    activity entry and returns a plain dict.
-5. The response is wrapped as `{success, data, request_id, meta}` and validated by the response
+6. The response is wrapped as `{success, data, request_id, meta}` and validated by the response
    model.
 
 Board access is guarded by a re-entrant per-board lock shared by `open`, `session`, `reader` and
@@ -107,6 +136,8 @@ SQLite has no cross-file transactions, so:
   is migrated eagerly and sequentially before requests are served, with a verified pre-migration
   snapshot and post-migration integrity checks. A failed board is marked `migration_failed` and
   blocks mutations until `POST /boards/{id}/migrate` succeeds.
+- Deleting a board removes the board directory and its backups **before** the registry row, so an
+  interrupted delete leaves a board that can be deleted again rather than a row pointing at nothing.
 - Card transfer between Loops or Boards is not supported: it would bypass the approved plan. The
   endpoint is removed and the service answers `409 plan_change_required` so a caller gets an
   actionable error instead of a silent shortcut.
@@ -115,9 +146,10 @@ SQLite has no cross-file transactions, so:
   labels in the new board database; it never creates ownerless columns. Creating a Loop copies
   those defaults into Loop-owned columns.
 - AI roles are split in two on purpose: `role_templates` (shared, editable) and `agents` (identity,
-  connection, sealed credential, template reference or override). Any future discussion persists
-  `AgentService.role_snapshot(...)` so prompt history is reproducible; see
-  [decisions/0001](decisions/0001-role-template-vs-agent-snapshot.md).
+  connection, sealed credential, template reference or override). Discussions, mentions and
+  generation runs persist `AgentService.role_snapshot(...)`, so later template edits cannot rewrite
+  what an agent was told; see
+  [decisions/0001](../docs/decisions/0001-role-template-vs-agent-snapshot.md).
 
 ## Loop workflow
 
@@ -150,8 +182,10 @@ through `services/loops.py`, `loop_documents.py`, `loop_plans.py`, `loop_generat
 - **Reading a board's Loops.** `GET /boards/{id}/loops` serializes every Loop with a constant number
   of statements (documents, approvals, plans, QA cycles and progress are loaded per board rather
   than per Loop), and a test holds that budget so the overview cannot drift back to one query set per
-  Loop. Legacy imports use the same
-  envelope with `source_kind = imported_legacy` and never create Tickets or approvals.
+  Loop. Legacy imports use the same envelope with `source_kind = imported_legacy` and never create
+  Tickets or approvals.
+
+The human-facing order of a Loop is in [Onboarding](Onboarding.md#the-order-of-work-inside-a-loop).
 
 ## Ordering strategy
 
@@ -165,7 +199,8 @@ reorders O(1) writes in the common case and bounds normalization to rare, list-s
   `409 version_conflict` with the current version otherwise.
 - `Idempotency-Key` on board/card creation stores a SHA-256 fingerprint plus the response. A replay
   with the same payload returns the stored response; a different payload returns `409
-  idempotency_key_reused`.
+  idempotency_key_reused`. The worker tools reuse the same idea per tool (identical content within
+  five minutes is a retry, not a second write).
 
 ## Discussion runs
 
@@ -182,15 +217,21 @@ the "one backend process per data directory" rule intact.
   A thread's `max_rounds` defaults to 3 and is capped at 4 — the point where a discussion either
   converged or started repeating itself — and the cap also applies to a value stored before it
   existed.
+- Participants answer one after another inside a round, and each prompt carries the answers already
+  given in that round. A `roundtable` thread only reaches consensus once an earlier round produced
+  answers, because whoever opens a thread has read nobody.
+- A position is read only from an explicit verdict: a JSON `verdict`/`position` field, a `Verdict:`
+  line, or a line that holds nothing else. "I do not AGREE" therefore counts as no vote, and an
+  unreadable answer abstains.
 - Budgets are enforced before a round starts (accumulated time) and after every answer (tokens), so
   a runaway loop stops instead of spending the whole budget in one round. A run always has both: when
   the caller sends none, it takes `TRALALA_DISCUSSION_TOKEN_BUDGET` (default 200 000) and
   `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS` (default 900), and an operator sets either to `0` to
-  disable that default. The round cap (four) bounds how many calls a question makes; the budgets
-  bound how large each call may be, which is what protects the bill.
+  disable that default. The round cap bounds how many calls a question makes; the budgets bound how
+  large each call may be, which is what protects the bill.
 - Duplicate guard: each agent message stores `content_sha256`. When an agent repeats its previous
   answer the message and vote are not inserted again; a round with only repeats ends the run as
-  `no_progress`.
+  `no_progress` and is never read as agreement.
 - Termination is explicit: `completed` (rounds used up), `completed` with `stop_reason=consensus`,
   `stopped`, `failed` (every participant errored), `budget_exhausted` or `no_progress`. A run whose
   round was interrupted by pause/stop still records that partial round, which is why
@@ -201,10 +242,11 @@ the "one backend process per data directory" rule intact.
   round per message). A `manual` thread requires an explicit `@agents` (or participant name)
   mention or an explicit run. The message insert publishes first and the run is requested after it
   commits; a running or closed thread simply keeps the message.
-- Startup reconciliation follows decision 0002: runs left `running`/`paused` fail with
-  `process_restart`, their thread `run_state` returns to `idle`, interrupted mention jobs fail as
-  retryable and queued ones resume. A crash therefore never leaves a thread that refuses new runs,
-  review or retry.
+- Startup reconciliation follows
+  [decisions/0002](../docs/decisions/0002-multi-database-consistency.md): runs left
+  `running`/`paused` fail with `process_restart`, their thread `run_state` returns to `idle`,
+  interrupted mention jobs fail as retryable and queued ones resume. A crash therefore never leaves
+  a thread that refuses new runs, review or retry.
 
 ### Event stream
 
@@ -228,8 +270,8 @@ then the threads of the selected board. The overview aggregates `MAX(last_activi
 count and the open count per board database, so ordering follows the newest post or LLM round
 without shipping every thread to the browser. Boards without threads stay reachable, sorted last.
 The overview is refreshed when the page opens, after a discussion is created and when the user
-returns to the board list (plus a 30 s interval while the list is visible); it is not refetched for
-every thread event.
+returns to the board list (plus a 30 s interval while the list is visible), and thread events
+invalidate it.
 
 A thread belongs to one Ticket and therefore to one Loop, so every thread records `loop_id`,
 `loop_key`, `loop_name` and `ticket_key`. The thread view shows that Loop and links to
@@ -249,8 +291,9 @@ channel (`queued` → `running` → `completed`/`failed`) and work runs on an in
 - The job stores a role snapshot at enqueue time, so later role-template edits cannot rewrite what
   the agent was asked.
 - Context is assembled from the ticket (title, description, list, priority, due date, labels), its
-  checklists and items, attachment metadata and the most recent comments. Attachment bytes are not
-  sent; text extraction is a later increment.
+  checklists and items, attachment metadata, the most recent comments and a bounded excerpt of up to
+  three text-like attachments (2 000 characters each, 200 KB maximum). Binary formats stay
+  metadata-only: extracting them would need a parser per format.
 - A successful answer is written as a normal agent-authored comment in the same thread, and the job
   records `response_comment_id`. `uq_comment_mentions_once` (one job per comment and agent) plus the
   guarded answer insert make retry idempotent: a retry can only run a job that failed and never
@@ -275,11 +318,15 @@ context registers only its tools through `createRegistry`, which uses an `AbortC
 scopes before registration, and every tool calls the typed REST client — never the database.
 
 An agent outside the browser cannot see WebMCP at all, so the same capability idea has a second
-transport: `POST /mcp` speaks MCP over JSON-RPC 2.0 with a Bearer token, and `GET /llms.txt` is the
+transport: `POST /mcp` speaks MCP over JSON-RPC 2.0 with a bearer token and `GET /llms.txt` is the
 public plain-text bootstrap that explains the product, the Loop lifecycle and the rules. Both come
-from `services/agent_tools.py`, which is the one description of what a worker token may call. The
-local role agents are not part of that surface: a run invokes them, they never authenticate, and
-they never change a Ticket.
+from `services/agent_tools.py`, which is the one description of what a worker token may call:
+thirteen tools covering reading a board, a Loop and a Ticket, assigning and moving a Ticket,
+commenting, creating a Loop, writing Info, running the analysis and the RoadMap, and the three
+discussion tools. The local role agents are not part of that surface: a run invokes them, they never
+authenticate, and they never change a Ticket. See
+[decisions/0015](../docs/decisions/0015-worker-surface-mcp-and-llms-txt.md) and
+[Agent_usage.md](Agent_usage.md).
 
 ## Operational notes
 
@@ -288,8 +335,13 @@ they never change a Ticket.
   reports the board's `alembic_version` revision.
 - `POST /api/v1/boards/{id}/migrate` retries a failed board migration (admin only) and returns
   the structured migration report.
-- Backups use SQLite's online-backup API; restore snapshots the backup into the live database file
-  and re-validates.
+- Backups use SQLite's online-backup API; restore snapshots the backup into the live database file,
+  puts the file sidecar back under the same board lock and re-validates. A snapshot without a
+  sidecar restores the database and keeps the current files, and says so in the response.
+- `BackupScheduler` snapshots every active board whose newest snapshot is older than
+  `TRALALA_BACKUP_INTERVAL_HOURS` (default 24, `0` disables it) and keeps the newest
+  `TRALALA_BACKUP_KEEP` (default 10) per board. It runs inside the backend process and logs
+  `backup_created` / `backup_failed`; files outside the snapshot pattern are never deleted.
 - Docker Compose mounts a single data volume; the web container (Caddy) serves the built SPA and
   proxies `/api`, `/docs`, `/openapi.json`, `/mcp` and `/llms.txt` to the backend, adding one security
   header policy for the whole origin. TLS is configuration there rather than a second service:
@@ -306,11 +358,15 @@ they never change a Ticket.
   always follows the real operating system. Windows refuses to delete a file another process holds
   open, so a board deletion or an attachment replace is retried briefly there; POSIX removes the name
   and leaves an open file alive, so it is not. Nothing outside `core/platform.py` inspects the
-  operating system for file behaviour.
+  operating system for file behaviour; see
+  [decisions/0020](../docs/decisions/0020-one-platform-profile-for-host-filesystem-behaviour.md).
 - A board database must stay on local disk, or on a share that implements POSIX byte-range locking.
   SQLite's WAL mode keeps a `-shm` file that assumes shared memory between processes, so a board
   directory on NFS/SMB can answer `disk I/O error` even with `TRALALA_PLATFORM_PROFILE=network`.
   That profile fixes transient removals, not WAL: a network share is for exports and backups, not for
   a live board.
+- Uploads are written to a staging name and moved into place before the row that names them is
+  inserted, so a crash can leave an unreferenced file but never a row whose bytes are missing.
 - End-to-end tests (`frontend/e2e`) run through `scripts/run-playwright.mjs`, which reuses a local
-  Playwright install and boots an isolated stack (backend `:8077`, Vite `:5273`).
+  Playwright install and boots an isolated stack (backend `:8077`, Vite `:5273`). The commands are in
+  [practical_commands.md](practical_commands.md).

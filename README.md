@@ -15,10 +15,11 @@ App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / Ro
 | --- | --- |
 | install and run it | [public_docs/Installation.md](public_docs/Installation.md) |
 | start, stop, test, update it day to day | [public_docs/practical_commands.md](public_docs/practical_commands.md) |
+| do the first hour: my account, a person, an agent, a repository, one Loop | [public_docs/Onboarding.md](public_docs/Onboarding.md) |
 | fix something that broke | [public_docs/Troubleshooting.md](public_docs/Troubleshooting.md) |
 | know what is protected and what is my decision | [public_docs/Security_defaults.md](public_docs/Security_defaults.md) |
 | connect a coding agent to it | [public_docs/Agent_usage.md](public_docs/Agent_usage.md) |
-| understand the design | [docs/architecture.md](docs/architecture.md), [docs/decisions/](docs/decisions) |
+| understand the design | [public_docs/Architecture.md](public_docs/Architecture.md), [docs/decisions/](docs/decisions) |
 | call the API | [docs/api.md](docs/api.md) |
 
 Prerequisites and the installation of Python, Node, pnpm and Docker live in the installation guide,
@@ -87,7 +88,7 @@ is no shared password. See [the first sign-in](public_docs/Installation.md#first
 backend/app/{api,core,schemas,services,storage}   FastAPI service layer and SQLite storage
 frontend/src/{app,features,lib,webmcp,themes}     React UI, typed API client, WebMCP adapter
 frontend/Caddyfile                                web tier: SPA, API proxy, TLS
-public_docs/                                      installation, troubleshooting, security, agents
+public_docs/                                      installation, onboarding, commands, architecture, security, agents
 docs/                                             architecture, API, database, decisions
 .ralph/                                           prd.json, progress.txt, prompt.md
 ```

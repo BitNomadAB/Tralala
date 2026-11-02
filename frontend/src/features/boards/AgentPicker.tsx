@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bot, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
+import { EXECUTABLE_CONNECTION_TYPES } from "@/lib/boardAgents";
 
 /**
  * Checkbox list of the board profiles the installation knows about. A board that selects agents
@@ -50,7 +51,8 @@ export function AgentPicker({
       </p>
       <div className="flex flex-col gap-1 rounded-lg border border-[var(--border)] p-2">
         {agents.map((agent) => {
-          const canGenerate = agent.enabled && agent.connection_type === "openai_compatible";
+          const canGenerate =
+            agent.enabled && EXECUTABLE_CONNECTION_TYPES.includes(agent.connection_type);
           return (
             <label key={agent.id} className="flex flex-wrap items-center gap-2 text-sm">
               <input

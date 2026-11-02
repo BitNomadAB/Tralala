@@ -28,8 +28,9 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
 - People join through an **invitation link** that the administrator shows once
   (`/enrol?token=…`, valid for `TRALALA_INVITE_TTL_HOURS`, default 72). Tralala sends no e-mail, so
   delivery is yours. See [decisions/0014](../docs/decisions/0014-enrolment-links-instead-of-email-verification.md).
-- Roles are `admin` and `member`. A member has every scope except `users:admin`, and no token of any
-  kind can hold `users:admin`, `credentials:admin` or the `agents:*` administrative scopes.
+- Roles are `admin` and `member`. A member holds every scope except `users:admin` and
+  `credentials:admin`, which stay with the administrator; no token of any kind can hold those or the
+  `agents:*` administrative scopes.
 
 ## Sessions
 
