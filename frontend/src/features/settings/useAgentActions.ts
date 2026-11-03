@@ -4,7 +4,7 @@ import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import type { AgentTestResult } from "@/lib/types";
-import { agentPayload, type AgentForm } from "./agentForm";
+import { agentPayload, DEFAULT_TIMEOUT_SECONDS, type AgentForm } from "./agentForm";
 
 /** Save, connection test, duplicate and delete for the agent editor. */
 export function useAgentActions({
@@ -66,7 +66,10 @@ export function useAgentActions({
       // A new agent has no row to test against, so the form asks the endpoint directly. Saving
       // first would put a configuration in the registry that nobody has proved works.
       return isNew
-        ? api.probeAgent({ ...connection, timeout_seconds: Number(form.timeoutSeconds) || 30 })
+        ? api.probeAgent({
+            ...connection,
+            timeout_seconds: Number(form.timeoutSeconds) || DEFAULT_TIMEOUT_SECONDS,
+          })
         : api.testAgent(agentId, connection);
     },
     onSuccess: (result) => {

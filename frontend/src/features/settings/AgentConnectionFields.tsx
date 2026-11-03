@@ -1,7 +1,7 @@
 import { Field, Input, Select } from "@/components/ui/input";
 import { PROVIDER_PRESETS, type PresetRequirements, type ProviderPreset } from "@/lib/providers";
 import type { Agent, ConnectionType } from "@/lib/types";
-import { fieldMark, type AgentForm } from "./agentForm";
+import { fieldMark, MAX_TIMEOUT_SECONDS, type AgentForm } from "./agentForm";
 
 /** How Tralala reaches the agent: transport, provider preset, endpoint, model and credential. */
 export function AgentConnectionFields({
@@ -191,15 +191,22 @@ export function AgentTuningFields({
   form,
   onChange,
   invalid,
+  lengthProblem,
 }: {
   form: AgentForm;
   onChange: (patch: Partial<AgentForm>) => void;
   /** The request fields the last save was refused for. */
   invalid: ReadonlySet<string>;
+  /** Why the answer length is above the preset's cap, or null. */
+  lengthProblem: string | null;
 }) {
   return (
     <>
-      <Field label="Temperature" htmlFor="agent-temperature">
+      <Field
+        label="Temperature"
+        htmlFor="agent-temperature"
+        hint="Empty uses the provider's default."
+      >
         <Input
           id="agent-temperature"
           {...fieldMark(invalid, "temperature")}
@@ -207,27 +214,38 @@ export function AgentTuningFields({
           step="0.1"
           min={0}
           max={2}
+          placeholder="provider default"
           value={form.temperature}
           onChange={(event) => onChange({ temperature: event.target.value })}
         />
       </Field>
-      <Field label="Max output tokens" htmlFor="agent-max-tokens">
+      <Field
+        label="Maximum answer length (tokens)"
+        htmlFor="agent-max-tokens"
+        hint={lengthProblem ?? "Empty uses the provider's default."}
+      >
         <Input
           id="agent-max-tokens"
           {...fieldMark(invalid, "max_output_tokens")}
+          {...(lengthProblem ? { "aria-invalid": true } : {})}
           type="number"
           min={1}
+          placeholder="provider default"
           value={form.maxTokens}
           onChange={(event) => onChange({ maxTokens: event.target.value })}
         />
       </Field>
-      <Field label="Timeout (seconds)" htmlFor="agent-timeout">
+      <Field
+        label="Timeout (seconds)"
+        htmlFor="agent-timeout"
+        hint="How long a call waits for the answer; a connection test waits at most 30 s."
+      >
         <Input
           id="agent-timeout"
           {...fieldMark(invalid, "timeout_seconds")}
           type="number"
           min={1}
-          max={600}
+          max={MAX_TIMEOUT_SECONDS}
           value={form.timeoutSeconds}
           onChange={(event) => onChange({ timeoutSeconds: event.target.value })}
         />

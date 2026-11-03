@@ -13,6 +13,8 @@ export interface ProviderPreset {
   requiresModel: boolean;
   modelPlaceholder?: string;
   docsUrl?: string;
+  /** The longest answer the provider documents, in tokens; set only where it documents one. */
+  maxOutputTokens?: number;
 }
 
 /**

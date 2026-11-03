@@ -10,7 +10,13 @@ import { useAgent, useRoleTemplates } from "@/lib/queries";
 import type { Agent, AgentTestResult } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { AgentConnectionFields, AgentTuningFields } from "./AgentConnectionFields";
-import { emptyAgentForm, hydrateAgentForm, withProvider, type AgentForm } from "./agentForm";
+import {
+  answerLengthProblem,
+  emptyAgentForm,
+  hydrateAgentForm,
+  withProvider,
+  type AgentForm,
+} from "./agentForm";
 import { AgentIdentityFields } from "./AgentIdentityFields";
 import { AgentTestResultPanel } from "./AgentTestResultPanel";
 import { useAgentActions } from "./useAgentActions";
@@ -87,12 +93,16 @@ export function AgentEditorPage() {
     form.connectionType === "openai_compatible" &&
     requirements.model === "required" &&
     !form.model.trim();
+  // A preset that documents its cap refuses a longer answer here, before the provider does.
+  const lengthProblem =
+    form.connectionType === "openai_compatible" ? answerLengthProblem(form, preset) : null;
   const canSave = Boolean(
     form.name.trim() &&
     form.baseUrl.trim() &&
     (form.roleTemplateId || form.override.trim()) &&
     !keyMissing &&
-    !modelMissing,
+    !modelMissing &&
+    !lengthProblem,
   );
 
   return (
@@ -145,7 +155,12 @@ export function AgentEditorPage() {
             stored={stored}
             invalid={invalid}
           />
-          <AgentTuningFields form={form} onChange={update} invalid={invalid} />
+          <AgentTuningFields
+            form={form}
+            onChange={update}
+            invalid={invalid}
+            lengthProblem={lengthProblem}
+          />
         </div>
 
         {testResult ? <AgentTestResultPanel result={testResult} /> : null}

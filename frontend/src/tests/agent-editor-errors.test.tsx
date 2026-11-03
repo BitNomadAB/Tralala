@@ -32,7 +32,7 @@ async function saveNewAgent(answer: () => ReturnType<typeof failure>) {
   const user = userEvent.setup();
   await user.type(screen.getByLabelText("API base URL"), "http://127.0.0.1:8080/v1");
   await user.type(screen.getByLabelText("Role prompt override (optional)"), "You review.");
-  await user.type(screen.getByLabelText("Max output tokens"), "999999");
+  await user.type(screen.getByLabelText("Maximum answer length (tokens)"), "999999");
   await user.click(screen.getByRole("button", { name: "Save agent" }));
   expect(await screen.findByText("Could not save agent")).toBeInTheDocument();
 }
@@ -48,7 +48,10 @@ describe("the agent form when a save is refused", () => {
     expect(
       screen.getByText("max_output_tokens: Must be at most 8192 for this preset"),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Max output tokens")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Maximum answer length (tokens)")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
     expect(screen.getByLabelText("API base URL")).not.toHaveAttribute("aria-invalid");
   });
 
@@ -56,6 +59,8 @@ describe("the agent form when a save is refused", () => {
     await saveNewAgent(() => failure(409, "conflict", "An agent with this name already exists"));
 
     expect(screen.getByText("An agent with this name already exists")).toBeInTheDocument();
-    expect(screen.getByLabelText("Max output tokens")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByLabelText("Maximum answer length (tokens)")).not.toHaveAttribute(
+      "aria-invalid",
+    );
   });
 });

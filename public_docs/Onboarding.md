@@ -67,6 +67,11 @@ second if you want your own coding agent to drive Tralala.
    A model running on your own machine or network — `http://192.168.0.10:8080` — usually has no key:
    tick **This endpoint needs no key** and nothing is sent, in the test or in a generation. The known
    local presets tick it for you; hosted providers keep it unticked and cannot be saved without one.
+
+   Leave **Temperature** and **Maximum answer length (tokens)** empty unless you know you need them:
+   empty sends neither, so the provider's own defaults apply and a provider that refuses either one
+   still answers. **Timeout** starts at 180 s, because a reasoning or local model can need minutes for
+   a structured answer; the connection test keeps its own limit of 30 s per call.
 5. Make it work on the board: open the board and choose **Edit board → Agents**. An agent a board does
    not list is never asked on that board; leaving every box unchecked means "any enabled board
    profile", which is fine for a single-agent install. A Loop can narrow that further in its own
