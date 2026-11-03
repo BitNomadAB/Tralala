@@ -39,6 +39,7 @@ from .loop_qa import LoopQaService
 from .loops import LoopService
 from .mentions import MentionService
 from .orchestrator import Orchestrator
+from .repo_archive_cache import ArchiveCache, ArchiveFilesOnDisk
 from .repo_mirror import MirrorService
 from .repo_mirror_files import DiskMirrorFiles
 from .repo_mirror_git import SubprocessGit
@@ -84,7 +85,12 @@ class Services:
             settings, self.registry_store, mirror=self.repository_mirror
         )
         self.repo_snapshot = RepositorySnapshotService(
-            self.repository, mirror=self.repository_mirror
+            self.repository,
+            mirror=self.repository_mirror,
+            archives=ArchiveCache(
+                ArchiveFilesOnDisk(settings.repos_dir),
+                max_bytes=settings.repository_archive_cache_max_bytes,
+            ),
         )
         self.board = BoardService(
             settings,

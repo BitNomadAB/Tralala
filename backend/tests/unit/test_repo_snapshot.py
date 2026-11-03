@@ -16,6 +16,7 @@ from pydantic import JsonValue
 
 from app.repositories.code_repositories import MirrorRecord
 from app.services import repo_snapshot
+from app.services.repo_archive_cache import ArchiveCache
 from app.services.repo_snapshot import (
     RepositorySnapshotService,
     SnapshotError,
@@ -27,6 +28,7 @@ from app.services.repo_snapshot import (
     select_members,
 )
 from app.services.repositories import RepositoryEntry
+from tests.unit.fakes.archives import FakeArchiveFiles
 
 SHA = "abc123def456abc123def456abc123def456abcd"
 TOKEN = "ghp_repository_token_value"
@@ -378,6 +380,23 @@ def _github_serving(archives: dict[str, bytes]) -> Callable[[httpx.Request], htt
         return httpx.Response(302, headers={"location": location})
 
     return handle
+
+
+def test_a_public_repository_is_read_without_a_token_and_a_known_commit_only_once(
+    github: GitHub,
+) -> None:
+    seen = github(_github_serving({"app": _tarball({"README.md": b"# App"})}))
+    archives = ArchiveCache(FakeArchiveFiles())
+    service = RepositorySnapshotService(Repositories("app"), archives=archives)
+    first = service.for_board("board-1", budget_chars=10_000)
+    second = service.for_board("board-1", budget_chars=10_000)
+    assert first == second
+    assert all("authorization" not in request.headers for request in seen)
+    # Both runs resolved the branch; only the first downloaded the archive of its commit.
+    paths = [(request.url.host, request.url.path.split("/")[-2]) for request in seen]
+    assert [path for path in paths if path[1] == "commits"] == [("api.github.com", "commits")] * 2
+    downloads = [request for request in seen if request.url.host == "codeload.github.com"]
+    assert len(downloads) == 1
 
 
 def _budgets(entries: list[dict[str, JsonValue]]) -> list[tuple[JsonValue, JsonValue, JsonValue]]:

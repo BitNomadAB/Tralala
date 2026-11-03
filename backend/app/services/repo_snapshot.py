@@ -35,6 +35,7 @@ from pydantic import JsonValue
 
 from ..core.errors import ValidationFailure
 from ..repositories.code_repositories import MirrorRecord
+from .repo_archive_cache import ArchiveCache
 from .repo_mirror import MirrorRequest, MirrorSnapshot
 from .repo_mirror_git import MirrorError
 from .repositories import API_BASE, RepositoryEntry, RepositoryService
@@ -461,9 +462,16 @@ class MirrorSource(Protocol):
 class RepositorySnapshotService:
     """Turn a board's repository links into the snapshot one generation run may see."""
 
-    def __init__(self, repositories: RepositorySource, mirror: MirrorSource | None = None) -> None:
+    def __init__(
+        self,
+        repositories: RepositorySource,
+        mirror: MirrorSource | None = None,
+        archives: ArchiveCache | None = None,
+    ) -> None:
         self.repositories = repositories
         self.mirror = mirror
+        # A GitHub commit's archive never changes: a second run on it reads the cached one.
+        self.archives = archives
 
     def for_board(self, board_id: str, *, budget_chars: int | None = None) -> list[JsonObject]:
         """One entry per enabled repository on the board; failures are entries, not exceptions.
@@ -506,7 +514,7 @@ class RepositorySnapshotService:
         started = time.monotonic()
         try:
             sha = resolve_commit(owner, name, row.get("branch"), token)
-            archive = fetch_archive(owner, name, sha, token)
+            archive = self._archive(row["id"], owner, name, sha, token)
             snapshot = _read_steered(archive, row, budget)
         except SnapshotError as exc:
             logger.warning(
@@ -520,6 +528,17 @@ class RepositorySnapshotService:
             return {**entry, "error": exc.code}
         _log_captured(row["id"], sha, snapshot, started)
         return {**entry, "commit_sha": sha, **_contents(snapshot, budget)}
+
+    def _archive(
+        self, repository_id: str, owner: str, name: str, sha: str, token: str | None
+    ) -> bytes:
+        cached = None if self.archives is None else self.archives.get(repository_id, sha)
+        if cached is not None:
+            return cached
+        archive = fetch_archive(owner, name, sha, token)
+        if self.archives is not None:
+            self.archives.put(repository_id, sha, archive)
+        return archive
 
     def _from_mirror(
         self, row: RepositoryEntry, entry: JsonObject, budget: int | None

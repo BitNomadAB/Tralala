@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     repository_fetch_timeout_seconds: int = 120
     # The git program the mirror runs; a bare name is looked up on PATH.
     repository_git_binary: str = "git"
+    # GitHub archives kept per repository and commit, all together at most this many bytes; the
+    # oldest go first. 0 keeps none.
+    repository_archive_cache_max_bytes: int = 256 * 1024 * 1024
     # A file cannot exceed the request body that carries it, so this tracks max_request_bytes
     # rather than promising a size the request ceiling would refuse.
     attachment_max_bytes: int = 8 * 1024 * 1024
