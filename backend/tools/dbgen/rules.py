@@ -14,11 +14,12 @@ so the lists stay exact. Every foreign key starts an index (SQLite looks up the 
 deleted or re-keyed parent row) and declares its ``ON DELETE`` rule: RESTRICT by default, CASCADE or
 SET NULL with a comment in the migration that says why.
 
-Most of ``UNENFORCED`` waits for one change: a SQLite table rebuild must run with foreign keys off
-(the 12-step procedure in the ALTER TABLE documentation), because ``DROP TABLE`` of the old copy
-fires the ``ON DELETE`` action of every row that references it. The migration runner enforces
-foreign keys inside its transaction, where ``PRAGMA foreign_keys`` cannot change, so a revision can
-only rebuild a table that nothing references, and cannot add a self-reference.
+A revision adds a key by rebuilding the table (``batch_alter_table``). The migration runner
+applies revisions as SQLite's table-rebuild procedure says (the ALTER TABLE documentation, "Making
+Other Kinds Of Table Schema Changes"): foreign keys off for the transaction, so dropping the old
+copy of a referenced table fires no ``ON DELETE`` action, and ``PRAGMA foreign_key_check`` before
+the COMMIT. So any table may be rebuilt, and what is left on ``UNENFORCED`` waits for the
+application, not for the schema.
 
 **STRICT tables (GCS-T22).** A table is ``STRICT`` (``op.create_table(..., sqlite_strict=True)``)
 unless the revision that created it is on ``NON_STRICT_REVISIONS``, which holds, each with its
@@ -170,14 +171,6 @@ def rule_shared_tables_match(schema: Schema) -> list[str]:
 REFERENCE_SUFFIXES: Final = ("_id", "_by")
 
 REGISTRY: Final = "references the registry"
-_PARENT: Final = (
-    "same database, but other tables reference this one: rebuilding it with foreign keys on"
-    " fires their ON DELETE actions when the old copy is dropped"
-)
-_SELF: Final = (
-    "same database, but a self-reference: a rebuild with foreign keys on clears (SET NULL),"
-    " deletes (CASCADE) or refuses (RESTRICT) the copied links when the old copy is dropped"
-)
 
 
 def _board(columns: Mapping[tuple[str, str], str]) -> Exceptions:
@@ -234,43 +227,19 @@ NOT_REFERENCES: Final = _board(
 )
 
 # Same-database references without a foreign key yet. This list only shrinks: each entry says what
-# blocks the constraint (see the module docstring for the rebuild rule).
-UNENFORCED: Final = MappingProxyType(
+# the application has to change before the key can be added.
+UNENFORCED: Final = _board(
     {
-        ("registry", "agents", "role_template_id"): _PARENT,
-        **_board(
-            {
-                ("cards", "phase_id"): _PARENT,
-                ("cards", "plan_item_id"): _PARENT,
-                ("cards", "plan_revision_id"): _PARENT,
-                ("discussion_messages", "parent_message_id"): _SELF,
-                ("discussion_threads", "origin_comment_id"): _PARENT,
-                ("loop_documents", "source_analysis_ai_revision_id"): _SELF,
-                ("loop_documents", "source_analysis_revision_id"): _SELF,
-                ("loop_documents", "source_info_revision_id"): (
-                    _SELF + "; also, an analysis submitted while no Info is current may name an"
-                    " Info revision the board does not hold, which the service stores unchecked"
-                ),
-                ("loop_documents", "source_roadmap_ai_revision_id"): _SELF,
-                ("loop_history", "loop_id"): _PARENT,
-                ("loop_plans", "roadmap_ai_revision_id"): (
-                    "same database, but NOT NULL and '' while a new plan waits for its roadmap"
-                    " revisions to be linked in the same transaction"
-                ),
-                ("loop_plans", "roadmap_revision_id"): (
-                    "same database, but NOT NULL and '' while a new plan waits for its roadmap"
-                    " revisions to be linked in the same transaction"
-                ),
-                ("loop_qa_cycles", "card_id"): _PARENT,
-                ("loop_qa_cycles", "generation_run_id"): _PARENT,
-                ("loops", "active_qa_cycle_id"): _PARENT,
-                ("loops", "analysis_approval_id"): _PARENT,
-                ("loops", "current_plan_id"): _PARENT,
-                ("loops", "history_id"): _PARENT,
-                ("loops", "implementation_approval_id"): _PARENT,
-                ("loops", "qa_approval_id"): _PARENT,
-                ("loops", "roadmap_approval_id"): _PARENT,
-            }
+        ("loop_documents", "source_info_revision_id"): (
+            "an analysis submitted while no Info is current may name an Info revision the board"
+            " does not hold, which LoopDocumentService._store_analysis stores unchecked; a key"
+            " would turn that submission into a server error until the service checks the id"
+            " (GCS-T00f)"
+        ),
+        ("loop_qa_cycles", "generation_run_id"): (
+            "QA instructions submitted without a run are stored with generation_run_id = ''"
+            " (LoopQaService.submit_instructions passes run_id=''), which a key refuses; it waits"
+            " for the service to store NULL instead (GCS-T00f)"
         ),
     }
 )

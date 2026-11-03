@@ -41,9 +41,12 @@ message broker.
    coordination store.
 9. **Schema changes only through Alembic revisions.** Add a revision under
    `backend/migrations/registry` or `backend/migrations/board`; never edit a released revision and
-   never write DDL anywhere else. Use `batch_alter_table` for SQLite table reconstruction. The
-   Migration Manager (`storage/migration_manager.py`) applies revisions; it takes a verified
-   pre-migration backup, validates integrity and marks a failed board `migration_failed`. The
+   never write DDL anywhere else. Use `batch_alter_table` for SQLite table reconstruction; the
+   runner applies revisions with foreign keys off and runs `foreign_key_check` before the COMMIT
+   (SQLite's table-rebuild procedure), so any table may be rebuilt, and a column's `COLLATE`, which
+   reflection drops, goes back through `reflect_args`. The Migration Manager
+   (`storage/migration_manager.py`) applies revisions; it takes a verified pre-migration backup,
+   validates integrity before the COMMIT and marks a failed board `migration_failed`. The
    migrations are the only description of the schema: `python -m tools.dbgen` validates both
    chains, generates the typed rows in `app/db/generated` from them and compiles every SQL
    statement in `app/` against the result, so nothing hand-written mirrors a table. Every column

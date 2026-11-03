@@ -82,8 +82,8 @@ Two independent Alembic chains live under `backend/migrations`:
 
 | Chain | Database | Version table | Head (current) |
 | --- | --- | --- | --- |
-| `registry` | `data/registry.sqlite` | `alembic_version` | `0015_registry_foreign_keys` |
-| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0011_board_foreign_keys` |
+| `registry` | `data/registry.sqlite` | `alembic_version` | `0016_agent_role_template_key` |
+| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0012_referenced_table_keys` |
 
 - The baseline revisions (`0001_registry_initial`, `0001_board_initial`) reproduce the schema that
   shipped before Alembic. A database that predates version tracking (no `alembic_version`) is
@@ -103,10 +103,12 @@ Two independent Alembic chains live under `backend/migrations`:
 - `registry` revision `0002` rebuilds the `boards` table with `batch_alter_table` to extend the
   status `CHECK` with `migration_failed` and to add `schema_revision` — SQLite cannot alter a
   `CHECK` constraint in place.
-- After upgrading, the manager runs `PRAGMA integrity_check` and `PRAGMA foreign_key_check`; any
-  failure (or any exception) rolls back the schema transaction and marks the board
-  `migration_failed`, which blocks mutations (`409 board_migration_failed`) and leaves reads
-  unavailable until it is repaired. The retry endpoint is `POST /boards/{id}/migrate`.
+- After upgrading, and before the upgrade's transaction commits, the manager runs
+  `PRAGMA integrity_check` and `PRAGMA foreign_key_check`; any failure (or any exception) rolls the
+  whole upgrade back, so the database keeps its previous revision, schema and data, and marks the
+  board `migration_failed`, which blocks mutations (`409 board_migration_failed`) and leaves reads
+  unavailable until it is repaired. A failed `foreign_key_check` names the offending rows (table,
+  rowid, parent). The retry endpoint is `POST /boards/{id}/migrate`.
 - No downgrades exist: every revision's `downgrade()` raises. Rollback means restoring a
   pre-migration backup.
 - Orchestration is idempotent: a database already at head is skipped and only its registry row is
@@ -135,22 +137,34 @@ Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestr
 - Every column named `*_id` or `*_by` has a foreign key, unless `tools/dbgen/rules.py` lists it
   with its reason: `CROSS_DATABASE` (board columns that name an actor, agent, role template or
   board in the registry, which no constraint can reach), `NOT_REFERENCES` (polymorphic ids and
-  correlation ids) or `UNENFORCED` (same-database references still without a key, each with what
-  blocks it). Every foreign key starts an index and declares `ON DELETE`: RESTRICT by default;
+  correlation ids) or `UNENFORCED` (same-database references still without a key, each with the
+  change in the application it waits for). Every foreign key starts an index and declares `ON DELETE`: RESTRICT by default;
   CASCADE or SET NULL only with a comment in the revision. Between two rows a Loop deletes
   together, RESTRICT would make deleting the Loop depend on the order SQLite visits the tables, so
   those keys CASCADE (the row is part of what it names) or SET NULL (an optional link).
   `python -m tools.dbgen` enforces all of this and keeps the lists exact.
 - A revision adds a foreign key by rebuilding the table with `batch_alter_table`. The runner
-  enforces foreign keys inside its transaction, and dropping the old copy fires the `ON DELETE`
-  action of every row that references it, so a revision only rebuilds tables nothing references
-  and adds no self-reference; the rest of `UNENFORCED` waits for migrations that run with foreign
-  keys off and check them before commit (SQLite's documented table-rebuild procedure). Before a
-  key is added, a reference whose row is gone is settled by meaning: an optional one becomes NULL,
-  a NOT NULL one that the application cannot orphan stops the upgrade and names the rows. The
-  whole upgrade, DDL included, runs in one `BEGIN IMMEDIATE` transaction
-  (`runner.migration_transaction`), so a refused or failed revision leaves the schema and the data
-  as they were.
+  applies revisions as SQLite's table-rebuild procedure says (`runner.migration_transaction`;
+  "Making Other Kinds Of Table Schema Changes" in SQLite's ALTER TABLE documentation):
+  `PRAGMA foreign_keys=OFF` on the connection before the transaction starts (the pragma does nothing
+  inside one), the revisions, then `PRAGMA foreign_key_check` before the COMMIT, and the pragma back
+  on afterwards. With foreign keys off, dropping the old copy of a table fires no `ON DELETE`
+  action, so a revision may rebuild a table others reference, or give a table a key to itself, and
+  the children and links survive; a row left naming a missing one refuses the upgrade instead. The
+  whole upgrade, DDL included, runs in one `BEGIN IMMEDIATE` transaction, so a refused or failed
+  revision leaves the schema and the data as they were.
+- Before a key is added, a reference whose row is gone is settled by meaning: an optional one
+  becomes NULL, a NOT NULL one that the application cannot orphan stops the upgrade and names the
+  rows. Nothing a person wrote is deleted.
+- A key whose column is filled in later in the same transaction is `DEFERRABLE INITIALLY DEFERRED`,
+  so SQLite checks it at the COMMIT: a plan revision is stored with `''` for its two roadmap
+  revisions and linked to them before its transaction ends (`loop_plans.roadmap_ai_revision_id`,
+  `roadmap_revision_id`).
+- A rebuild copies what SQLAlchemy reflects, and SQLite reflection does not carry a column's
+  `COLLATE`: a revision that rebuilds a table with a collated column passes that column through
+  `batch_alter_table(..., reflect_args=[...])` (`agents.name` keeps `NOCASE` that way). The rebuild
+  also drops the table's triggers and renumbers its rowids, so for `cards` and `loop_history`
+  `ensure_fts` recreates the FTS triggers and rebuilds the index once the upgrade is committed.
 - Lists require archiving before deletion and must be empty of active cards.
 - Boards require archiving and a name confirmation before physical deletion.
 - All timestamps are ISO 8601 UTC strings with second precision (`2026-10-30T12:00:00Z`).
@@ -198,8 +212,11 @@ Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestr
 CREATE VIRTUAL TABLE cards_fts USING fts5(title, description, content='cards', content_rowid='rowid');
 ```
 
-Insert/update/delete triggers keep the index in sync. If the runtime lacks FTS5 the migration
-layer skips the index and search falls back to `LIKE`; `/search` reports `meta.engine`.
+Insert/update/delete triggers keep the index in sync. `ensure_fts` runs after every board
+migration: it creates what is missing and rebuilds an index that is new or whose triggers were
+missing (a revision that rebuilds `cards` or `loop_history` drops their triggers and renumbers the
+rows the index points at). If the runtime lacks FTS5 the migration layer skips the index and search
+falls back to `LIKE`; `/search` reports `meta.engine`.
 
 ### Backups and restore
 

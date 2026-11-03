@@ -15,6 +15,9 @@ from ..core.dates import utcnow as utcnow
 from ..core.transactions import WRITER, begin_transaction
 
 BUSY_TIMEOUT_MS = 5000
+_FOREIGN_KEYS_STATE = "PRAGMA foreign_keys"
+_FOREIGN_KEYS_OFF = "PRAGMA foreign_keys=OFF"
+_FOREIGN_KEYS_ON = "PRAGMA foreign_keys=ON"
 
 
 def create_sqlite_engine(path: Path) -> Engine:
@@ -54,10 +57,45 @@ def write_transaction(engine: Engine) -> Iterator[Connection]:
     Committed when the block ends and rolled back when it raises, as ``engine.begin()`` is. A
     transaction that only reads uses ``engine.connect()`` and starts with a deferred ``BEGIN``.
     """
+    with engine.connect() as connection, _immediate(connection):
+        yield connection
+
+
+@contextmanager
+def _immediate(connection: Connection) -> Iterator[None]:
+    """The one place a transaction is begun by hand: as a writer, so ``BEGIN IMMEDIATE``."""
+    connection.execution_options(**{WRITER: True})
+    with connection.begin():
+        yield
+
+
+@contextmanager
+def schema_change_transaction(engine: Engine) -> Iterator[Connection]:
+    """A ``write_transaction`` with foreign key enforcement off, for a schema change.
+
+    SQLite rebuilds a table to change it (https://www.sqlite.org/lang_altertable.html, "Making Other
+    Kinds Of Table Schema Changes"), and dropping the old copy with foreign keys on fires the ON
+    DELETE action of every row that references it: CASCADE deletes the children, SET NULL clears
+    them, RESTRICT fails. The procedure therefore turns enforcement off before the transaction
+    starts (step 1), because ``PRAGMA foreign_keys`` is a no-op inside one, and back on after it
+    ends (step 12). The caller checks the keys before the COMMIT (step 10):
+    ``runner.migration_transaction`` does.
+
+    Both pragmas go to the driver's connection: a statement sent through SQLAlchemy would begin
+    the transaction first (``core/transactions.py``). The setting is put back as it was found.
+    """
     with engine.connect() as connection:
-        connection.execution_options(**{WRITER: True})
-        with connection.begin():
-            yield connection
+        driver = connection.connection.driver_connection
+        if driver is None:
+            raise RuntimeError("The SQLite connection has no driver connection")
+        enforced = driver.execute(_FOREIGN_KEYS_STATE).fetchone()[0] == 1
+        driver.execute(_FOREIGN_KEYS_OFF)
+        try:
+            with _immediate(connection):
+                yield connection
+        finally:
+            if enforced and not connection.invalidated:
+                driver.execute(_FOREIGN_KEYS_ON)
 
 
 def connect_sqlite(path: Path) -> sqlite3.Connection:

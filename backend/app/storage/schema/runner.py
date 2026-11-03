@@ -32,7 +32,8 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Connection, Engine
 
-from ..sqlite import write_transaction
+from ...core.integrity import foreign_key_problem
+from ..sqlite import schema_change_transaction
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
 
@@ -111,17 +112,33 @@ def upgrade(chain: str, connection: Connection, revision: str = "head") -> None:
         command.upgrade(config, revision)
 
 
+class ForeignKeyCheckError(RuntimeError):
+    """A schema change left a row that names a row that does not exist; nothing was committed."""
+
+
 @contextmanager
 def migration_transaction(engine: Engine) -> Iterator[Connection]:
-    """The one transaction an upgrade runs in, opened as a writer (``BEGIN IMMEDIATE``).
+    """The one transaction an upgrade runs in, per SQLite's table-rebuild procedure.
 
     Alembic joins a transaction its caller has opened, and the engine sends the BEGIN itself
     (``core/transactions.py``), so every revision's DDL runs inside this one: a revision that fails
     leaves the schema and ``alembic_version`` as they were. Python's ``sqlite3`` alone would commit
     each DDL statement that runs before the first INSERT, UPDATE or DELETE.
+
+    Foreign keys are off for the length of the transaction (``schema_change_transaction``), so a
+    revision may rebuild a table that others reference, or give a table a key to itself, with
+    ``batch_alter_table``: dropping the old copy then fires no ON DELETE action. In exchange,
+    ``PRAGMA foreign_key_check`` runs before the COMMIT, and a row that names a missing one rolls
+    the whole upgrade back (:class:`ForeignKeyCheckError`, naming the rows). The caller may run
+    its own checks inside the block; they too come before the COMMIT.
     """
-    with write_transaction(engine) as connection:
+    with schema_change_transaction(engine) as connection:
         yield connection
+        problem = foreign_key_problem(
+            connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+        )
+        if problem is not None:
+            raise ForeignKeyCheckError(problem)
 
 
 def create_schema(chain: str, engine: Engine) -> str:

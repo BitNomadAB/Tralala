@@ -24,10 +24,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from ..core.config import Settings
 from ..core.errors import NotFound
+from ..core.integrity import foreign_key_problem
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
 from ..storage.schema import ensure_fts, runner
@@ -75,9 +76,9 @@ class MigrationManager:
             backup = self._backup(
                 self.settings.backups_dir / "registry", self.settings.registry_path
             )
-        from_revision, to_revision, adopted = self._upgrade_chain("registry", engine)
-        validation = self._validate(engine)
-        self._require_valid(validation, "registry failed post-migration validation")
+        from_revision, to_revision, adopted, validation = self._upgrade_chain(
+            "registry", engine, "registry failed post-migration validation"
+        )
         report = MigrationReport(
             chain="registry",
             board_id=None,
@@ -160,9 +161,9 @@ class MigrationManager:
                 needs_change = has_schema and from_revision != head
                 if needs_change:
                     backup = self._backup(self.settings.backups_dir / board_id, path)
-                from_revision, to_revision, adopted = self._upgrade_chain("board", engine)
-                validation = self._validate(engine)
-                self._require_valid(validation, "post-migration validation failed")
+                from_revision, to_revision, adopted, validation = self._upgrade_chain(
+                    "board", engine, "post-migration validation failed"
+                )
                 ensure_fts(engine)
                 self._reconcile_registry(row, to_revision, previous_status)
                 report = MigrationReport(
@@ -207,13 +208,16 @@ class MigrationManager:
 
     # --- internals ------------------------------------------------------------
 
-    def _upgrade_chain(self, chain: str, engine: Engine) -> tuple[str | None, str, bool]:
-        """Stamp a legacy database, then upgrade to head. Safe to repeat."""
+    def _upgrade_chain(
+        self, chain: str, engine: Engine, invalid: str
+    ) -> tuple[str | None, str, bool, dict[str, Any]]:
+        """Stamp a legacy database, upgrade it to head and validate it. Safe to repeat."""
         baseline = runner.CHAIN_BASELINES[chain]
         head = runner.head_revision(chain)
         adopted = False
-        # One transaction: Alembic participates in it, so a failure leaves the version and
-        # schema untouched and the next start can resume from the same point.
+        # One transaction: Alembic participates in it, so a failure, a failed validation included,
+        # leaves the version, schema and data untouched and the next start can resume from the
+        # same point.
         with runner.migration_transaction(engine) as connection:
             from_revision = runner.current_revision(connection)
             if from_revision is None and runner.has_legacy_schema(chain, connection):
@@ -236,9 +240,12 @@ class MigrationManager:
             if runner.current_revision(connection) != head:
                 runner.upgrade(chain, connection, "head")
             to_revision = runner.current_revision(connection)
+            # Before the COMMIT, so a database that fails is left as it was.
+            validation = self._validate(connection)
+            self._require_valid(validation, invalid)
         if to_revision != head:
             raise RuntimeError(f"{chain} schema did not reach head ({to_revision!r} != {head!r})")
-        return from_revision, to_revision, adopted
+        return from_revision, to_revision, adopted, validation
 
     def _reconcile_registry(self, row: dict[str, Any], revision: str, previous_status: str) -> None:
         updates: dict[str, Any] = {
@@ -298,15 +305,19 @@ class MigrationManager:
             raise RuntimeError(f"{message}: {validation}")
 
     @staticmethod
-    def _validate(engine: Engine) -> dict[str, Any]:
-        with engine.connect() as connection:
-            integrity = connection.exec_driver_sql("PRAGMA integrity_check").scalar_one()
-            violations = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
-        return {
-            "integrity": integrity,
+    def _validate(connection: Connection) -> dict[str, Any]:
+        # integrity_check answers one row "ok", or one row per problem it found.
+        findings = [str(row[0]) for row in connection.exec_driver_sql("PRAGMA integrity_check")]
+        violations = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+        validation: dict[str, Any] = {
+            "integrity": "; ".join(findings),
             "foreign_key_violations": len(violations),
-            "ok": integrity == "ok" and not violations,
+            "ok": findings == ["ok"] and not violations,
         }
+        problem = foreign_key_problem(violations)
+        if problem is not None:
+            validation["foreign_key_detail"] = problem
+        return validation
 
     def _log(self, event: str, report: MigrationReport | None = None, **fields: Any) -> None:
         payload: dict[str, Any] = {"event": event, **fields}
