@@ -1,4 +1,4 @@
-import type { GenerationRun } from "@/lib/types";
+import type { GenerationRun, GenerationRunRepository } from "@/lib/types";
 
 /** The steps a generation run passes through, in the order the server records them. */
 export type RunPhaseKey = "reading_info" | "analysing_repository" | "generating";
@@ -81,4 +81,29 @@ export function failedStepKey(run: Pick<GenerationRun, "status" | "phase">): Run
   return run.phase && ORDER.includes(run.phase as RunPhaseKey)
     ? (run.phase as RunPhaseKey)
     : ORDER[0];
+}
+
+/** What the repository step actually got, so a fast step cannot read as "it read the code". */
+export type RepositoryOutcome =
+  | { kind: "waiting" }
+  | { kind: "none" }
+  | { kind: "listed"; lines: string[] };
+
+export function repositoryOutcome(
+  run: Pick<GenerationRun, "source_revisions" | "phase" | "status">,
+): RepositoryOutcome {
+  const value = run.source_revisions?.repositories;
+  if (!Array.isArray(value)) return { kind: "waiting" };
+  const repositories = value as GenerationRunRepository[];
+  if (repositories.length === 0) return { kind: "none" };
+  return {
+    kind: "listed",
+    lines: repositories.map((repository) =>
+      repository.error
+        ? `${repository.name} · unavailable (${repository.error})`
+        : `${repository.name} @ ${(repository.commit_sha ?? "").slice(0, 8)}, ${repository.file_count} files${
+            repository.truncated ? " (truncated)" : ""
+          }`,
+    ),
+  };
 }

@@ -371,21 +371,21 @@ function LoopDocumentDialog({
       toast.push({ title: "Could not record the decision", description: errorText(error), variant: "error" }),
   });
 
-  const withdraw = useMutation({
+  const resetScope = useMutation({
     mutationFn: (scope: "analysis" | "roadmap") =>
-      api.withdrawReview(boardId, loop.id, scope, { version: loop.version }),
+      api.resetScope(boardId, loop.id, scope, { version: loop.version }),
     onSuccess: () => {
       setConfirmWithdraw(false);
       setFeedback("");
       invalidate();
       toast.push({
-        title: "Approval withdrawn",
+        title: "Scope reset",
         description: "The document is cleared, so it has to be generated again.",
         variant: "success",
       });
     },
     onError: (error) =>
-      toast.push({ title: "Could not withdraw the approval", description: errorText(error), variant: "error" }),
+      toast.push({ title: "Could not reset the scope", description: errorText(error), variant: "error" }),
   });
 
   const visible = useMemo(() => {
@@ -395,11 +395,16 @@ function LoopDocumentDialog({
   }, [tab, technical]);
 
   const scopeDocuments = tab === "analysis" ? ["analysis_ai", "analysis"] : ["roadmap_ai", "roadmap"];
-  // An empty document is what a withdrawal leaves behind, so there is nothing to approve and the
-  // server would refuse it anyway.
-  const scopeHasText = Boolean(
-    documents?.[(tab === "analysis" ? "analysis_ai" : "roadmap_ai") as DocumentKind]?.current_content?.trim(),
+  const scopeHasText = scopeDocuments.some((kind) =>
+    Boolean(documents?.[kind as DocumentKind]?.current_content?.trim()),
   );
+  const approvedForScope =
+    tab === "analysis"
+      ? documents?.analysis.state === "approved"
+      : documents?.roadmap.state === "approved";
+  // Reset is for the draft too, not only for an approval: a bad generation has to be clearable before
+  // anyone signs it off.
+  const canResetScope = isHuman && !readOnly && (scopeHasText || Boolean(approvedForScope));
   const canReviewScope =
     isHuman &&
     scopeHasText &&
@@ -407,10 +412,6 @@ function LoopDocumentDialog({
       const document = documents?.[kind as DocumentKind];
       return document?.current_revision_id && document.state !== "stale";
     });
-  const approvedForScope =
-    tab === "analysis"
-      ? documents?.analysis.state === "approved"
-      : documents?.roadmap.state === "approved";
   const scope: "analysis" | "roadmap" = tab === "analysis" ? "analysis" : "roadmap";
   const scopeLabel = tab === "analysis" ? "analysis" : "RoadMap";
   const generating = Boolean(runId) && !runFinished;
@@ -648,19 +649,20 @@ function LoopDocumentDialog({
               </Field>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  {approvedForScope ? (
+                  {canResetScope ? (
                     confirmWithdraw ? (
                       <>
                         <span className="text-[11px] text-[var(--destructive)]">
-                          Withdrawing clears the {scopeLabel}. It has to be generated again.
+                          Resetting clears the {scopeLabel} and any approval behind it. It has to be
+                          generated again.
                         </span>
                         <Button
                           size="sm"
                           variant="danger"
-                          disabled={readOnly || !isHuman || withdraw.isPending}
-                          onClick={() => withdraw.mutate(scope)}
+                          disabled={resetScope.isPending}
+                          onClick={() => resetScope.mutate(scope)}
                         >
-                          Withdraw and clear
+                          Reset and clear
                         </Button>
                         <Button
                           size="sm"
@@ -674,10 +676,10 @@ function LoopDocumentDialog({
                       <Button
                         size="sm"
                         variant="danger"
-                        disabled={readOnly || !isHuman || withdraw.isPending}
+                        disabled={resetScope.isPending}
                         onClick={() => setConfirmWithdraw(true)}
                       >
-                        Un-approve {scopeLabel}
+                        Reset {scopeLabel}
                       </Button>
                     )
                   ) : null}

@@ -207,7 +207,7 @@ document slots; there is no Board-level Kanban.
 | POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/roadmap` | Human-only; publishes the plan atomically |
-| POST | `/boards/{board_id}/loops/{loop_id}/reviews/{scope}/withdraw` | Human-only; supersedes the approval and replaces the scope's documents with an empty draft |
+| POST | `/boards/{board_id}/loops/{loop_id}/reviews/{scope}/reset` | Human-only; clears the scope's documents and supersedes any approval behind them |
 | GET | `/boards/{board_id}/loops/{loop_id}/plan` | Active plan with phases and readiness |
 | GET | `/boards/{board_id}/loops/{loop_id}/agents` | The agent this Loop prefers per purpose |
 | PUT | `/boards/{board_id}/loops/{loop_id}/agents` | Sets that preference (`boards:write`; omitted field keeps its value, `null` clears) |
@@ -291,14 +291,17 @@ file count and `truncated` flag. No token, path or content ever appears in a log
 Every run also reports `phase` — `reading_info`, `analysing_repository` or `generating` — the step it
 last reached, so a caller can show progress instead of one opaque wait. When a run fails, `phase`
 names the step that failed alongside `error_code` and `error_message`; the dialogue shows that step
-with the error as JSON rather than a toast that scrolls away.
+with the error as JSON rather than a toast that scrolls away. `source_revisions.repositories` is
+written as soon as the repository step finishes, so a caller can tell "nothing is linked" (`[]`) from
+"the step has not run yet" (no key) — a fast run is then never mistaken for one that read the code.
 
-Withdrawing an approval (`POST …/reviews/{scope}/withdraw`, `{version}`) is the counterpart of
-approving and equally human-only. It supersedes the approval row — the history stays — replaces the
-scope's documents with an empty draft revision chained to its inputs, clears every approval that
-depended on them, and returns `{scope, approval_id, cleared, version}`. `409 approval_missing` means
-there was nothing current to withdraw; `409 document_empty` refuses an approval when the document
-text is blank, which is what a withdrawal leaves behind.
+Resetting a scope (`POST …/reviews/{scope}/reset`, `{version}`) is the counterpart of approving and
+equally human-only. It clears the scope's documents — writing an empty draft revision chained to its
+real inputs — and supersedes any approval behind them, keeping the row as history. It works on a
+draft that was never approved as well as on an approved one, and returns
+`{scope, approval_id, cleared, version}` with `approval_id: null` when there was nothing approved.
+`409 nothing_to_reset` means the scope is already empty; `409 document_empty` refuses to approve a
+blank document, which is what a reset leaves behind.
 
 `scope` says where a profile works. `board` profiles answer inside one board; `organisation`
 profiles (`coordinator`, `architect`) work across the whole installation and cannot be selected as

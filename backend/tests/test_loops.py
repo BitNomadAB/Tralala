@@ -1279,13 +1279,13 @@ def test_reopening_a_prerequisite_invalidates_qa(
     assert loop_row["stage"] in {"in_progress", "ready"}
 
 
-# --- withdrawing an approval ------------------------------------------------------
+# --- resetting a scope ------------------------------------------------------------
 
 
-def test_withdrawing_an_analysis_clears_its_documents(
+def test_resetting_an_analysis_clears_its_documents(
     api: Api, board: dict[str, Any], loop: dict[str, Any]
 ) -> None:
-    """Withdrawing is not a rejection: the approved text is retired, not sent back for changes."""
+    """A reset is not a rejection: the approved text is retired, not sent back for changes."""
     api.data(
         api.put(
             f"{_base(api, board, loop)}/documents/info",
@@ -1299,7 +1299,7 @@ def test_withdrawing_an_analysis_clears_its_documents(
 
     withdrawn = api.data(
         api.post(
-            f"{_base(api, board, loop)}/reviews/analysis/withdraw",
+            f"{_base(api, board, loop)}/reviews/analysis/reset",
             json={"version": _version(api, board, loop)},
         )
     )
@@ -1326,13 +1326,13 @@ def test_withdrawing_an_analysis_clears_its_documents(
     assert refused.json()["error"]["code"] == "approval_required"
 
 
-def test_withdrawing_a_roadmap_keeps_the_approved_analysis(
+def test_resetting_a_roadmap_keeps_the_approved_analysis(
     api: Api, board: dict[str, Any], loop: dict[str, Any]
 ) -> None:
     _ready_loop(api, board, loop)
     withdrawn = api.data(
         api.post(
-            f"{_base(api, board, loop)}/reviews/roadmap/withdraw",
+            f"{_base(api, board, loop)}/reviews/roadmap/reset",
             json={"version": _version(api, board, loop)},
         )
     )
@@ -1345,9 +1345,10 @@ def test_withdrawing_a_roadmap_keeps_the_approved_analysis(
     assert loop_row["roadmap_approval_id"] is None
 
 
-def test_withdrawal_needs_a_current_approval(
+def test_reset_clears_a_draft_that_was_never_approved(
     api: Api, board: dict[str, Any], loop: dict[str, Any]
 ) -> None:
+    """The button has to work before an approval exists, or there is no way back from a draft."""
     api.data(
         api.put(
             f"{_base(api, board, loop)}/documents/info",
@@ -1355,15 +1356,30 @@ def test_withdrawal_needs_a_current_approval(
         )
     )
     _submit_analysis(api, board, loop)
-    response = api.post(
-        f"{_base(api, board, loop)}/reviews/analysis/withdraw",
+    assert _documents(api, board, loop)["documents"]["analysis"]["state"] == "ready_for_review"
+
+    reset = api.data(
+        api.post(
+            f"{_base(api, board, loop)}/reviews/analysis/reset",
+            json={"version": _version(api, board, loop)},
+        )
+    )
+    assert reset["approval_id"] is None
+    assert reset["cleared"] == ["analysis_ai", "analysis"]
+    documents = _documents(api, board, loop)
+    for kind in ("analysis_ai", "analysis"):
+        assert documents["documents"][kind]["current_content"] == ""
+        assert documents["documents"][kind]["state"] == "draft"
+    # A second reset has nothing left to clear.
+    again = api.post(
+        f"{_base(api, board, loop)}/reviews/analysis/reset",
         json={"version": _version(api, board, loop)},
     )
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "approval_missing"
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "nothing_to_reset"
 
 
-def test_withdrawal_refuses_a_stale_version(
+def test_reset_refuses_a_stale_version(
     api: Api, board: dict[str, Any], loop: dict[str, Any]
 ) -> None:
     api.data(
@@ -1375,14 +1391,14 @@ def test_withdrawal_refuses_a_stale_version(
     _submit_analysis(api, board, loop)
     _approve_analysis(api, board, loop)
     response = api.post(
-        f"{_base(api, board, loop)}/reviews/analysis/withdraw",
+        f"{_base(api, board, loop)}/reviews/analysis/reset",
         json={"version": _version(api, board, loop) - 1},
     )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "version_conflict"
 
 
-def test_withdrawal_is_human_only(
+def test_reset_is_human_only(
     api: Api, board: dict[str, Any], loop: dict[str, Any]
 ) -> None:
     api.data(
@@ -1395,7 +1411,7 @@ def test_withdrawal_is_human_only(
     _approve_analysis(api, board, loop)
     headers = _agent_headers(api, ["boards:read", "cards:read"])
     response = api.post(
-        f"{_base(api, board, loop)}/reviews/analysis/withdraw",
+        f"{_base(api, board, loop)}/reviews/analysis/reset",
         json={"version": _version(api, board, loop)},
         headers=headers,
     )

@@ -535,7 +535,7 @@ class LoopGenerationService:
                 + _snapshot_caps()
             )
         elif isinstance(repositories, str):
-            lines.append("Repository snapshot: none linked to this board.")
+            lines.append("Repository snapshot: no enabled repository is linked to this board.")
         if captured.get("instructions"):
             lines.append("Additional instructions: " + captured["instructions"])
         lines.append("Context (JSON):")
@@ -738,7 +738,7 @@ class LoopGenerationService:
             return captured
         entries = self.snapshots.for_board(board_id)
         context = dict(captured.get("context") or {})
-        context["repositories"] = entries or "none linked to this board"
+        context["repositories"] = entries or "no enabled repository is linked to this board"
         captured = {**captured, "context": context}
         described = [
             {

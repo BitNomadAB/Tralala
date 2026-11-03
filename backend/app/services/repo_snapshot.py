@@ -20,6 +20,7 @@ from __future__ import annotations
 import io
 import logging
 import tarfile
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -293,8 +294,15 @@ class RepositorySnapshotService:
 
     def for_board(self, board_id: str) -> list[dict[str, Any]]:
         """One entry per enabled repository on the board; failures are entries, not exceptions."""
+        rows = self.repositories.for_board(board_id)
+        if not rows:
+            # Silent here used to look like a successful fetch in the run panel: say so in the log.
+            logger.info(
+                '{"event": "repository_snapshot_none", "board_id": "%s"}', board_id
+            )
+            return []
         entries: list[dict[str, Any]] = []
-        for row in self.repositories.for_board(board_id):
+        for row in rows:
             entries.append(self._one(row))
         return entries
 
@@ -310,25 +318,29 @@ class RepositorySnapshotService:
         except ValidationFailure:
             return {**entry, "error": "invalid_url"}
         token = self.repositories.token(row["id"])
+        started = time.monotonic()
         try:
             sha = resolve_commit(owner, name, row.get("branch"), token)
             archive = fetch_archive(owner, name, sha, token)
             snapshot = read_snapshot(archive)
         except SnapshotError as exc:
             logger.warning(
-                '{"event": "repository_snapshot_failed", "repository_id": "%s", "code": "%s"}',
+                '{"event": "repository_snapshot_failed", "repository_id": "%s", "code": "%s",'
+                ' "duration_ms": %d}',
                 row["id"],
                 exc.code,
+                int((time.monotonic() - started) * 1000),
             )
             return {**entry, "error": exc.code}
         logger.info(
             '{"event": "repository_snapshot_captured", "repository_id": "%s", "commit_sha": "%s",'
-            ' "files": %d, "text_bytes": %d, "truncated": %s}',
+            ' "files": %d, "text_bytes": %d, "truncated": %s, "duration_ms": %d}',
             row["id"],
             sha,
             len(snapshot["files"]),
             snapshot["text_bytes"],
             "true" if snapshot["truncated"] else "false",
+            int((time.monotonic() - started) * 1000),
         )
         return {
             **entry,

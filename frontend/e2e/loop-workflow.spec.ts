@@ -127,11 +127,11 @@ test.describe("loop planning and completion", () => {
     await expect(page.getByRole("dialog", { name: "Email verification" })).toBeVisible();
   });
 
-  test("withdraws an approval, which clears the analysis so it can be generated again", async ({
+  test("resets a scope, cleared draft or approved, so it can be generated again", async ({
     page,
   }) => {
     await login(page);
-    const boardName = uniqueName("Withdraw journey");
+    const boardName = uniqueName("Reset journey");
     await boardWithLoop(page, boardName, "Session expiry");
     const boardId = boardIdFromUrl(page);
     const loopId = page.url().split("/loops/")[1];
@@ -146,7 +146,7 @@ test.describe("loop planning and completion", () => {
     await infoDialog.getByRole("button", { name: "Save as new revision" }).click();
     await page.getByRole("button", { name: "Close dialog" }).click();
 
-    const analysis = await page.request.post(`${loopBase}/candidates`, {
+    const candidate = {
       headers,
       data: {
         kind: "analysis",
@@ -167,20 +167,32 @@ test.describe("loop planning and completion", () => {
           verification: ["An idle session is rejected"],
         },
       },
-    });
+    };
+    const analysis = await page.request.post(`${loopBase}/candidates`, candidate);
     expect(analysis.status()).toBe(201);
 
+    // A draft that was never approved can be thrown away too: that is the way back from a bad run.
     await page.reload();
     await page.getByRole("button", { name: "Analysis" }).click();
     const dialog = page.getByRole("dialog", { name: /planning documents/ });
     await expect(dialog.getByText(/Sessions never time out today/)).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Reset analysis" })).toBeEnabled();
+    await dialog.getByRole("button", { name: "Reset analysis" }).click();
+    await expect(dialog.getByText(/Resetting clears the analysis/)).toBeVisible();
+    await dialog.getByRole("button", { name: "Reset and clear" }).click();
+    await expect(dialog.getByText("Nothing here yet.").first()).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Reset analysis" })).toHaveCount(0);
+
+    // The same button clears an approved analysis, and asks first because the text is retired.
+    expect((await page.request.post(`${loopBase}/candidates`, candidate)).status()).toBe(201);
+    await page.reload();
+    await page.getByRole("button", { name: "Analysis" }).click();
+    await expect(dialog.getByText(/Sessions never time out today/)).toBeVisible();
     await dialog.getByRole("button", { name: "Approve analysis" }).click();
     await expect(dialog.getByRole("button", { name: "Approved" })).toBeVisible();
-
-    // Withdrawing is a two-step action: it throws the approved text away, so it asks first.
-    await dialog.getByRole("button", { name: "Un-approve analysis" }).click();
-    await expect(dialog.getByText(/Withdrawing clears the analysis/)).toBeVisible();
-    await dialog.getByRole("button", { name: "Withdraw and clear" }).click();
+    await dialog.getByRole("button", { name: "Reset analysis" }).click();
+    await expect(dialog.getByText(/Resetting clears the analysis/)).toBeVisible();
+    await dialog.getByRole("button", { name: "Reset and clear" }).click();
     await expect(dialog.getByText("Nothing here yet.").first()).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve analysis" })).toBeVisible();
 

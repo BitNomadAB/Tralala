@@ -51,11 +51,14 @@ Worth knowing when you look at the dashboard:
   purpose, with the provider's own sentence, until it is retried.
 - **Generation shows which step it is on, and which one failed.** A second panel beside the documents
   dialog lists *Reading Info data*, *Analysing repository* and *Generating analysis* (or *RoadMap*)
-  with the step reached marked. A failure marks the step it died on and keeps the provider's answer
-  there as JSON until it is dismissed. *Generate* is locked and glows while a run is in flight.
-- **An approval can be taken back.** The red *Un-approve* button at the bottom-left of the Analysis
-  and RoadMap tabs withdraws the approval and clears the documents it authorized, so the work has to
-  be generated again; it asks first, because the text is retired rather than edited. This is a
+  with the step reached marked. The repository step reports what it actually got — `app @ abc123de,
+  34 files`, `app · unavailable (unauthorized)`, or *no enabled repository is linked to this board* —
+  so a fast run cannot be mistaken for an analysis that read the code. A failure marks the step it
+  died on and keeps the provider's answer there as JSON until it is dismissed. *Generate* is locked
+  and glows while a run is in flight.
+- **A scope can be reset.** The red *Reset* button at the bottom-left of the Analysis and RoadMap tabs
+  clears the document and any approval behind it — a draft as well as an approved one — so the work
+  has to be generated again; it asks first, because the text is retired rather than edited. This is a
   person's action and rejects agent tokens like any other approval decision.
 - **A discussion is capped at four rounds** per run, with default token and time budgets
   (`TRALALA_DISCUSSION_TOKEN_BUDGET`, `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`). There is no

@@ -1,5 +1,5 @@
 import { Check, Loader2, X } from "lucide-react";
-import { failedStepKey, runFailureJson, runSteps } from "@/lib/runPhases";
+import { failedStepKey, repositoryOutcome, runFailureJson, runSteps } from "@/lib/runPhases";
 import type { GenerationRun } from "@/lib/types";
 
 /**
@@ -23,6 +23,7 @@ export function RunPhases({
   const steps = runSteps(purpose, run);
   const failedKey = failedStepKey(run);
   const failureJson = runFailureJson(run);
+  const repositories = repositoryOutcome(run);
   const running = run.status === "queued" || run.status === "running";
 
   return (
@@ -83,6 +84,20 @@ export function RunPhases({
                   )}
                 </div>
               </div>
+              {step.key === "analysing_repository" && repositories.kind !== "waiting" ? (
+                <p className="ml-6 text-[11px] text-[var(--muted-foreground)]">
+                  {repositories.kind === "none"
+                    ? "No enabled repository is linked to this board."
+                    : repositories.lines.join("; ")}
+                </p>
+              ) : null}
+              {step.key === "analysing_repository" &&
+              repositories.kind === "waiting" &&
+              step.state === "active" ? (
+                <p className="ml-6 text-[11px] italic text-[var(--muted-foreground)]">
+                  Fetching the linked repositories…
+                </p>
+              ) : null}
               {failureJson && step.key === failedKey ? (
                 <pre className="ml-6 overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin">
                   {failureJson}

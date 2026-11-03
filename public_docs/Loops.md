@@ -30,13 +30,13 @@ Changing an input invalidates what depended on it: a new Info revision makes the
 both RoadMap views stale, the Loop moves to `replanning`, and execution transitions are rejected
 with `409 plan_change_required` until a replacement plan is approved.
 
-Withdrawing an approval is the heavier action, and the dialog offers it as the red *Un-approve*
-button in the bottom-left corner of the Analysis and RoadMap tabs. It is not a rejection: a rejection
-keeps the text and asks for changes, while a withdrawal records that the approval should never have
-been given. The approval row stays as history but is superseded, the scope's documents are replaced
-by an empty draft, and every approval that depended on them is cleared — so a withdrawn analysis has
-to be generated again before a RoadMap can be. Because the text is retired rather than edited, the
-button asks for confirmation first.
+Withdrawing an approval is the heavier action, and the dialog offers it as the red *Reset* button in
+the bottom-left corner of the Analysis and RoadMap tabs — available for a draft as well as for an
+approved document. It is not a rejection: a rejection keeps the text and asks for changes, while a
+reset clears it. Any approval behind the text is superseded and kept as history, the scope's documents
+are replaced by an empty draft, and every approval that depended on them is cleared — so a reset
+analysis has to be generated again before a RoadMap can be. Because the text is retired rather than
+edited, the button asks for confirmation first.
 
 ## Approval boundaries
 
@@ -45,7 +45,7 @@ button asks for confirmation first.
 | Write Info | Signed-in person, or a worker token while the Loop is `draft` / `analysis_review` | `PUT …/documents/info` |
 | Approve or reject analysis | Signed-in person | `POST …/reviews/analysis` |
 | Approve or reject RoadMap (publishes Tickets) | Signed-in person | `POST …/reviews/roadmap` |
-| Withdraw an approval and clear the documents | Signed-in person | `POST …/reviews/{scope}/withdraw` |
+| Reset a scope: clears the documents and any approval behind them | Signed-in person | `POST …/reviews/{scope}/reset` |
 | Confirm a human-only Ticket | Signed-in person | `POST …/cards/{card_id}/confirm` |
 | Accept implementation | Signed-in person | `POST …/completion` |
 | Accept QA and finalize | Signed-in person | `POST …/qa/decision` |
@@ -85,10 +85,15 @@ only the repositories of the boards it serves.
 
 A run is one background call, so the document dialog shows the step it is on — *Reading Info data*,
 *Analysing repository*, *Generating analysis* (or *RoadMap*) — in a second panel beside the dialog
-(inline at the top of the dialog on a narrow screen). The same panel is where a failure appears: the
-step that failed is marked, carries the provider's own answer as JSON, and stays on screen until it
-is dismissed. *Generate* is locked and glows for the duration, so the same document cannot be started
-twice by accident.
+(inline at the top of the dialog on a narrow screen). The repository step also reports what it got:
+`acme/app @ abc123de, 34 files`, `acme/app · unavailable (unauthorized)`, or *no enabled repository is
+linked to this board*. A green tick on its own would read like the code had been read; the line under
+the step is what tells you whether it was. The same panel is where a failure appears: the step that
+failed is marked, carries the provider's own answer as JSON, and stays on screen until it is
+dismissed. *Generate* is locked and glows for the duration, so the same document cannot be started
+twice by accident. The red *Reset* button at the bottom-left corner clears the analysis or the
+RoadMap — an approved one as well as a draft — and asks first, because the text is retired rather
+than edited.
 
 ## Board profiles and organisation profiles
 

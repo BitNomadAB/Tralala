@@ -283,6 +283,50 @@ def test_a_run_carries_the_snapshot_and_records_only_the_commit(
     assert "ghp_repository_token_value" not in json.dumps(run)
 
 
+def test_a_board_without_a_repository_says_so_instead_of_looking_fetched(
+    api: Api,
+    board: dict[str, Any],
+    loop: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fast run must not be mistaken for an analysis that read the code."""
+    agent = api.data(
+        api.post(
+            "/api/v1/agents",
+            json={
+                "name": "No repo agent",
+                "connection_type": "openai_compatible",
+                "base_url": "http://127.0.0.1:8080/v1",
+                "model": "test-model",
+                "role_template_id": next(
+                    role["id"]
+                    for role in api.data(api.get("/api/v1/role-templates"))
+                    if role["builtin_key"] == "qa_engineer"
+                ),
+            },
+        )
+    )
+    assert agent["id"]
+    base = f"/api/v1/boards/{board['id']}/loops/{loop['id']}"
+    api.data(api.put(f"{base}/documents/info", json={"content": "Intent"}))
+    seen: dict[str, Any] = {}
+
+    def fake_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        seen["messages"] = kwargs.get("messages", [])
+        return {"ok": True, "error": None, "text": _analysis_json(), "usage": {}}
+
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime, "call_completion", fake_call)
+        started = api.data(api.post(f"{base}/generation-runs", json={"purpose": "analysis"}))
+        run = _wait(api, f"{base}/generation-runs", started["id"])
+
+    assert run["status"] == "completed", run
+    assert "no enabled repository is linked to this board" in seen["messages"][0]["content"]
+    # An empty list is a fact about the run, not the same thing as "the step never ran".
+    assert run["source_revisions"]["repositories"] == []
+    assert run["phase"] == "generating"
+
+
 def _wait(api: Api, url: str, run_id: str, *, attempts: int = 60) -> dict[str, Any]:
     for _ in range(attempts):
         run = api.data(api.get(f"{url}/{run_id}"))

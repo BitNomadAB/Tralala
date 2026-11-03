@@ -78,4 +78,9 @@ describe("run repository provenance", () => {
     });
     expect(describeRunRepositories(entry)).toBe("acme app (unavailable: unauthorized)");
   });
+
+  it("says out loud when the board had no repository", () => {
+    const entry = run({ info: "abc", repositories: [] });
+    expect(describeRunRepositories(entry)).toBe("no enabled repository linked to this board");
+  });
 });

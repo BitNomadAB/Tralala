@@ -242,13 +242,13 @@ class ApprovalOut(OutModel):
     superseded_at: str | None = None
 
 
-class WithdrawalRequest(StrictModel):
+class ScopeResetRequest(StrictModel):
     version: int = Field(ge=1)
 
 
-class WithdrawalOut(OutModel):
+class ScopeResetOut(OutModel):
     scope: str
-    approval_id: str
+    approval_id: str | None = None
     cleared: list[str] = Field(default_factory=list)
     version: int
 

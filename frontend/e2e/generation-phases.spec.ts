@@ -143,6 +143,11 @@ test.describe("generation progress", () => {
     await expect(panel.getByText("Reading Info data")).toBeVisible();
     await expect(panel.getByText("Analysing repository")).toBeVisible();
     await expect(panel.getByText("Generating analysis")).toBeVisible();
+    // The repository step says what it actually got: this board links none, and a green tick alone
+    // would look like the code had been read.
+    await expect(
+      panel.getByText("No enabled repository is linked to this board."),
+    ).toBeVisible();
 
     // It finishes without a reload, and the draft replaces the progress panel.
     await expect(analysis.getByText(/Sessions never time out today/)).toBeVisible({

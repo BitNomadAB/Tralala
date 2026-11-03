@@ -13,8 +13,10 @@ export function runRepositories(run: GenerationRun): GenerationRunRepository[] {
  * person needs the commit and the count, not the files.
  */
 export function describeRunRepositories(run: GenerationRun): string | null {
-  const repositories = runRepositories(run);
-  if (repositories.length === 0) return null;
+  const value = run.source_revisions?.repositories;
+  if (!Array.isArray(value)) return null;
+  const repositories = value as GenerationRunRepository[];
+  if (repositories.length === 0) return "no enabled repository linked to this board";
   return repositories
     .map((repository) =>
       repository.error

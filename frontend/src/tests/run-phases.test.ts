@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { failedStepKey, runFailureJson, runSteps } from "@/lib/runPhases";
+import {
+  failedStepKey,
+  repositoryOutcome,
+  runFailureJson,
+  runSteps,
+} from "@/lib/runPhases";
 
 describe("run steps", () => {
   it("shows the first step as active before the server recorded a phase", () => {
@@ -49,5 +54,53 @@ describe("run steps", () => {
     const steps = runSteps("analysis", { status: "failed", phase: null });
     expect(steps[0].state).toBe("failed");
     expect(failedStepKey({ status: "failed", phase: null })).toBe("reading_info");
+  });
+
+  it("waits for the repository step before it claims anything about the code", () => {
+    expect(
+      repositoryOutcome({ status: "running", phase: "analysing_repository", source_revisions: {} }),
+    ).toEqual({ kind: "waiting" });
+  });
+
+  it("says no repository is linked instead of leaving the step looking green", () => {
+    expect(
+      repositoryOutcome({
+        status: "running",
+        phase: "generating",
+        source_revisions: { repositories: [] },
+      }),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("names the commit and the file count the step actually got", () => {
+    const outcome = repositoryOutcome({
+      status: "completed",
+      phase: "generating",
+      source_revisions: {
+        repositories: [
+          {
+            id: "r1",
+            name: "acme app",
+            branch: "main",
+            commit_sha: "abc123def456",
+            file_count: 12,
+            truncated: true,
+          },
+          {
+            id: "r2",
+            name: "acme api",
+            branch: null,
+            commit_sha: null,
+            file_count: 0,
+            truncated: false,
+            error: "unauthorized",
+          },
+        ],
+      },
+    });
+    expect(outcome).toEqual({
+      kind: "listed",
+      lines: ["acme app @ abc123de, 12 files (truncated)", "acme api · unavailable (unauthorized)"],
+    });
   });
 });

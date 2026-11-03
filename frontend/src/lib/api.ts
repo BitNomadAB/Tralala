@@ -336,17 +336,22 @@ export const api = {
     );
   },
 
-  async withdrawReview(
+  async resetScope(
     boardId: string,
     loopId: string,
     scope: "analysis" | "roadmap",
     payload: { version: number },
-  ): Promise<{ scope: string; approval_id: string; cleared: string[]; version: number }> {
+  ): Promise<{ scope: string; approval_id: string | null; cleared: string[]; version: number }> {
     return json(
-      await request<{ scope: string; approval_id: string; cleared: string[]; version: number }>(
-        `/boards/${boardId}/loops/${loopId}/reviews/${scope}/withdraw`,
-        { method: "POST", body: payload },
-      ),
+      await request<{
+        scope: string;
+        approval_id: string | null;
+        cleared: string[];
+        version: number;
+      }>(`/boards/${boardId}/loops/${loopId}/reviews/${scope}/reset`, {
+        method: "POST",
+        body: payload,
+      }),
     );
   },
 
