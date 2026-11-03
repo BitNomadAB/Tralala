@@ -41,6 +41,10 @@ class RoleTemplateOut(OutModel):
 
 ConnectionType = str
 
+DEFAULT_TIMEOUT_SECONDS = 180
+MAX_TIMEOUT_SECONDS = 900
+MAX_OUTPUT_TOKENS = 2_000_000
+
 
 class AgentCreate(StrictModel):
     name: Name
@@ -52,8 +56,12 @@ class AgentCreate(StrictModel):
     model: Name | None = None
     api_key: str | None = Field(default=None, max_length=4096)
     temperature: float | None = Field(default=None, ge=0, le=2)
-    max_output_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
-    timeout_seconds: int = Field(default=30, ge=1, le=600)
+    # The longest answer the provider may write; none sends no limit, so the provider's own
+    # default applies. The cap is a sanity bound, not any provider's limit.
+    max_output_tokens: int | None = Field(default=None, ge=1, le=MAX_OUTPUT_TOKENS)
+    # A reasoning or local model needs minutes for a structured answer; a connection test keeps
+    # its own short bound (agents_probe.PROBE_TIMEOUT_SECONDS).
+    timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, ge=1, le=MAX_TIMEOUT_SECONDS)
     enabled: bool = True
 
 
@@ -68,8 +76,8 @@ class AgentUpdate(StrictModel):
     api_key: str | None = Field(default=None, max_length=4096)
     clear_api_key: bool = False
     temperature: float | None = Field(default=None, ge=0, le=2)
-    max_output_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
-    timeout_seconds: int | None = Field(default=None, ge=1, le=600)
+    max_output_tokens: int | None = Field(default=None, ge=1, le=MAX_OUTPUT_TOKENS)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=MAX_TIMEOUT_SECONDS)
     enabled: bool | None = None
 
 
@@ -93,7 +101,7 @@ class AgentOut(OutModel):
     api_key_hint: str | None = None
     temperature: float | None = None
     max_output_tokens: int | None = None
-    timeout_seconds: int = 30
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     enabled: bool = True
     last_test_status: str | None = None
     last_test_message: str | None = None
@@ -125,7 +133,7 @@ class AgentTestRequest(StrictModel):
     # A model on your own network usually has no credential. Saying so explicitly is different from
     # omitting `api_key`, which means "use the one already stored on this agent".
     no_api_key: bool = False
-    timeout_seconds: int | None = Field(default=None, ge=1, le=600)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=MAX_TIMEOUT_SECONDS)
 
 
 class AgentCompletionResult(OutModel):

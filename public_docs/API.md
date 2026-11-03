@@ -401,6 +401,13 @@ local model servers are the primary use case (`TRALALA_AGENTS_ALLOW_PRIVATE_ENDP
 rule is checked again when a call or a connection test connects, and the connection goes to the
 checked address only; a refused address is reported as `ForbiddenAddressError`.
 
+`timeout_seconds` defaults to 180 and may be at most 900: a reasoning or local model can need minutes
+for a structured answer, and a call that runs out of time fails with "No answer within N s (the
+agent's timeout setting)". A connection test waits at most 30 s per call whatever the agent's
+timeout, and says so when the model does not answer in time. `max_output_tokens` (at most 2 000 000)
+and `temperature` are sent only when set; empty leaves both to the provider's default, which avoids
+the providers that refuse an answer length above their own cap or any temperature at all.
+
 API keys are sealed with Fernet (HKDF-derived from the install secret). Responses expose only
 `has_api_key` and a `••••ab12` hint — never the key itself. `/agents/directory` is the autocomplete
 projection: enabled agents with `id`, `name` and role only, no endpoint, model or credential hint.
@@ -417,7 +424,7 @@ with the request. With no key there is no `Authorization` header in any call, pr
 `POST /agents/{id}/test` probes `GET {base_url}/models` for OpenAI-compatible endpoints and the A2A
 agent card (`/.well-known/agent.json`) for `a2a`, then records `last_test_status`,
 `last_test_message` and `last_tested_at`. When an OpenAI-compatible agent has a model, the probe
-also sends **one real chat completion** (`max_tokens: 16`, `temperature: 0`) and reports it as
+also sends **one real chat completion** (`max_tokens: 16`, no `temperature`) and reports it as
 `completion`. The model list proves the endpoint answers; only the completion proves that the model
 name exists and that the parameters a generation sends are accepted, which is the difference between
 a green test and a run that fails with `400`. A refused completion fails the test and carries the

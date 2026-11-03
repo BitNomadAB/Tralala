@@ -151,9 +151,46 @@ def test_a_completion_sends_the_system_prompt_first(
             {"role": "system", "content": "You are the architect."},
             {"role": "user", "content": "Is the plan sound?"},
         ],
-        "temperature": 0.3,
     }
     assert recorder.client_options == [{"timeout": 10.0, "allow_private": True}]
+
+
+def test_a_provider_that_refuses_a_temperature_answers_when_nobody_chose_one(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    def refuse_temperature(request: httpx.Request) -> httpx.Response:
+        sent: JsonValue = json.loads(request.content)
+        if isinstance(sent, dict) and "temperature" in sent:
+            return httpx.Response(400, json={"error": {"message": "temperature is not supported"}})
+        return _completion("ok")
+
+    recorder = provider(refuse_temperature)
+    result = runtime.call_completion(settings, _agent(), system_prompt="s", messages=[])
+    assert (result["ok"], result["text"]) == (True, "ok")
+    assert "temperature" not in recorder.body()
+    # A caller's choice is still sent, and the provider's refusal still carries its sentence.
+    refused = runtime.call_completion(
+        settings, _agent(), system_prompt="s", messages=[], temperature=0.2
+    )
+    assert (refused["ok"], refused["error"]) == (False, "HTTP 400: temperature is not supported")
+    assert recorder.body()["temperature"] == 0.2
+
+
+@pytest.mark.parametrize("connection_type", ["openai_compatible", "a2a"])
+def test_a_call_that_runs_out_of_time_names_the_agents_timeout(
+    settings: Settings, provider: Callable[[Handler], Provider], connection_type: str
+) -> None:
+    def too_slow(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    provider(too_slow)
+    agent = _agent(connection_type, timeout_seconds=180)
+    result = runtime.call_completion(settings, agent, system_prompt="s", messages=[])
+    assert result == {
+        "ok": False,
+        "error": "No answer within 180 s (the agent's timeout setting)",
+        "text": "",
+    }
 
 
 def test_the_agent_settings_and_its_sealed_key_reach_the_request(

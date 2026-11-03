@@ -14,8 +14,11 @@ from ..core.config import Settings
 from ..core.errors import ValidationFailure
 from ..core.secrets import CredentialError, open_secret
 from ..db.generated.registry import AgentsRow
-from ..schemas.agents import AgentTestRequest
+from ..schemas.agents import DEFAULT_TIMEOUT_SECONDS, AgentTestRequest
 from .connections import CompletionProbe, EndpointProbe
+
+# A connection test waits at most this long for each call, whatever the agent's timeout.
+PROBE_TIMEOUT_SECONDS = 30.0
 
 logger = logging.getLogger("tralala.agents")
 
@@ -87,8 +90,10 @@ def probe_connection(
             api_key = open_secret(settings, row.api_key_ciphertext)
         except CredentialError:
             api_key = None
-    fallback_timeout = row.timeout_seconds if row else 30
-    timeout = float(payload.timeout_seconds or fallback_timeout)
+    # A connection test stays quick whatever the agent's timeout: a generation may wait minutes
+    # for a slow model, the test waits at most PROBE_TIMEOUT_SECONDS per call.
+    fallback_timeout = row.timeout_seconds if row else DEFAULT_TIMEOUT_SECONDS
+    timeout = min(float(payload.timeout_seconds or fallback_timeout), PROBE_TIMEOUT_SECONDS)
     fallback_model = row.model if row else ""
     selected_model = (payload.model or fallback_model or "").strip()
     allow_private = settings.agents_allow_private_endpoints

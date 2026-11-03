@@ -75,6 +75,11 @@ def _app_settings(settings: object) -> Settings:
     raise TypeError(f"an agent call needs the application Settings, not {type(settings).__name__}")
 
 
+def timeout_error(timeout: float) -> str:
+    """A call that ran out of time is the agent's setting, not a provider fault; say which."""
+    return f"No answer within {timeout:g} s (the agent's timeout setting)"
+
+
 def _timeout(agent_row: Mapping[str, object]) -> float:
     """``timeout_seconds`` as ``float()`` reads it; nothing (or zero) is the 60-second default."""
     value = agent_row.get("timeout_seconds") or 60
@@ -270,6 +275,8 @@ def call_a2a(
                 },
             }
             response = client.post(endpoint, headers=headers, json=payload)
+    except httpx.TimeoutException:
+        return {"ok": False, "error": timeout_error(timeout), "text": ""}
     except Exception as exc:  # noqa: BLE001 - surfaced as an agent failure
         return {"ok": False, "error": f"{type(exc).__name__}", "text": ""}
     if response.status_code >= 400:
@@ -327,12 +334,12 @@ def call_completion(
     payload: dict[str, object] = {
         "model": agent_row.get("model") or "default",
         "messages": [{"role": "system", "content": system_prompt}, *messages],
-        "temperature": (
-            temperature
-            if temperature is not None
-            else (agent_row["temperature"] if agent_row.get("temperature") is not None else 0.3)
-        ),
     }
+    # Sent only when the caller or the agent chose one: some reasoning models refuse the
+    # parameter, and the provider's default is what nobody choosing means.
+    chosen = temperature if temperature is not None else agent_row.get("temperature")
+    if chosen is not None:
+        payload["temperature"] = chosen
     limit = max_tokens or agent_row.get("max_output_tokens")
     if limit:
         payload["max_tokens"] = limit
@@ -351,6 +358,8 @@ def call_completion(
             if "response_format" in payload and refuses_response_format(response):
                 del payload["response_format"]
                 response = client.post(url, headers=headers, json=payload)
+    except httpx.TimeoutException:
+        return {"ok": False, "error": timeout_error(timeout), "text": ""}
     except Exception as exc:  # noqa: BLE001 - surfaced as an agent failure
         return {"ok": False, "error": f"{type(exc).__name__}", "text": ""}
     if response.status_code >= 400:

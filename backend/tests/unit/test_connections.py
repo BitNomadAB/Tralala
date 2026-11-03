@@ -554,6 +554,36 @@ def test_a_model_the_plain_call_cannot_reach_fails_the_test_with_its_own_refusal
     assert len(upstream.requests) == 2
 
 
+def test_the_model_call_sends_no_temperature(upstream: Upstream) -> None:
+    upstream.answer = _answers(_chat('{"answer": "ok"}'))
+    _trial()
+    (sent,) = upstream.requests
+    assert ("temperature" in _sent(sent), _sent(sent)["max_tokens"]) == (False, 16)
+
+
+def test_a_model_that_runs_out_of_time_names_the_tests_own_limit(upstream: Upstream) -> None:
+    def too_slow(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    upstream.answer = too_slow
+    result = connections.probe_completion(
+        "https://api.example.com/v1",
+        model="example-model",
+        api_key=None,
+        timeout=30,
+        allow_private=False,
+    )
+    assert (result["ok"], result["status"], result["supports_json_schema"]) == (
+        False,
+        "timeout",
+        False,
+    )
+    assert result["message"] == (
+        "The model did not answer within 30 s, the connection test's own limit; a generation "
+        "waits as long as the agent's timeout allows"
+    )
+
+
 def test_a_server_error_is_reported_without_a_second_call(upstream: Upstream) -> None:
     upstream.answer = _answers(httpx.Response(503, text="busy"))
     result = _trial()

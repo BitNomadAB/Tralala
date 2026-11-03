@@ -376,7 +376,6 @@ def probe_completion(
             {"role": "user", "content": "ping"},
         ],
         "max_tokens": 16,
-        "temperature": 0,
     }
     url = f"{base_url}/chat/completions"
     supports_json_schema = True
@@ -388,6 +387,17 @@ def probe_completion(
             if 400 <= response.status_code < 500:
                 supports_json_schema = False
                 response = client.post(url, headers=headers, json=plain)
+    except httpx.TimeoutException:
+        return {
+            "ok": False,
+            "status": "timeout",
+            "message": (
+                f"The model did not answer within {timeout:g} s, the connection test's own limit; "
+                "a generation waits as long as the agent's timeout allows"
+            ),
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "supports_json_schema": False,
+        }
     except Exception as exc:  # noqa: BLE001 - network failures are reported, not raised
         return {
             "ok": False,

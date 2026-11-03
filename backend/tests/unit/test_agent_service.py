@@ -14,6 +14,7 @@ import logging
 from dataclasses import dataclass
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from app.core.config import Settings
 from app.core.context import ActorContext, scopes_for_role
@@ -394,6 +395,54 @@ def test_a_new_agent_stores_its_key_sealed_and_shows_only_the_hint(agents: Agent
     )
     assert (entry["id"], entry["has_api_key"], entry["api_key_hint"]) == ("new-1", True, "••••9876")
     assert "sk-fresh-9876" not in str(entry)
+
+
+def test_a_new_agent_waits_three_minutes_and_leaves_length_and_temperature_to_the_provider(
+    agents: Agents,
+) -> None:
+    entry = agents.service.create(ADMIN, create())
+    row = agents.state.agents["new-1"]
+    assert (row.timeout_seconds, row.max_output_tokens, row.temperature) == (180, None, None)
+    assert (entry["timeout_seconds"], entry["max_output_tokens"]) == (180, None)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("timeout_seconds", 900, True),
+        ("timeout_seconds", 901, False),
+        ("max_output_tokens", 2_000_000, True),
+        ("max_output_tokens", 2_000_001, False),
+    ],
+)
+def test_the_timeout_and_answer_length_have_their_bounds(
+    field: str, value: int, accepted: bool
+) -> None:
+    values: dict[str, object] = {
+        "name": "Fresh",
+        "connection_type": "openai_compatible",
+        "base_url": "http://10.0.0.5:8080/v1",
+        field: value,
+    }
+    if accepted:
+        assert getattr(AgentCreate.model_validate(values), field) == value
+        assert getattr(AgentUpdate.model_validate({field: value}), field) == value
+    else:
+        with pytest.raises(PydanticValidationError):
+            AgentCreate.model_validate(values)
+        with pytest.raises(PydanticValidationError):
+            AgentUpdate.model_validate({field: value})
+
+
+@pytest.mark.parametrize(("timeout", "bound"), [(600, 30.0), (12, 12.0)])
+def test_a_connection_test_waits_at_most_thirty_seconds_per_call(
+    agents: Agents, timeout: int, bound: float
+) -> None:
+    agents.state.agents["helper"] = agents.state.agents["helper"].__replace__(
+        timeout_seconds=timeout
+    )
+    agents.service.test(ADMIN, "helper", AgentTestRequest())
+    assert [call[3] for call in agents.endpoints.calls] == [bound, bound]
 
 
 def test_an_empty_key_stores_no_key(agents: Agents) -> None:
