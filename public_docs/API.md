@@ -615,9 +615,14 @@ counters and the error text only, so clients refetch the comment instead of read
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/boards/{board_id}/search?q=&label=&priority=&overdue=&completed=&list_id=&include_archived=` | `cards:read` |
+| GET | `/boards/{board_id}/loops/{loop_id}/search?q=&label=&priority=&overdue=&completed=&list_id=&include_archived=` | `cards:read` |
 | GET | `/search?q=` (all active boards) | `cards:read` |
 | GET | `/boards/{board_id}/activity?entity_type=&entity_id=&actor_type=&action=` | `boards:read` |
+
+`q` is matched without the spaces around it. In a Loop's search a blank `q` (empty or only
+whitespace) is no text filter, so the other filters alone decide; `meta.engine` says whether the
+text was matched by the board's FTS5 index (`fts5`) or by `LIKE` (`like`). The App-wide search needs
+text and answers a blank `q` with `422 validation_failed`.
 
 ## Worker tools (MCP and `/llms.txt`)
 

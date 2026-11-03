@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import NotRequired, TypedDict
 
 from ..core.dates import iso_utc
-from ..core.errors import NotFound
+from ..core.errors import NotFound, ValidationFailure
 from ..db.generated.board import CardsRow, LabelsRow, LoopsRow
 from ..repositories.board import BoardUnitOfWork
 from ..repositories.cards import CardCounts
@@ -133,11 +133,14 @@ class SearchService:
         self.boards.require_row(board_id)
         if not self.store.exists(board_id):
             raise NotFound("Board database not found")
-        full_text = bool(q) and self.index.fts_available(board_id)
+        # Blank text is no text filter on either engine, as an empty ``q`` always was: FTS5 refuses
+        # the empty MATCH it would become, and LIKE would look for the spaces themselves.
+        words = q.strip() if q else ""
+        full_text = bool(words) and self.index.fts_available(board_id)
         search = CardSearch(
             loop_id=loop_id,
-            match=fts_query(q) if q and full_text else None,
-            contains=q if q and not full_text else None,
+            match=fts_query(words) if full_text else None,
+            contains=words if words and not full_text else None,
             include_archived=include_archived,
             priority=priority or None,
             label=label or None,
@@ -175,7 +178,10 @@ class SearchService:
         self, *, q: str, limit_per_loop: int = 10, max_boards: int = 25
     ) -> GlobalSearch:
         """Every open Loop of the most recently updated active boards; a board or Loop that is
-        gone by the time it is searched is skipped."""
+        gone by the time it is searched is skipped. Blank text is refused, as an empty ``q`` is at
+        the route: a Loop's search would read it as no filter and answer every Ticket."""
+        if not q.strip():
+            raise ValidationFailure("Search text must not be blank")
         with self.accounts.reader() as registry:
             boards = registry.boards.most_recent(status="active", limit=max_boards)
         results: list[SearchHit] = []

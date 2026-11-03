@@ -15,7 +15,7 @@ from typing import TypedDict
 
 import pytest
 
-from app.core.errors import NotFound
+from app.core.errors import NotFound, ValidationFailure
 from app.db.generated.board import (
     CardLabelsRow,
     ChecklistItemsRow,
@@ -188,11 +188,17 @@ def test_without_text_the_index_is_not_asked() -> None:
     assert w.index.asked == []
 
 
-def test_only_whitespace_reaches_the_index_as_an_empty_match() -> None:
-    # SQLite answers an empty MATCH with a syntax error; unchanged (the route does not trim).
-    w = world()
-    with pytest.raises(ValueError, match="fts5: syntax error"):
-        w.service.board(BOARD_ID, LOOP, q="   ")
+@pytest.mark.parametrize("fts", [True, False])
+def test_blank_text_is_no_text_filter_on_either_engine(fts: bool) -> None:
+    # Was a 500 with the index: the blank text became an empty MATCH, which FTS5 refuses.
+    w = world(fts=fts)
+    for blank in ("   ", " \t\n "):
+        page = w.service.board(BOARD_ID, LOOP, q=blank)
+        assert [hit["id"] for hit in page["items"]] == ["c2", "c1", "c0", "c3"]
+        assert page["engine"] == "like"
+    assert w.index.asked == []
+    # Spaces around the words are not part of them, for LIKE as for the index.
+    assert found(w, {"q": "  Review  "}) == ["c2"]
 
 
 # --- the filters, the order and the page ----------------------------------------------------------
@@ -356,6 +362,28 @@ def test_the_app_wide_search_reads_the_open_loops_of_the_newest_active_boards(
     assert [hit["loop_id"] for hit in everything["items"]][-1] == "third"
     assert (everything["board_count"], everything["loop_count"]) == (4, 4)
     assert len(everything["items"]) == 5
+
+
+def test_the_app_wide_search_refuses_blank_text_before_it_reads_a_board(tmp_path: Path) -> None:
+    databases = FakeBoardDatabases(tmp_path)
+    databases.create_database(FIRST, "")
+    databases.states[FIRST] = board_state(("a", None, None))
+    registry = RegistryState()
+    registry.boards = {FIRST: board_row(FIRST, name="First")}
+    index = FakeIndex({FIRST})
+    service = SearchService(
+        FakeBoardChecks(),
+        databases,
+        FakeRegistryUnitOfWork(registry),
+        plans=FakePlanViews(),
+        index=as_index(index),
+    )
+    for blank in ("", "   ", "\t\n"):
+        with pytest.raises(ValidationFailure, match="Search text must not be blank") as raised:
+            service.global_search(q=blank)
+        assert (raised.value.status_code, raised.value.code) == (422, "validation_failed")
+    assert index.asked == []
+    assert [hit["id"] for hit in service.global_search(q=" docs ")["items"]] == ["a-card"]
 
 
 def test_the_app_wide_search_takes_at_most_its_limit_from_each_loop(tmp_path: Path) -> None:

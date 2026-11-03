@@ -43,6 +43,10 @@ Worth knowing when you look at the dashboard:
 - **A held file no longer half-deletes a board.** Host filesystem behaviour follows
   `TRALALA_PLATFORM_PROFILE`, and a board delete that cannot remove its files answers
   `409 board_files_busy` with the leftover directory.
+- **A search for nothing but spaces no longer fails.** In a Loop's search a blank `q` is no text
+  filter, as an empty one always was, whether or not the board has its full-text index; the
+  App-wide search answers it with `422 validation_failed`. Both answered 500 on a board with the
+  index. Spaces around the words are ignored by both search engines.
 - **The agent form follows the provider you pick.** A preset now fixes the endpoint for hosted
   providers, asks for the key only where one is needed, and says which providers need a model name at
   all — so a local Ollama install is not asked for a key and OpenAI cannot be saved without one.
