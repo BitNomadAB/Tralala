@@ -232,7 +232,8 @@ def create_credential(
     stamp: Stamp,
     new_id: Callable[[], str],
 ) -> CredentialIssued:
-    """Any signed-in person may issue an agent access; only an admin may issue a wide one."""
+    """A person issues an agent access, never a token; an admin may issue a wide one."""
+    actor.require_human("Issuing agent access")
     if actor.is_admin:
         return _issue(store, settings, actor, payload, stamp=stamp, new_id=new_id)
     days = _member_policy(store, settings, actor, payload)
@@ -269,6 +270,8 @@ def rotate_credential(
     stamp: Stamp,
     new_id: Callable[[], str],
 ) -> CredentialIssued:
+    """Issue a replacement and revoke the old one; issuing is a person's act, never a token's."""
+    actor.require_human("Rotating agent access")
     with store.reader() as repos:
         existing = _owned_or_admin(repos, actor, credential_id).credential
     replacement = CredentialCreate.model_validate(

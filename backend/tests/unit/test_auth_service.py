@@ -1126,6 +1126,40 @@ def test_a_member_holds_at_most_the_configured_number_of_live_accesses(
     assert refused.value.details == {"limit": limit, "live": limit}
 
 
+def test_a_token_never_issues_a_token(registry: Registry) -> None:
+    """A key is issued by a person: a leaked key cannot reproduce, whatever scopes it holds."""
+    agent = ActorContext(
+        actor_id="agent-1",
+        actor_type="agent",
+        actor_name="Robot",
+        scopes=frozenset(MEMBER_TOKEN_SCOPES),
+    )
+
+    with pytest.raises(Forbidden) as refused:
+        registry.service.create_credential(agent, _create(["cards:read"]))
+
+    assert refused.value.code == "human_action_required"
+    assert refused.value.details == {"action": "Issuing agent access", "actor_type": "agent"}
+    assert registry.state.credentials == {}
+    assert "new-1" not in registry.state.actors
+
+
+def test_a_token_may_revoke_what_it_owns_but_never_rotate_it(registry: Registry) -> None:
+    """A rotation issues a token, so it is a person's act; a revocation only removes access."""
+    add_token(registry, "child", owner=AGENT.actor_id)
+    add_token(registry, "bobs")
+
+    with pytest.raises(Forbidden) as refused:
+        registry.service.rotate_credential(AGENT, "child")
+
+    assert refused.value.code == "human_action_required"
+    assert refused.value.details == {"action": "Rotating agent access", "actor_type": "agent"}
+    assert registry.state.credentials["child"].revoked_at is None
+    with pytest.raises(NotFound):
+        registry.service.revoke_credential(AGENT, "bobs")
+    assert registry.service.revoke_credential(AGENT, "child") is True
+
+
 # --- listing, rotating and revoking tokens -------------------------------------------------------
 
 

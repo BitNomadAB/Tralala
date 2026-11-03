@@ -107,8 +107,8 @@ keys. API tokens may hold every scope except `credentials:admin` and `users:admi
 | POST | `/users/{id}/invite` (`{"expires_in_hours"}` optional, default 72) | `users:admin`; returns a one-time enrolment token once |
 | GET | `/credentials` | signed-in person; own access, or every token with `credentials:admin` (`?owner_id=` narrows it) |
 | GET | `/credentials/mine` | signed-in person; their own access whatever their role |
-| POST | `/credentials` | signed-in person; an admin may grant any grantable scope, a member only `member_token_scopes` |
-| POST | `/credentials/{id}/rotate` | the owner or `credentials:admin`; issues a new token and revokes the old one |
+| POST | `/credentials` | signed-in person, never a token (`403 human_action_required`); an admin may grant any grantable scope, a member only `member_token_scopes` |
+| POST | `/credentials/{id}/rotate` | the owner or `credentials:admin`, as a signed-in person, never a token (`403 human_action_required`); issues a new token and revokes the old one |
 | POST | `/credentials/{id}/revoke` | the owner or `credentials:admin` |
 
 A token is a person's **interaction agent access**: it is created as its own `agent` actor, records
