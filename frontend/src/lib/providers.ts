@@ -16,6 +16,13 @@ export interface ProviderPreset {
 }
 
 /**
+ * Tralala calls a model from its backend container, where 127.0.0.1 is the container itself, so a
+ * local preset points at the host by the name Docker gives it.
+ */
+export const CONTAINER_HINT =
+  "From the Tralala container, 127.0.0.1 is the container. Use host.docker.internal for a model on the same machine, or the machine's LAN address for another one; run from source, use 127.0.0.1.";
+
+/**
  * Known OpenAI-compatible providers. A preset prefills the endpoint and says what the provider
  * actually needs, so the form stops asking for a key a local server does not use and stops letting a
  * hosted provider be saved without one. It never restricts what an agent may use: anything else is
@@ -72,9 +79,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "ollama",
     label: "Ollama (local)",
-    baseUrl: "http://127.0.0.1:11434/v1",
+    baseUrl: "http://host.docker.internal:11434/v1",
     model: "llama3.1",
-    hint: "Ollama ignores the key. Change the host if it runs on another machine.",
+    hint: `Ollama ignores the key. ${CONTAINER_HINT}`,
     baseUrlFixed: false,
     requiresApiKey: false,
     requiresModel: true,
@@ -84,9 +91,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "llamacpp",
     label: "llama.cpp / vLLM (local)",
-    baseUrl: "http://127.0.0.1:8080/v1",
+    baseUrl: "http://host.docker.internal:8080/v1",
     model: "",
-    hint: "The server usually serves one model and ignores the name; no key is needed unless you put one in front.",
+    hint: `The server usually serves one model and ignores the name; no key is needed unless you put one in front. ${CONTAINER_HINT}`,
     baseUrlFixed: false,
     requiresApiKey: false,
     requiresModel: false,

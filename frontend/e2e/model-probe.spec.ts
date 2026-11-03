@@ -129,7 +129,9 @@ test.describe("agent connection test", () => {
     // A local provider: same form, no key asked for, endpoint editable.
     await page.getByLabel("Provider preset").selectOption({ label: "Ollama (local)" });
     await expect(page.getByLabel("This endpoint needs no key")).toBeChecked();
-    await expect(page.getByLabel("API base URL")).toHaveValue("http://127.0.0.1:11434/v1");
+    await expect(page.getByLabel("API base URL")).toHaveValue(
+      "http://host.docker.internal:11434/v1",
+    );
     await expect(page.getByLabel("API base URL")).not.toHaveAttribute("readonly", "");
     await expect(page.getByLabel("API key (not used)")).toBeDisabled();
     await expect(page.getByRole("button", { name: "Save agent" })).toBeEnabled();

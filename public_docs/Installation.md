@@ -110,6 +110,26 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
   https://<host>.<tailnet>.ts.net/mcp
 ```
 
+### Reaching a model that runs on the host
+
+Tralala calls a model from its backend container, and inside that container `127.0.0.1` is the
+container itself, not your machine. A model server on `127.0.0.1` therefore answers a connection
+test with "Could not reach the endpoint (ConnectError)", and the test adds which address to use
+instead. The Compose file maps `host.docker.internal` to the host (`extra_hosts`), and the
+**Ollama (local)** and **llama.cpp / vLLM (local)** presets start from it.
+
+| Where the model runs | API base URL in the agent form | What the model server needs |
+| --- | --- | --- |
+| On the same machine as Tralala | `http://host.docker.internal:11434/v1` (Ollama) or `http://host.docker.internal:8080/v1` (llama.cpp, vLLM) | Listen on all interfaces (`OLLAMA_HOST=0.0.0.0`, `--host 0.0.0.0`), or at least on the Docker bridge; a server bound to `127.0.0.1` only is not reachable from a container. |
+| On another machine on your network | `http://192.168.1.20:8080/v1` (that machine's LAN address) | Listen on its LAN address and let the port through its firewall. |
+| Behind a gateway that wants a key | The gateway's address, for example `https://llm.example.com/v1` | Untick **This endpoint needs no key** and paste the gateway's key. |
+
+Private addresses are allowed by default (`TRALALA_AGENTS_ALLOW_PRIVATE_ENDPOINTS`). Use `http://`
+for a server without TLS: `https://` against a plain HTTP port fails the handshake, and the
+connection test says the endpoint speaks plain HTTP. When Tralala runs from source instead of in
+Docker, `127.0.0.1` is your machine again and the presets' host name does not resolve: use
+`http://127.0.0.1:<port>/v1`.
+
 ## From source
 
 Use this when you want to change the code, run the test suites, or work offline. The commands below

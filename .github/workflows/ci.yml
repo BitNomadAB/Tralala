@@ -188,6 +188,12 @@ jobs:
           ! curl -sI http://127.0.0.1:8080/ | grep -qi "^server:"
       - name: Build the backend image
         run: docker build -t tralala-backend:ci ./backend
+      # A local model preset points at host.docker.internal; the mapping is what makes that name
+      # reach the host on Docker for Linux.
+      - name: The backend reaches a model on the host
+        run: |
+          TRALALA_SECRET_KEY=ci TRALALA_BOOTSTRAP_PASSWORD=ci docker compose config > compose.ci.yml
+          grep -Eq 'host\.docker\.internal[:=]host-gateway' compose.ci.yml
       - name: Logs on failure
         if: failure()
         run: docker logs web || true

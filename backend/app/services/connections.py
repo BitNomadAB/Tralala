@@ -17,6 +17,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
+import ssl
 import time
 from collections.abc import Callable, Sequence
 from typing import Literal, TypedDict
@@ -81,6 +82,49 @@ def _literal_address(host: str) -> Address | None:
         return ipaddress.ip_address(host)
     except ValueError:
         return None
+
+
+# What a connection test adds when it could not connect for a reason the operator can fix: the
+# address is the backend container itself, or https was used against an endpoint without TLS.
+CONTAINER_HINT = (
+    "From the Tralala container, 127.0.0.1 is the container. Use host.docker.internal for a model "
+    "on the same machine, or the machine's LAN address for another one."
+)
+PLAIN_HTTP_HINT = (
+    "The endpoint answered without TLS: it speaks plain HTTP, so use http:// instead of https://."
+)
+
+
+def _is_loopback(host: str) -> bool:
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    address = _literal_address(host)
+    return address is not None and address.is_loopback
+
+
+def _tls_mismatch(exc: BaseException) -> bool:
+    """A TLS handshake that failed for another reason than an untrusted certificate."""
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, ssl.SSLError):
+            return not isinstance(seen, ssl.SSLCertVerificationError)
+        seen = seen.__cause__ or seen.__context__
+    text = str(exc)
+    return "[SSL" in text and "CERTIFICATE_VERIFY_FAILED" not in text
+
+
+def unreachable(message: str, url: str, exc: Exception) -> str:
+    """``message`` naming the failure, plus what to change when the cause is a known deployment
+    mistake. A refused address keeps its own reason."""
+    named = f"{message} ({type(exc).__name__})"
+    if isinstance(exc, ForbiddenAddressError) or not isinstance(exc, httpx.ConnectError):
+        return named
+    parts = urlsplit(url)
+    if parts.scheme == "https" and _tls_mismatch(exc):
+        return f"{named}. {PLAIN_HTTP_HINT}"
+    if _is_loopback(parts.hostname or ""):
+        return f"{named}. {CONTAINER_HINT}"
+    return named
 
 
 def address_refusal(value: str, *, allow_private: bool) -> Refusal | None:
@@ -295,7 +339,7 @@ def probe_openai_compatible(
         return {
             "ok": False,
             "status": "unreachable",
-            "message": f"Could not reach the endpoint ({type(exc).__name__})",
+            "message": unreachable("Could not reach the endpoint", base_url, exc),
             "latency_ms": int((time.monotonic() - started) * 1000),
             "models": [],
         }
@@ -402,7 +446,7 @@ def probe_completion(
         return {
             "ok": False,
             "status": "unreachable",
-            "message": f"The model call did not reach the endpoint ({type(exc).__name__})",
+            "message": unreachable("The model call did not reach the endpoint", base_url, exc),
             "latency_ms": int((time.monotonic() - started) * 1000),
             "supports_json_schema": False,
         }
@@ -452,7 +496,7 @@ def probe_a2a(
         return {
             "ok": False,
             "status": "unreachable",
-            "message": f"Could not reach the agent card ({type(exc).__name__})",
+            "message": unreachable("Could not reach the agent card", url, exc),
             "latency_ms": int((time.monotonic() - started) * 1000),
             "models": [],
         }

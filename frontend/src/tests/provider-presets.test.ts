@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONTAINER_HINT,
   PROVIDER_PRESETS,
   presetById,
   presetRequirements,
@@ -43,6 +44,14 @@ describe("provider presets", () => {
     // llama.cpp serves one model and ignores the name; custom is unknown.
     expect(presetRequirements(preset("llamacpp")).model).toBe("optional");
     expect(presetRequirements(preset("custom")).model).toBe("optional");
+  });
+
+  it("points the local presets at the host, not at the backend container", () => {
+    expect(preset("ollama").baseUrl).toBe("http://host.docker.internal:11434/v1");
+    expect(preset("llamacpp").baseUrl).toBe("http://host.docker.internal:8080/v1");
+    for (const id of ["ollama", "llamacpp"]) {
+      expect(preset(id).hint).toContain(CONTAINER_HINT);
+    }
   });
 
   it("locks the endpoint only for hosted providers", () => {

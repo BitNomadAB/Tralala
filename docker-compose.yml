@@ -18,6 +18,10 @@ services:
       TRALALA_LOG_LEVEL: ${TRALALA_LOG_LEVEL:-INFO}
     volumes:
       - tralala-data:/data
+    # Inside the container 127.0.0.1 is the container itself; a model on the same machine is
+    # host.docker.internal, which Docker Desktop provides and Docker on Linux needs mapped.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test:

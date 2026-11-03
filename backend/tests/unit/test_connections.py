@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import json
 import socket
+import ssl
 from collections.abc import Callable, Iterator, Mapping
 from functools import partial
 from pathlib import Path
@@ -462,6 +463,52 @@ def test_a_probe_reaches_a_checked_endpoint(
     (sent,) = upstream.requests
     assert sent.url.host == PUBLIC_V4
     assert sent.headers["host"] == "api.example.com"
+
+
+def _refused(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("connection refused", request=request)
+
+
+def _plain_http(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("[SSL: WRONG_VERSION_NUMBER] wrong version number", request=request)
+
+
+@pytest.mark.parametrize("probe", PROBES.values(), ids=PROBES.keys())
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1:11434/v1", "http://[::1]:11434/v1", "http://localhost:11434/v1"],
+)
+def test_a_loopback_endpoint_that_refuses_is_explained_as_the_container(
+    upstream: Upstream, probe: Callable[..., Mapping[str, object]], url: str
+) -> None:
+    upstream.answer = _refused
+    result = probe(url, api_key=None, timeout=5, allow_private=True)
+    assert (result["ok"], result["status"]) == (False, "unreachable")
+    assert str(result["message"]).endswith("(ConnectError). " + connections.CONTAINER_HINT)
+
+
+@pytest.mark.parametrize("probe", PROBES.values(), ids=PROBES.keys())
+def test_https_against_a_plain_http_endpoint_names_the_mismatch(
+    upstream: Upstream, probe: Callable[..., Mapping[str, object]]
+) -> None:
+    upstream.answer = _plain_http
+    result = probe("https://lan.example.com:8080/v1", api_key=None, timeout=5, allow_private=True)
+    assert (result["ok"], result["status"]) == (False, "unreachable")
+    assert str(result["message"]).endswith("(ConnectError). " + connections.PLAIN_HTTP_HINT)
+
+
+def test_other_connection_failures_carry_no_hint() -> None:
+    request = httpx.Request("GET", "https://lan.example.com/v1/models")
+    untrusted = httpx.ConnectError("certificate verify failed", request=request)
+    untrusted.__cause__ = ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")
+    for url, exc in [
+        ("http://lan.example.com/v1", httpx.ConnectError("refused", request=request)),
+        ("https://lan.example.com/v1", untrusted),
+        ("http://127.0.0.1/v1", connections.ForbiddenAddressError("refused", request=request)),
+        ("http://127.0.0.1/v1", httpx.ReadError("reset", request=request)),
+    ]:
+        message = connections.unreachable("Could not reach the endpoint", url, exc)
+        assert message == f"Could not reach the endpoint ({type(exc).__name__})"
 
 
 @pytest.mark.parametrize("probe", PROBES.values(), ids=PROBES.keys())

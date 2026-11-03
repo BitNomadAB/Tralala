@@ -61,6 +61,9 @@ second if you want your own coding agent to drive Tralala.
    later. Nothing is stored until the test is green, the reported model names become suggestions in
    the model field, and the raw answer is shown as JSON so the same block serves every provider.
 
+   A model on the machine that runs Tralala is `http://host.docker.internal:<port>/v1` from inside
+   the container, not `127.0.0.1`; see
+   [Reaching a model that runs on the host](Installation.md#reaching-a-model-that-runs-on-the-host).
    A model running on your own machine or network — `http://192.168.0.10:8080` — usually has no key:
    tick **This endpoint needs no key** and nothing is sent, in the test or in a generation. The known
    local presets tick it for you; hosted providers keep it unticked and cannot be saved without one.
