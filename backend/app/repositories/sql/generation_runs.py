@@ -53,7 +53,7 @@ _FAIL_INPUT_CHANGED = text(
 )
 _FINISH = text(
     "UPDATE loop_generation_runs SET status = :status, error_code = :code,"
-    " error_message = :message, finished_at = :now WHERE id = :id"
+    " error_message = :message, output_json = :output, finished_at = :now WHERE id = :id"
 )
 _INTERRUPT = text(
     "UPDATE loop_generation_runs SET status = 'failed', error_code = 'interrupted',"
@@ -139,12 +139,14 @@ class SqlGenerationRunRepository:
         status: str,
         error_code: str | None,
         error_message: str | None,
+        output_json: str,
         now: str,
     ) -> None:
         parameters = {
             "status": status,
             "code": error_code,
             "message": error_message,
+            "output": output_json,
             "now": now,
             "id": run_id,
         }

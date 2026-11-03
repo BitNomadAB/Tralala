@@ -2,14 +2,16 @@
 executed inline: which agent a run gets, what a run needs before it starts, how a run captures its
 input, repairs, promotes or refuses the model's output, how a key replays a start, and how runs are
 cancelled, retried, recovered and read. A repository snapshot reaches the model and the run's own
-record; the API answer names the repository and its commit, never its file paths."""
+record; the API answer names the repository and its commit, never its file paths. A failed run
+keeps the real error without a prompt or a credential, and every run logs its start and its end."""
 
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import JsonValue
@@ -24,6 +26,7 @@ from app.services.agents import EffectiveRole
 from app.services.idempotency import request_fingerprint
 from app.services.loop_documents import LoopDocumentService
 from app.services.loop_generation import MAX_REPAIRS, PURPOSE_PROMPTS, LoopGenerationService
+from app.services.loop_generation_runs import MAX_EXCEPTION_TEXT
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_plans import LoopPlanService
 from app.services.runtime import ResponseSchema
@@ -32,6 +35,7 @@ from tests.unit.fakes.board import (
     BoardState,
     FakeBoardChecks,
     FakeBoardUnitOfWork,
+    approval_row,
     document_row,
     list_row,
     loop_row,
@@ -44,6 +48,7 @@ from tests.unit.fakes.registry import (
     registry_unit_of_work,
     role_template_row,
 )
+from tests.unit.log_lines import events
 
 MOMENT = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
 STAMP = "2026-11-03T10:00:00Z"
@@ -109,6 +114,28 @@ REPOSITORIES: list[dict[str, JsonValue]] = [
     },
     {"id": "repo-2", "name": "docs", "error": "unreachable"},
 ]
+# A RoadMap whose only Phase waits for a Phase that does not exist.
+PHASE = "11111111-1111-4111-8111-111111111111"
+UNKNOWN_PHASE = "99999999-9999-4999-8999-999999999999"
+BROKEN_ROADMAP: dict[str, JsonValue] = {
+    "summary": "One phase",
+    "phases": [
+        {
+            "id": PHASE,
+            "number": 1,
+            "name": "Database",
+            "prerequisite_phase_ids": [UNKNOWN_PHASE],
+            "tickets": [
+                {
+                    "id": "22222222-2222-4222-8222-222222222222",
+                    "title": "Add columns",
+                    "acceptance_criteria": ["ok"],
+                }
+            ],
+        }
+    ],
+}
+USAGE: dict[str, JsonValue] = {"prompt_tokens": 1200, "completion_tokens": 300}
 # What every result of the first run records about where it came from.
 PROVENANCE = {
     "generation_run_id": "id-1",
@@ -141,8 +168,8 @@ RUN_KEYS = {
 type Answer = Mapping[str, object]
 
 
-def answer(text: str) -> Answer:
-    return {"ok": True, "text": text, "usage": {"total_tokens": 42}, "model": "m-2"}
+def answer(text: str, *, usage: JsonValue = None) -> Answer:
+    return {"ok": True, "text": text, "usage": usage or {"total_tokens": 42}, "model": "m-2"}
 
 
 VALID = answer(json.dumps(ANALYSIS))
@@ -357,6 +384,7 @@ def make(
     preferences: Mapping[str, str] | None = None,
     repositories: Sequence[dict[str, JsonValue]] | None = None,
     runs: Sequence[LoopGenerationRunsRow] = (),
+    clock: Callable[[], datetime] = lambda: MOMENT,
 ) -> World:
     state = BoardState()
     state.loops = {
@@ -395,7 +423,7 @@ def make(
         None if repositories is None else snapshots,
         idempotency_ttl_seconds=3600,
         call_completion=provider,
-        clock=lambda: MOMENT,
+        clock=clock,
         new_id=ids,
         background=False,
     )
@@ -414,6 +442,31 @@ def start(
 ) -> tuple[Mapping[str, object], bool]:
     request = GenerationRequest.model_validate({"purpose": purpose, **fields})
     return w.service.start(actor, BOARD_ID, LOOP, request, idempotency_key=key)
+
+
+class Later:
+    """The service's clock: a run is created and started at MOMENT, and every later reading is
+    ``seconds`` after it."""
+
+    def __init__(self, seconds: int) -> None:
+        self.readings = 0
+        self.seconds = seconds
+
+    def __call__(self) -> datetime:
+        self.readings += 1
+        return MOMENT if self.readings <= 2 else MOMENT + timedelta(seconds=self.seconds)
+
+
+def approve_analysis(w: World) -> None:
+    """The Loop's analysis as a person approved it, so a RoadMap may be generated."""
+    w.state.documents += [
+        document_row("ai-1", LOOP, "analysis_ai", info="info-1"),
+        document_row("an-1", LOOP, "analysis", analysis_ai="ai-1"),
+    ]
+    reviewed = {"info": "info-1", "analysis_ai": "ai-1", "analysis": "an-1"}
+    w.state.approvals = [
+        approval_row("appr-1", LOOP, "analysis", revisions_json=json.dumps(reviewed))
+    ]
 
 
 def revise_info(w: World) -> None:
@@ -675,17 +728,130 @@ def test_a_provider_failure_fails_the_run_as_retryable(answers: list[Answer]) ->
     assert w.kinds() == ["info"]
 
 
-def test_a_provider_that_raises_fails_the_run_without_breaking_the_start() -> None:
+@pytest.mark.parametrize(
+    ("raised", "message"),
+    [
+        (RuntimeError("socket closed"), "RuntimeError: socket closed"),
+        (RuntimeError("x" * 600), "RuntimeError: " + "x" * MAX_EXCEPTION_TEXT),
+        (TimeoutError(), "TimeoutError"),
+    ],
+    ids=["its text", "the start of a long text", "no text"],
+)
+def test_a_provider_that_raises_fails_the_run_without_breaking_the_start(
+    raised: Exception, message: str
+) -> None:
     w = make()
-    w.provider.raises = RuntimeError("socket closed")
+    w.provider.raises = raised
     result, _ = start(w)
     run = w.run()
     assert result["status"] == "queued"
-    assert (run.status, run.error_code, run.error_message) == (
+    # The class name and what the exception says, bounded; the run may be tried again.
+    assert (run.status, run.error_code, run.error_message, run.output_json) == (
         "failed",
         "generation_failed",
-        "RuntimeError",
+        message,
+        "{}",
     )
+
+
+def test_a_roadmap_refused_by_a_plan_rule_keeps_the_rules_code_message_and_details() -> None:
+    w = make(answers=[answer(json.dumps(BROKEN_ROADMAP))])
+    approve_analysis(w)
+    start(w, "roadmap")
+    run = w.run()
+    assert (run.status, run.error_code, run.error_message) == (
+        "failed",
+        "invalid_dependency_graph",
+        "Phase dependency references an unknown Phase",
+    )
+    entry = w.service.get(BOARD_ID, LOOP, "id-1")
+    assert entry["output"] == {"error_details": {"phase_id": PHASE, "missing": UNKNOWN_PHASE}}
+    assert w.kinds() == ["info", "analysis_ai", "analysis"]
+
+
+def test_a_failed_run_keeps_no_prompt_message_token_or_key(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    w = make()
+    w.provider.raises = ServiceUnavailable(
+        "The model refused the request",
+        code="model_refused",
+        details={
+            "status": 400,
+            "prompt": "SECRET prompt",
+            "messages": [{"role": "user", "content": "SECRET message"}],
+            "provider": {
+                "api_key": "SECRET key",
+                "Token": "SECRET token",
+                "hint": "check the model",
+            },
+        },
+    )
+    with caplog.at_level(logging.DEBUG, logger="tralala"):
+        start(w)
+    run = w.run()
+    assert (run.status, run.error_code, run.error_message) == (
+        "failed",
+        "model_refused",
+        "The model refused the request",
+    )
+    assert json.loads(run.output_json) == {
+        "error_details": {"status": 400, "provider": {"hint": "check the model"}}
+    }
+    logged = json.dumps(events(caplog.records))
+    assert "generation_run_finished" in logged
+    assert "SECRET" not in logged + run.output_json + (run.error_message or "")
+
+
+def test_error_details_over_the_bound_are_kept_as_their_truncated_text() -> None:
+    w = make()
+    w.provider.raises = ServiceUnavailable(
+        "Too much", code="too_much", details={"text": "y" * 3000}
+    )
+    start(w)
+    kept = json.loads(w.run().output_json)["error_details"]
+    assert isinstance(kept, str)
+    assert (len(kept), kept[:10]) == (2000, '{"text": "')
+
+
+@pytest.mark.parametrize(
+    ("answers", "status", "error_code", "prompt_tokens", "completion_tokens"),
+    [
+        ([answer(json.dumps(ANALYSIS), usage=USAGE)], "completed", None, 1200, 300),
+        ([FAILED], "failed", "provider_error", None, None),
+    ],
+    ids=["completed", "failed"],
+)
+def test_a_run_logs_its_start_and_its_end_once(
+    caplog: pytest.LogCaptureFixture,
+    answers: list[Answer],
+    status: str,
+    error_code: str | None,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+) -> None:
+    w = make(answers=answers, repositories=REPOSITORIES, clock=Later(3))
+    with caplog.at_level(logging.INFO, logger="tralala.loop_generation"):
+        start(w)
+    lifecycle = [
+        event
+        for event in events(caplog.records)
+        if event["event"] in {"generation_run_started", "generation_run_finished"}
+    ]
+    who = {"run_id": "id-1", "purpose": "analysis", "agent_id": "alpha"}
+    assert lifecycle == [
+        {"event": "generation_run_started", **who},
+        {
+            "event": "generation_run_finished",
+            **who,
+            "status": status,
+            "error_code": error_code,
+            "duration_ms": 3000,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "snapshot_chars": len("print('hello')"),
+        },
+    ]
 
 
 # --- what changes while the model works ----------------------------------------------------------
@@ -919,8 +1085,9 @@ def test_a_board_without_a_repository_tells_the_model_so() -> None:
     start(w)
     run = w.run()
     assert w.provider.context()["repositories"] == "no enabled repository is linked to this board"
-    assert "Repository snapshot: no enabled repository is linked to this board." in (
-        w.provider.calls[0].messages[0]["content"]
+    assert (
+        "Repository snapshot: no enabled repository is linked to this board."
+        in (w.provider.calls[0].messages[0]["content"])
     )
     assert json.loads(run.source_revisions_json)["repositories"] == []
     assert run.status == "completed"

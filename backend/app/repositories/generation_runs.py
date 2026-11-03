@@ -75,9 +75,11 @@ class GenerationRunRepository(Protocol):
         status: str,
         error_code: str | None,
         error_message: str | None,
+        output_json: str,
         now: str,
     ) -> None:
-        """``status`` with that error code and message (each may be none), finished at ``now``."""
+        """``status`` with that error code and message (each may be none) and that output (the
+        error's details, or ``{}``), finished at ``now``."""
         ...
 
     def interrupt(self, run_id: str, *, message: str, now: str) -> None:

@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
 
+from pydantic import JsonValue
+
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
 from ..core.errors import ApiError, Conflict, NotFound
@@ -64,8 +66,10 @@ from .loop_generation_runs import (
     RepositorySnapshots,
     RunEntry,
     attach_repositories,
+    failure_of,
     finish,
     generate,
+    log_started,
     promote,
     record_phase,
     serialize_run,
@@ -417,6 +421,7 @@ class LoopGenerationService:
                 if row is None or row.status != "queued":
                     return
                 repos.generation_runs.start(run_id, now=self._now())
+            log_started(row)
             captured: JsonObject = json.loads(row.input_json)
             agent_id = row.agent_id
             # The archive fetch is network I/O, so it happens here — inside the run, outside every
@@ -468,27 +473,25 @@ class LoopGenerationService:
                     retryable=False,
                 )
                 return
-            logger.exception("loop generation run failed", extra={"run_id": run_id})
-            self._finish(
-                board_id,
-                loop_id,
-                run_id,
-                status="failed",
-                error_code="generation_failed",
-                error_message=f"{type(exc).__name__}",
-                retryable=True,
-            )
+            # A rule refused the result (a RoadMap whose references do not resolve, say): the run
+            # keeps the rule's code, message and details, so a person can read what went wrong.
+            self._fail(board_id, loop_id, run_id, exc)
         except Exception as exc:  # a run failure must not break the process
-            logger.exception("loop generation run failed", extra={"run_id": run_id})
-            self._finish(
-                board_id,
-                loop_id,
-                run_id,
-                status="failed",
-                error_code="generation_failed",
-                error_message=f"{type(exc).__name__}",
-                retryable=True,
-            )
+            logger.exception("generation_run_error", extra={"run_id": run_id})
+            self._fail(board_id, loop_id, run_id, exc)
+
+    def _fail(self, board_id: str, loop_id: str, run_id: str, exc: Exception) -> None:
+        failure = failure_of(exc)
+        self._finish(
+            board_id,
+            loop_id,
+            run_id,
+            status="failed",
+            error_code=failure.error_code,
+            error_message=failure.error_message,
+            error_details=failure.error_details,
+            retryable=True,
+        )
 
     def _phase(self, board_id: str, run_id: str, phase: str) -> None:
         """Record which step a run is on; best effort, it never fails the run."""
@@ -538,6 +541,7 @@ class LoopGenerationService:
         error_code: str | None = None,
         error_message: str | None = None,
         details: str | None = None,
+        error_details: JsonValue = None,
         retryable: bool = False,
     ) -> None:
         finish(
@@ -548,6 +552,7 @@ class LoopGenerationService:
             error_code=error_code,
             error_message=error_message,
             details=details,
+            error_details=error_details,
             retryable=retryable,
             store=self.store,
             timestamp=self._now,

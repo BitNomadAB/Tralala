@@ -121,12 +121,17 @@ class FakeGenerationRunRepository:
         status: str,
         error_code: str | None,
         error_message: str | None,
+        output_json: str,
         now: str,
     ) -> None:
         row = self._state.generation_runs.get(run_id)
         if row is not None:
             self._state.generation_runs[run_id] = row.__replace__(
-                status=status, error_code=error_code, error_message=error_message, finished_at=now
+                status=status,
+                error_code=error_code,
+                error_message=error_message,
+                output_json=output_json,
+                finished_at=now,
             )
 
     def interrupt(self, run_id: str, *, message: str, now: str) -> None:

@@ -5,6 +5,9 @@ model (repairing an answer that does not validate), record the step a run is on,
 repository snapshot, promote the result, or record why there is none. Each step takes the unit
 of work, the clock and the collaborators it needs as arguments; the service's private methods
 (``_generate``, ``_phase``, ``_attach_repositories``, ``_promote``, ``_finish``) hand them over.
+
+A run logs ``generation_run_started`` when it starts and ``generation_run_finished`` once when it
+ends, whichever way; neither line carries a prompt, a message or the model's answer.
 """
 
 from __future__ import annotations
@@ -13,14 +16,16 @@ import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Protocol
 
 from pydantic import JsonValue, ValidationError
 
 from ..core.context import ActorContext
+from ..core.errors import ApiError
 from ..db.generated.board import LoopGenerationRunsRow
 from ..db.generated.registry import AgentsRow
-from ..repositories.board import BoardUnitOfWork
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..schemas.loops import AnalysisPayload, PlanPayload, QaInstructions
 from .idempotency import request_fingerprint
 from .loop_documents import LoopDocumentService
@@ -38,6 +43,14 @@ from .runtime import ResponseSchema
 logger = logging.getLogger("tralala.loop_generation")
 
 MAX_REPAIRS = 2
+# A failed run keeps an error's details up to this many characters of JSON, and an unexpected
+# exception's text up to MAX_EXCEPTION_TEXT.
+MAX_ERROR_DETAILS_CHARS = 2000
+MAX_EXCEPTION_TEXT = 500
+# Keys an error's details never keep, at any depth: what the model was told and the credentials.
+_HIDDEN_DETAIL_KEYS = frozenset(
+    {"prompt", "system_prompt", "messages", "api_key", "token", "authorization", "password"}
+)
 
 type RunEntry = dict[str, object]
 
@@ -87,6 +100,114 @@ class Outcome:
     error_message: str = ""
     details: str | None = None
     retryable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Failure:
+    """Why a run failed, as ``finish`` records it."""
+
+    error_code: str
+    error_message: str
+    error_details: JsonValue = None
+
+
+@dataclass(frozen=True, slots=True)
+class _Ended:
+    """How ``promote`` left a run, for its finished line."""
+
+    status: str
+    error_code: str | None
+    now: str
+    usage_json: str = "{}"
+
+
+def _without_secrets(value: JsonValue) -> JsonValue:
+    if isinstance(value, dict):
+        return {
+            key: _without_secrets(item)
+            for key, item in value.items()
+            if key.lower() not in _HIDDEN_DETAIL_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_secrets(item) for item in value]
+    return value
+
+
+def error_details(details: Mapping[str, object] | None) -> JsonValue:
+    """An error's details as a run keeps them: JSON without a key that names a prompt, the
+    messages or a credential at any depth, at most ``MAX_ERROR_DETAILS_CHARS`` characters; a
+    longer one is kept as its truncated text."""
+    if not details:
+        return None
+    loaded: JsonValue = json.loads(json.dumps(dict(details), default=str))
+    kept = _without_secrets(loaded)
+    text = json.dumps(kept)
+    return kept if len(text) <= MAX_ERROR_DETAILS_CHARS else text[:MAX_ERROR_DETAILS_CHARS]
+
+
+def failure_of(exc: Exception) -> Failure:
+    """An application error names itself (its code, message and details); anything else is its
+    class name and the start of its text."""
+    if isinstance(exc, ApiError):
+        return Failure(exc.code or "generation_failed", exc.message, error_details(exc.details))
+    name = type(exc).__name__
+    text = str(exc)[:MAX_EXCEPTION_TEXT]
+    return Failure("generation_failed", f"{name}: {text}" if text else name)
+
+
+def snapshot_chars(captured: JsonValue) -> int:
+    """The characters of repository file content a run's captured context holds."""
+    context = captured.get("context") if isinstance(captured, dict) else None
+    repositories = context.get("repositories") if isinstance(context, dict) else None
+    if not isinstance(repositories, list):
+        return 0
+    total = 0
+    for entry in repositories:
+        files = entry.get("files") if isinstance(entry, dict) else None
+        for item in files if isinstance(files, list) else []:
+            content = item.get("content") if isinstance(item, dict) else None
+            total += len(content) if isinstance(content, str) else 0
+    return total
+
+
+def _token_count(usage: JsonValue, name: str) -> int | None:
+    value = usage.get(name) if isinstance(usage, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _duration_ms(started_at: str | None, finished_at: str) -> int | None:
+    if not started_at:
+        return None
+    try:
+        elapsed = datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)
+    except ValueError:
+        return None
+    return round(elapsed.total_seconds() * 1000)
+
+
+def log_started(row: LoopGenerationRunsRow) -> None:
+    logger.info(
+        "generation_run_started",
+        extra={"run_id": row.id, "purpose": row.purpose, "agent_id": row.agent_id},
+    )
+
+
+def _log_finished(row: LoopGenerationRunsRow, ended: _Ended, captured: JsonValue) -> None:
+    usage: JsonValue = json.loads(ended.usage_json)
+    logger.info(
+        "generation_run_finished",
+        extra={
+            "run_id": row.id,
+            "purpose": row.purpose,
+            "agent_id": row.agent_id,
+            "status": ended.status,
+            "error_code": ended.error_code,
+            "duration_ms": _duration_ms(row.started_at, ended.now),
+            "prompt_tokens": _token_count(usage, "prompt_tokens"),
+            "completion_tokens": _token_count(usage, "completion_tokens"),
+            "snapshot_chars": snapshot_chars(captured),
+        },
+    )
 
 
 def _loads(raw: str) -> JsonValue:
@@ -300,64 +421,96 @@ def promote(
 ) -> None:
     with store.writer(board_id) as repos:
         row = repos.generation_runs.get(run_id)
-        if row is None or row.status == "cancelled":
+        if row is None:
             return
-        loop = require_loop(repos, loop_id)
-        ensure_writable(loop)
-        current = documents.collect_context(repos, loop)
-        if request_fingerprint(current) != captured["context_hash"]:
-            repos.generation_runs.fail_input_changed(
-                run_id,
-                message=(
-                    "The documents changed while the model was working; the result was "
-                    "kept for inspection and was not promoted"
-                ),
-                output_json=json.dumps({"stale_candidate": payload})[:MAX_OUTPUT_CHARS],
-                now=timestamp(),
-            )
-            return
-        provenance = {
-            "generation_run_id": run_id,
-            "agent_id": row.agent_id,
-            "agent_name": row.agent_name,
-            "model": result.model or row.model,
-        }
-        outputs: object
-        if captured["purpose"] == "analysis":
-            outputs = documents.store_generated_analysis(
-                repos,
-                loop,
-                AnalysisPayload.model_validate(payload),
-                _system_actor(row),
-                run_id=run_id,
-                provenance=provenance,
-            )
-        elif captured["purpose"] == "roadmap":
-            outputs = documents.store_generated_roadmap(
-                repos,
-                loop,
-                PlanPayload.model_validate(payload),
-                _system_actor(row),
-                run_id=run_id,
-                provenance=provenance,
-            )
-        else:
-            outputs = links.apply_qa_instructions(
-                repos,
-                loop,
-                QaInstructions.model_validate(payload),
-                run_id=run_id,
-                provenance=provenance,
-            )
+        ended = _promote_run(
+            repos,
+            row,
+            loop_id,
+            captured,
+            payload,
+            result,
+            documents=documents,
+            links=links,
+            timestamp=timestamp,
+        )
+    _log_finished(row, ended, captured)
+
+
+def _promote_run(
+    repos: BoardRepositories,
+    row: LoopGenerationRunsRow,
+    loop_id: str,
+    captured: JsonObject,
+    payload: JsonObject,
+    result: Outcome,
+    *,
+    documents: LoopDocumentService,
+    links: LoopWorkflowLinks,
+    timestamp: Callable[[], str],
+) -> _Ended:
+    run_id = row.id
+    if row.status == "cancelled":
+        return _Ended("cancelled", None, timestamp())
+    loop = require_loop(repos, loop_id)
+    ensure_writable(loop)
+    current = documents.collect_context(repos, loop)
+    if request_fingerprint(current) != captured["context_hash"]:
         now = timestamp()
-        repos.generation_runs.complete(
+        repos.generation_runs.fail_input_changed(
             run_id,
-            output_json=json.dumps({**payload, "_references": outputs})[:MAX_OUTPUT_CHARS],
-            usage_json=json.dumps(result.usage or {}),
-            model=result.model or row.model,
+            message=(
+                "The documents changed while the model was working; the result was "
+                "kept for inspection and was not promoted"
+            ),
+            output_json=json.dumps({"stale_candidate": payload})[:MAX_OUTPUT_CHARS],
             now=now,
         )
-        refresh_stage(repos, loop_id, now=now)
+        return _Ended("failed", "generation_input_changed", now)
+    provenance = {
+        "generation_run_id": run_id,
+        "agent_id": row.agent_id,
+        "agent_name": row.agent_name,
+        "model": result.model or row.model,
+    }
+    outputs: object
+    if captured["purpose"] == "analysis":
+        outputs = documents.store_generated_analysis(
+            repos,
+            loop,
+            AnalysisPayload.model_validate(payload),
+            _system_actor(row),
+            run_id=run_id,
+            provenance=provenance,
+        )
+    elif captured["purpose"] == "roadmap":
+        outputs = documents.store_generated_roadmap(
+            repos,
+            loop,
+            PlanPayload.model_validate(payload),
+            _system_actor(row),
+            run_id=run_id,
+            provenance=provenance,
+        )
+    else:
+        outputs = links.apply_qa_instructions(
+            repos,
+            loop,
+            QaInstructions.model_validate(payload),
+            run_id=run_id,
+            provenance=provenance,
+        )
+    now = timestamp()
+    usage_json = json.dumps(result.usage or {})
+    repos.generation_runs.complete(
+        run_id,
+        output_json=json.dumps({**payload, "_references": outputs})[:MAX_OUTPUT_CHARS],
+        usage_json=usage_json,
+        model=result.model or row.model,
+        now=now,
+    )
+    refresh_stage(repos, loop_id, now=now)
+    return _Ended("completed", None, now, usage_json)
 
 
 def finish(
@@ -369,12 +522,19 @@ def finish(
     error_code: str | None = None,
     error_message: str | None = None,
     details: str | None = None,
+    error_details: JsonValue = None,
     retryable: bool = False,
     store: BoardUnitOfWork,
     timestamp: Callable[[], str],
 ) -> None:
+    """End a run without a result. ``details`` is appended to the message; ``error_details``
+    (already passed through ``error_details()``) becomes the run's output."""
+    del loop_id
+    output: JsonObject = {} if error_details is None else {"error_details": error_details}
     try:
         with store.writer(board_id) as repos:
+            row = repos.generation_runs.get(run_id)
+            now = timestamp()
             repos.generation_runs.finish(
                 run_id,
                 status=status,
@@ -385,8 +545,11 @@ def finish(
                     + ("" if retryable else " (not retryable)")
                 ).strip()
                 or None,
-                now=timestamp(),
+                output_json=json.dumps(output),
+                now=now,
             )
     except Exception:  # never mask the original failure
         logger.exception("could not record generation failure", extra={"run_id": run_id})
-    del loop_id
+        return
+    if row is not None:
+        _log_finished(row, _Ended(status, error_code, now), _loads(row.input_json))
