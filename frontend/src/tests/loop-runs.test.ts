@@ -46,6 +46,37 @@ describe("run repository provenance", () => {
     expect(describeRunRepositories(entry)).toBe("acme app @ abc123de, 12 files");
   });
 
+  it("says how much file text the repository sent of its budget", () => {
+    const repository = {
+      id: "r1",
+      name: "acme app",
+      branch: "main",
+      commit_sha: "abc123def4567890",
+      file_count: 32,
+      truncated: false,
+      budget_chars: 360_000,
+      snapshot_chars_included: 200_704,
+      content_omitted: false,
+    };
+    expect(describeRunRepositories(run({ repositories: [repository] }))).toBe(
+      "acme app @ abc123de, 32 files, 196 KB",
+    );
+    const small = { ...repository, file_count: 1, snapshot_chars_included: 300 };
+    expect(describeRunRepositories(run({ repositories: [small] }))).toBe(
+      "acme app @ abc123de, 1 files, <1 KB",
+    );
+    const omitted = {
+      ...repository,
+      file_count: 0,
+      truncated: true,
+      snapshot_chars_included: 0,
+      content_omitted: true,
+    };
+    expect(describeRunRepositories(run({ repositories: [omitted] }))).toBe(
+      "acme app @ abc123de, 0 files, no room for file content, truncated",
+    );
+  });
+
   it("says when the snapshot was cut short", () => {
     const entry = run({
       repositories: [

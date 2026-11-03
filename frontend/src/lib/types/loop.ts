@@ -207,6 +207,12 @@ export interface GenerationRunRepository {
   commit_sha: string | null;
   file_count: number;
   truncated: boolean;
+  /** The repository's share of the run's context budget, in characters (runs since AGL-004). */
+  budget_chars?: number;
+  /** What its files took of that share. */
+  snapshot_chars_included?: number;
+  /** Not even one file fitted in the share. */
+  content_omitted?: boolean;
   error?: string;
 }
 
