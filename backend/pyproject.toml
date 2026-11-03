@@ -16,6 +16,7 @@ dependencies = [
 dev = [
   "pytest>=8.3",
   "pytest-xdist==3.8.0",
+  "pytest-cov==7.1.0",
   "httpx>=0.28",
   "ruff==0.17.3",
   "pyright==1.1.414",
@@ -27,6 +28,14 @@ dev = [
 # The unit suite is the default; the SQLite suite runs on request: pytest tests/infrastructure.
 testpaths = ["tests/unit"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+# The unit suite's measured line coverage (GCS-T26). It can only go up: raise it when it does.
+fail_under = 79
+skip_covered = true
 
 [tool.ruff]
 line-length = 100

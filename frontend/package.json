@@ -11,6 +11,7 @@
     "lint": "prettier --check . && eslint . --max-warnings 0",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "lint:md": "cd .. && markdownlint-cli2",
     "test:e2e": "node ../scripts/run-playwright.mjs test"
   },
@@ -40,6 +41,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "4.1.12",
     "eslint": "^10.14.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-import-resolver-typescript": "^4.4.5",

@@ -43,9 +43,17 @@ jobs:
         run: python -m ruff check app tests migrations tools
       - name: Type check
         run: python -m pyright
-      # In parallel, so a test that leans on another one's state fails here.
+      # In parallel, so a test that leans on another one's state fails here. Coverage fails the step
+      # below the floor in pyproject.toml ([tool.coverage.report] fail_under).
       - name: Unit tests
-        run: python -m pytest -n auto
+        run: python -m pytest -n auto --cov=app --cov-report=term --cov-report=xml
+      - name: Upload the coverage report
+        if: always() && matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          if-no-files-found: ignore
 
   backend-infrastructure:
     # The one place a backend test opens SQLite: connections, migrations to completion, commit and
@@ -100,8 +108,16 @@ jobs:
       # type information (eslint.config.js): every rule is an error and any warning fails.
       - name: Format and lint
         run: pnpm lint
+      # Fails below the floors in vite.config.ts (test.coverage.thresholds).
       - name: Unit tests
-        run: pnpm test
+        run: pnpm test:coverage
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          if-no-files-found: ignore
       # Includes `tsc --noEmit`, ESLint and the client build guard (no source maps, no server-only
       # strings), so the container image build cannot skip them either.
       - name: Production build

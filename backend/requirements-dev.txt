@@ -2,6 +2,8 @@
 pytest>=8.3,<10
 # Runs the unit suite in parallel in CI (`-n auto`), which keeps proving the tests share no state.
 pytest-xdist==3.8.0
+# Coverage of the unit suite in CI, with the floor in pyproject.toml ([tool.coverage.report]).
+pytest-cov==7.1.0
 # Exact: a Ruff release can add rules to the selected families, so CI and local runs pin one.
 ruff==0.17.3
 # Exact for the same reason: the strict scope in pyrightconfig.json must mean one thing everywhere.
