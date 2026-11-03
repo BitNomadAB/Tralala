@@ -23,7 +23,7 @@ from app.repositories.registry import RegistryUnitOfWork
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
 from app.services.repo_mirror import MirrorService
 from app.services.repo_mirror_git import ERROR_TEXT, authorization_header
-from app.services.repositories import GitHubGet, JsonObject, RepositoryService
+from app.services.repositories import GitHubGet, JsonObject, RepositoryService, rate_limit_detail
 from tests.unit.fakes.mirror import FakeGit, FakeMirrorFiles, FakeRemote
 from tests.unit.fakes.registry import (
     CREATED,
@@ -357,6 +357,7 @@ def test_a_branch_that_does_not_exist_is_reported_as_missing(repos: Repositories
         ((401, None), "unauthorized", "The token was rejected"),
         ((404, None), "not_found", "Repository not found, or the token cannot see it"),
         ((403, None), "forbidden", "GitHub refused the request (scope or rate limit)"),
+        ((429, None), "rate_limited", rate_limit_detail(has_token=False)),
         ((502, None), "unreachable", "GitHub answered 502"),
         ((200, None), "unreachable", "GitHub answered 200"),
     ],
@@ -376,6 +377,24 @@ def test_a_refusal_is_named_by_its_class_never_by_githubs_words(
     }
     assert repos.github.calls == [(f"{API}/acme/lib", None)]
     assert repos.state.code_repositories["lib"].last_check_status == status
+
+
+def test_the_rate_limit_names_the_limit_without_a_token_and_the_remedy() -> None:
+    assert "60 API calls an hour" in rate_limit_detail(has_token=False)
+    assert "5 000 an hour" in rate_limit_detail(has_token=False)
+    assert rate_limit_detail(has_token=True) == (
+        "GitHub's limit for this token was reached; try again later"
+    )
+
+
+def test_a_rejected_token_that_passed_an_earlier_check_has_probably_expired(
+    repos: Repositories,
+) -> None:
+    row = repos.state.code_repositories["lib"]
+    repos.state.code_repositories["lib"] = row.__replace__(last_check_status="ok")
+    repos.github.answers[f"{API}/acme/lib"] = (401, None)
+    detail = repos.service.check(ADMIN, "lib")["detail"]
+    assert detail.startswith("The token was rejected; it worked before, so it has probably expired")
 
 
 def test_a_size_that_is_not_a_number_fails_as_int_would(repos: Repositories) -> None:

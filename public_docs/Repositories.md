@@ -26,8 +26,13 @@ A repository is read through one of two providers, chosen when it is added:
 | Private GitHub repository | The URL and a fine-grained token for that repository with *Contents: read* | GitHub | The same, with the token | The same | The same |
 | Any HTTPS Git host | The HTTPS URL, the host in `TRALALA_REPOSITORY_HOSTS`, and a read-only token if the host wants one | Git over HTTPS | The main branch, fetched into the mirror before every run | The same, plus when the mirror was fetched and whether it was stale | The same |
 
-GitHub limits API calls without a token per address, so a busy installation reading public
-repositories benefits from a token too. `github.com` is in `TRALALA_REPOSITORY_HOSTS` by default, so
+A public GitHub repository needs no token. Without one, GitHub allows 60 API calls an hour per
+address; each run of a linked repository makes one to resolve its branch. When that limit is reached,
+the check and the run say so (`rate_limited`), and a token raises it to 5 000 an hour: a fine-grained
+token with *Contents: read* is enough, even for a public repository. The archive of a commit is
+downloaded once and kept (see the layout below), so a retry or a second Loop on the same commit costs
+only that one call. A token that passed an earlier check and is then rejected has most likely
+expired: the check says so, and you replace it under **Edit**. `github.com` is in `TRALALA_REPOSITORY_HOSTS` by default, so
 a GitHub repository can also be read through the mirror, for example one whose archive is larger
 than the API path accepts.
 
@@ -82,17 +87,20 @@ the API call that does the same (`/api/v1`, an administrator's session or a toke
 
 ## What Tralala keeps
 
-Each Git over HTTPS repository has one directory under the data directory:
+Each repository that has been read has one directory under the data directory:
 
 ```text
 <data>/repos/
   <repository id>/
-    mirror.git/   a bare, shallow mirror of one branch: one commit, no working tree
-    state.json    the URL (never a token), the branch, the default branch, the last commit,
-                  when it was fetched, its size and the last error
+    mirror.git/   Git over HTTPS: a bare, shallow mirror of one branch, one commit, no working tree
+    state.json    Git over HTTPS: the URL (never a token), the branch, the default branch, the last
+                  commit, when it was fetched, its size and the last error
+    archive-<commit>.tar.gz
+                  GitHub: the archive of a commit a run read, so the next run on it downloads nothing
 ```
 
-Nothing else is written there. It is a cache:
+Nothing else is written there. The GitHub archives of all repositories together stay under
+`TRALALA_REPOSITORY_ARCHIVE_CACHE_MAX_BYTES`; the oldest go first. It is all a cache:
 
 - **Backups leave it out.** A backup holds one board's database and its attachments, nothing from
   `repos/`.
@@ -112,6 +120,7 @@ GitHub repositories keep nothing under `repos/`.
 | `TRALALA_REPOSITORY_MIRROR_MAX_BYTES` | `1073741824` (1 GiB) | A mirror still larger than this after its clean-up is removed, and the run reports `too_large` |
 | `TRALALA_REPOSITORY_FETCH_TIMEOUT_SECONDS` | `120` | How long one `git` command (ls-remote, clone, fetch, archive or a clean-up step) may take |
 | `TRALALA_GENERATION_CONTEXT_CHARS` | `400000` | What one run sends the model, documents and repository snapshots together. The documents come first; the repositories share the rest in link order, and what one does not use carries over to the next |
+| `TRALALA_REPOSITORY_ARCHIVE_CACHE_MAX_BYTES` | `268435456` (256 MiB) | GitHub archives kept per repository and commit, all together at most this many bytes, the oldest removed first; `0` keeps none |
 | `TRALALA_REPOSITORY_GIT_BINARY` | `git` | The `git` program the mirror runs. The backend image installs it; from source, `git` must be on `PATH` |
 
 ## Before every run: fetch and clean-up

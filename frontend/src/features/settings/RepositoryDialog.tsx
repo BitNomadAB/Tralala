@@ -27,7 +27,8 @@ const PROVIDER_TEXT: Record<
       "Read-only access for the Analysis agent through the GitHub API. Only https://github.com/your-org/your-repo is accepted.",
     placeholder: "https://github.com/your-org/your-repo",
     branch: "Defaults to the default branch.",
-    token: "Fine-grained token with Contents: read for this repository only.",
+    token:
+      "Not needed for a public repository: without one GitHub allows 60 calls an hour per address, a token raises that to 5 000. For a private repository: a fine-grained token with Contents: read for this repository only.",
   },
   git_https: {
     description:

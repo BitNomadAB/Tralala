@@ -69,6 +69,7 @@ __all__ = [
     "MirrorControl",
     "RepositoryEntry",
     "RepositoryService",
+    "rate_limit_detail",
 ]
 
 logger = logging.getLogger("tralala.repositories")
@@ -126,6 +127,17 @@ def _json_object(value: object) -> TypeIs[JsonObject]:
     return isinstance(value, dict)
 
 
+def rate_limit_detail(*, has_token: bool) -> str:
+    """What GitHub's rate limit means for this repository, and what to do about it."""
+    if has_token:
+        return "GitHub's limit for this token was reached; try again later"
+    return (
+        "GitHub allows 60 API calls an hour per address without a token, and that limit was "
+        "reached. A token raises it to 5 000 an hour (a fine-grained token with Contents: read "
+        "is enough), or try again within the hour"
+    )
+
+
 def _size_kb(value: JsonValue) -> int:
     """GitHub's ``size`` as ``int()`` reads it; nothing (or zero) is 0."""
     if not value:
@@ -158,7 +170,10 @@ def _github_get(
         payload: object = response.json()
     except ValueError:
         payload = None
-    return response.status_code, payload if _json_object(payload) else None
+    status = response.status_code
+    if status == 403 and response.headers.get("x-ratelimit-remaining") == "0":
+        status = 429  # GitHub's rate limit answers 403 or 429; the service reads one code
+    return status, payload if _json_object(payload) else None
 
 
 class RepositoryService:
@@ -524,7 +539,16 @@ class RepositoryService:
                 "checked_at": now,
             }
         elif status_code == 401:
-            result = outcome("unauthorized", "The token was rejected", now)
+            # A token that passed an earlier check has most likely expired or been revoked.
+            detail = (
+                "The token was rejected; it worked before, so it has probably expired or been "
+                "revoked. Create a new one and replace it"
+                if row.last_check_status == "ok"
+                else "The token was rejected"
+            )
+            result = outcome("unauthorized", detail, now)
+        elif status_code == 429:
+            result = outcome("rate_limited", rate_limit_detail(has_token=bool(token)), now)
         elif status_code == 404:
             result = outcome("not_found", "Repository not found, or the token cannot see it", now)
         elif status_code == 403:

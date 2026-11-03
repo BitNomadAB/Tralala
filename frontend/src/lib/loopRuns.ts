@@ -27,6 +27,12 @@ function staleness(repository: GenerationRunRepository): string {
   return ` (stale mirror from ${repository.fetched_at ?? "an earlier fetch"})`;
 }
 
+/** What a repository that could not be read means for the person reading the run. */
+const REPOSITORY_ERROR_TEXT: Readonly<Record<string, string>> = {
+  rate_limited: "GitHub's limit of 60 calls an hour without a token was reached; a token raises it",
+  unauthorized: "the token was rejected; it may have expired",
+};
+
 export function describeRunRepositories(run: GenerationRun): string | null {
   const value = run.source_revisions.repositories;
   if (!Array.isArray(value)) return null;
@@ -35,7 +41,7 @@ export function describeRunRepositories(run: GenerationRun): string | null {
   return repositories
     .map((repository) =>
       repository.error
-        ? `${repository.name} (unavailable: ${repository.error})`
+        ? `${repository.name} (unavailable: ${REPOSITORY_ERROR_TEXT[repository.error] ?? repository.error})`
         : `${repository.name} @ ${(repository.commit_sha ?? "").slice(0, 8)}, ${repository.file_count} files${sentSize(repository)}${repository.truncated ? ", truncated" : ""}${staleness(repository)}`,
     )
     .join("; ");

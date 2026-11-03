@@ -107,7 +107,9 @@ describe("run repository provenance", () => {
         },
       ],
     });
-    expect(describeRunRepositories(entry)).toBe("acme app (unavailable: unauthorized)");
+    expect(describeRunRepositories(entry)).toBe(
+      "acme app (unavailable: the token was rejected; it may have expired)",
+    );
   });
 
   it("says when a mirror could not be fetched and how old the copy the run read was", () => {
@@ -165,5 +167,26 @@ describe("what a finished run cost", () => {
 
   it("shows nothing for a run that has not finished", () => {
     expect(describeRunCost(finished({ status: "running", finished_at: null }))).toBeNull();
+  });
+});
+
+describe("a repository a run could not read", () => {
+  it("says what GitHub's limit without a token means", () => {
+    const entry = run({
+      repositories: [
+        {
+          id: "r1",
+          name: "acme app",
+          branch: "main",
+          commit_sha: null,
+          file_count: 0,
+          truncated: false,
+          error: "rate_limited",
+        },
+      ],
+    });
+    expect(describeRunRepositories(entry)).toBe(
+      "acme app (unavailable: GitHub's limit of 60 calls an hour without a token was reached; a token raises it)",
+    );
   });
 });
