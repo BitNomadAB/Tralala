@@ -6,27 +6,22 @@ the same scenario ids. Agents may submit results; only a human accepts QA and fi
 ``LoopQaService`` reaches the board database only through the board unit of work and the registry
 only through ``BoardChecks``; it takes the clock and the id source as arguments, so every rule here
 runs in a unit test without a database.
+
+The cycle and its Task live in ``loop_qa_cycles``, the scenario set in ``loop_qa_instructions``
+and its Markdown views in ``loop_qa_render``; this module keeps the service and the import path.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import asdict
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
 from ..core.errors import ApiError, Conflict, NotFound, ValidationFailure, VersionConflict
-from ..db.generated.board import (
-    CardsRow,
-    LoopApprovalsRow,
-    LoopPhasesRow,
-    LoopQaCyclesRow,
-    LoopQaResultsRow,
-    LoopsRow,
-)
+from ..db.generated.board import LoopApprovalsRow, LoopQaCyclesRow, LoopQaResultsRow, LoopsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..schemas.loops import (
     GenerationRequest,
@@ -36,12 +31,28 @@ from ..schemas.loops import (
     QaResultSubmission,
     QaScenario,
 )
-from .activity import activity_entry
 from .idempotency import remember, request_fingerprint, stored_answer
 from .lists import BoardChecks
 from .loop_history import LoopHistoryService
-from .loop_identifiers import format_ticket_key
 from .loop_links import LoopWorkflowLinks
+from .loop_qa_cycles import (
+    QA_PHASE_NAME,
+    Entry,
+    active_cycle,
+    cycle_by_id,
+    delivery_baseline,
+    delivery_tickets,
+    ensure_qa_cycle,
+    log_loop_activity,
+    serialize_cycle,
+)
+from .loop_qa_instructions import (
+    BLOCKING_RESULT_STATUSES,
+    apply_qa_instructions,
+    qa_acceptance_blockers,
+    read_qa_instructions,
+)
+from .loop_qa_render import render_qa_ai, render_qa_human, render_qa_task
 from .loops import (
     QA_OPEN_STATUSES,
     ensure_execution_allowed,
@@ -50,58 +61,6 @@ from .loops import (
     require_loop,
 )
 
-QA_PHASE_NAME = "Verification"
-BLOCKING_RESULT_STATUSES = {"failed", "blocked", "not_run"}
-# The instruction and attestation columns are answered parsed, under names without ``_json``.
-_JSON_COLUMNS = ("ai_instructions_json", "human_instructions_json", "attestation_json")
-
-type Entry = dict[str, object]
-
-
-def render_qa_ai(instructions: QaInstructions) -> str:
-    lines = ["## QA instructions (agent view)", ""]
-    if instructions.summary:
-        lines += [instructions.summary, ""]
-    lines.append(
-        "Report each scenario id with an outcome of passed, failed, blocked, not_run or "
-        "not_applicable. State which of your own tools are available; never infer a pass from "
-        "the absence of an error report."
-    )
-    lines += ["", "Prerequisites and environment must be supplied by whoever runs this task.", ""]
-    if instructions.known_risks:
-        lines += ["**Known risks**", ""] + [f"- {risk}" for risk in instructions.known_risks] + [""]
-    for scenario in instructions.scenarios:
-        lines += [f"### {scenario.id} — {scenario.title} ({scenario.kind})", ""]
-        if scenario.prerequisites:
-            lines += ["Prerequisites:"] + [f"- {item}" for item in scenario.prerequisites] + [""]
-        lines += [f"{index}. {step}" for index, step in enumerate(scenario.steps_ai, start=1)]
-        lines += ["", f"Expected result: {scenario.expected_result}", ""]
-        if scenario.evidence:
-            lines += ["Capture:"] + [f"- {item}" for item in scenario.evidence] + [""]
-    return "\n".join(lines).strip() + "\n"
-
-
-def render_qa_human(instructions: QaInstructions) -> str:
-    lines = ["## QA instructions (human view)", ""]
-    if instructions.summary:
-        lines += [instructions.summary, ""]
-    for scenario in instructions.scenarios:
-        lines += [f"### Scenario {scenario.id}: {scenario.title}", ""]
-        if scenario.prerequisites:
-            lines += ["Before you start:"] + [f"- {item}" for item in scenario.prerequisites] + [""]
-        lines += [f"{index}. {step}" for index, step in enumerate(scenario.steps_human, start=1)]
-        lines += ["", f"Expected result: {scenario.expected_result}", ""]
-    return "\n".join(lines).strip() + "\n"
-
-
-def render_qa_task(instructions: QaInstructions, cycle_number: int) -> str:
-    return (
-        f"QA cycle {cycle_number}. One task, both views, the same scenario ids.\n\n"
-        + render_qa_human(instructions)
-        + "\n---\n\n"
-        + render_qa_ai(instructions)
-    )
-
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -109,18 +68,6 @@ def _now() -> datetime:
 
 def _new_id() -> str:
     return str(uuid4())
-
-
-def _json_object(raw: str) -> object:
-    return json.loads(raw or "{}")
-
-
-def _active(cycles: list[LoopQaCyclesRow]) -> LoopQaCyclesRow | None:
-    return next((cycle for cycle in cycles if cycle.status in QA_OPEN_STATUSES), None)
-
-
-def _cycle_by_id(cycles: list[LoopQaCyclesRow], cycle_id: str) -> LoopQaCyclesRow | None:
-    return next((cycle for cycle in cycles if cycle.id == cycle_id), None)
 
 
 def _check_version(loop: LoopsRow, expected: int) -> None:
@@ -163,139 +110,18 @@ class LoopQaService:
         changes: Mapping[str, object],
         now: str,
     ) -> None:
-        repos.activity.add(
-            activity_entry(
-                actor,
-                action=action,
-                entity_type="loop",
-                entity_id=loop_id,
-                changes=changes,
-                entry_id=self._new_id(),
-                timestamp=now,
-            )
-        )
+        log_loop_activity(repos, actor, action, loop_id, changes, now, new_id=self._new_id)
 
     # --- helpers ---------------------------------------------------------------
-
-    def _qa_phase(self, repos: BoardRepositories, loop_id: str) -> LoopPhasesRow:
-        phases = repos.phases.for_loop(loop_id)
-        existing = next((phase for phase in phases if phase.is_qa_phase == 1), None)
-        if existing is not None:
-            return existing
-        plan = repos.plans.active(loop_id)
-        if plan is None:
-            raise Conflict(
-                "A QA Task needs an approved plan before implementation can be accepted",
-                code="approval_required",
-            )
-        phase = LoopPhasesRow(
-            id=self._new_id(),
-            loop_id=loop_id,
-            plan_id=plan.id,
-            number=max((other.number for other in phases), default=0) + 1,
-            name=QA_PHASE_NAME,
-            objective="Verify the delivered work against the approved requirements.",
-            entry_conditions_json="[]",
-            exit_conditions_json="[]",
-            is_qa_phase=1,
-            created_at=self._now(),
-        )
-        repos.phases.add(phase)
-        return phase
 
     def ensure_cycle(
         self, repos: BoardRepositories, loop: LoopsRow, actor: ActorContext
     ) -> LoopQaCyclesRow:
         """One active QA cycle per Loop; repeated attempts reuse it."""
-        cycles = repos.qa.cycles(loop.id)
-        active = _active(cycles)
-        if active is not None:
-            return active
-        number = max((cycle.cycle_number for cycle in cycles), default=0) + 1
-        phase = self._qa_phase(repos, loop.id)
-        columns = repos.lists.for_loop(loop.id, include_archived=False)
-        if not columns:
-            raise Conflict("The Loop has no column for its QA Task", code="loop_required")
-        cycle_id = self._new_id()
-        card_id = self._new_id()
-        key = format_ticket_key(loop.key, "QA", phase.number, number)
-        now = self._now()
-        repos.cards.add(
-            CardsRow(
-                id=card_id,
-                list_id=columns[0].id,
-                title=f"QA — {loop.name}",
-                description=(
-                    "QA is outstanding. Instructions are generated from the approved plan and "
-                    "the recorded delivery results."
-                ),
-                position=repos.cards.highest_position(columns[0].id) + 1024,
-                priority="none",
-                due_at=None,
-                completed_at=None,
-                created_at=now,
-                updated_at=now,
-                archived_at=None,
-                version=1,
-                assignee_actor_id=None,
-                assignee_type=None,
-                assignee_name=None,
-                assigned_at=None,
-                assigned_by_actor_id=None,
-                loop_id=loop.id,
-                phase_id=phase.id,
-                plan_item_id=None,
-                ticket_key=key,
-                kind="qa",
-                required_actor="human",
-                execution_mode="normal",
-                human_action_reason="",
-                human_instructions="",
-                human_confirmed_at=None,
-                human_confirmed_by_actor_id=None,
-                plan_revision_id=loop.current_plan_id,
-            )
-        )
-        cycle = LoopQaCyclesRow(
-            id=cycle_id,
-            loop_id=loop.id,
-            cycle_number=number,
-            status="pending",
-            card_id=card_id,
-            ai_instructions_json="{}",
-            human_instructions_json="{}",
-            instruction_revision=0,
-            delivery_baseline=self._delivery_baseline(repos, loop.id),
-            generation_run_id=None,
-            attestation_json="{}",
-            created_at=now,
-            updated_at=now,
-            decided_at=None,
-            decided_by_actor_id=None,
-            decision_note="",
-        )
-        repos.qa.add(cycle)
-        repos.loops.set_active_qa_cycle(loop.id, cycle_id, now=now)
-        self._log(
-            repos,
-            actor,
-            "loop.qa_cycle_created",
-            loop.id,
-            {"cycle": number, "card_id": card_id, "key": key},
-            now,
-        )
-        return cycle
+        return ensure_qa_cycle(repos, loop, actor, new_id=self._new_id, timestamp=self._now)
 
-    @staticmethod
-    def _delivery_tickets(repos: BoardRepositories, loop_id: str) -> list[CardsRow]:
-        return [card for card in repos.archive.tickets(loop_id) if card.kind == "ticket"]
-
-    def _delivery_baseline(self, repos: BoardRepositories, loop_id: str) -> str:
-        records = [
-            {"ticket_key": card.ticket_key, "completed_at": card.completed_at}
-            for card in self._delivery_tickets(repos, loop_id)
-        ]
-        return json.dumps(records, sort_keys=True)
+    _delivery_tickets = staticmethod(delivery_tickets)
+    _delivery_baseline = staticmethod(delivery_baseline)
 
     # --- implementation acceptance ---------------------------------------------
 
@@ -462,57 +288,19 @@ class LoopQaService:
         run_id: str,
         provenance: Mapping[str, object],
     ) -> Entry:
-        actor = ActorContext(
-            actor_id=str(provenance.get("agent_id") or "generation"),
-            actor_type="agent",
-            actor_name=str(provenance.get("agent_name") or "QA agent"),
-        )
-        cycle = self.ensure_cycle(repos, loop, actor)
-        revision = cycle.instruction_revision + 1
-        now = self._now()
-        ai_view = {
-            "markdown": render_qa_ai(instructions),
-            "scenarios": [scenario.model_dump() for scenario in instructions.scenarios],
-            "provenance": dict(provenance),
-        }
-        human_view = {
-            "markdown": render_qa_human(instructions),
-            "scenarios": [scenario.model_dump() for scenario in instructions.scenarios],
-        }
-        repos.qa.set_instructions(
-            cycle.id,
-            ai_json=json.dumps(ai_view),
-            human_json=json.dumps(human_view),
-            revision=revision,
+        return apply_qa_instructions(
+            repos,
+            loop,
+            instructions,
             run_id=run_id,
-            baseline=self._delivery_baseline(repos, loop.id),
-            now=now,
+            provenance=provenance,
+            new_id=self._new_id,
+            timestamp=self._now,
         )
-        card = None if cycle.card_id is None else repos.cards.get(cycle.card_id)
-        if card is not None:
-            repos.cards.update(
-                card.id,
-                {
-                    "description": render_qa_task(instructions, cycle.cycle_number),
-                    "updated_at": now,
-                    "version": card.version + 1,
-                },
-            )
-        return {
-            "cycle_id": cycle.id,
-            "instruction_revision": revision,
-            "card_id": cycle.card_id,
-        }
 
     @staticmethod
     def get_instructions(cycle: LoopQaCyclesRow) -> QaInstructions | None:
-        payload = json.loads(cycle.ai_instructions_json or "{}")
-        scenarios = payload.get("scenarios")
-        if not scenarios:
-            return None
-        return QaInstructions.model_validate(
-            {"schema_version": 1, "summary": "", "scenarios": scenarios}
-        )
+        return read_qa_instructions(cycle)
 
     def submit_instructions(
         self, actor: ActorContext, board_id: str, loop_id: str, payload: QaInstructions
@@ -554,7 +342,7 @@ class LoopQaService:
             ensure_writable(loop)
             cycles = repos.qa.cycles(loop_id)
             cycle = (
-                _cycle_by_id(cycles, payload.cycle_id) if payload.cycle_id else _active(cycles)
+                cycle_by_id(cycles, payload.cycle_id) if payload.cycle_id else active_cycle(cycles)
             )
             if cycle is None:
                 raise NotFound("QA cycle not found", code="qa_incomplete")
@@ -624,7 +412,7 @@ class LoopQaService:
                 if cached is not None:
                     return cached
             loop = require_loop(repos, loop_id)
-            cycle = _cycle_by_id(repos.qa.cycles(loop_id), payload.cycle_id)
+            cycle = cycle_by_id(repos.qa.cycles(loop_id), payload.cycle_id)
             if loop.completed_at is not None or loop.stage == "completed":
                 if cycle is None or cycle.status != "accepted":
                     raise Conflict(
@@ -718,49 +506,11 @@ class LoopQaService:
         cycle: LoopQaCyclesRow,
         approved_not_applicable: list[str],
     ) -> list[dict[str, str | None]]:
-        instructions = self.get_instructions(cycle)
-        if instructions is None:
-            return [{"scenario_id": None, "reason": "instructions_missing"}]
-        latest = {record.scenario_id: record for record in repos.qa.results(cycle.id)}
-        blockers: list[dict[str, str | None]] = []
-        for scenario in instructions.scenarios:
-            result = latest.get(scenario.id)
-            if result is None:
-                blockers.append({"scenario_id": scenario.id, "reason": "not_run"})
-                continue
-            if result.status == "not_applicable":
-                if scenario.id not in approved_not_applicable:
-                    blockers.append(
-                        {
-                            "scenario_id": scenario.id,
-                            "reason": "not_applicable_requires_human_approval",
-                        }
-                    )
-                continue
-            if result.status in BLOCKING_RESULT_STATUSES:
-                blockers.append(
-                    {
-                        "scenario_id": scenario.id,
-                        "reason": result.status,
-                        "detail": result.reason,
-                    }
-                )
-            if result.instruction_revision != cycle.instruction_revision:
-                blockers.append({"scenario_id": scenario.id, "reason": "instructions_revised"})
-        return blockers
+        return qa_acceptance_blockers(repos, cycle, approved_not_applicable)
 
     # --- views -----------------------------------------------------------------
 
-    @staticmethod
-    def _serialize_cycle(repos: BoardRepositories, cycle: LoopQaCyclesRow) -> Entry:
-        entry: Entry = {
-            name: value for name, value in asdict(cycle).items() if name not in _JSON_COLUMNS
-        }
-        entry["ai_instructions"] = _json_object(cycle.ai_instructions_json)
-        entry["human_instructions"] = _json_object(cycle.human_instructions_json)
-        entry["attestation"] = _json_object(cycle.attestation_json)
-        entry["results"] = [asdict(result) for result in repos.qa.results(cycle.id)]
-        return entry
+    _serialize_cycle = staticmethod(serialize_cycle)
 
     def _latest_entry(self, repos: BoardRepositories, loop_id: str) -> Entry:
         entry = self.cycle_for(repos, loop_id)
@@ -779,6 +529,9 @@ class LoopQaService:
 
 
 __all__ = [
+    "BLOCKING_RESULT_STATUSES",
+    "QA_PHASE_NAME",
+    "Entry",
     "LoopQaService",
     "QaScenario",
     "render_qa_ai",
