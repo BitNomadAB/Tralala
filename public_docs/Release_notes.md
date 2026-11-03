@@ -36,6 +36,10 @@ Worth knowing when you look at the dashboard:
   sound board database answers `422 board_import_invalid` and leaves nothing behind; before, it left
   a board in `error` that broke the board list and the next start. A board whose file cannot be read
   is now skipped by the list and at startup (`board_database_unreadable`).
+- **A backup that fails SQLite's checks is not restored.** A restore now also runs
+  `foreign_key_check` on the snapshot, and any refusal answers `422 board_backup_invalid` (was
+  `422 validation_failed`) with `details.reason` and `details.detail`; the board keeps its database.
+  Before, a snapshot with a broken key replaced the board and was only reported afterwards.
 - **A held file no longer half-deletes a board.** Host filesystem behaviour follows
   `TRALALA_PLATFORM_PROFILE`, and a board delete that cannot remove its files answers
   `409 board_files_busy` with the leftover directory.

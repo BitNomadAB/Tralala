@@ -1,8 +1,9 @@
 # Database design
 
-Two database kinds, both SQLite with `PRAGMA foreign_keys=ON`, WAL journaling, a 5 s busy timeout
-and `synchronous=NORMAL`. Each database tracks its own schema in Alembic's `alembic_version` table;
-the registry and board schemas are separate migration chains managed by the Migration Manager.
+Two database kinds, both SQLite with `PRAGMA foreign_keys=ON`, WAL journaling, a 5 s busy timeout,
+`synchronous=NORMAL` and a 64 MiB `journal_size_limit` (see "Maintenance PRAGMAs"). Each database
+tracks its own schema in Alembic's `alembic_version` table; the registry and board schemas are
+separate migration chains managed by the Migration Manager.
 
 SQLAlchemy sends every `BEGIN` itself, with Python's `sqlite3` transaction handling switched off
 (`isolation_level=None`, SQLAlchemy's documented recipe; `app/core/transactions.py`), so DDL is
@@ -220,11 +221,38 @@ falls back to `LIKE`; `/search` reports `meta.engine`.
 
 ### Backups and restore
 
-Backups use SQLite's online backup API (`sqlite3.Connection.backup`) so WAL state is captured
-consistently. Backups live in `data/backups/{board_uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite`, are
-integrity-checked on creation, and can be restored by name (validated against
-`^backup-\d{8}T\d{6}Z\.sqlite$`). Restore disposes the board engine, snapshots the backup into the
-live file, then re-runs `integrity_check` and `foreign_key_check`.
+Backups use SQLite's online backup API (`sqlite3.Connection.backup`), which copies every committed
+page, the ones still in the `-wal` file included, in one read transaction, so no checkpoint is
+needed first. Backups live in `data/backups/{board_uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite`, are
+integrity-checked on creation, and can be restored by name (the whole name must match
+`backup-[0-9]{8}T[0-9]{6}Z(-[a-z0-9-]+)?\.sqlite`).
+
+A restore first checks the snapshot (`storage/sqlite.check_snapshot`): it is opened like an imported
+file (read only, `immutable=1`, nothing written beside it), `PRAGMA integrity_check` runs, and on a
+file that passes, `PRAGMA foreign_key_check`. The pure `app/core/integrity.snapshot_problem` and
+`unreadable_problem` turn the rows, or the error SQLite raised, into a refusal
+(`422 board_backup_invalid`, `details.reason` `not_a_database`, `integrity_check_failed` or
+`foreign_key_check_failed`) before the board is touched. An accepted snapshot is copied over the
+live file under the board's lock (`restore_snapshot`): read through the same kind of connection, so
+the pages copied are the pages checked, in one transaction on the target, followed by a `TRUNCATE`
+checkpoint. The restored board is checked once more and reported.
+
+### Maintenance PRAGMAs
+
+`app/core/pragmas.py` holds every list as a constant (unit-tested against SQLite's documentation);
+`app/storage/sqlite.py` sends them.
+
+| When | PRAGMAs | Why |
+| --- | --- | --- |
+| Every connection (`create_sqlite_engine`) | `foreign_keys=ON`, `journal_mode=WAL`, `busy_timeout=5000`, `synchronous=NORMAL`, `journal_size_limit=67108864` | Per-connection settings. SQLite reuses a WAL file after a checkpoint instead of shrinking it; the 64 MiB limit is far above the ~4 MiB a WAL reaches between automatic checkpoints, so it only cuts back what an outsized transaction (a table rebuild, a restore) left behind. |
+| A board goes out of use: idle sweep, eviction over the cache cap, shutdown (`BoardDatabaseManager._maintain`) | `optimize=0x1fffe`, then `wal_checkpoint(TRUNCATE)` | SQLite's pattern for long-lived handles (a board's cached engine is one). `0x1fffe` is the default mask plus `0x10000`, "check all tables", because the connection that runs it has queried none. Not before every connection closes: before SQLite 3.46.0 a connection that queried an empty indexed table re-runs ANALYZE on it at each close, taking the write lock. The upkeep connection never creates the file and never waits (no busy timeout); a busy or unreadable board is skipped and logged (`board_maintenance_skipped`). `close()` does not maintain: it runs right before a restore, migration or delete changes the file. |
+| After a restore wrote a snapshot into the live file | `wal_checkpoint(TRUNCATE)` | The backup API writes the whole snapshot into the board's `-wal` file in one transaction; the checkpoint moves it into the database file at once. |
+| Before a backup | none | The backup API reads committed `-wal` pages itself; a checkpoint would not change the copy, and a RESTART or TRUNCATE one would make writers wait. |
+
+Every board connection is short-lived (`NullPool`), and the last connection to close checkpoints the
+database and deletes the `-wal` and `-shm` files itself. The explicit checkpoints matter when another
+connection still has the file open at that moment (a backup being taken, an export): the `-wal` is
+emptied then instead of keeping its size until that connection closes.
 
 ### Export format (v2)
 

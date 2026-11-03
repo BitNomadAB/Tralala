@@ -101,9 +101,11 @@ planning groups, not Kanban columns.
   directory.
 
 Board ids are UUIDs validated before any path is constructed, so user input never reaches the
-filesystem. Each board engine is created with `NullPool`, `foreign_keys=ON`, WAL journaling and a
-5 s busy timeout; engines idle longer than `TRALALA_BOARD_IDLE_CLOSE_SECONDS` are disposed, and the
-cache is capped so a host with many boards cannot exhaust file handles.
+filesystem. Each board engine is created with `NullPool`, `foreign_keys=ON`, WAL journaling, a
+5 s busy timeout and a 64 MiB journal size limit; engines idle longer than
+`TRALALA_BOARD_IDLE_CLOSE_SECONDS` are disposed, and the cache is capped so a host with many boards
+cannot exhaust file handles. A board that goes out of use that way, or at shutdown, gets SQLite's
+`PRAGMA optimize` and a checkpoint that empties its `-wal` file.
 
 ## Request lifecycle
 

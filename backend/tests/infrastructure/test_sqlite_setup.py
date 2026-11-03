@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.core.config import Settings
+from app.core.pragmas import JOURNAL_SIZE_LIMIT_BYTES
 from app.storage.board_db import BoardDatabaseManager
 from app.storage.migration_manager import MigrationManager, MigrationReport
 from app.storage.registry import Registry
@@ -16,7 +17,13 @@ def test_every_engine_connection_gets_the_pragmas(settings: Settings, board_id: 
         with engine.connect() as connection:
             pragmas = {
                 name: connection.exec_driver_sql(f"PRAGMA {name}").scalar_one()
-                for name in ("foreign_keys", "journal_mode", "busy_timeout", "synchronous")
+                for name in (
+                    "foreign_keys",
+                    "journal_mode",
+                    "busy_timeout",
+                    "synchronous",
+                    "journal_size_limit",
+                )
             }
     finally:
         engine.dispose()
@@ -26,6 +33,7 @@ def test_every_engine_connection_gets_the_pragmas(settings: Settings, board_id: 
         "journal_mode": "wal",
         "busy_timeout": BUSY_TIMEOUT_MS,
         "synchronous": 1,
+        "journal_size_limit": JOURNAL_SIZE_LIMIT_BYTES,
     }
 
 

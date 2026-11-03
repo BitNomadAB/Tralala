@@ -89,6 +89,16 @@ facts that explain most surprises:
   to be retryable, `posix` does not, `network` adds the transient retries an NFS/SMB share needs.
   It changes retry policy only, never the locking mechanism. Do not put a live board on a share:
   SQLite's WAL mode needs shared memory and will answer `disk I/O error`.
+- **`422 board_backup_invalid` on a restore** — the snapshot failed SQLite's checks and was not
+  restored; the board kept its database. `details.reason` says which check (`not_a_database`,
+  `integrity_check_failed`, `foreign_key_check_failed`) and `details.detail` what SQLite found.
+  Restore an older snapshot from the same list instead.
+- **`board.sqlite-wal` and `board.sqlite-shm` next to `board.sqlite`** — normal. SQLite's WAL mode
+  writes changes to the `-wal` file first and coordinates readers through the `-shm` file; both are
+  part of the database while it is open, and SQLite removes them when the last connection closes.
+  The backend empties the `-wal` file when a board goes idle, is restored or the backend stops, so it
+  stays small. Never delete or copy them by hand while the backend runs: committed changes can still
+  be in the `-wal` file. To copy a board, use a backup or an export.
 - **Restore said `attachments.skipped: true`** — the snapshot predates the file archive. The database
   was restored and the current files were kept; the response carries a `warning` saying so.
 - **A restored board misses recent uploads** — expected for a snapshot older than the uploads. Check

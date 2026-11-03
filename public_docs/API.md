@@ -32,7 +32,8 @@ Failure (same shape for every status):
 Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_token`,
 `token_revoked`, `token_expired`, `forbidden`, `csrf_failed`, `not_found`, `conflict`,
 `version_conflict`, `board_archived`, `board_migration_failed`, `board_schema_outdated`,
-`board_files_busy`, `board_import_invalid`, `board_database_unreadable`, `idempotency_key_reused`,
+`board_files_busy`, `board_import_invalid`, `board_backup_invalid`, `board_database_unreadable`,
+`idempotency_key_reused`,
 `creation_in_progress`, `creation_failed`,
 `validation_failed`, `payload_too_large`, `rate_limited`, and the Loop workflow codes
 `loop_not_found`,
@@ -156,6 +157,14 @@ A snapshot is a pair: `backup-<UTC>.sqlite` plus, when the board has uploaded fi
 snapshot from before this existed has no sidecar: the database is restored, the board's current files
 are kept, and the restore response says exactly that — `attachments.skipped` is `true`,
 `attachments.reason` is `snapshot_has_no_file_archive`, and a top-level `warning` explains it.
+
+Before a restore touches the board, the snapshot is read as a file of unknown origin (read only,
+nothing written beside it) and must pass SQLite's `integrity_check` and then its `foreign_key_check`.
+One that fails is refused with `422 board_backup_invalid` and the board keeps its database:
+`details.name` is the snapshot, `details.reason` is `not_a_database`, `integrity_check_failed` or
+`foreign_key_check_failed`, and `details.detail` carries SQLite's answer (the first 20 findings or
+rows, and how many more there are). The restored board is checked once more, and that report is the
+response's `verification`.
 
 Deleting a board removes its database, its uploaded files and its backups before the registry row, so
 an interrupted delete leaves a board that can be deleted again. When the host will not release a file

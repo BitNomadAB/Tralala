@@ -12,9 +12,24 @@ from sqlalchemy.pool import NullPool
 
 # Re-exported: the clock moved to core so a service can take it without importing storage.
 from ..core.dates import utcnow as utcnow
+from ..core.integrity import (
+    SnapshotProblem,
+    integrity_problem,
+    snapshot_problem,
+    unreadable_problem,
+)
+from ..core.pragmas import (
+    AFTER_RESTORE_PRAGMAS,
+    CLOSE_PRAGMAS,
+    CONNECT_PRAGMAS,
+    FOREIGN_KEY_CHECK,
+    INTEGRITY_CHECK,
+)
+
+# Re-exported: the PRAGMA lists that use it live in core, where the unit suite can read them.
+from ..core.pragmas import BUSY_TIMEOUT_MS as BUSY_TIMEOUT_MS
 from ..core.transactions import WRITER, begin_transaction
 
-BUSY_TIMEOUT_MS = 5000
 _FOREIGN_KEYS_STATE = "PRAGMA foreign_keys"
 _FOREIGN_KEYS_OFF = "PRAGMA foreign_keys=OFF"
 _FOREIGN_KEYS_ON = "PRAGMA foreign_keys=ON"
@@ -25,7 +40,8 @@ def create_sqlite_engine(path: Path) -> Engine:
 
     The driver's own BEGIN is off (``isolation_level=None``) and ``begin_transaction`` sends every
     BEGIN, so DDL is transactional and a writer takes the write lock at its BEGIN
-    (``core/transactions.py``). ``busy_timeout`` is how long a BEGIN IMMEDIATE waits for it.
+    (``core/transactions.py``). ``busy_timeout`` is how long a BEGIN IMMEDIATE waits for it. Every
+    connection sends ``CONNECT_PRAGMAS`` first (``core/pragmas.py``).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
@@ -42,12 +58,30 @@ def create_sqlite_engine(path: Path) -> Engine:
 
     @event.listens_for(engine, "connect")
     def _set_pragmas(dbapi_connection: sqlite3.Connection, _record: object) -> None:
-        dbapi_connection.execute("PRAGMA foreign_keys=ON")
-        dbapi_connection.execute("PRAGMA journal_mode=WAL")
-        dbapi_connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-        dbapi_connection.execute("PRAGMA synchronous=NORMAL")
+        for statement in CONNECT_PRAGMAS:
+            dbapi_connection.execute(statement)
 
     return engine
+
+
+def close_maintenance(path: Path) -> None:
+    """Send ``CLOSE_PRAGMAS`` to the database at ``path`` on a connection of their own.
+
+    For a board that went out of use (``BoardDatabaseManager``). Its engine is gone, but another
+    connection may still use the file (a backup being taken, a request that opened the board again
+    since). So the connection never creates the file (``mode=rw``) and never waits (no busy
+    timeout): upkeep runs on the path of whichever request let the board go, and a board that is
+    busy just now is skipped and looked after the next time. Raises ``sqlite3.Error``; the caller
+    logs it and carries on.
+    """
+    connection = sqlite3.connect(
+        f"{path.resolve().as_uri()}?mode=rw", uri=True, timeout=0, isolation_level=None
+    )
+    try:
+        for statement in CLOSE_PRAGMAS:
+            connection.execute(statement).fetchall()
+    finally:
+        connection.close()
 
 
 @contextmanager
@@ -138,6 +172,61 @@ def snapshot_database(source: Path, target: Path) -> None:
         dst = sqlite3.connect(target)
         try:
             src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+
+def check_snapshot(path: Path) -> SnapshotProblem | None:
+    """None when the snapshot at ``path`` may be restored, else why not.
+
+    It is read as ``connect_untrusted`` reads a file (read only, ``immutable``: nothing is written
+    beside it), as ``restore_snapshot`` will read it. ``integrity_check`` runs first and
+    ``foreign_key_check`` only on a file that passed it; ``core/integrity.py`` judges the rows, and
+    an error SQLite raises on the way (a damaged page, not a database) is a refusal too.
+    """
+    try:
+        connection = connect_untrusted(path)
+    except sqlite3.Error as exc:
+        return unreadable_problem(_error_code(exc), str(exc))
+    try:
+        findings = connection.execute(INTEGRITY_CHECK).fetchall()
+        violations = (
+            connection.execute(FOREIGN_KEY_CHECK).fetchall()
+            if integrity_problem(findings) is None
+            else []
+        )
+        return snapshot_problem(findings, violations)
+    except sqlite3.Error as exc:
+        return unreadable_problem(_error_code(exc), str(exc))
+    finally:
+        connection.close()
+
+
+def _error_code(error: sqlite3.Error) -> int:
+    """SQLite's extended result code, or 0 for an error the driver raised itself."""
+    code: int | None = getattr(error, "sqlite_errorcode", None)
+    return code or 0
+
+
+def restore_snapshot(source: Path, target: Path) -> None:
+    """Copy a snapshot ``check_snapshot`` accepted over a board's database, with the backup API.
+
+    The snapshot is read exactly as it was checked (``connect_untrusted``), so the pages copied are
+    the pages checked, and the copy is one transaction on the target: a failure leaves the board's
+    previous database. The target is in WAL mode, so the copy lands in its ``-wal`` file;
+    ``AFTER_RESTORE_PRAGMAS`` moves it into the database file at once, also when another connection
+    still has the file open, in which case SQLite's own checkpoint would come only when the last
+    connection closes.
+    """
+    src = connect_untrusted(source)
+    try:
+        dst = sqlite3.connect(target, timeout=BUSY_TIMEOUT_MS / 1000)
+        try:
+            src.backup(dst)
+            for statement in AFTER_RESTORE_PRAGMAS:
+                dst.execute(statement).fetchall()
         finally:
             dst.close()
     finally:

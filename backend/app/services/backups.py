@@ -10,9 +10,10 @@ from typing import Any
 
 from ..core.context import ActorContext
 from ..core.errors import NotFound, ValidationFailure
+from ..core.integrity import SNAPSHOT_REFUSALS
 from ..core.platform import remove_file, retry_io
 from ..storage.board_db import BoardDatabaseManager
-from ..storage.sqlite import snapshot_database, utcnow
+from ..storage.sqlite import check_snapshot, restore_snapshot, snapshot_database, utcnow
 from .boards import BoardService
 from .common import archive_file_name
 
@@ -194,16 +195,18 @@ class BackupService:
         source = self._directory(board_id) / name
         if not source.exists():
             raise NotFound("Backup not found")
-        verification = self._check_file(source)
-        if not verification["ok"]:
+        # Before the board is touched, so a refused snapshot leaves its database as it was.
+        problem = check_snapshot(source)
+        if problem is not None:
             raise ValidationFailure(
-                "Backup failed its integrity check and was not restored",
-                details={"name": name, **verification},
+                SNAPSHOT_REFUSALS[problem.reason],
+                code="board_backup_invalid",
+                details={"name": name, "reason": problem.reason, "detail": problem.detail},
             )
         destination = self.boards.path(board_id)
         with self.boards.locked(board_id):
             self.boards.close(board_id)
-            snapshot_database(source, destination)
+            restore_snapshot(source, destination)
             self.boards.close(board_id)
             attachments = self._restore_attachments(board_id, name)
         report = self.validate(board_id)

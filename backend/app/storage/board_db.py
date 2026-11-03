@@ -4,7 +4,7 @@ import json
 import logging
 import sqlite3
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
@@ -18,7 +18,13 @@ from ..core.errors import BoardUnreadable, NotFound, ServiceUnavailable
 from ..core.identifiers import canonical_board_id
 from ..core.platform import remove_tree
 from .schema import ensure_fts, runner
-from .sqlite import create_sqlite_engine, snapshot_database, utcnow, write_transaction
+from .sqlite import (
+    close_maintenance,
+    create_sqlite_engine,
+    snapshot_database,
+    utcnow,
+    write_transaction,
+)
 
 MAX_CACHED_BOARDS = 64
 
@@ -136,8 +142,18 @@ class BoardDatabaseManager:
 
     def open(self, board_id: str) -> Engine:
         self.validate_board_id(board_id)
+        released: list[str] = []
+        try:
+            return self._open(board_id, released)
+        finally:
+            # Once the manager's lock is released: upkeep of the boards this open let go must not
+            # hold up every other board's open.
+            self._maintain(released)
+
+    def _open(self, board_id: str, released: list[str]) -> Engine:
+        """``open`` itself; the boards it lets go (idle or over the cap) go into ``released``."""
         with self._board_lock(board_id), self._lock:
-            self._sweep()
+            released.extend(self._sweep())
             engine = self._engines.get(board_id)
             if engine is None:
                 path = self.path(board_id)
@@ -172,7 +188,7 @@ class BoardDatabaseManager:
                         details={"current_revision": current, "head_revision": head},
                     )
                 self._verified.add(board_id)
-            self._evict_overflow()
+            released.extend(self._evict_overflow())
             return engine
 
     def _drop(self, board_id: str, engine: Engine) -> None:
@@ -232,33 +248,66 @@ class BoardDatabaseManager:
         remove_tree(directory, profile=self.settings.file_profile)
 
     def close_all(self) -> None:
+        """Release every board at shutdown, then look after each one (``_maintain``)."""
         with self._lock:
+            released = list(self._engines)
             for engine in self._engines.values():
                 engine.dispose()
             self._engines.clear()
             self._last_used.clear()
             self._verified.clear()
             self._fts.clear()
+        self._maintain(released)
 
-    def _sweep(self) -> None:
+    def _sweep(self) -> list[str]:
+        """Release the boards idle longer than the setting; the caller maintains them."""
         cutoff = time.monotonic() - self.settings.board_idle_close_seconds
-        for board_id, used in list(self._last_used.items()):
-            if used < cutoff:
-                engine = self._engines.pop(board_id, None)
-                self._last_used.pop(board_id, None)
-                self._verified.discard(board_id)
-                self._fts.pop(board_id, None)
-                if engine is not None:
-                    engine.dispose()
+        return [
+            board_id
+            for board_id, used in list(self._last_used.items())
+            if used < cutoff and self._release(board_id)
+        ]
 
-    def _evict_overflow(self) -> None:
+    def _evict_overflow(self) -> list[str]:
+        """Release the least recently used boards beyond the cap; the caller maintains them."""
         if len(self._engines) <= MAX_CACHED_BOARDS:
-            return
+            return []
         oldest = sorted(self._last_used.items(), key=lambda item: item[1])
-        for board_id, _ in oldest[: len(self._engines) - MAX_CACHED_BOARDS]:
-            engine = self._engines.pop(board_id, None)
-            self._last_used.pop(board_id, None)
-            self._verified.discard(board_id)
-            self._fts.pop(board_id, None)
-            if engine is not None:
-                engine.dispose()
+        return [
+            board_id
+            for board_id, _ in oldest[: len(self._engines) - MAX_CACHED_BOARDS]
+            if self._release(board_id)
+        ]
+
+    def _release(self, board_id: str) -> bool:
+        """Forget a board's engine (the caller holds ``_lock``); whether it had one."""
+        engine = self._engines.pop(board_id, None)
+        self._last_used.pop(board_id, None)
+        self._verified.discard(board_id)
+        self._fts.pop(board_id, None)
+        if engine is None:
+            return False
+        engine.dispose()
+        return True
+
+    def _maintain(self, board_ids: Iterable[str]) -> None:
+        """SQLite's upkeep for boards that went out of use: ``CLOSE_PRAGMAS`` (``core/pragmas.py``).
+
+        Only where a board goes out of use with its file staying as it is: the idle sweep, the
+        eviction of the least recently used board and shutdown. ``close`` does not maintain: it is
+        called right before a restore, a migration or a delete changes or removes the file. Best
+        effort: a board SQLite will not open or that is busy just now is skipped and logged.
+        """
+        for board_id in board_ids:
+            try:
+                close_maintenance(self.path(board_id))
+            except sqlite3.Error as exc:
+                logger.info(
+                    json.dumps(
+                        {
+                            "event": "board_maintenance_skipped",
+                            "board_id": board_id,
+                            "sqlite_error": getattr(exc, "sqlite_errorname", None),
+                        }
+                    )
+                )
