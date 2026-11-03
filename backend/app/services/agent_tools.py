@@ -7,11 +7,11 @@ deliberately left for later. Every handler calls the same services as the REST r
 authorization, version checks and workflow gates are exactly the ones REST already enforces — a tool
 can be narrower than a scope, never wider.
 
-Deliberately absent: board and list structure changes, Ticket creation, archiving and every human
-decision. A worker lists the boards and finds its Ticket, agrees an intent, creates the Loop, writes
-the Info while it is still speculative, writes its own analysis and RoadMap (or asks a board agent
-for them) and tracks the Tickets; a person still approves the analysis and the RoadMap, confirms
-human work and accepts QA.
+Deliberately absent: board and list structure changes, planned Ticket creation, archiving and every
+human decision. A worker lists the boards and finds its Ticket, agrees an intent, creates the Loop,
+writes the Info while it is still speculative, writes its own analysis and RoadMap (or asks a board
+agent for them), tracks and completes the Tickets and adds the follow-ups it finds outside the plan;
+a person still approves the analysis and the RoadMap, confirms human work and accepts QA.
 
 The handlers live beside this module, in ``agent_tools_read``, ``agent_tools_write``,
 ``agent_tools_tickets`` and ``agent_tools_plan``, and the argument schemas in
@@ -48,7 +48,7 @@ from .agent_tools_schema import ArgumentSchema, InputSchema
 from .agent_tools_schema import model_argument as _model
 from .agent_tools_schema import object_schema as _object
 from .agent_tools_schema import string_argument as _string
-from .agent_tools_tickets import comment_ticket, complete_ticket
+from .agent_tools_tickets import comment_ticket, complete_ticket, create_ticket
 from .agent_tools_write import (
     DEDUPE_WINDOW_SECONDS,
     _ask_agents,
@@ -238,6 +238,28 @@ def tool_catalog() -> dict[str, AgentTool]:
                 required=["board_id", "card_id", "column"],
             ),
             handler=_move_ticket,
+        ),
+        AgentTool(
+            name="create_ticket",
+            description=(
+                "Add a follow-up you found while executing a Loop: a Ticket outside the plan, "
+                "keyed <LoopKey>-UNP-<nnn>, in the first column. It never blocks the plan or the "
+                "Loop's completion. With follow_up_of, the origin Ticket gets a comment pointing "
+                "at it. Asking for the same Ticket again answers the first one."
+            ),
+            scopes=("cards:write", "comments:write"),
+            input_schema=_object(
+                {
+                    "board_id": _BOARD_ID,
+                    "loop_id": _string("Loop identifier from read_board"),
+                    "title": _string("Short title of the work"),
+                    "description": _string("Markdown: what was found and what is to be done"),
+                    "follow_up_of": _string("Optional id of the Ticket this work came out of"),
+                    "priority": _string("Optional: none, low, medium, high or urgent"),
+                },
+                required=["board_id", "loop_id", "title"],
+            ),
+            handler=create_ticket,
         ),
         AgentTool(
             name="comment_ticket",
@@ -554,6 +576,7 @@ __all__ = [
     "allowed_actions",
     "comment_ticket",
     "complete_ticket",
+    "create_ticket",
     "describe_scope",
     "list_boards",
     "map_plan_ids",

@@ -50,7 +50,7 @@ from .cards_writes import (
     ticket_in_loop,
 )
 from .lists import BoardChecks
-from .loops import ensure_execution_allowed, readiness_item, require_loop
+from .loops import EXECUTION_STAGES, ensure_execution_allowed, readiness_item, require_loop
 from .plan_views import PlanViews, ReadinessItem
 from .subresources import label_entries
 
@@ -293,11 +293,13 @@ class CardService:
     def _loop_taking_new_work(self, repos: BoardRepositories, loop_id: str) -> LoopsRow:
         loop = require_loop(repos, loop_id)
         self._require_writable(loop)
-        if loop.current_plan_id:
+        # A Loop with a plan takes work outside it only while it executes; that work is keyed
+        # <LoopKey>-UNP-<nnn> and never blocks readiness or completion.
+        if loop.current_plan_id and loop.stage not in EXECUTION_STAGES:
             raise Conflict(
-                "This Loop executes an approved plan; amend the plan to add work",
+                "This Loop's plan is not executing; amend the plan or wait for it to run",
                 code=PLAN_CHANGE_CODE,
-                details={"loop_id": loop_id},
+                details={"loop_id": loop_id, "stage": loop.stage},
             )
         return loop
 

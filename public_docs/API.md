@@ -805,6 +805,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket; only a read-only Loop or board refuses it |
+| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`; `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id` |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the messages and positions |
 | `read_discussion` | `discussions:read` | Read a thread with its messages and each agent's position |
@@ -815,7 +816,7 @@ The flow a person and their worker use to start work is `create_loop` → `write
 produces. Every step stays inside the same gates: the analysis and the RoadMap are candidates until a
 signed-in person approves them, and a cancelled or completed Loop is read-only.
 
-Deliberately absent: board and list structure changes, Ticket creation or archiving, RoadMap and QA
+Deliberately absent: board and list structure changes, planned Ticket creation or archiving, RoadMap and QA
 writes, provider configuration and the approval decisions themselves.
 
 A tool lists **every** scope it needs, and `tools/list` hides a tool unless the token holds all of

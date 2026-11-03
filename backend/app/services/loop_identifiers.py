@@ -43,3 +43,22 @@ def format_ticket_key(
     loop_key: str, phase_prefix_value: str, phase_number: int, ticket_sequence: int
 ) -> str:
     return f"{loop_key}-{phase_prefix_value}{phase_number:02d}-{ticket_sequence:03d}"
+
+
+UNPLANNED_MARK = "UNP"
+
+
+def format_unplanned_key(loop_key: str, sequence: int) -> str:
+    """The key of a Ticket added outside a Loop's plan: ``<LoopKey>-UNP-<nnn>``."""
+    return f"{loop_key}-{UNPLANNED_MARK}-{sequence:03d}"
+
+
+def next_unplanned_sequence(loop_key: str, keys: list[str | None]) -> int:
+    """One more than the highest unplanned sequence among ``keys``, so a key is never reused."""
+    prefix = f"{loop_key}-{UNPLANNED_MARK}-"
+    taken = [
+        int(key[len(prefix) :])
+        for key in keys
+        if key is not None and key.startswith(prefix) and key[len(prefix) :].isdigit()
+    ]
+    return max(taken, default=0) + 1

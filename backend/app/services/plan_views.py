@@ -89,6 +89,39 @@ class Readiness(TypedDict):
     phases: list[PhaseView]
 
 
+class UnplannedTicket(TypedDict):
+    """A Ticket added outside the Loop's plan: it never blocks readiness or completion."""
+
+    id: str
+    key: str | None
+    title: str
+    completed_at: str | None
+    archived_at: str | None
+
+
+class LoopReadiness(Readiness):
+    """Readiness as the Loop answers it: the plan's Tickets and the work outside the plan."""
+
+    unplanned: list[UnplannedTicket]
+
+
+def unplanned_tickets(repos: BoardRepositories, loop: LoopsRow) -> list[UnplannedTicket]:
+    """The manual Tickets of a Loop that executes a plan, archived ones included; a Loop without
+    a plan has nothing outside it."""
+    if not loop.current_plan_id:
+        return []
+    return [
+        {
+            "id": card.id,
+            "key": card.ticket_key,
+            "title": card.title,
+            "completed_at": card.completed_at,
+            "archived_at": card.archived_at,
+        }
+        for card in repos.cards.manual(loop.id)
+    ]
+
+
 class PlanView(TypedDict):
     """The Loop's active plan by Phase (``status`` ``none`` when there is none)."""
 

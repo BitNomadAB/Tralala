@@ -18,6 +18,7 @@ from ..repositories.cards import CardChanges
 from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.cards import CardCreate, CardUpdate
 from .activity import activity_entry
+from .loop_identifiers import format_unplanned_key, next_unplanned_sequence
 from .loops import refresh_stage
 from .ordering import place
 
@@ -132,6 +133,13 @@ def insert_card(
         )
     card_id = new_id()
     timestamp = now()
+    # Work added to a Loop that executes a plan is outside it: keyed so a person can follow it.
+    key = None
+    if loop.current_plan_id:
+        sequence = next_unplanned_sequence(
+            loop.key, [row.ticket_key for row in repos.cards.manual(loop.id)]
+        )
+        key = format_unplanned_key(loop.key, sequence)
     repos.cards.add(
         CardsRow(
             id=card_id,
@@ -154,7 +162,7 @@ def insert_card(
             loop_id=loop.id,
             phase_id=None,
             plan_item_id=None,
-            ticket_key=None,
+            ticket_key=key,
             kind="manual",
             required_actor="any",
             execution_mode="normal",

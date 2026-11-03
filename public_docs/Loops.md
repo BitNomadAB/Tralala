@@ -41,6 +41,12 @@ changes or resets it. In the Analysis tab the human view carries a label — *Wr
 or *Rendered from the structure* — and **Rewrite for people** starts the run again for the current
 technical analysis. While one runs, the tab says so and **Approve analysis** waits for it.
 
+Once the plan executes (`ready`, `in_progress`, `awaiting_qa`), a person or a worker may still add
+a Ticket *outside the plan*: it is keyed `<LoopKey>-UNP-<nnn>`, carries an **Unplanned** badge, is
+listed under **Outside the plan** in the RoadMap tab and in readiness (`unplanned`), and never blocks
+a Phase or the Loop's completion; accepting the implementation names the ones still open. Outside
+those stages a new Ticket is refused with `409 plan_change_required`.
+
 Changing an input invalidates what depended on it: a new Info revision makes the analysis pair and
 both RoadMap views stale, the Loop moves to `replanning`, and execution transitions are rejected
 with `409 plan_change_required` until a replacement plan is approved.

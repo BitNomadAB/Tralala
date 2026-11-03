@@ -88,7 +88,7 @@ from .loops_views import (
     progress_entry,
     qa_summary,
 )
-from .plan_views import PlanView, PlanViews, Readiness
+from .plan_views import LoopReadiness, PlanView, PlanViews, unplanned_tickets
 
 if TYPE_CHECKING:
     from .cards import CardEntry
@@ -191,10 +191,14 @@ class LoopService:
         with self.store.reader(board_id) as repos:
             return self.plans.plan_view(repos, require_loop(repos, loop_id))
 
-    def readiness(self, board_id: str, loop_id: str) -> Readiness:
+    def readiness(self, board_id: str, loop_id: str) -> LoopReadiness:
         self.boards.require_row(board_id)
         with self.store.reader(board_id) as repos:
-            return self.plans.readiness(repos, require_loop(repos, loop_id))
+            loop = require_loop(repos, loop_id)
+            return {
+                **self.plans.readiness(repos, loop),
+                "unplanned": unplanned_tickets(repos, loop),
+            }
 
     # --- writes ----------------------------------------------------------------------------------
 

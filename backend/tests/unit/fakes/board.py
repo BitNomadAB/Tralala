@@ -1385,6 +1385,16 @@ class FakeCardRepository:
             ),
         )
 
+    def manual(self, loop_id: str) -> list[CardsRow]:
+        return sorted(
+            (
+                card
+                for card in self._state.cards.values()
+                if card.loop_id == loop_id and card.kind == "manual"
+            ),
+            key=lambda card: (card.created_at, card.id),
+        )
+
     def completed_tickets(self, loop_id: str) -> int:
         return sum(
             1

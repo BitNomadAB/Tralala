@@ -60,6 +60,7 @@ from .loops import (
     refresh_stage,
     require_loop,
 )
+from .plan_views import unplanned_tickets
 
 
 def _now() -> datetime:
@@ -161,6 +162,12 @@ class LoopQaService:
                     code="ticket_blocked",
                     details={"open": open_work},
                 )
+            # Work outside the plan never blocks; the answer names what is still open of it.
+            unplanned_open = [
+                ticket
+                for ticket in unplanned_tickets(repos, loop)
+                if ticket["completed_at"] is None and ticket["archived_at"] is None
+            ]
             approval_id = self._record_decision(
                 repos,
                 loop,
@@ -187,7 +194,7 @@ class LoopQaService:
                     qa_approval_id=qa_approval_id,
                     now=self._now(),
                 )
-                return self.history.finalize(
+                finalized = self.history.finalize(
                     repos,
                     loop_id,
                     board_id=board_id,
@@ -195,6 +202,8 @@ class LoopQaService:
                     qa_approval_id=qa_approval_id,
                     attestation=payload.attestation,
                 )
+                finalized["unplanned_open"] = unplanned_open
+                return finalized
             cycle = self.ensure_cycle(repos, loop, actor)
             now = self._now()
             repos.loops.start_qa(
@@ -215,6 +224,7 @@ class LoopQaService:
             result = self._latest_entry(repos, loop_id)
             result["finalized"] = False
             result["stage"] = loop.stage
+            result["unplanned_open"] = unplanned_open
         return result
 
     def _request_instructions(self, actor: ActorContext, board_id: str, loop_id: str) -> None:

@@ -342,6 +342,8 @@ def _read_loop(
             for entry in _loop_lists(services, board_id, loop_id)
         ],
         "tickets": services.card.list(board_id, loop_id, limit=200)[0],
+        # Work added outside the plan (create_ticket): it never blocks readiness or completion.
+        "unplanned_tickets": readiness["unplanned"],
     }
 
 

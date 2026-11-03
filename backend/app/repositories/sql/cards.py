@@ -94,6 +94,10 @@ _CONFIRM_HUMAN = text(
     " human_confirmed_by_actor_id = :actor, updated_at = :now, version = version + 1"
     " WHERE id = :id"
 )
+_MANUAL = text(
+    f"SELECT {sql.column_list(CARDS_COLUMNS)} FROM cards"  # noqa: S608 - from CARDS_COLUMNS
+    " WHERE loop_id = :id AND kind = 'manual' ORDER BY created_at, id"
+)
 _COMPLETED_TICKETS = text(
     "SELECT COUNT(*) AS total FROM cards WHERE loop_id = :id AND kind IN ('ticket','qa')"
     " AND completed_at IS NOT NULL"
@@ -324,6 +328,10 @@ class SqlCardRepository:
 
     def confirm_human(self, card_id: str, actor_id: str, *, now: str) -> None:
         self._connection.execute(_CONFIRM_HUMAN, {"now": now, "actor": actor_id, "id": card_id})
+
+    def manual(self, loop_id: str) -> list[CardsRow]:
+        result = self._connection.execute(_MANUAL, {"id": loop_id})
+        return [CardsRow.from_mapping(row) for row in result.mappings()]
 
     def completed_tickets(self, loop_id: str) -> int:
         row = self._connection.execute(_COMPLETED_TICKETS, {"id": loop_id}).mappings().one()

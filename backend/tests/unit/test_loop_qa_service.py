@@ -196,6 +196,29 @@ def test_open_delivery_tickets_block_acceptance(tmp_path: Path) -> None:
     assert generation.started == []
 
 
+def test_unplanned_work_never_blocks_acceptance_and_the_answer_names_what_is_open(
+    tmp_path: Path,
+) -> None:
+    service, state, _ = make(tmp_path)
+    state.cards["u-1"] = card_row("u-1", "list-a", LOOP).__replace__(
+        kind="manual", ticket_key="L-1-UNP-001", title="Rename the export"
+    )
+    state.cards["u-2"] = card_row("u-2", "list-a", LOOP).__replace__(
+        kind="manual", ticket_key="L-1-UNP-002", completed_at=NOW
+    )
+    result = accept(service)
+    assert result["unplanned_open"] == [
+        {
+            "id": "u-1",
+            "key": "L-1-UNP-001",
+            "title": "Rename the export",
+            "completed_at": None,
+            "archived_at": None,
+        }
+    ]
+    assert len(state.qa_cycles) == 1
+
+
 def test_acceptance_without_an_active_plan_needs_approval(tmp_path: Path) -> None:
     service, state, _ = make(tmp_path)
     state.plans.clear()

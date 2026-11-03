@@ -311,6 +311,14 @@ class PlanOut(OutModel):
     warnings: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
 
+class UnplannedTicketOut(OutModel):
+    id: str
+    key: str | None = None
+    title: str
+    completed_at: str | None = None
+    archived_at: str | None = None
+
+
 class ReadinessOut(OutModel):
     loop_id: str
     stage: LoopStage
@@ -318,6 +326,10 @@ class ReadinessOut(OutModel):
     blocked_reason: dict[str, object] | None = None
     items: list[PlanItemOut] = Field(default_factory=list[PlanItemOut])
     phases: list[PhaseOut] = Field(default_factory=list[PhaseOut])
+    unplanned: list[UnplannedTicketOut] = Field(
+        default_factory=list["UnplannedTicketOut"],
+        description="Tickets added outside the plan while it executes; they never block",
+    )
 
 
 class ChangePreviewOut(OutModel):

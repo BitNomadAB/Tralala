@@ -86,6 +86,7 @@ certificate. `/llms.txt` is plain text at the same origin.
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |
 | `comment_ticket` | `comments:write` | add a comment, done or not: progress, findings, a blocker |
+| `create_ticket` | `cards:write`, `comments:write` | add a follow-up outside the plan while the Loop executes, keyed `<LoopKey>-UNP-<nnn>` |
 | `complete_ticket` | `cards:write`, `comments:write` | finish a Ticket: your summary and evidence as a comment, then completed |
 | `create_loop` | `loops:write` | open a Loop for an agreed intent (idempotent) |
 | `write_info` | `loops:write` | write the Info, only while the Loop is `draft` or `analysis_review` |
@@ -112,6 +113,7 @@ read_ticket                     -> read the one you are about to touch, includin
 comment_ticket                  -> what you found or what you changed
 assign_ticket / move_ticket     -> hand it on, or move it to the column that means "in progress"
 complete_ticket(summary)        -> done: the summary and evidence as a comment, completed_at set
+create_ticket(follow_up_of)     -> anything you found that is not this Ticket's work
 ```
 
 To start something new together:
@@ -139,12 +141,23 @@ keys when you hand the RoadMap in again. Send `expected_info_revision_id` or
 `409 document_stale`. While an analysis or a RoadMap is approved, a token cannot replace it
 (`403 human_action_required`): the person requests changes or resets it first.
 
+### Work outside the plan
+
+A follow-up you discover while a Loop executes (`ready`, `in_progress` or `awaiting_qa`) is
+`create_ticket`: a Ticket outside the plan, keyed `<LoopKey>-UNP-<nnn>`, in the Loop's first column.
+It never blocks a Phase, the plan's readiness or the Loop's completion; `read_loop` lists it under
+`unplanned_tickets`, and accepting the implementation names the ones still open. With
+`follow_up_of`, the description starts with `Follow-up of <KEY>:` and the origin Ticket gets the
+comment `Follow-up: <NEW KEY> - <title>`. Outside an execution stage the answer is
+`409 plan_change_required`.
+
 ## 5. What a worker cannot do, by design
 
 - Approve an analysis or a RoadMap, confirm a human-only Ticket, accept QA, finalize a Loop — these
   answer `403 human_action_required` even with every scope.
-- Create or archive boards, change board structure, publish or edit a RoadMap, create Tickets
-  directly: the plan does, after a human approves it.
+- Create or archive boards, change board structure, publish or edit a RoadMap, or create a
+  *planned* Ticket: the plan does, after a human approves it. Work you find while executing goes
+  outside the plan with `create_ticket` (below).
 - Change a Ticket's approved scope, or move work between Loops.
 - Complete a Ticket by moving it: a column named Done completes nothing. `complete_ticket` is the
   way, and it is offered in `read_ticket`'s `allowed_actions` only while the Ticket is ready, open
@@ -162,6 +175,8 @@ keys when you hand the RoadMap in again. Send `expected_info_revision_id` or
   as a retry and return the original object; so does `complete_ticket` with the same summary and
   evidence (`deduplicated: true`). A Ticket somebody already completed answers
   `already_completed: true` and keeps your summary as a comment.
+- `create_ticket` asked for the same Ticket again (same Loop, title, description, priority and
+  origin) answers the first one (`deduplicated: true`) for a day.
 - `move_ticket` is version-checked: send the version you read, and a `409 version_conflict` means
   someone else moved it first — re-read rather than retrying blindly.
 

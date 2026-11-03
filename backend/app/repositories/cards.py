@@ -151,6 +151,11 @@ class CardRepository(Protocol):
         """Completed and confirmed by ``actor_id``, with the next version."""
         ...
 
+    def manual(self, loop_id: str) -> list[CardsRow]:
+        """The Loop's manual cards (not published from a plan), archived ones included, by
+        creation time and id."""
+        ...
+
     def completed_tickets(self, loop_id: str) -> int:
         """Completed Ticket and QA cards of the Loop, archived ones included."""
         ...

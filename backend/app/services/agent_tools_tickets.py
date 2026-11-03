@@ -1,4 +1,9 @@
-"""The worker tools that write on a Ticket: ``comment_ticket`` and ``complete_ticket``.
+"""The worker tools that write on a Ticket: ``create_ticket``, ``comment_ticket`` and
+``complete_ticket``.
+
+``create_ticket`` adds work a worker found while executing a Loop: outside the plan, keyed
+``<LoopKey>-UNP-<nnn>``, never blocking readiness or completion (``CardService.create`` holds the
+rule). A follow-up names the Ticket it came from, which gets a comment pointing at it.
 
 A comment goes on a Ticket whether it is done or not; only a Loop or board that takes no writes
 refuses it (the service's rule).
@@ -17,17 +22,23 @@ uses, so a unit test runs it with the real services on the typed fakes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+import hashlib
+import json
+from typing import TYPE_CHECKING, Protocol, TypeIs, get_args
+
+from pydantic import ValidationError
 
 from ..core.context import ActorContext
 from ..core.errors import ApiError, NotFound, ValidationFailure, VersionConflict
-from ..schemas.cards import CardUpdate
+from ..schemas.cards import CardCreate, CardUpdate
+from ..schemas.common import Priority
 from ..schemas.subresources import CommentCreate
-from .agent_tools_read import ToolArguments, ToolResult, _require
+from .agent_tools_read import ToolArguments, ToolResult, _require, _text
 from .agent_tools_write import DEDUPE_WINDOW_SECONDS, _seconds_since
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from .cards import CardEntry, CardService
+    from .lists import ListService
     from .loops import LoopService
     from .subresources import CommentEntry, CommentService
 
@@ -46,6 +57,13 @@ class TicketCommenting(Protocol):
 
     @property
     def comment(self) -> CommentService: ...
+
+
+class TicketCreating(TicketCommenting, Protocol):
+    """What ``create_ticket`` uses of the composition root."""
+
+    @property
+    def list(self) -> ListService: ...
 
 
 class TicketCompleting(TicketCommenting, Protocol):
@@ -153,6 +171,88 @@ def comment_ticket(
     }
 
 
+def _is_priority(value: object) -> TypeIs[Priority]:
+    return value in get_args(Priority)
+
+
+def _priority(args: ToolArguments) -> Priority:
+    value = args.get("priority") or "none"
+    if _is_priority(value):
+        return value
+    raise ValidationFailure(
+        "Unknown priority", details={"argument": "priority", "allowed": list(get_args(Priority))}
+    )
+
+
+def _retry_key(loop_id: str, title: str, description: str, priority: str, origin: str) -> str:
+    """The idempotency key of a ``create_ticket`` call: the same Ticket asked for again by the
+    same actor answers the first one instead of a second Ticket."""
+    material = json.dumps([loop_id, title, description, priority, origin])
+    return "create_ticket:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:40]
+
+
+def create_ticket(
+    services: TicketCreating, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
+    actor.require("cards:write")
+    actor.require("comments:write")
+    board_id = _require(args, "board_id")
+    loop_id = _require(args, "loop_id")
+    title = _require(args, "title")
+    description = _text(args.get("description")) or ""
+    priority = _priority(args)
+    origin_id = _text(args.get("follow_up_of"))
+    origin: CardEntry | None = None
+    if origin_id is not None:
+        origin_loop, _ = services.card.locate(board_id, origin_id)
+        origin = services.card.get(board_id, origin_loop, origin_id)
+        description = f"Follow-up of {origin['ticket_key'] or origin['title']}: {description}"
+    columns = services.list.list(board_id, loop_id)
+    if not columns:
+        raise ValidationFailure("The Loop has no column to add a Ticket to")
+    try:
+        payload = CardCreate(
+            list_id=columns[0]["id"], title=title, description=description, priority=priority
+        )
+    except ValidationError as error:
+        raise ValidationFailure(
+            "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in error.errors())
+        ) from None
+    created, replayed = services.card.create(
+        actor,
+        board_id,
+        loop_id,
+        payload,
+        idempotency_key=_retry_key(loop_id, title, description, priority, origin_id or ""),
+    )
+    card = services.card.get(board_id, loop_id, str(created["id"]))
+    answer: ToolResult = {
+        "ticket": {
+            "id": card["id"],
+            "key": card["ticket_key"],
+            "title": card["title"],
+            "column": columns[0]["name"],
+            "version": card["version"],
+        },
+        "unplanned": card["ticket_key"] is not None,
+    }
+    if origin is not None:
+        note = f"Follow-up: {card['ticket_key'] or card['title']} - {card['title']}"
+        kept = _recent(services, actor, board_id, origin["id"], note)
+        if kept is None and not replayed:
+            kept = services.comment.create(
+                actor, board_id, origin["id"], CommentCreate(content=note)
+            )
+        answer["follow_up_of"] = {
+            "id": origin["id"],
+            "key": origin["ticket_key"],
+            "comment_id": kept["id"] if kept is not None else None,
+        }
+    if replayed:
+        answer["deduplicated"] = True
+    return answer
+
+
 def complete_ticket(
     services: TicketCompleting, actor: ActorContext, args: ToolArguments
 ) -> ToolResult:
@@ -194,7 +294,9 @@ __all__ = [
     "REFUSALS",
     "TicketCommenting",
     "TicketCompleting",
+    "TicketCreating",
     "comment_ticket",
     "complete_ticket",
     "completion_comment",
+    "create_ticket",
 ]

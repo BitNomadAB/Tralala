@@ -419,9 +419,14 @@ def test_a_new_card_is_refused_where_it_cannot_belong(settings: Settings) -> Non
     ("loop", "code", "message"),
     [
         (
-            loop_row(LOOP, stage="ready").__replace__(current_plan_id="p"),
+            loop_row(LOOP, stage="replanning").__replace__(current_plan_id="p"),
             "plan_change_required",
-            "This Loop executes an approved plan; amend the plan to add work",
+            "This Loop's plan is not executing; amend the plan or wait for it to run",
+        ),
+        (
+            loop_row(LOOP, stage="roadmap_review").__replace__(current_plan_id="p"),
+            "plan_change_required",
+            "This Loop's plan is not executing; amend the plan or wait for it to run",
         ),
         (
             loop_row(LOOP, completed_at=STAMP),
@@ -448,6 +453,27 @@ def test_a_planned_or_finished_loop_takes_no_new_card(
     with pytest.raises(Conflict):
         w.service.bulk_create(HUMAN, BOARD_ID, LOOP, BulkCardCreate(cards=[payload]))
     assert w.state.cards == {}
+
+
+@pytest.mark.parametrize("stage", ["ready", "in_progress", "awaiting_qa"])
+def test_an_executing_loop_takes_unplanned_work_keyed_after_every_earlier_one(
+    settings: Settings, stage: str
+) -> None:
+    w = world(settings, loop_row(LOOP, stage=stage).__replace__(current_plan_id="p"))
+    first, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="One"))
+    second, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Two"))
+    assert (first["ticket_key"], second["ticket_key"]) == ("L-1-UNP-001", "L-1-UNP-002")
+    assert {w.card(str(first["id"])).kind, w.card(str(second["id"])).kind} == {"manual"}
+    # An archived one keeps its key, so the next never reuses it.
+    w.service.archive(HUMAN, BOARD_ID, LOOP, str(second["id"]))
+    third, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Three"))
+    assert third["ticket_key"] == "L-1-UNP-003"
+
+
+def test_a_loop_without_a_plan_keys_no_manual_card(settings: Settings) -> None:
+    w = world(settings)
+    entry, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Plain"))
+    assert entry["ticket_key"] is None
 
 
 def test_a_replayed_card_key_answers_the_stored_card(settings: Settings) -> None:

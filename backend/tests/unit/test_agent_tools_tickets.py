@@ -9,8 +9,10 @@ sees a comment written by this test as seconds old.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TypeIs
 
 import pytest
 from pydantic import JsonValue, ValidationError
@@ -22,13 +24,16 @@ from app.core.errors import ApiError, Conflict, Forbidden, ValidationFailure
 from app.db.generated.board import CommentsRow
 from app.schemas.subresources import CommentCreate
 from app.services.agent_tools import (
+    ToolResult,
     allowed_actions,
     comment_ticket,
     complete_ticket,
+    create_ticket,
     tool_catalog,
 )
 from app.services.agent_tools_tickets import completion_comment
 from app.services.cards import CardService
+from app.services.lists import ListService
 from app.services.loops import LoopService
 from app.services.subresources import CommentService
 from tests.unit.fakes.board import (
@@ -68,6 +73,7 @@ class TicketWorld:
     card: CardService
     comment: CommentService
     loop: LoopService
+    list: ListService
     state: BoardState
     views: FakePlanViews
 
@@ -78,7 +84,10 @@ def ticket_world(settings: Settings) -> TicketWorld:
     state = BoardState()
     loop = loop_row(LOOP, stage="ready").__replace__(current_plan_id="plan-1")
     state.loops = {LOOP: loop}
-    state.lists = {"doing": list_row("doing", LOOP, 1024, name="Doing")}
+    state.lists = {
+        "todo": list_row("todo", LOOP, 512, name="Todo"),
+        "doing": list_row("doing", LOOP, 1024, name="Doing"),
+    }
     state.cards = {
         "t": card_row("t", "doing", LOOP, plan_item_id="item-t").__replace__(
             ticket_key="K-1", kind="ticket"
@@ -106,6 +115,7 @@ def ticket_world(settings: Settings) -> TicketWorld:
         loop=LoopService(
             settings, checks, store, plans=plan_views(views), tickets=cards, clock=lambda: NOW
         ),
+        list=ListService(checks, store),
         state=state,
         views=views,
     )
@@ -275,6 +285,83 @@ def test_comment_ticket_is_refused_only_where_nothing_may_be_written(settings: S
         comment_ticket(world, WORKER, note("m", "Hello"))
     assert closed.value.code == "loop_read_only"
     assert comments(world, "m") == []
+
+
+def _is_mapping(value: object) -> TypeIs[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def part(answer: ToolResult, key: str) -> Mapping[str, object]:
+    value = answer[key]
+    assert _is_mapping(value)
+    return value
+
+
+def ask(title: str, **more: JsonValue) -> dict[str, JsonValue]:
+    return {"board_id": BOARD_ID, "loop_id": LOOP, "title": title, **more}
+
+
+def test_create_ticket_adds_work_outside_the_plan_in_the_first_column(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    answer = create_ticket(
+        world, WORKER, ask("Rename the export", description="It still says CSV.", priority="low")
+    )
+    card = world.state.cards[str(part(answer, "ticket")["id"])]
+    assert (card.kind, card.ticket_key, card.list_id, card.priority) == (
+        "manual",
+        "L-1-UNP-001",
+        "todo",
+        "low",
+    )
+    assert card.description == "It still says CSV."
+    assert answer == {
+        "ticket": {
+            "id": card.id,
+            "key": "L-1-UNP-001",
+            "title": "Rename the export",
+            "column": "Todo",
+            "version": 1,
+        },
+        "unplanned": True,
+    }
+    readiness = world.loop.readiness(BOARD_ID, LOOP)
+    assert [entry["key"] for entry in readiness["unplanned"]] == ["L-1-UNP-001"]
+    # It is not a planned Ticket, so it never blocks: no readiness item, no blocker.
+    assert all(item["card_id"] != card.id for item in readiness["items"])
+
+
+def test_create_ticket_as_a_follow_up_points_both_ways_and_a_retry_answers_the_first(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    first = create_ticket(world, WORKER, ask("Fix the date", follow_up_of="t"))
+    again = create_ticket(world, WORKER, ask("Fix the date", follow_up_of="t"))
+    card = world.state.cards[str(part(first, "ticket")["id"])]
+    assert card.description == "Follow-up of K-1: "
+    assert comments(world, "t") == ["Follow-up: L-1-UNP-001 - Fix the date"]
+    follow_up = part(first, "follow_up_of")
+    assert (follow_up["id"], follow_up["key"]) == ("t", "K-1")
+    assert again == first | {"deduplicated": True}
+    assert [row.ticket_key for row in world.state.cards.values() if row.kind == "manual"] == [
+        "L-1-UNP-001"
+    ]
+
+
+def test_create_ticket_is_refused_where_the_plan_is_not_executing(settings: Settings) -> None:
+    world = ticket_world(settings)
+    world.state.loops[LOOP] = world.state.loops[LOOP].__replace__(stage="replanning")
+    with pytest.raises(Conflict) as refused:
+        create_ticket(world, WORKER, ask("Too late"))
+    assert refused.value.code == "plan_change_required"
+    with pytest.raises(ValidationFailure, match="priority"):
+        create_ticket(world, WORKER, ask("Odd", priority="whenever"))
+    with pytest.raises(ValidationFailure, match="title"):
+        create_ticket(world, WORKER, ask("x" * 201))
+    with pytest.raises(Forbidden):
+        create_ticket(world, MOVER, ask("No comments scope"))
+    assert all(card.kind != "manual" for card in world.state.cards.values() if card.id != "m")
 
 
 def test_complete_ticket_needs_both_scopes_and_list_evidence(settings: Settings) -> None:
