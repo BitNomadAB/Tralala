@@ -134,8 +134,11 @@ hand authentication and the service call to the same pool. It runs 40 requests a
 SQLite takes one writer per database. A transaction that writes starts with `BEGIN IMMEDIATE`, so
 it holds the write lock before it reads: a second writer waits up to the 5 s busy timeout at its
 start instead of failing halfway, and then reads what the first committed. A reader starts with a
-deferred `BEGIN` and blocks nobody. An open event stream waits for its next event on a limiter of
-its own (100 streams), so open streams cannot use up the threads that requests run in.
+deferred `BEGIN` and blocks nobody. Alembic keeps the migration it is running in module globals,
+so the process runs one migration at a time: boards created, imported or migrated at once get
+their schema one after the other (`app/storage/schema/runner.py`). An open event stream waits for
+its next event on a limiter of its own (100 streams), so open streams cannot use up the threads
+that requests run in.
 
 ## Consistency across databases
 
