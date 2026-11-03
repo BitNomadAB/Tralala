@@ -1,6 +1,7 @@
 // @ts-check
 import js from "@eslint/js";
 import { defineConfig, globalIgnores } from "eslint/config";
+import eslintConfigPrettier from "eslint-config-prettier/flat";
 import { createTypeScriptImportResolver } from "eslint-import-resolver-typescript";
 import { importX } from "eslint-plugin-import-x";
 import jsxA11y from "eslint-plugin-jsx-a11y-x";
@@ -130,5 +131,9 @@ export default allErrors(
         globals: globals.node,
       },
     },
+    // Last, so it wins: layout is Prettier's (`prettier --check` in `pnpm lint`), and this turns
+    // off every rule that would argue with it. In this config that is only no-unexpected-multiline,
+    // which guards against a missing semicolon that Prettier always inserts.
+    eslintConfigPrettier,
   ),
 );

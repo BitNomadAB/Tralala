@@ -62,12 +62,13 @@ Run these from `frontend/`.
 | `pnpm install` | Install and update the lockfile if `package.json` changed. |
 | `pnpm dev` | Development server with hot reload on `:5173`. |
 | `pnpm typecheck` | `tsc --noEmit`: types only, no output. |
-| `pnpm lint` | ESLint with type information (`eslint.config.js`); every rule is an error and any warning fails. |
+| `pnpm lint` | `prettier --check .` (`.prettierrc.json`; a file Prettier would reformat fails), then ESLint with type information (`eslint.config.js`); every rule is an error and any warning fails. |
+| `pnpm format` | Prettier rewrites the frontend's TypeScript, JavaScript, JSON, CSS and HTML; run it before a commit. Markdown is left to `pnpm lint:md`. |
 | `pnpm exec eslint . --fix` | Apply the fixes ESLint can make on its own (import order, braces), then re-run `pnpm lint`. |
 | `pnpm test` | Vitest unit and component tests, one run. |
 | `pnpm exec vitest` | The same tests in watch mode while you edit. |
 | `pnpm exec vitest run src/tests/theme.test.ts` | Only one test file. |
-| `pnpm build` | Typecheck, lint, production build and the client build guard (no source maps, no server-only strings). |
+| `pnpm build` | Typecheck, ESLint, production build and the client build guard (no source maps, no server-only strings). |
 | `pnpm preview` | Serve the built bundle locally to check a production build. |
 | `pnpm lint:md` | markdownlint on `README.md`, `AGENTS.md`, `docs/` and `public_docs/`; what CI runs. |
 
@@ -184,11 +185,15 @@ downgraded by that, so a rollback across a schema change needs a snapshot from b
 | `pnpm update` | Move within the declared ranges (patch and minor). |
 | `pnpm up react react-dom @types/react @types/react-dom` | The deliberate React upgrade; rewrites `package.json` ranges. |
 | `pnpm up vite vitest typescript` | The same for the build and test toolchain. |
-| `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | The gate: types, lint, unit tests, build and the journeys. |
+| `pnpm add -D -E prettier@<version>` then `pnpm format` | A Prettier upgrade: commit the reformatted files alone and add that commit to `.git-blame-ignore-revs`. |
+| `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | The gate: types, formatting and lint, unit tests, build and the journeys. |
 | `pnpm rebuild` | Re-run install scripts, e.g. if a native dependency broke after an upgrade. |
 
 React is pinned to `^19.2` (the code uses `useEffectEvent`), Vite to `^6`, TypeScript to `~5.7` in `frontend/package.json`. Update the
 range and the code together, never only the lockfile.
+
+Prettier is pinned to one exact version, because even a patch release may lay code out differently
+and would then fail `pnpm lint` on files nobody touched.
 
 ### Backend dependencies (FastAPI, SQLAlchemy, Alembic, httpx)
 

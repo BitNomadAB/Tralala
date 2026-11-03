@@ -235,7 +235,7 @@ cd backend
 ../.venv/bin/python -m ruff check app tests migrations
 cd ../frontend
 pnpm typecheck
-pnpm lint           # ESLint, zero warnings
+pnpm lint           # Prettier check, then ESLint with zero warnings (`pnpm format` fixes layout)
 pnpm test
 pnpm build          # also runs typecheck, ESLint and the client build guard
 pnpm lint:md        # Markdown lint on the documentation

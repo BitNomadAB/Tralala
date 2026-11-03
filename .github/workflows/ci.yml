@@ -59,8 +59,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
-      # ESLint with type information (eslint.config.js): every rule is an error and any warning fails.
-      - name: Lint
+      # Prettier first (.prettierrc.json): a file it would reformat fails the step. Then ESLint with
+      # type information (eslint.config.js): every rule is an error and any warning fails.
+      - name: Format and lint
         run: pnpm lint
       - name: Unit tests
         run: pnpm test

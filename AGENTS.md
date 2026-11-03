@@ -111,8 +111,9 @@ Frontend (run from `frontend/`):
 ```powershell
 pnpm test           # vitest unit/component tests
 pnpm typecheck      # tsc --noEmit
-pnpm lint           # ESLint (eslint.config.js), every rule an error, zero warnings
-pnpm build          # production build (includes typecheck and lint)
+pnpm lint           # Prettier --check, then ESLint (eslint.config.js), every rule an error
+pnpm format         # Prettier rewrites what pnpm lint would reject for formatting
+pnpm build          # production build (includes typecheck and ESLint)
 pnpm dev            # dev server on :5173, proxies /api to :8000
 pnpm test:e2e       # Playwright journeys against an isolated stack (:8077 + :5273)
 pnpm lint:md        # markdownlint on README.md, AGENTS.md, docs/ and public_docs/
@@ -139,6 +140,13 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 - ESLint (`frontend/eslint.config.js`): typed typescript-eslint, React hooks, jsx-a11y and import
   rules, every one an error. A rule is switched off or configured only in that file, with its reason
   on the line above; there is no inline `eslint-disable`.
+- Formatting is Prettier's, not a reviewer's: `frontend/.prettierrc.json` (100 columns, double
+  quotes, trailing commas everywhere; the rest is Prettier's defaults, which match `.editorconfig`)
+  covers the frontend's TypeScript, JavaScript, JSON, CSS and HTML. Run `pnpm format` before a
+  commit; `pnpm lint` fails on any file it would change. `eslint-config-prettier` comes last in the
+  ESLint config so no lint rule argues about layout. Markdown is markdownlint's alone, so Prettier
+  does not touch it. Commits that only reformat are listed in `.git-blame-ignore-revs`; run
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs` once so `git blame` skips them.
 - API: JSON envelope `{success, data, request_id, meta}`; errors `{success:false, error, request_id}`.
   Unknown request fields are rejected (`extra="forbid"`). Timestamps are ISO 8601 UTC.
 - Frontend state: TanStack Query for server state; no global store for board data.
