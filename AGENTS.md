@@ -169,6 +169,12 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   `IN :ids`). The only things formatted into a statement are identifiers and fragments taken from
   a module-level tuple of string literals through `app/core/sql.py`; such a line carries
   `# noqa: S608 - from <TUPLE>`.
+- A transaction that writes opens with `write_transaction(engine)` from
+  `backend/app/storage/sqlite.py` and starts with `BEGIN IMMEDIATE`, so a second writer waits at its
+  `BEGIN` instead of failing halfway; `Registry.connect`, `BoardDatabaseManager.session` and the
+  migration runner use it. A reader uses `engine.connect()` and starts a deferred `BEGIN`.
+  SQLAlchemy sends every `BEGIN` (`backend/app/core/transactions.py`), so DDL is transactional, and
+  `backend/tests/unit/test_transactions.py` refuses an `engine.begin()` anywhere else in `app/`.
 - Text files are UTF-8 without a byte-order mark and use LF line endings (`.gitattributes`,
   `.editorconfig`). Backend code writes text with `newline=""` or writes bytes, so a file written on
   Windows is byte-identical to one written on Linux; `tests/unit/test_text_files.py` enforces both.

@@ -16,7 +16,7 @@ from ..core.errors import NotFound, ServiceUnavailable
 from ..core.identifiers import canonical_board_id
 from ..core.platform import remove_tree
 from .schema import ensure_fts, runner
-from .sqlite import create_sqlite_engine, utcnow
+from .sqlite import create_sqlite_engine, utcnow, write_transaction
 
 MAX_CACHED_BOARDS = 64
 
@@ -70,7 +70,7 @@ class BoardDatabaseManager:
         runner.create_schema("board", engine)
         self._fts[board_id] = ensure_fts(engine)
         now = utcnow()
-        with engine.begin() as conn:
+        with write_transaction(engine) as conn:
             conn.execute(
                 text(
                     "INSERT INTO board_metadata (id, description, created_at, updated_at,"
@@ -152,7 +152,7 @@ class BoardDatabaseManager:
         """Single transactional unit of work against one board database."""
         with self._board_lock(board_id):
             engine = self.open(board_id)
-            with engine.begin() as conn:
+            with write_transaction(engine) as conn:
                 yield conn
             with self._lock:
                 self._last_used[board_id] = time.monotonic()

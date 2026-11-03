@@ -4,6 +4,14 @@ Two database kinds, both SQLite with `PRAGMA foreign_keys=ON`, WAL journaling, a
 and `synchronous=NORMAL`. Each database tracks its own schema in Alembic's `alembic_version` table;
 the registry and board schemas are separate migration chains managed by the Migration Manager.
 
+SQLAlchemy sends every `BEGIN` itself, with Python's `sqlite3` transaction handling switched off
+(`isolation_level=None`, SQLAlchemy's documented recipe; `app/core/transactions.py`), so DDL is
+transactional and a reader's statements share one snapshot. A transaction that writes is opened
+with `write_transaction` (`app/storage/sqlite.py`) and starts with `BEGIN IMMEDIATE`: it takes the
+write lock before it reads, so a second writer waits at its `BEGIN` for up to the busy timeout and
+then sees what the first committed, instead of failing with `database is locked` halfway. A reader
+(`engine.connect()`) starts with a deferred `BEGIN`.
+
 ## registry.sqlite
 
 | Table | Purpose |
@@ -139,9 +147,10 @@ Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestr
   and adds no self-reference; the rest of `UNENFORCED` waits for migrations that run with foreign
   keys off and check them before commit (SQLite's documented table-rebuild procedure). Before a
   key is added, a reference whose row is gone is settled by meaning: an optional one becomes NULL,
-  a NOT NULL one that the application cannot orphan stops the upgrade and names the rows. A
-  revision starts with that DML, because Python's `sqlite3` runs DDL before the first
-  INSERT/UPDATE/DELETE outside the transaction.
+  a NOT NULL one that the application cannot orphan stops the upgrade and names the rows. The
+  whole upgrade, DDL included, runs in one `BEGIN IMMEDIATE` transaction
+  (`runner.migration_transaction`), so a refused or failed revision leaves the schema and the data
+  as they were.
 - Lists require archiving before deletion and must be empty of active cards.
 - Boards require archiving and a name confirmation before physical deletion.
 - All timestamps are ISO 8601 UTC strings with second precision (`2026-10-30T12:00:00Z`).

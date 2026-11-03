@@ -214,7 +214,7 @@ class MigrationManager:
         adopted = False
         # One transaction: Alembic participates in it, so a failure leaves the version and
         # schema untouched and the next start can resume from the same point.
-        with engine.begin() as connection:
+        with runner.migration_transaction(engine) as connection:
             from_revision = runner.current_revision(connection)
             if from_revision is None and runner.has_legacy_schema(chain, connection):
                 runner.stamp(chain, connection, baseline)

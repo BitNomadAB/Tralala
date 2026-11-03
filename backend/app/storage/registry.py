@@ -22,7 +22,7 @@ from ..core.security import (
     hash_password,
     write_private_file,
 )
-from .sqlite import create_sqlite_engine, utcnow
+from .sqlite import create_sqlite_engine, utcnow, write_transaction
 
 # What the registry formats into SQL text (see core/sql.py).
 _CREDENTIAL_FILTERS: sql.Filters = (("owner", "c.owner_actor_id = :owner"),)
@@ -59,7 +59,7 @@ class Registry:
 
     @contextmanager
     def connect(self) -> Iterator[Connection]:
-        with self.engine.begin() as conn:
+        with write_transaction(self.engine) as conn:
             yield conn
 
     def read(

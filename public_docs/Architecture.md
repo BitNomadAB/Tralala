@@ -131,7 +131,10 @@ and the event loop keeps to connections, middleware, request bodies and event st
 request does not hold up the others. The three endpoints that read raw bytes stay asynchronous and
 hand authentication and the service call to the same pool. It runs 40 requests at once
 (`THREADPOOL_TOKENS` in `app/main.py`); requests to one board still queue on that board's lock, and
-SQLite takes one writer per database. An open event stream waits for its next event on a limiter of
+SQLite takes one writer per database. A transaction that writes starts with `BEGIN IMMEDIATE`, so
+it holds the write lock before it reads: a second writer waits up to the 5 s busy timeout at its
+start instead of failing halfway, and then reads what the first committed. A reader starts with a
+deferred `BEGIN` and blocks nobody. An open event stream waits for its next event on a limiter of
 its own (100 streams), so open streams cannot use up the threads that requests run in.
 
 ## Consistency across databases
@@ -217,8 +220,10 @@ with no cache, 15 ms once the counters are known, 13 ms with the flag.
   `409 version_conflict` with the current version otherwise.
 - `Idempotency-Key` on board/card creation stores a SHA-256 fingerprint plus the response. A replay
   with the same payload returns the stored response; a different payload returns `409
-  idempotency_key_reused`. The worker tools reuse the same idea per tool (identical content within
-  five minutes is a retry, not a second write).
+  idempotency_key_reused`. Two board creations with one key at the same time take turns on the
+  registry's write lock: the second answers `409 creation_in_progress` while the first is still
+  creating the board, and a retry afterwards replays its response. The worker tools reuse the same
+  idea per tool (identical content within five minutes is a retry, not a second write).
 
 ## Discussion runs
 

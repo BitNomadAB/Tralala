@@ -7,6 +7,8 @@ keeps its own revision in ``alembic_version``. Nothing outside this module and
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
@@ -15,6 +17,8 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Connection, Engine
+
+from ..sqlite import write_transaction
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
 
@@ -85,8 +89,21 @@ def upgrade(chain: str, connection: Connection, revision: str = "head") -> None:
     command.upgrade(_config(chain, connection), revision)
 
 
+@contextmanager
+def migration_transaction(engine: Engine) -> Iterator[Connection]:
+    """The one transaction an upgrade runs in, opened as a writer (``BEGIN IMMEDIATE``).
+
+    Alembic joins a transaction its caller has opened, and the engine sends the BEGIN itself
+    (``core/transactions.py``), so every revision's DDL runs inside this one: a revision that fails
+    leaves the schema and ``alembic_version`` as they were. Python's ``sqlite3`` alone would commit
+    each DDL statement that runs before the first INSERT, UPDATE or DELETE.
+    """
+    with write_transaction(engine) as connection:
+        yield connection
+
+
 def create_schema(chain: str, engine: Engine) -> str:
     """Create a brand-new database at the chain head (used for new boards)."""
-    with engine.begin() as connection:
+    with migration_transaction(engine) as connection:
         upgrade(chain, connection)
     return head_revision(chain)

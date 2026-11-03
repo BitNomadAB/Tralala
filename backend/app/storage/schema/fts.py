@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from sqlalchemy.engine import Connection, Engine
 
+from ..sqlite import write_transaction
+
 FTS_STATEMENTS = [
     """
     CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts
@@ -71,7 +73,7 @@ def _history_index_matches(conn: Connection) -> bool:
 def ensure_fts(engine: Engine) -> bool:
     """Create the FTS tables/triggers when supported; rebuild only when first created."""
     try:
-        with engine.begin() as conn:
+        with write_transaction(engine) as conn:
             existed = conn.exec_driver_sql(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cards_fts'"
             ).first()
