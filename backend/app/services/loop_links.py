@@ -9,13 +9,42 @@ service that is used before the composition root wired it fails with a clear err
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Mapping
+from typing import Protocol
 
+from ..core.context import ActorContext
 from ..core.errors import ServiceUnavailable
+from ..db.generated.board import LoopsRow
+from ..repositories.board import BoardRepositories
+from ..schemas.loops import GenerationRequest, QaInstructions
 
-StartGeneration = Callable[..., Any]
-ApplyQaInstructions = Callable[..., Any]
+
+class StartGeneration(Protocol):
+    """``LoopGenerationService.start``, as accepting implementation asks for QA instructions."""
+
+    def __call__(
+        self,
+        actor: ActorContext,
+        board_id: str,
+        loop_id: str,
+        request: GenerationRequest,
+        /,
+    ) -> object: ...
+
+
+class ApplyQaInstructions(Protocol):
+    """``LoopQaService.apply_instructions``, as a finished QA run hands over its instructions."""
+
+    def __call__(
+        self,
+        repos: BoardRepositories,
+        loop: LoopsRow,
+        instructions: QaInstructions,
+        /,
+        *,
+        run_id: str,
+        provenance: Mapping[str, object],
+    ) -> object: ...
 
 
 class LoopWorkflowLinks:

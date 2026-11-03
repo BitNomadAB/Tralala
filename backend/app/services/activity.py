@@ -1,8 +1,7 @@
 """The board's activity log: the entry every write adds, and the feed that reads them back.
 
 The feed reaches the board database only through the board unit of work (``app/repositories``);
-``log_activity`` is the same entry for services that still hold a connection until their
-conversion.
+a write adds its entry through ``repos.activity`` in its own unit of work.
 """
 
 from __future__ import annotations
@@ -10,17 +9,13 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from typing import Protocol, TypedDict
-from uuid import uuid4
 
 from pydantic import JsonValue
-from sqlalchemy.engine import Connection
 
 from ..core.context import ActorContext
-from ..core.dates import utcnow
 from ..db.generated.board import ActivityLogRow
 from ..repositories.activity import ActivityQuery
 from ..repositories.board import BoardUnitOfWork
-from ..repositories.sql.activity import SqlActivityRepository
 
 
 class ActivityEntry(TypedDict):
@@ -68,29 +63,6 @@ def activity_entry(
         timestamp=timestamp,
         changes_json=json.dumps(changes or {}),
     )
-
-
-def log_activity(
-    conn: Connection,
-    actor: ActorContext,
-    *,
-    action: str,
-    entity_type: str,
-    entity_id: str,
-    changes: Mapping[str, object] | None = None,
-) -> str:
-    """The same row for services that still hold a Connection (until GCS-T00g converts them)."""
-    entry = activity_entry(
-        actor,
-        action=action,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        changes=changes,
-        entry_id=str(uuid4()),
-        timestamp=utcnow(),
-    )
-    SqlActivityRepository(conn).add(entry)
-    return entry.id
 
 
 def _changes(raw: str) -> JsonValue:

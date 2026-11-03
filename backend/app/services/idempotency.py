@@ -3,8 +3,7 @@
 A board keeps one record per actor and key: the request's fingerprint and the answer it got. A
 retried request with the same fingerprint is answered from the record until it expires; the same
 key with another fingerprint is refused. The rule runs on ``BoardIdempotencyRepository``, so it is
-unit-tested on a fake; ``common.run_idempotent`` applies it for the services that still hold a
-connection. A request's fingerprint is ``request_fingerprint`` of what it asks for.
+unit-tested on a fake. A request's fingerprint is ``request_fingerprint`` of what it asks for.
 """
 
 from __future__ import annotations

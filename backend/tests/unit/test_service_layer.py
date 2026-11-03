@@ -4,11 +4,8 @@ AGENTS.md rule 1: a service never holds ``BoardDatabaseManager``, ``Registry``, 
 text of its own. This guard reads every module in ``app/services/`` and fails on the two things
 that make that possible: importing from SQLAlchemy or from ``app.storage``, and calling ``text`` or
 ``exec_driver_sql``. Without those imports a module in pyright's strict scope cannot type a storage
-handle either, so the import rule and the strict scope together hold the line.
-
-``NOT_YET_ON_REPOSITORIES`` lists the modules written before the rule. It only shrinks: a module
-that no longer reaches storage itself must leave the list, and a module that is not on it must
-follow the rule from its first line.
+handle either, so the import rule and the strict scope together hold the line. There is no list of
+exceptions: every service module follows the rule.
 """
 
 from __future__ import annotations
@@ -24,15 +21,6 @@ SERVICES = BACKEND_ROOT / "app" / "services"
 # The composition root builds the storage objects and hands them to the SQL repositories; wiring is
 # its job, so it is the one permanent exception.
 COMPOSITION_ROOT = "__init__.py"
-
-# Modules that still reach storage themselves. Each leaves the list when it is converted.
-NOT_YET_ON_REPOSITORIES = frozenset(
-    {
-        "activity.py",  # log_activity(conn) stays for the unconverted callers below
-        "common.py",  # SQL helpers the unconverted callers below still use
-        "loop_bridge.py",  # transitional; deleted when loop_qa and loop_generation are converted
-    }
-)
 
 FORBIDDEN_CALLS = frozenset({"text", "exec_driver_sql"})
 FORBIDDEN_PREFIXES = ("sqlalchemy.", "app.storage")
@@ -81,20 +69,9 @@ def _service_modules() -> list[Path]:
 @pytest.mark.parametrize("path", _service_modules(), ids=lambda path: path.name)
 def test_a_service_reaches_storage_only_through_repositories(path: Path) -> None:
     reaches = storage_reaches(path.read_text(encoding="utf-8"))
-    if path.name in NOT_YET_ON_REPOSITORIES:
-        assert reaches, (
-            f"{path.name} no longer reaches storage itself: remove it from NOT_YET_ON_REPOSITORIES"
-        )
-    else:
-        assert not reaches, (
-            f"{path.name} reaches storage without a repository (AGENTS.md rule 1): {reaches}"
-        )
-
-
-def test_the_list_names_only_existing_modules() -> None:
-    names = {path.name for path in _service_modules()}
-    unknown = NOT_YET_ON_REPOSITORIES - names
-    assert not unknown, sorted(unknown)
+    assert not reaches, (
+        f"{path.name} reaches storage without a repository (AGENTS.md rule 1): {reaches}"
+    )
 
 
 @pytest.mark.parametrize(

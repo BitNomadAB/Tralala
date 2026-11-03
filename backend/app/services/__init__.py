@@ -30,7 +30,6 @@ from .discussions import DiscussionService
 from .events import EventService
 from .lists import ListService
 from .loop_agents import LoopAgentService
-from .loop_bridge import LoopConnectionHelpers
 from .loop_documents import LoopDocumentService
 from .loop_generation import LoopGenerationService
 from .loop_history import LoopHistoryService
@@ -57,10 +56,10 @@ class Services:
         settings.ensure_dirs()
         self.settings = settings
         self.registry = Registry(settings)
-        # The registry unit of work for the services converted to repositories (GCS-T00d onwards).
+        # The registry unit of work: the one way a service reaches the registry.
         self.registry_store = SqlRegistryUnitOfWork(self.registry)
         self.boards = BoardDatabaseManager(settings)
-        # The board unit of work for the services converted to repositories (GCS-T00c onwards).
+        # The board unit of work: the one way a service reaches a board database.
         self.board_store = SqlBoardUnitOfWork(self.boards)
         self.board_stats = BoardStatsCache(settings, self.registry_store, self.board_store)
         # The manager has exactly one write choke point, so the cache is told there instead of
@@ -96,11 +95,6 @@ class Services:
         self.loop = LoopService(
             settings, self.board, self.board_store, plans=self.loop_plan, tickets=self.card
         )
-        # The connection helpers are the transitional bridge to the Loop workflow services that
-        # GCS-T00f converts next (services/loop_bridge.py).
-        self.loop_helpers = LoopConnectionHelpers(self.loop)
-        # The services below that take ``boards`` (and ``registry``) are not converted to the
-        # repositories yet (GCS-T00f..g) and still open connections themselves.
         self.loop_document = LoopDocumentService(self.board, self.board_store, self.loop_plan)
         self.loop_links = LoopWorkflowLinks()
         self.loop_agents = LoopAgentService(self.board_store, self.agent)
