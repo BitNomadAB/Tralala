@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,6 +13,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from ..core.config import Settings
 from ..core.errors import NotFound, ServiceUnavailable
+from ..core.identifiers import canonical_board_id
 from ..core.platform import remove_tree
 from .schema import ensure_fts, runner
 from .sqlite import create_sqlite_engine, utcnow
@@ -49,10 +49,7 @@ class BoardDatabaseManager:
 
     @staticmethod
     def validate_board_id(board_id: str) -> str:
-        try:
-            return str(uuid.UUID(board_id))
-        except (ValueError, AttributeError, TypeError) as exc:
-            raise NotFound("Board not found") from exc
+        return canonical_board_id(board_id)
 
     def path(self, board_id: str) -> Path:
         return self.settings.boards_dir / self.validate_board_id(board_id) / "board.sqlite"

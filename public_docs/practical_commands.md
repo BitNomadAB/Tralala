@@ -110,10 +110,10 @@ Run these from `backend/`.
 | `python --version` | Check the interpreter; `pyproject.toml` accepts 3.13 and 3.14, and 3.13 is the version of record. |
 | `python -m uvicorn app.main:create_app --factory --port 8000 --reload` | Development server. |
 | `python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log --no-server-header` | What the container runs: no reload, no banner advertising the server. |
-| `python -m pytest` | The whole backend suite — the primary gate. |
-| `python -m pytest tests/test_boards.py` | One file. |
-| `python -m pytest tests/test_boards.py::test_delete_requires_archive_and_matching_name` | One test. |
-| `python -m pytest -k "backup or restore"` | Tests matching a keyword. |
+| `python -m pytest` | The whole backend suite — the primary gate. It is unit tests only (no app, no database, no network), so it finishes in seconds; the running stack is exercised by the Playwright journeys. |
+| `python -m pytest tests/test_hardening.py` | One file. |
+| `python -m pytest tests/test_hardening.py::test_explicit_secret_wins` | One test. |
+| `python -m pytest -k "csrf or session"` | Tests matching a keyword. |
 | `python -m pytest -x --lf` | Stop at the first failure, starting with the last failing tests. |
 | `python -m pytest -q --tb=short` | Short output for a quick loop. |
 | `python -m ruff check app tests migrations` | Lint everything; what CI runs. |

@@ -1,21 +1,24 @@
+"""Repository snapshots: which files an analysis sees, in which order, and how GitHub is asked.
+
+GitHub is an in-process ``httpx.MockTransport`` installed through the module's ``TRANSPORT``
+hook, so no request leaves the process.
+"""
+
 from __future__ import annotations
 
 import io
-import json
 import tarfile
-import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from typing import Any
 
 import httpx
 import pytest
-from conftest import Api
-from fastapi.testclient import TestClient
-from test_loop_generation import _analysis_json
 
-from app.services import repo_snapshot, runtime
+from app.services import repo_snapshot
+from app.services.repo_snapshot import SnapshotError, fetch_archive, read_snapshot, resolve_commit
 
 SHA = "abc123def456abc123def456abc123def456abcd"
+TOKEN = "ghp_repository_token_value"
 
 
 def _tarball(files: dict[str, bytes], *, prefix: str = "acme-app") -> bytes:
@@ -24,313 +27,171 @@ def _tarball(files: dict[str, bytes], *, prefix: str = "acme-app") -> bytes:
         for path, payload in files.items():
             info = tarfile.TarInfo(f"{prefix}-{SHA}/{path}")
             info.size = len(payload)
+            info.mtime = 0
             archive.addfile(info, io.BytesIO(payload))
     return buffer.getvalue()
 
 
-class GitHub:
-    """A GitHub stand-in: commits, the 302 to codeload, and the archive itself."""
-
-    def __init__(
-        self,
-        archive: bytes | None = None,
-        *,
-        status: int = 200,
-        redirect_to: str | None = None,
-    ) -> None:
-        self.archive = archive if archive is not None else _tarball({"README.md": b"# App\n"})
-        self.status = status
-        self.redirect_to = redirect_to
-        self.requests: list[str] = []
-        self.authorizations: list[str] = []
-
-    def __call__(self, request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        self.requests.append(url)
-        self.authorizations.append(request.headers.get("authorization", ""))
-        if url.endswith("/commits/main"):
-            if self.status != 200:
-                return httpx.Response(self.status, json={"message": "nope"})
-            return httpx.Response(200, json={"sha": SHA})
-        if "/tarball/" in url:
-            location = self.redirect_to or f"https://codeload.github.com/acme/app/legacy.tar.gz/{SHA}"
-            return httpx.Response(302, headers={"location": location})
-        if url.startswith("https://codeload.github.com/"):
-            return httpx.Response(200, content=self.archive)
-        return httpx.Response(404, json={"message": "not found"})
+# --- what an analysis sees ----------------------------------------------------------------------
 
 
-@pytest.fixture()
-def github(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., GitHub]]:
-    def install(archive: bytes | None = None, **kwargs: Any) -> GitHub:
-        handler = GitHub(archive, **kwargs)
-        monkeypatch.setattr(repo_snapshot, "TRANSPORT", httpx.MockTransport(handler))
-        return handler
-
-    yield install
-    monkeypatch.setattr(repo_snapshot, "TRANSPORT", None)
-
-
-def _services(client: TestClient) -> Any:
-    return client.app.state.services  # type: ignore[attr-defined]
-
-
-def _linked_repository(api: Api, board_id: str, *, branch: str = "main") -> dict[str, Any]:
-    repository = api.data(
-        api.post(
-            "/api/v1/repositories",
-            json={
-                "name": "acme app",
-                "url": "https://github.com/acme/app",
-                "branch": branch,
-                "token": "ghp_repository_token_value",
-            },
+def test_the_files_an_analysis_needs_come_first_and_noise_is_skipped() -> None:
+    snapshot = read_snapshot(
+        _tarball(
+            {
+                "src/deep/nested/module.py": b"def work():\n    return 1\n",
+                "package.json": b'{"name":"app"}\n',
+                "docs/guide.md": b"# Guide\n",
+                "README.md": b"# App\n",
+                "AGENTS.md": b"# Rules\n",
+                "node_modules/left-pad/index.js": b"module.exports = 1\n",
+                "package-lock.json": b"{}",
+                "logo.png": b"\x89PNG\r\n\x1a\n\x00\x00",
+                "blob.bin": b"\x00\x01\x02\x03",
+                "src/data.raw": b"\x00binary",
+                "empty.txt": b"",
+            }
         )
     )
-    api.data(api.patch(f"/api/v1/boards/{board_id}", json={"repository_ids": [repository["id"]]}))
-    return repository
-
-
-def test_a_snapshot_orders_the_files_an_analysis_needs_first(
-    api: Api, client: TestClient, board: dict[str, Any], github: Callable[..., GitHub]
-) -> None:
-    _linked_repository(api, board["id"])
-    archive = _tarball(
-        {
-            "src/deep/nested/module.py": b"def work():\n    return 1\n",
-            "package.json": b'{"name":"app"}\n',
-            "docs/guide.md": b"# Guide\n",
-            "README.md": b"# App\n",
-            "node_modules/left-pad/index.js": b"module.exports = 1\n",
-            "package-lock.json": b"{}",
-            "logo.png": b"\x89PNG\r\n\x1a\n\x00\x00",
-            "blob.bin": b"\x00\x01\x02\x03",
-        }
-    )
-    github(archive)
-
-    entries = _services(client).repo_snapshot.for_board(board["id"])
-
-    assert len(entries) == 1
-    entry = entries[0]
-    assert entry["commit_sha"] == SHA
-    assert entry["branch"] == "main"
-    assert entry["truncated"] is False
-    assert entry["file_count"] == 4
-    assert [item["path"] for item in entry["files"]] == [
+    assert [entry["path"] for entry in snapshot["files"]] == [
+        "AGENTS.md",
         "README.md",
         "docs/guide.md",
         "package.json",
         "src/deep/nested/module.py",
     ]
+    assert snapshot["truncated"] is False
+    assert snapshot["text_bytes"] == sum(entry["bytes"] for entry in snapshot["files"])
 
 
-def test_too_many_files_stop_at_the_cap(
-    api: Api, client: TestClient, board: dict[str, Any], github: Callable[..., GitHub]
-) -> None:
-    _linked_repository(api, board["id"])
-    github(_tarball({f"src/file_{index:03d}.py": b"x = 1\n" for index in range(250)}))
-
-    entry = _services(client).repo_snapshot.for_board(board["id"])[0]
-
-    assert entry["file_count"] == repo_snapshot.MAX_FILES
-    assert entry["truncated"] is True
+def test_the_same_archive_gives_the_same_snapshot_whatever_the_member_order() -> None:
+    files = {"b.md": b"b", "a.md": b"a", "src/x.py": b"x = 1\n", "docs/z.md": b"z"}
+    reordered = dict(reversed(list(files.items())))
+    first = read_snapshot(_tarball(files))
+    assert read_snapshot(_tarball(files)) == first
+    assert read_snapshot(_tarball(reordered)) == first
 
 
-def test_too_much_text_stops_at_the_cap(
-    api: Api, client: TestClient, board: dict[str, Any], github: Callable[..., GitHub]
-) -> None:
-    _linked_repository(api, board["id"])
+def test_too_many_files_stop_at_the_cap() -> None:
+    snapshot = read_snapshot(
+        _tarball({f"src/file_{index:03d}.py": b"x = 1\n" for index in range(250)})
+    )
+    assert len(snapshot["files"]) == repo_snapshot.MAX_FILES
+    assert snapshot["truncated"] is True
+
+
+def test_too_much_text_stops_at_the_cap() -> None:
     chunk = b"x" * 100_000
-    github(_tarball({f"src/big_{index}.py": chunk for index in range(4)}))
-
-    entry = _services(client).repo_snapshot.for_board(board["id"])[0]
-
-    assert entry["truncated"] is True
-    assert sum(item["bytes"] for item in entry["files"]) <= repo_snapshot.MAX_TEXT_BYTES
+    snapshot = read_snapshot(_tarball({f"src/big_{index}.py": chunk for index in range(4)}))
+    assert snapshot["truncated"] is True
+    assert snapshot["text_bytes"] <= repo_snapshot.MAX_TEXT_BYTES
 
 
-def test_an_archive_over_the_limit_is_refused(
-    api: Api, client: TestClient, board: dict[str, Any], github: Callable[..., GitHub]
-) -> None:
-    _linked_repository(api, board["id"])
-    github(b"\x1f\x8b" + b"0" * (repo_snapshot.ARCHIVE_MAX_BYTES + 1024))
-
-    entry = _services(client).repo_snapshot.for_board(board["id"])[0]
-
-    assert entry["error"] == "too_large"
-    assert "files" not in entry
+def test_text_that_is_not_utf8_is_kept_readable() -> None:
+    snapshot = read_snapshot(_tarball({"notes.md": "Malmö".encode("latin-1")}))
+    assert snapshot["files"][0]["content"] == "Malm�"
 
 
-def test_a_redirect_away_from_codeload_is_refused(
-    api: Api, client: TestClient, board: dict[str, Any], github: Callable[..., GitHub]
-) -> None:
-    _linked_repository(api, board["id"])
-    github(redirect_to="https://evil.example.com/archive.tar.gz")
+def test_a_broken_archive_is_a_named_failure() -> None:
+    with pytest.raises(SnapshotError) as failure:
+        read_snapshot(b"not a tarball")
+    assert failure.value.code == "malformed_archive"
 
-    entry = _services(client).repo_snapshot.for_board(board["id"])[0]
 
-    assert entry["error"] == "redirect_refused"
+def test_the_prompt_states_the_caps() -> None:
+    description = repo_snapshot.RepositorySnapshotService.describe()
+    assert "2 MB" in description and "200 files" in description and "200 KB" in description
+
+
+# --- how GitHub is asked ------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Callable[..., httpx.Response]], list]:
+    def install(handler: Callable[[httpx.Request], httpx.Response]) -> list[httpx.Request]:
+        seen: list[httpx.Request] = []
+
+        def record(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return handler(request)
+
+        monkeypatch.setattr(repo_snapshot, "TRANSPORT", httpx.MockTransport(record))
+        return seen
+
+    return install
+
+
+def _redirect(location: str, archive: bytes = b"") -> Callable[[httpx.Request], httpx.Response]:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if "/tarball/" in str(request.url):
+            return httpx.Response(302, headers={"location": location})
+        return httpx.Response(200, content=archive)
+
+    return handle
+
+
+def test_the_commit_is_resolved_with_the_token(github: Any) -> None:
+    seen = github(lambda request: httpx.Response(200, json={"sha": SHA}))
+    assert resolve_commit("acme", "app", "main", TOKEN) == SHA
+    assert str(seen[0].url) == "https://api.github.com/repos/acme/app/commits/main"
+    assert seen[0].headers["authorization"] == f"Bearer {TOKEN}"
+
+
+def test_without_a_branch_the_default_head_is_read(github: Any) -> None:
+    seen = github(lambda request: httpx.Response(200, json={"sha": SHA}))
+    resolve_commit("acme", "app", None, None)
+    assert str(seen[0].url).endswith("/commits/HEAD")
+    assert "authorization" not in seen[0].headers
 
 
 @pytest.mark.parametrize(
-    ("status", "expected"), [(401, "unauthorized"), (404, "not_found"), (429, "rate_limited")]
+    ("status", "headers", "code"),
+    [
+        (401, {}, "unauthorized"),
+        (404, {}, "not_found"),
+        (429, {}, "rate_limited"),
+        (403, {"x-ratelimit-remaining": "0"}, "rate_limited"),
+        (403, {}, "forbidden"),
+        (500, {}, "unreachable"),
+    ],
 )
-def test_a_refused_repository_becomes_an_entry_not_a_failure(
-    api: Api,
-    client: TestClient,
-    board: dict[str, Any],
-    github: Callable[..., GitHub],
-    status: int,
-    expected: str,
+def test_a_refusal_is_named_the_way_an_operator_reads_it(
+    github: Any, status: int, headers: dict[str, str], code: str
 ) -> None:
-    _linked_repository(api, board["id"])
-    github(status=status)
-
-    entry = _services(client).repo_snapshot.for_board(board["id"])[0]
-
-    assert entry["error"] == expected
-    assert entry["name"] == "acme app"
+    github(lambda request: httpx.Response(status, headers=headers, json={"message": "nope"}))
+    with pytest.raises(SnapshotError) as failure:
+        resolve_commit("acme", "app", "main", TOKEN)
+    assert failure.value.code == code
 
 
-def test_the_same_commit_produces_the_same_snapshot(
-    api: Api, client: TestClient, board: dict[str, Any], github: Callable[..., GitHub]
-) -> None:
-    _linked_repository(api, board["id"])
-    github(_tarball({"b.md": b"b", "a.md": b"a", "src/x.py": b"x = 1\n"}))
-    service = _services(client).repo_snapshot
-
-    first = service.for_board(board["id"])
-    second = service.for_board(board["id"])
-
-    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+def test_an_answer_without_a_sha_is_malformed(github: Any) -> None:
+    github(lambda request: httpx.Response(200, json={"message": "no sha"}))
+    with pytest.raises(SnapshotError) as failure:
+        resolve_commit("acme", "app", "main", TOKEN)
+    assert failure.value.code == "malformed_response"
 
 
-def test_a_run_carries_the_snapshot_and_records_only_the_commit(
-    api: Api,
-    board: dict[str, Any],
-    loop: dict[str, Any],
-    github: Callable[..., GitHub],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The model sees the file content; the run record keeps the commit and the paths."""
-    _linked_repository(api, board["id"])
-    github(_tarball({"README.md": b"# App\n", "src/app.py": b"print('hello')\n"}))
-    agent = api.data(
-        api.post(
-            "/api/v1/agents",
-            json={
-                "name": "Snapshot agent",
-                "connection_type": "openai_compatible",
-                "base_url": "http://127.0.0.1:8080/v1",
-                "model": "test-model",
-                "role_template_id": next(
-                    role["id"]
-                    for role in api.data(api.get("/api/v1/role-templates"))
-                    if role["builtin_key"] == "qa_engineer"
-                ),
-            },
-        )
-    )
-    assert agent["id"]
-    base = f"/api/v1/boards/{board['id']}/loops/{loop['id']}"
-    api.data(api.put(f"{base}/documents/info", json={"content": "Intent"}))
-
-    seen: dict[str, Any] = {}
-
-    def fake_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        seen["system_prompt"] = kwargs.get("system_prompt", "")
-        seen["messages"] = kwargs.get("messages", [])
-        return {
-            "ok": True,
-            "error": None,
-            "text": _analysis_json(),
-            "model": "test-model",
-            "usage": {},
-        }
-
-    with monkeypatch.context() as patch:
-        patch.setattr(runtime, "call_completion", fake_call)
-        started = api.data(api.post(f"{base}/generation-runs", json={"purpose": "analysis"}))
-        run = _wait(api, f"{base}/generation-runs", started["id"])
-
-    assert run["status"] == "completed", run
-
-    user_message = seen["messages"][0]["content"]
-    assert "Repository snapshot" in user_message
-    assert "src/app.py" in user_message
-    assert "print('hello')" in user_message
-    assert "2 MB" in user_message and "200 files" in user_message
-    # Framed as data, never as instructions.
-    assert "untrusted" in user_message
-    assert "untrusted" in seen["system_prompt"] or "data to analyse" in seen["system_prompt"]
-
-    sources = run["source_revisions"]
-    repositories = sources["repositories"]
-    assert repositories == [
-        {
-            "id": repositories[0]["id"],
-            "name": "acme app",
-            "branch": "main",
-            "commit_sha": SHA,
-            "file_count": 2,
-            "truncated": False,
-        }
-    ]
-    # Contents and paths stay in the run's own record; the API never returns them.
-    assert "files" not in repositories[0]
-    assert "print('hello')" not in json.dumps(run)
-    assert "ghp_repository_token_value" not in json.dumps(run)
+def test_the_archive_comes_from_codeload_without_the_token(github: Any) -> None:
+    archive = _tarball({"README.md": b"# App\n"})
+    seen = github(_redirect(f"https://codeload.github.com/acme/app/legacy.tar.gz/{SHA}", archive))
+    assert fetch_archive("acme", "app", SHA, TOKEN) == archive
+    api_request, download = seen
+    assert api_request.headers["authorization"] == f"Bearer {TOKEN}"
+    assert download.url.host == "codeload.github.com"
+    assert "authorization" not in download.headers
 
 
-def test_a_board_without_a_repository_says_so_instead_of_looking_fetched(
-    api: Api,
-    board: dict[str, Any],
-    loop: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A fast run must not be mistaken for an analysis that read the code."""
-    agent = api.data(
-        api.post(
-            "/api/v1/agents",
-            json={
-                "name": "No repo agent",
-                "connection_type": "openai_compatible",
-                "base_url": "http://127.0.0.1:8080/v1",
-                "model": "test-model",
-                "role_template_id": next(
-                    role["id"]
-                    for role in api.data(api.get("/api/v1/role-templates"))
-                    if role["builtin_key"] == "qa_engineer"
-                ),
-            },
-        )
-    )
-    assert agent["id"]
-    base = f"/api/v1/boards/{board['id']}/loops/{loop['id']}"
-    api.data(api.put(f"{base}/documents/info", json={"content": "Intent"}))
-    seen: dict[str, Any] = {}
-
-    def fake_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        seen["messages"] = kwargs.get("messages", [])
-        return {"ok": True, "error": None, "text": _analysis_json(), "usage": {}}
-
-    with monkeypatch.context() as patch:
-        patch.setattr(runtime, "call_completion", fake_call)
-        started = api.data(api.post(f"{base}/generation-runs", json={"purpose": "analysis"}))
-        run = _wait(api, f"{base}/generation-runs", started["id"])
-
-    assert run["status"] == "completed", run
-    assert "no enabled repository is linked to this board" in seen["messages"][0]["content"]
-    # An empty list is a fact about the run, not the same thing as "the step never ran".
-    assert run["source_revisions"]["repositories"] == []
-    assert run["phase"] == "generating"
+def test_a_redirect_away_from_codeload_is_refused(github: Any) -> None:
+    seen = github(_redirect("https://evil.example.com/archive.tar.gz"))
+    with pytest.raises(SnapshotError) as failure:
+        fetch_archive("acme", "app", SHA, TOKEN)
+    assert failure.value.code == "redirect_refused"
+    assert len(seen) == 1
 
 
-def _wait(api: Api, url: str, run_id: str, *, attempts: int = 60) -> dict[str, Any]:
-    for _ in range(attempts):
-        run = api.data(api.get(f"{url}/{run_id}"))
-        if run["status"] in {"completed", "failed", "cancelled"}:
-            return run
-        time.sleep(0.05)
-    raise AssertionError("run did not finish")
+def test_an_archive_over_the_limit_is_refused(github: Any) -> None:
+    oversized = b"\x1f\x8b" + b"0" * (repo_snapshot.ARCHIVE_MAX_BYTES + 1024)
+    github(_redirect(f"https://codeload.github.com/acme/app/legacy.tar.gz/{SHA}", oversized))
+    with pytest.raises(SnapshotError) as failure:
+        fetch_archive("acme", "app", SHA, TOKEN)
+    assert failure.value.code == "too_large"

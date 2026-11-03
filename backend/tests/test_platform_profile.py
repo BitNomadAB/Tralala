@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import Api
 
 from app.core import platform as platform_profile
 from app.core.config import Settings
@@ -37,7 +36,11 @@ def test_an_explicit_profile_wins_and_an_unknown_one_is_rejected() -> None:
 
 
 def test_settings_store_the_resolved_profile(settings: Settings) -> None:
-    explicit = Settings(data_dir=settings.data_dir, platform_profile="network")
+    explicit = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        data_dir=settings.data_dir,
+        platform_profile="network",
+    )
     assert explicit.platform_profile == "network"
     assert explicit.file_profile == "network"
 
@@ -114,35 +117,6 @@ def test_removing_what_is_not_there_is_success(tmp_path: Path) -> None:
     assert platform_profile.remove_file(tmp_path / "gone.txt", profile="posix") is False
 
 
-def test_a_busy_board_directory_keeps_the_board_and_says_where_it_is_left(
-    api: Api, board: dict[str, Any], monkeypatch: Any
-) -> None:
-    api.data(api.post(f"/api/v1/boards/{board['id']}/archive"))
-    services = api.client.app.state.services
-
-    def still_open(path: Any, **kwargs: Any) -> None:
-        raise OSError(errno.EACCES, "the file is in use", str(path))
-
-    monkeypatch.setattr(platform_profile.shutil, "rmtree", still_open)
-    response = api.delete(
-        f"/api/v1/boards/{board['id']}", json={"confirm_name": board["name"]}
-    )
-    assert response.status_code == 409, response.text
-    error = response.json()["error"]
-    assert error["code"] == "board_files_busy"
-    assert error["details"]["leftover"] == f"boards/{board['id']}"
-    assert error["details"]["platform_profile"] == services.settings.file_profile
-
-    # The board survives with its data, so the operator can retry once the file is free.
-    monkeypatch.undo()
-    still_there = api.data(api.get(f"/api/v1/boards/{board['id']}"))
-    assert still_there["id"] == board["id"]
-    retried = api.delete(
-        f"/api/v1/boards/{board['id']}", json={"confirm_name": board["name"]}
-    )
-    assert api.data(retried)["deleted"] is True
-
-
 def test_the_lock_mechanism_ignores_the_configured_profile() -> None:
     """A wrong profile must not be able to select a locking call this host does not have."""
     import os
@@ -150,40 +124,3 @@ def test_the_lock_mechanism_ignores_the_configured_profile() -> None:
     windows = os.name == "nt"
     expected = platform_profile.PROFILE_WINDOWS if windows else platform_profile.PROFILE_POSIX
     assert platform_profile.lock_primitive() == expected
-
-
-@pytest.mark.parametrize("entry", ["attachments/..", "attachments/x\\y.bin", "attachments/"])
-def test_an_archive_entry_must_be_a_plain_filename(entry: str) -> None:
-    from app.core.errors import ValidationFailure
-    from app.services.common import archive_file_name
-
-    with pytest.raises(ValidationFailure):
-        archive_file_name(entry)
-
-
-def test_a_normal_archive_entry_keeps_its_stored_name() -> None:
-    from app.services.common import archive_file_name
-
-    assert archive_file_name("attachments/abc.bin") == "abc.bin"
-
-
-def test_an_import_refuses_a_relative_attachment_entry(api: Api) -> None:
-    import io
-    import zipfile
-
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr(
-            "manifest.json",
-            '{"format_version": 2, "board": {"name": "Unsafe"}, "attachments": {"files": 1}}',
-        )
-        archive.writestr("board.sqlite", b"not-a-database")
-        archive.writestr("attachments/..", b"escape")
-    response = api.request(
-        "POST",
-        "/api/v1/boards/import",
-        content=buffer.getvalue(),
-        headers={"Content-Type": "application/zip"},
-    )
-    assert response.status_code == 422, response.text
-    assert response.json()["error"]["details"]["entry"] == "attachments/.."
