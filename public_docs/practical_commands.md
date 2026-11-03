@@ -108,15 +108,20 @@ Run these from `backend/`.
 | `pip install --upgrade -r requirements-dev.txt` | Upgrade them to the newest allowed versions. |
 | `pip list --outdated` | Show what could be upgraded; read before upgrading a production install. |
 | `python --version` | Check the interpreter; `pyproject.toml` accepts 3.13 and 3.14, and 3.13 is the version of record. |
+| `python -m tools.dbgen` | First step of every backend build: checks that both migration chains are linear and apply, generates the typed rows in `app/db/generated/` and compiles every SQL statement in `app/` against the schema. Cached by hash, so a run with nothing changed takes about a second. Run it after every pull that brings a migration. |
+| `python -m tools.dbgen --check` | Only compare: exit 1 when the rows or the SQL check are out of date; writes nothing. |
 | `python -m uvicorn app.main:create_app --factory --port 8000 --reload` | Development server. |
 | `python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log --no-server-header` | What the container runs: no reload, no banner advertising the server. |
-| `python -m pytest` | The whole backend suite — the primary gate. It is unit tests only (no app, no database, no network), so it finishes in seconds; the running stack is exercised by the Playwright journeys. |
-| `python -m pytest tests/test_hardening.py` | One file. |
-| `python -m pytest tests/test_hardening.py::test_explicit_secret_wins` | One test. |
+| `python -m pytest` | The unit suite (`tests/unit`) — the primary gate. No app, no database, no network: services run against in-memory repository fakes, so it finishes in seconds. It refuses to start when the generated rows are older than the migrations. |
+| `python -m pytest -n auto` | The same, spread over every core; what CI runs, and proof that no test depends on another. |
+| `python -m pytest tests/infrastructure` | The small SQLite suite: connection set-up, migrations, commit and rollback, a board releasing its file. Its own command and CI job. |
+| `python -m pytest tests/unit/test_hardening.py` | One file. |
+| `python -m pytest tests/unit/test_hardening.py::test_explicit_secret_wins` | One test. |
 | `python -m pytest -k "csrf or session"` | Tests matching a keyword. |
 | `python -m pytest -x --lf` | Stop at the first failure, starting with the last failing tests. |
 | `python -m pytest -q --tb=short` | Short output for a quick loop. |
-| `python -m ruff check app tests migrations` | Lint everything; what CI runs. |
+| `python -m ruff check app tests migrations tools` | Lint everything; what CI runs. |
+| `python -m pyright` | Strict type check of the scope in `pyrightconfig.json` (generated rows, repositories, converted services, unit tests, build tools); what CI runs after ruff. Needs Node.js on the `PATH`. |
 | `python -m ruff check app --fix` | Apply the mechanical fixes. |
 | `python -m app.dev_reset` | List what a development reset would erase — it changes nothing. |
 | `python -m app.dev_reset --confirm` | Erase boards, backups and the registry; the schema is recreated on next start. |
@@ -168,6 +173,7 @@ Notes worth knowing before you type any of these:
 | `git tag --sort=-v:refname \| head -5` | Show the newest release tags; an empty answer means this repository has none yet, so `master` is the version. |
 | `git checkout <tag>` | Pin your server to a release; `git checkout master` returns to the tip. |
 | `pip install -r backend/requirements-dev.txt` | Install any backend dependency the update added. |
+| `(cd backend && ../.venv/bin/python -m tools.dbgen)` | Regenerate the typed database rows for any migration the update added. |
 | `(cd frontend && pnpm install)` | Install any frontend dependency the update added. |
 | `docker compose up -d --build` | Apply it in Docker; migrations run during backend startup. |
 | `curl -s localhost:8080/api/v1/health` | Confirm the new version answers before you walk away. |
@@ -201,11 +207,12 @@ and would then fail `pnpm lint` on files nobody touched.
 | --- | --- |
 | `pip install -r requirements.txt --upgrade` | Upgrade the runtime dependencies within their ranges. |
 | `pip install -r requirements-dev.txt --upgrade` | The same, plus the test tools. |
-| `python -m pytest && python -m ruff check app tests migrations` | The gate after an upgrade. |
+| `python -m tools.dbgen && python -m ruff check app tests migrations tools && python -m pyright && python -m pytest` | The gate after an upgrade, in pipeline order. |
 | `pip install "fastapi==<version>"` | Pin one package deliberately when a range is too wide for you. |
 
 `requirements.txt` holds what the app imports at runtime (`httpx` and `anyio` included, because the
-provider calls and the event stream need them). `requirements-dev.txt` adds pytest and ruff.
+provider calls and the event stream need them). `requirements-dev.txt` adds pytest, pytest-xdist,
+ruff and pyright.
 
 ### Python and SQLite
 

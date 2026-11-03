@@ -32,11 +32,11 @@ def _parse_labels(raw: Any) -> list[dict[str, str]]:
         return []
     if not isinstance(value, list):
         return []
-    labels: list[dict[str, str]] = []
-    for entry in value:
-        if isinstance(entry, dict) and isinstance(entry.get("name"), str):
-            labels.append({"name": entry["name"], "color": str(entry.get("color") or "#64748b")})
-    return labels
+    return [
+        {"name": entry["name"], "color": str(entry.get("color") or "#64748b")}
+        for entry in value
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    ]
 
 
 def _unique_names(names: list[str], *, field: str) -> list[str]:
@@ -115,7 +115,6 @@ class TemplateService:
 
     def _write(
         self,
-        actor: ActorContext,
         *,
         name: str,
         description: str,
@@ -181,7 +180,6 @@ class TemplateService:
         labels = [label.model_dump() for label in payload.labels]
         _unique_names([label["name"] for label in labels], field="label")
         return self._write(
-            actor,
             name=payload.name,
             description=payload.description,
             lists=lists,
@@ -205,7 +203,6 @@ class TemplateService:
         if "labels" in updates:
             _unique_names([label["name"] for label in labels], field="label")
         return self._write(
-            actor,
             template_id=template_id,
             name=updates.get("name", current["name"]),
             description=updates.get("description", current["description"]),
@@ -248,7 +245,6 @@ class TemplateService:
                 ).mappings()
             ]
         return self._write(
-            actor,
             name=payload.name,
             description=payload.description,
             lists=_dedupe_names(lists),

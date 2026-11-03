@@ -155,7 +155,23 @@ TRALALA_BOOTSTRAP_PASSWORD=
   `<data>/.session-secret`.
 - Every setting is listed in [`.env.example`](../.env.example).
 
-### 4. Run both processes
+### 4. Generate the database rows
+
+The backend's typed database rows are generated from the schema migrations, not stored in the
+repository. Generate them once, and again whenever an update brings a new migration:
+
+```bash
+cd backend
+../.venv/bin/python -m tools.dbgen
+cd ..
+```
+
+It checks the migrations, writes `backend/app/db/generated/` and checks every SQL statement against
+the schema; a second run with nothing changed finishes at once. Without it the backend stops at
+start with "The generated database rows are missing: run python -m tools.dbgen". The container
+image runs it during `docker compose up --build`.
+
+### 5. Run both processes
 
 ```bash
 # terminal 1
@@ -201,6 +217,7 @@ keys: [Security defaults](Security_defaults.md).
 ```bash
 git pull
 pip install -r backend/requirements-dev.txt    # backend dependencies
+(cd backend && ../.venv/bin/python -m tools.dbgen)  # rows for any new migration
 cd frontend && pnpm install && cd ..           # frontend dependencies
 docker compose up -d --build                   # Docker installs only
 ```
@@ -231,8 +248,11 @@ Run what CI runs:
 
 ```bash
 cd backend
-../.venv/bin/python -m pytest
-../.venv/bin/python -m ruff check app tests migrations
+../.venv/bin/python -m tools.dbgen                       # migrations, rows, SQL (always first)
+../.venv/bin/python -m ruff check app tests migrations tools
+../.venv/bin/python -m pyright                           # strict types
+../.venv/bin/python -m pytest                            # unit tests
+../.venv/bin/python -m pytest tests/infrastructure       # the small SQLite suite
 cd ../frontend
 pnpm typecheck
 pnpm lint           # Prettier check, then ESLint with zero warnings (`pnpm format` fixes layout)

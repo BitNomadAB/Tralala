@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     board_counts_cache_seconds: int = 60
     default_lists: str = "Backlog,Todo,In Progress,Review,Done"
     bootstrap_username: str = "admin"
-    bootstrap_password: str = "admin"
+    bootstrap_password: str = "admin"  # noqa: S105 - a placeholder bootstrap_admin replaces
     max_page_size: int = 200
     default_page_size: int = 50
     bulk_limit: int = 100

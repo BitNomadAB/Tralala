@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound
 from ..schemas.loops import LegacyImportRequest
@@ -27,6 +28,17 @@ MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_TOTAL = 20 * 1024 * 1024
 LEGACY_LABEL = "Imported legacy reference - may not follow the current standard"
 MAX_SEARCH_TEXT = 200_000
+# What the history search formats into SQL text (see core/sql.py).
+_HISTORY_FTS_JOIN = " JOIN loop_history_fts f ON f.rowid = h.rowid"
+_HISTORY_FILTERS: sql.Filters = (
+    ("match", "loop_history_fts MATCH :match"),
+    ("q", "(h.search_text LIKE :q OR h.loop_name LIKE :q)"),
+    ("source_kind", "h.source_kind = :source_kind"),
+    ("loop_key", "(h.loop_key = :loop_key OR h.loop_name LIKE :loop_key_like)"),
+    ("qa_status", "h.qa_status = :qa_status"),
+    ("date_from", "COALESCE(h.completed_at, h.imported_at, h.created_at) >= :date_from"),
+    ("date_to", "COALESCE(h.completed_at, h.imported_at, h.created_at) <= :date_to"),
+)
 
 
 def generation_provenance(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -161,7 +173,7 @@ class LoopHistoryService:
             "history_schema_version": HISTORY_SCHEMA_VERSION,
             "source_kind": "native",
             "conformance": "native",
-            "board_id": loop["board_id"] if "board_id" in loop else None,
+            "board_id": loop.get("board_id"),
             "loop": {
                 "id": loop["id"],
                 "key": loop["key"],
@@ -387,12 +399,9 @@ class LoopHistoryService:
                     ticket["human_instructions"],
                 ]
             )
-        for ticket in envelope["delivery"]["tickets"]:
-            parts.append(ticket["title"])
-        for comment in envelope["delivery"]["comments"]:
-            parts.append(comment["content"])
-        for cycle in envelope["qa"]["cycles"]:
-            parts.append(_canonical(cycle["ai_instructions"]))
+        parts.extend(ticket["title"] for ticket in envelope["delivery"]["tickets"])
+        parts.extend(comment["content"] for comment in envelope["delivery"]["comments"])
+        parts.extend(_canonical(cycle["ai_instructions"]) for cycle in envelope["qa"]["cycles"])
         for result in envelope["qa"]["results"]:
             parts.append(result["evidence"])
             parts.append(result["reason"])
@@ -584,44 +593,48 @@ class LoopHistoryService:
         offset: int = 0,
     ) -> dict[str, Any]:
         self.board_service.require_row(board_id)
-        clauses = ["1 = 1"]
+        filters: list[str] = []
         params: dict[str, Any] = {}
         engine = "like"
         join = ""
         if q:
             if self.boards.fts_available(board_id):
-                join = " JOIN loop_history_fts f ON f.rowid = h.rowid"
-                clauses.append("loop_history_fts MATCH :match")
+                join = _HISTORY_FTS_JOIN
+                filters.append("match")
                 params["match"] = _fts_query(q)
                 engine = "fts5"
             else:
-                clauses.append("(h.search_text LIKE :q OR h.loop_name LIKE :q)")
+                filters.append("q")
                 params["q"] = f"%{q}%"
         if source_kind:
-            clauses.append("h.source_kind = :source_kind")
+            filters.append("source_kind")
             params["source_kind"] = source_kind
         if loop_key:
-            clauses.append("(h.loop_key = :loop_key OR h.loop_name LIKE :loop_key_like)")
+            filters.append("loop_key")
             params["loop_key"] = loop_key
             params["loop_key_like"] = f"%{loop_key}%"
         if qa_status:
-            clauses.append("h.qa_status = :qa_status")
+            filters.append("qa_status")
             params["qa_status"] = qa_status
         if date_from:
-            clauses.append("COALESCE(h.completed_at, h.imported_at, h.created_at) >= :date_from")
+            filters.append("date_from")
             params["date_from"] = date_from
         if date_to:
-            clauses.append("COALESCE(h.completed_at, h.imported_at, h.created_at) <= :date_to")
+            filters.append("date_to")
             params["date_to"] = date_to
-        where = " AND ".join(clauses)
+        where = sql.where(_HISTORY_FILTERS, filters)
         with self.boards.reader(board_id) as conn:
             total = conn.execute(
-                text(f"SELECT COUNT(DISTINCT h.id) FROM loop_history h{join} WHERE {where}"),
+                text(
+                    "SELECT"  # noqa: S608 - from _HISTORY_FTS_JOIN and _HISTORY_FILTERS
+                    f" COUNT(DISTINCT h.id) FROM loop_history h{join}{where}"
+                ),
                 params,
             ).scalar_one()
             records = rows(
                 conn,
-                f"SELECT DISTINCT h.* FROM loop_history h{join} WHERE {where}"
+                "SELECT"  # noqa: S608 - from _HISTORY_FTS_JOIN and _HISTORY_FILTERS
+                f" DISTINCT h.* FROM loop_history h{join}{where}"
                 " ORDER BY COALESCE(h.completed_at, h.imported_at, h.created_at) DESC, h.id"
                 " LIMIT :limit OFFSET :offset",
                 {**params, "limit": limit, "offset": offset},

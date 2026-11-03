@@ -20,7 +20,7 @@ from typing import Any
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound
@@ -44,6 +44,12 @@ TEXT_ATTACHMENT_TYPES = {"application/json", "application/xml", "application/x-y
 ATTACHMENT_EXCERPTS = 3
 ATTACHMENT_EXCERPT_BYTES = 200_000
 ATTACHMENT_EXCERPT_CHARS = 2_000
+_ACTOR_NAMES = text("SELECT id, name, type FROM actors WHERE id IN :ids").bindparams(
+    bindparam("ids", expanding=True)
+)
+_AGENT_NAMES = text("SELECT id, name, 'agent' AS type FROM agents WHERE id IN :ids").bindparams(
+    bindparam("ids", expanding=True)
+)
 
 
 def _rows(conn: Any, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -655,23 +661,9 @@ class MentionService:
         }
         if not missing:
             return comments
-        params = {f"a{index}": actor_id for index, actor_id in enumerate(missing)}
-        placeholders = ", ".join(f":{key}" for key in params)
-        known = {
-            row["id"]: row
-            for row in self.registry.read(
-                f"SELECT id, name, type FROM actors WHERE id IN ({placeholders})", params
-            )
-        }
-        known.update(
-            {
-                row["id"]: row
-                for row in self.registry.read(
-                    f"SELECT id, name, 'agent' AS type FROM agents WHERE id IN ({placeholders})",
-                    params,
-                )
-            }
-        )
+        params = {"ids": list(missing)}
+        known = {row["id"]: row for row in self.registry.read(_ACTOR_NAMES, params)}
+        known.update({row["id"]: row for row in self.registry.read(_AGENT_NAMES, params)})
         for comment in comments:
             actor = known.get(str(comment["actor_id"]))
             if actor:

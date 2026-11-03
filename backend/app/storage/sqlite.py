@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,12 +8,10 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
+# Re-exported: the clock moved to core so a service can take it without importing storage.
+from ..core.dates import utcnow as utcnow
+
 BUSY_TIMEOUT_MS = 5000
-
-
-def utcnow() -> str:
-    """ISO 8601 UTC timestamp with second precision, e.g. 2026-10-30T12:00:00Z."""
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def create_sqlite_engine(path: Path) -> Engine:
@@ -28,7 +25,7 @@ def create_sqlite_engine(path: Path) -> Engine:
     )
 
     @event.listens_for(engine, "connect")
-    def _set_pragmas(dbapi_connection, _record) -> None:  # noqa: ANN001
+    def _set_pragmas(dbapi_connection: sqlite3.Connection, _record: object) -> None:
         dbapi_connection.execute("PRAGMA foreign_keys=ON")
         dbapi_connection.execute("PRAGMA journal_mode=WAL")
         dbapi_connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
@@ -65,6 +62,6 @@ def sqlite_supports_fts5() -> bool:
     try:
         with sqlite3.connect(":memory:") as probe:
             probe.execute("CREATE VIRTUAL TABLE probe USING fts5(value)")
-        return True
     except sqlite3.Error:
         return False
+    return True

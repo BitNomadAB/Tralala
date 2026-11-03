@@ -501,7 +501,8 @@ class LoopQaService:
             "card_id": cycle["card_id"],
         }
 
-    def get_instructions(self, conn: Any, cycle: dict[str, Any]) -> QaInstructions | None:
+    @staticmethod
+    def get_instructions(cycle: dict[str, Any]) -> QaInstructions | None:
         payload = json.loads(cycle["ai_instructions_json"] or "{}")
         scenarios = payload.get("scenarios")
         if not scenarios:
@@ -767,7 +768,7 @@ class LoopQaService:
     def acceptance_blockers(
         self, conn: Any, cycle: dict[str, Any], approved_not_applicable: list[str]
     ) -> list[dict[str, Any]]:
-        instructions = self.get_instructions(conn, cycle)
+        instructions = self.get_instructions(cycle)
         if instructions is None:
             return [{"scenario_id": None, "reason": "instructions_missing"}]
         latest: dict[str, dict[str, Any]] = {}
@@ -835,10 +836,6 @@ class LoopQaService:
     def cycle_for(self, conn: Any, loop_id: str) -> dict[str, Any] | None:
         cycle = self._latest_cycle(conn, loop_id)
         return self._serialize_cycle(conn, cycle) if cycle else None
-
-    def scenario_ids(self, conn: Any, cycle: dict[str, Any]) -> list[str]:
-        payload = json.loads(cycle["ai_instructions_json"] or "{}")
-        return [scenario["id"] for scenario in payload.get("scenarios", [])]
 
 
 __all__ = [

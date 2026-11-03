@@ -137,7 +137,6 @@ async def delete_board(
 async def export_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
-    request: Request,
 ) -> Response:
     ctx.actor.require("boards:write")
     data = ctx.services.board.export_archive(ctx.actor, board_id)

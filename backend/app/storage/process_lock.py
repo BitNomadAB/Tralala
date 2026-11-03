@@ -37,7 +37,8 @@ class DataDirectoryLock:
         if self._handle is not None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(self.path, "a+b")  # noqa: SIM115 - the handle is held for the process lifetime
+        # The handle is held for the process lifetime, so no context manager.
+        handle = self.path.open("a+b")
         try:
             handle.seek(0)
             if lock_primitive() == PROFILE_WINDOWS:  # pragma: no cover - Windows only

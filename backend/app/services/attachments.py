@@ -44,7 +44,7 @@ ZIP_TYPES = {".docx", ".pptx", ".xlsx"}
 _FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._ ()\[\]-]+")
 
 
-def sanitize_filename(raw: str) -> str:
+def sanitize_filename(raw: str | None) -> str:
     name = Path(str(raw or "")).name.strip()
     name = _FILENAME_SAFE.sub("_", name)
     name = name.lstrip(".") or "attachment"

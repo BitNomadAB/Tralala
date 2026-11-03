@@ -43,9 +43,14 @@ def _config(chain: str, connection: Connection | None = None) -> Config:
     return config
 
 
+def script_directory(chain: str) -> ScriptDirectory:
+    """The revisions of one chain, as Alembic reads them from its versions directory."""
+    return ScriptDirectory.from_config(_config(chain))
+
+
 @lru_cache(maxsize=2)
 def head_revision(chain: str) -> str:
-    head = ScriptDirectory.from_config(_config(chain)).get_current_head()
+    head = script_directory(chain).get_current_head()
     if head is None:
         raise RuntimeError(f"Migration chain {chain} has no head revision")
     return head
@@ -54,10 +59,10 @@ def head_revision(chain: str) -> str:
 @lru_cache(maxsize=2)
 def revision_count(chain: str) -> int:
     """Number of revisions in the chain; stored in the human-facing schema_version columns."""
-    return len(list(ScriptDirectory.from_config(_config(chain)).walk_revisions()))
+    return len(list(script_directory(chain).walk_revisions()))
 
 
-def current_revision(chain: str, connection: Connection) -> str | None:
+def current_revision(connection: Connection) -> str | None:
     return MigrationContext.configure(connection).get_current_revision()
 
 

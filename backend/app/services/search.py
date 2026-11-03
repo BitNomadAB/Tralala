@@ -7,11 +7,33 @@ from typing import Any
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.errors import NotFound
 from ..storage.sqlite import utcnow
 from .boards import BoardService
 from .cards import CardService
-from .common import decorate_cards, rows
+from .common import LABEL_JOIN, decorate_cards, rows
+
+# What the searches format into SQL text (see core/sql.py).
+_CARD_FTS_JOIN = " JOIN cards_fts f ON f.rowid = c.rowid"
+_CARD_SEARCH_FILTERS: sql.Filters = (
+    ("loop", "c.loop_id = :loop_id"),
+    ("match", "cards_fts MATCH :match"),
+    ("q", "(c.title LIKE :q OR c.description LIKE :q)"),
+    ("unarchived", "c.archived_at IS NULL"),
+    ("priority", "c.priority = :priority"),
+    ("label", "(l.id = :label OR l.name = :label)"),
+    ("completed", "c.completed_at IS NOT NULL"),
+    ("open", "c.completed_at IS NULL"),
+    ("overdue", "c.due_at IS NOT NULL AND c.due_at < :now AND c.completed_at IS NULL"),
+    ("list", "c.list_id = :list_id"),
+)
+_ACTIVITY_FILTERS: sql.Filters = (
+    ("entity_type", "entity_type = :entity_type"),
+    ("entity_id", "entity_id = :entity_id"),
+    ("actor_type", "actor_type = :actor_type"),
+    ("action", "action = :action"),
+)
 
 
 def _fts_query(value: str) -> str:
@@ -45,36 +67,35 @@ class SearchService:
         if not self.boards.exists(board_id):
             raise NotFound("Board database not found")
 
-        clauses: list[str] = ["c.loop_id = :loop_id"]
+        filters = ["loop"]
         params: dict[str, Any] = {"loop_id": loop_id}
-        join = ""
+        joins = ""
         if q:
             if self.boards.fts_available(board_id):
-                join += " JOIN cards_fts f ON f.rowid = c.rowid"
-                clauses.append("cards_fts MATCH :match")
+                joins += _CARD_FTS_JOIN
+                filters.append("match")
                 params["match"] = _fts_query(q)
             else:
-                clauses.append("(c.title LIKE :q OR c.description LIKE :q)")
+                filters.append("q")
                 params["q"] = f"%{q}%"
         if not include_archived:
-            clauses.append("c.archived_at IS NULL")
+            filters.append("unarchived")
         if priority:
-            clauses.append("c.priority = :priority")
+            filters.append("priority")
             params["priority"] = priority
         if label:
-            join += " JOIN card_labels cl ON cl.card_id = c.id JOIN labels l ON l.id = cl.label_id"
-            clauses.append("(l.id = :label OR l.name = :label)")
+            joins += LABEL_JOIN
+            filters.append("label")
             params["label"] = label
         if completed is not None:
-            clauses.append("c.completed_at IS NOT NULL" if completed else "c.completed_at IS NULL")
+            filters.append("completed" if completed else "open")
         if overdue:
-            clauses.append("c.due_at IS NOT NULL AND c.due_at < :now AND c.completed_at IS NULL")
+            filters.append("overdue")
             params["now"] = utcnow()
         if list_id:
-            clauses.append("c.list_id = :list_id")
+            filters.append("list")
             params["list_id"] = list_id
-        where = f" WHERE {' AND '.join(clauses)}"
-        base = f"FROM cards c{join}{where}"
+        where = sql.where(_CARD_SEARCH_FILTERS, filters)
         with self.boards.reader(board_id) as conn:
             loop = rows(
                 conn,
@@ -83,11 +104,18 @@ class SearchService:
             )
             if not loop:
                 raise NotFound("Loop not found", code="loop_not_found")
-            total = conn.execute(text(f"SELECT COUNT(DISTINCT c.id) {base}"), params).scalar_one()
+            total = conn.execute(
+                text(
+                    "SELECT"  # noqa: S608 - from _CARD_FTS_JOIN, LABEL_JOIN, _CARD_SEARCH_FILTERS
+                    f" COUNT(DISTINCT c.id) FROM cards c{joins}{where}"
+                ),
+                params,
+            ).scalar_one()
             records = rows(
                 conn,
-                f"SELECT DISTINCT c.* {base} ORDER BY c.updated_at DESC, c.id"
-                f" LIMIT :limit OFFSET :offset",
+                "SELECT"  # noqa: S608 - from _CARD_FTS_JOIN, LABEL_JOIN, _CARD_SEARCH_FILTERS
+                f" DISTINCT c.* FROM cards c{joins}{where} ORDER BY c.updated_at DESC, c.id"
+                " LIMIT :limit OFFSET :offset",
                 {**params, "limit": limit, "offset": offset},
             )
             items = decorate_cards(conn, board_id, records)
@@ -121,14 +149,11 @@ class SearchService:
     def global_search(
         self, *, q: str, limit_per_loop: int = 10, max_boards: int = 25
     ) -> dict[str, Any]:
-        boards = [
-            row
-            for row in self.board_service.registry.read(
-                "SELECT id, name FROM boards WHERE status = 'active' ORDER BY updated_at DESC"
-                " LIMIT :limit",
-                {"limit": max_boards},
-            )
-        ]
+        boards = self.board_service.registry.read(
+            "SELECT id, name FROM boards WHERE status = 'active' ORDER BY updated_at DESC"
+            " LIMIT :limit",
+            {"limit": max_boards},
+        )
         results: list[dict[str, Any]] = []
         loop_count = 0
         for board in boards:
@@ -172,26 +197,27 @@ def activity_feed(
     offset: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
     board_service.require_row(board_id)
-    clauses: list[str] = []
     params: dict[str, Any] = {}
     if entity_type:
-        clauses.append("entity_type = :entity_type")
         params["entity_type"] = entity_type
     if entity_id:
-        clauses.append("entity_id = :entity_id")
         params["entity_id"] = entity_id
     if actor_type:
-        clauses.append("actor_type = :actor_type")
         params["actor_type"] = actor_type
     if action:
-        clauses.append("action = :action")
         params["action"] = action
-    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    where = sql.where(_ACTIVITY_FILTERS, params)
     with board_service.boards.reader(board_id) as conn:
-        total = conn.execute(text(f"SELECT COUNT(*) FROM activity_log{where}"), params).scalar_one()
+        total = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM activity_log"  # noqa: S608 - from _ACTIVITY_FILTERS
+                f"{where}"
+            ),
+            params,
+        ).scalar_one()
         records = rows(
             conn,
-            f"SELECT * FROM activity_log{where}"
+            f"SELECT * FROM activity_log{where}"  # noqa: S608 - from _ACTIVITY_FILTERS
             " ORDER BY timestamp DESC, id LIMIT :limit OFFSET :offset",
             {**params, "limit": limit, "offset": offset},
         )

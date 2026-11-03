@@ -155,7 +155,7 @@ def resolve_commit(owner: str, name: str, branch: str | None, token: str | None)
             response = client.get(
                 f"{API_BASE}/repos/{owner}/{name}/commits/{ref}", headers=_headers(token)
             )
-    except Exception as exc:  # noqa: BLE001 - reported, never raised past this module
+    except Exception as exc:  # reported, never raised past this module
         code = "timeout" if "timeout" in type(exc).__name__.lower() else "unreachable"
         raise SnapshotError(code) from exc
     if response.status_code >= 400:
@@ -188,31 +188,36 @@ def fetch_archive(owner: str, name: str, sha: str, token: str | None) -> bytes:
     url = f"{API_BASE}/repos/{owner}/{name}/tarball/{sha}"
     try:
         with _client() as client:
-            response = client.get(url, headers=_headers(token))
-            if response.status_code in (301, 302, 303, 307, 308):
-                location = response.headers.get("location") or ""
-                host = (urlsplit(location).hostname or "").lower()
-                if host not in CODELOAD_HOSTS:
-                    raise SnapshotError("redirect_refused")
-                buffer = bytearray()
-                with client.stream("GET", location, headers={"User-Agent": "tralala"}) as stream:
-                    if stream.status_code >= 400:
-                        raise SnapshotError(_classify(stream.status_code, stream.headers))
-                    for chunk in stream.iter_bytes():
-                        buffer.extend(chunk)
-                        if len(buffer) > ARCHIVE_MAX_BYTES:
-                            raise SnapshotError("too_large")
-                return bytes(buffer)
-            if response.status_code >= 400:
-                raise SnapshotError(_classify(response.status_code, response.headers))
-            if len(response.content) > ARCHIVE_MAX_BYTES:
-                raise SnapshotError("too_large")
-            return response.content
+            return _download(client, url, token)
     except SnapshotError:
         raise
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # reported, never raised past this module
         code = "timeout" if "timeout" in type(exc).__name__.lower() else "unreachable"
         raise SnapshotError(code) from exc
+
+
+def _download(client: Any, url: str, token: str | None) -> bytes:
+    """The archive request itself; every refusal is a SnapshotError with its code."""
+    response = client.get(url, headers=_headers(token))
+    if response.status_code in (301, 302, 303, 307, 308):
+        location = response.headers.get("location") or ""
+        host = (urlsplit(location).hostname or "").lower()
+        if host not in CODELOAD_HOSTS:
+            raise SnapshotError("redirect_refused")
+        buffer = bytearray()
+        with client.stream("GET", location, headers={"User-Agent": "tralala"}) as stream:
+            if stream.status_code >= 400:
+                raise SnapshotError(_classify(stream.status_code, stream.headers))
+            for chunk in stream.iter_bytes():
+                buffer.extend(chunk)
+                if len(buffer) > ARCHIVE_MAX_BYTES:
+                    raise SnapshotError("too_large")
+        return bytes(buffer)
+    if response.status_code >= 400:
+        raise SnapshotError(_classify(response.status_code, response.headers))
+    if len(response.content) > ARCHIVE_MAX_BYTES:
+        raise SnapshotError("too_large")
+    return response.content
 
 
 def _is_text(payload: bytes) -> bool:
@@ -260,7 +265,8 @@ def read_snapshot(archive_bytes: bytes) -> dict[str, Any]:
     used_bytes = 0
     truncated = False
     try:
-        archive = tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz")
+        # Opened apart from the `with` below, so only a failed open is malformed_archive.
+        archive = tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz")  # noqa: SIM115 - see above
     except (tarfile.TarError, OSError) as exc:
         raise SnapshotError("malformed_archive") from exc
     with archive:
@@ -301,10 +307,7 @@ class RepositorySnapshotService:
                 '{"event": "repository_snapshot_none", "board_id": "%s"}', board_id
             )
             return []
-        entries: list[dict[str, Any]] = []
-        for row in rows:
-            entries.append(self._one(row))
-        return entries
+        return [self._one(row) for row in rows]
 
     def _one(self, row: dict[str, Any]) -> dict[str, Any]:
         entry: dict[str, Any] = {

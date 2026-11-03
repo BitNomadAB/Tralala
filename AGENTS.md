@@ -14,6 +14,10 @@ message broker.
 
 1. **One service layer.** Every interface (React UI, REST, WebMCP) calls the same functions in
    `backend/app/services/`. Business rules never live in routers, React components or WebMCP tools.
+   A service reaches a database only through the repository Protocols and the unit of work in
+   `backend/app/repositories/` (implemented over SQL in `repositories/sql/`), never through
+   `BoardDatabaseManager`, `Registry`, a connection or SQL text of its own. `services/lists.py` is
+   the reference; services not converted yet still hold those handles until their conversion.
 2. **Board isolation.** A board's data lives only in `data/boards/{uuid}/board.sqlite`. A board id
    is always a UUID resolved through `BoardDatabaseManager`; never build a path from user text.
 2b. **A Loop owns its Kanban.** Boards contain Loops; loops contain lists, Tickets, documents,
@@ -39,7 +43,10 @@ message broker.
    `backend/migrations/registry` or `backend/migrations/board`; never edit a released revision and
    never write DDL anywhere else. Use `batch_alter_table` for SQLite table reconstruction. The
    Migration Manager (`storage/migration_manager.py`) applies revisions; it takes a verified
-   pre-migration backup, validates integrity and marks a failed board `migration_failed`.
+   pre-migration backup, validates integrity and marks a failed board `migration_failed`. The
+   migrations are the only description of the schema: `python -m tools.dbgen` validates both
+   chains, generates the typed rows in `app/db/generated` from them and compiles every SQL
+   statement in `app/` against the result, so nothing hand-written mirrors a table.
 10. **No new infrastructure** without a documented decision in `docs/decisions/` (a local, untracked
     working document) that proves a requirement.
 11a. **Planning decisions are human decisions.** Approving analysis or a RoadMap, resetting a scope,
@@ -61,7 +68,10 @@ message broker.
 12. **Provider credentials are sealed, never echoed.** API keys are encrypted with
     `core/secrets.py`; responses and logs expose only `has_api_key` and a short hint. Endpoints are
     validated by `services/connections.validate_endpoint` (no metadata/link-local targets, no
-    embedded credentials, no redirects).
+    embedded credentials, no redirects; a host name is judged by every address it resolves to), and
+    every call to an agent endpoint goes through `connections.endpoint_client`, which checks the
+    same rule when it connects and connects only to the checked address. Never open another HTTP
+    client to an agent endpoint.
 13. **The worker surface is one catalogue.** `services/agent_tools.py` is the only description of
     what an external worker token may call; `/mcp` and `/llms.txt` are generated from it and every
     handler calls a service. Adding a capability is a catalogue entry plus a handler — never a new
@@ -72,9 +82,12 @@ message broker.
 ## Repository layout
 
 ```text
-backend/app/{api,core,models,repositories,schemas,services,storage,security,seeds}
+backend/app/{api,core,db,models,repositories,schemas,services,storage,security,seeds}
+backend/app/db/generated   typed rows written by tools/dbgen from the migrations (git-ignored)
+backend/app/repositories/sql   the SQL implementations of the repository Protocols
 backend/migrations/{registry,board}
-backend/tests/   pytest unit tests, including the guard tests that hold the code to these rules
+backend/tools/dbgen   the first build step: migrations, generated rows, static SQL check
+backend/tests/{unit,infrastructure}   unit tests and guards (the default); the minimal SQLite suite
 frontend/src/{app,components,features,lib,webmcp,themes,tests}
 frontend/e2e/    the Playwright journeys
 public_docs/     everything a user or operator follows: installation, onboarding, commands,
@@ -88,10 +101,11 @@ scripts/         run-playwright.mjs, the isolated Playwright runner
 #   .ralph/           progress.txt (the running log) and the Loop implementation specification
 ```
 
-`models/`, `repositories/` and `security/` are reserved for code that is promoted out of
-`storage/` and `core/` when it grows; do not duplicate logic into them.
+`repositories/` holds the repository Protocols, shaped by what the services need, and `db/` the
+generated rows and their checked value converters. `models/` and `security/` are reserved for code
+that is promoted out of `storage/` and `core/` when it grows; do not duplicate logic into them.
 
-`tests/test_instruction_files.py` holds this file to the tree: the layout block above, the commands
+`tests/unit/test_instruction_files.py` holds this file to the tree: the layout block above, the commands
 below and every file path it names must exist, every relative link in a shipped document must
 resolve, and no shipped document or source may describe the licence as anything but
 source-available. Move a directory and its line here in the same change.
@@ -101,8 +115,11 @@ source-available. Move a directory and its line here in the same change.
 Backend (run from `backend/`):
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest                            # unit tests (primary gate)
-..\.venv\Scripts\python.exe -m ruff check app tests migrations  # lint, what CI runs
+..\.venv\Scripts\python.exe -m tools.dbgen                            # first: migrations, rows, SQL
+..\.venv\Scripts\python.exe -m ruff check app tests migrations tools  # lint, what CI runs
+..\.venv\Scripts\python.exe -m pyright                                # strict scope: pyrightconfig.json
+..\.venv\Scripts\python.exe -m pytest                                 # unit tests (primary gate)
+..\.venv\Scripts\python.exe -m pytest tests/infrastructure            # the minimal SQLite suite
 ..\.venv\Scripts\python.exe -m uvicorn app.main:create_app --factory --reload
 ```
 
@@ -128,10 +145,26 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 - Python: **3.13 is the version of record** — the container image, CI's primary job and your
   virtual environment all run it, so a local run means what CI means. CI also runs 3.14, and
   `requires-python` allows it; anything newer is untested and needs a CI leg before it is claimed.
-  Typed, ruff-clean (line length 100), no blocking work in async paths.
+  Typed, ruff-clean (line length 100), no blocking work in async paths. The Ruff rule set and its
+  few ignores live in `backend/pyproject.toml`, each ignore with its reason; an inline `# noqa`
+  names its rule and says why. No `print` in `app/`: use a logger.
+- SQL text is literal and values are bind parameters (a list is an expanding parameter,
+  `IN :ids`). The only things formatted into a statement are identifiers and fragments taken from
+  a module-level tuple of string literals through `app/core/sql.py`; such a line carries
+  `# noqa: S608 - from <TUPLE>`.
 - Text files are UTF-8 without a byte-order mark and use LF line endings (`.gitattributes`,
   `.editorconfig`). Backend code writes text with `newline=""` or writes bytes, so a file written on
-  Windows is byte-identical to one written on Linux; `tests/test_text_files.py` enforces both.
+  Windows is byte-identical to one written on Linux; `tests/unit/test_text_files.py` enforces both.
+- Database rows are the generated `<Table>Row` dataclasses (`app/db/generated`, never edited by
+  hand; rerun `python -m tools.dbgen` after a migration). A repository selects exactly a row's
+  columns (`sql.column_list(<TABLE>_COLUMNS)`) and maps each result through the row's checked
+  `from_mapping`. A service returns typed values (a row, a `TypedDict` of its JSON shape), and a
+  unit test changes a row with `row.__replace__(...)`, which pyright checks, not
+  `dataclasses.replace`.
+- Pyright runs strict on the scope in `backend/pyrightconfig.json`: the generated rows, the
+  repositories, every converted service, the unit tests and the build tools. In that scope there is
+  no `Any`, no `cast` and no `# type: ignore`; `tests/unit/test_strict_scope.py` enforces it. Each
+  converted service joins the scope.
 - TypeScript: strict, plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
   `noImplicitOverride` and `verbatimModuleSyntax` (`frontend/tsconfig.json`). An index or regex
   result is narrowed, never asserted with `!`; an optional property that may be passed `undefined`
@@ -185,23 +218,43 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 
 ## Verification contract
 
-Backend tests are unit tests. A test gives a function a fixed input and asserts what comes back,
-and the same input always gives the same result. A backend test never builds the application
-(`create_app`, `TestClient`), never opens SQLite (engines, sessions, `BoardDatabaseManager`,
-migrations), never reaches the network and never sleeps or starts a thread; anything expensive and
-shared is a session-scoped fixture built once, so the whole suite runs in seconds.
-`tests/test_unit_only.py` enforces this. When a rule sits inside a request or database path, extract
-the pure part and test that, as `csrf_satisfied` in `core/security.py` and `canonical_board_id` in
-`core/identifiers.py` are. The running stack (HTTP, authentication, the databases, migrations) is
-exercised only by the Playwright journeys in `frontend/e2e/`; no backend test covers it.
+The backend build is a pipeline, run in this order locally and in CI, stopping at the first
+failure: `python -m tools.dbgen` -> `ruff` -> `pyright` -> `pytest` (unit) -> `pytest
+tests/infrastructure`.
+
+- **`python -m tools.dbgen`** proves the schema side without a test: each Alembic chain is linear
+  and migrates from empty to head (in memory), the schema rules hold, the typed rows are generated,
+  and every SQL statement in `app/` compiles (SQLite `EXPLAIN`) against that schema. It caches by
+  hash, so an unchanged schema and unchanged statements cost almost nothing; `--check` only
+  compares.
+- **`pyright`** proves the types: a schema change that renames or adds a column breaks every row
+  consumer (repository, fake, service) before a test runs.
+- **Unit tests** (`tests/unit/`, the default `pytest`) give a function a fixed input and assert what
+  comes back, and the same input always gives the same result. A service runs its real code
+  against the typed in-memory fakes in `tests/unit/fakes/`, which implement the repository
+  Protocols over the generated rows. A unit test never builds the application (`create_app`,
+  `TestClient`), never opens SQLite or imports `app.storage`, `app.repositories.sql` or
+  `tools.dbgen`, never reaches the network and never sleeps or starts a thread; anything expensive
+  and shared is a session-scoped fixture built once, and the suite runs in parallel
+  (`pytest -n auto`) as well as in order. `tests/unit/test_unit_only.py` enforces this, and the
+  suite refuses to start on rows generated from an older schema. When a rule sits inside a request
+  path, extract the pure part and test that, as `csrf_satisfied` in `core/security.py` is.
+- **The infrastructure suite** (`tests/infrastructure/`) is the only backend test that opens SQLite,
+  and it stays minimal: connection set-up, migrations to completion, the unit of work's commit and
+  rollback, a board releasing its file, availability. One real database per session, never per
+  test; no test per table, column, constraint or repository, and no business rule against a real
+  database.
+- The running stack (HTTP, authentication, the databases together) is exercised by the Playwright
+  journeys in `frontend/e2e/`.
 
 A story is complete only when:
 
-- schema changes include an Alembic revision (there are no migration tests; the Migration Manager's
-  verified backup, integrity check and `migration_failed` marking guard an upgrade),
+- schema changes include an Alembic revision and `python -m tools.dbgen` passes on it (there are no
+  migration tests; the Migration Manager's verified backup, integrity check and `migration_failed`
+  marking guard an upgrade),
 - behavioural changes include unit tests of the functions that carry the behaviour,
 - the smallest relevant test command passes,
-- `ruff check` (backend), `tsc --noEmit` and `pnpm lint` (frontend) pass,
+- `ruff check` and `pyright` (backend), `tsc --noEmit` and `pnpm lint` (frontend) pass,
 - the production frontend build succeeds for UI changes,
 - user-journey changes extend `frontend/e2e/*.spec.ts`,
 - no existing test regressed.

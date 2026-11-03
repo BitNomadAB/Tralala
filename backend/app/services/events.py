@@ -11,6 +11,7 @@ serves both.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import queue
 from threading import Lock
@@ -19,10 +20,15 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import NotFound
 from ..storage.sqlite import utcnow
 from .boards import BoardService
+
+# The event tables and their scope columns; the names are formatted into SQL text (core/sql.py).
+_EVENT_TABLES = ("discussion_events", "card_events")
+_SCOPE_COLUMNS = ("discussion_id", "card_id")
 
 MESSAGE_CREATED = "message_created"
 AGENT_STARTED = "agent_started"
@@ -101,15 +107,18 @@ class EventService:
         payload: dict[str, Any] | None,
         actor: ActorContext | None,
     ) -> dict[str, Any]:
-        column = "discussion_id" if table == "discussion_events" else "card_id"
+        table = sql.identifier(table, _EVENT_TABLES)
+        column = sql.identifier(
+            "discussion_id" if table == "discussion_events" else "card_id", _SCOPE_COLUMNS
+        )
         event_id = str(uuid4())
         now = utcnow()
         result = conn.execute(
             text(
-                f"INSERT INTO {table}"
+                f"INSERT INTO {table}"  # noqa: S608 - from _EVENT_TABLES and _SCOPE_COLUMNS
                 f" (id, {column}, type, payload_json, actor_id, actor_type, actor_name,"
                 "  created_at)"
-                f" VALUES (:id, :scope_id, :type, :payload, :actor_id, :actor_type,"
+                " VALUES (:id, :scope_id, :type, :payload, :actor_id, :actor_type,"
                 "         :actor_name, :now)"
             ),
             {
@@ -150,14 +159,10 @@ class EventService:
             try:
                 target.put_nowait(event)
             except queue.Full:
-                try:
+                with contextlib.suppress(queue.Empty):
                     target.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
+                with contextlib.suppress(queue.Full):
                     target.put_nowait(event)
-                except queue.Full:
-                    pass
 
     def subscribe(self, board_id: str, discussion_id: str) -> queue.Queue:
         return self._subscribe((board_id, DISCUSSION, discussion_id))
@@ -244,11 +249,14 @@ class EventService:
         after: int,
         limit: int,
     ) -> list[dict[str, Any]]:
+        table = sql.identifier(table, _EVENT_TABLES)
+        column = sql.identifier(column, _SCOPE_COLUMNS)
         with self.boards.reader(board_id) as conn:
             rows = conn.execute(
                 text(
-                    f"SELECT seq, id, {column} AS scope_id, type, payload_json, actor_id,"
-                    f" actor_type, actor_name, created_at FROM {table}"
+                    "SELECT seq, id,"  # noqa: S608 - from _EVENT_TABLES and _SCOPE_COLUMNS
+                    f" {column} AS scope_id, type, payload_json, actor_id, actor_type, actor_name,"
+                    f" created_at FROM {table}"
                     f" WHERE {column} = :id AND seq > :after ORDER BY seq LIMIT :limit"
                 ),
                 {"id": scope_id, "after": after, "limit": limit},

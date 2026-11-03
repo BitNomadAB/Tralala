@@ -68,7 +68,6 @@ async def download_attachment(
     board_id: str,
     attachment_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
-    request: Request,
 ) -> Response:
     ctx.actor.require("cards:read")
     row, data = ctx.services.attachment.read_bytes(board_id, attachment_id)

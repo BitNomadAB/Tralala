@@ -52,9 +52,12 @@ We keep signed agreements on file and never publish them.
 ## What a good pull request looks like
 
 - One concern per pull request, with a test that fails before the change and passes after it.
-- Behavioural changes need an API-level test; user-journey changes extend `frontend/e2e/*.spec.ts`.
-- Schema changes need an Alembic revision under `backend/migrations/{registry,board}` plus tests for
-  fresh install, upgrade from the previous revision, data preservation and failure recovery.
+- Behavioural changes need unit tests of the functions that carry them (a service runs against the
+  in-memory repository fakes in `backend/tests/unit/fakes`); user-journey changes extend
+  `frontend/e2e/*.spec.ts`.
+- Schema changes need an Alembic revision under `backend/migrations/{registry,board}`, and
+  `python -m tools.dbgen` (run first, before ruff, pyright and pytest) must pass on it: it migrates
+  both chains, regenerates the typed rows and compiles every SQL statement against the new schema.
 - Update the relevant file in `public_docs/` when you change behaviour: installation,
   troubleshooting, security defaults, agent usage, the API and the Loop workflow all live there,
   and they must never link into the working documents under `docs/`, `analysis/` or `.ralph/`.

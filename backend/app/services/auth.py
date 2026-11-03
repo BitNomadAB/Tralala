@@ -50,6 +50,21 @@ def _token_scopes() -> frozenset[str]:
     return frozenset(scope for scope in SCOPES if scope not in blocked)
 
 
+def check_password(password: str, *, minimum_length: int, username: str | None = None) -> None:
+    """The password policy: at least eight characters (or the configured minimum, if higher),
+    not a well-known password and not the username."""
+    minimum = max(8, int(minimum_length))
+    if len(password) < minimum:
+        raise ValidationFailure(
+            f"Password must be at least {minimum} characters",
+            details={"minimum_length": minimum},
+        )
+    if password.strip().lower() in WEAK_PASSWORDS:
+        raise ValidationFailure("Choose a stronger password")
+    if username and password.strip().casefold() == username.strip().casefold():
+        raise ValidationFailure("Password must not be the username")
+
+
 class AuthService:
     def __init__(self, settings: Settings, registry: Registry) -> None:
         self.settings = settings
@@ -170,16 +185,9 @@ class AuthService:
         return self._preferences(actor.actor_id)
 
     def validate_password(self, password: str, *, username: str | None = None) -> None:
-        minimum = max(8, int(self.settings.password_min_length))
-        if len(password) < minimum:
-            raise ValidationFailure(
-                f"Password must be at least {minimum} characters",
-                details={"minimum_length": minimum},
-            )
-        if password.strip().lower() in WEAK_PASSWORDS:
-            raise ValidationFailure("Choose a stronger password")
-        if username and password.strip().casefold() == username.strip().casefold():
-            raise ValidationFailure("Password must not be the username")
+        check_password(
+            password, minimum_length=self.settings.password_min_length, username=username
+        )
 
     def change_password(
         self, actor: ActorContext, current_password: str, new_password: str
@@ -247,7 +255,8 @@ class AuthService:
         elif disabled is False:
             self.registry.enable_actor(user_id)
         updated = self.registry.user_by_id(user_id)
-        assert updated is not None
+        if updated is None:
+            raise NotFound("User not found")
         counts = self.registry.credential_owner_counts().get(str(user_id)) or {}
         return {
             "id": updated["id"],
@@ -357,7 +366,7 @@ class AuthService:
         credential["token"] = token
         return credential
 
-    def _member_policy(self, actor: ActorContext, payload: CredentialCreate) -> int | None:
+    def _member_policy(self, actor: ActorContext, payload: CredentialCreate) -> int:
         """A person's own agent access: within the member vocabulary, capped and time-boxed."""
         outside = [scope for scope in payload.scopes if scope not in MEMBER_TOKEN_SCOPES]
         if outside:
@@ -399,7 +408,6 @@ class AuthService:
         if actor.is_admin:
             return self._issue(actor, payload)
         days = self._member_policy(actor, payload)
-        assert days is not None
         return self._issue(
             actor,
             payload,

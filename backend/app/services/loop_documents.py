@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, Forbidden, ValidationFailure, VersionConflict
 from ..schemas.loops import (
@@ -35,6 +36,13 @@ from .loops import DOCUMENT_KINDS, LoopService
 ANALYSIS_SCOPE_KINDS = ("info", "analysis_ai", "analysis")
 ROADMAP_SCOPE_KINDS = ("info", "analysis_ai", "analysis", "roadmap_ai", "roadmap")
 REVIEW_SCOPES = ("analysis", "roadmap")
+# A Loop's approval columns, upstream first; the names are formatted into SQL text (core/sql.py).
+_APPROVAL_COLUMNS = (
+    "analysis_approval_id",
+    "roadmap_approval_id",
+    "implementation_approval_id",
+    "qa_approval_id",
+)
 MATERIAL_FINDING_CATEGORIES = {"risk", "blocker", "legal", "security", "question"}
 MAX_DOCUMENT_PAYLOAD = 200_000
 
@@ -374,29 +382,19 @@ class LoopDocumentService:
 
     def _invalidate_downstream(self, conn: Any, loop_id: str, kind: str) -> None:
         """A changed input invalidates the approvals that authorized execution."""
-        clears: list[str] = []
-        if kind == "info":
-            clears = [
-                "analysis_approval_id",
-                "roadmap_approval_id",
-                "implementation_approval_id",
-                "qa_approval_id",
-            ]
-        elif kind in {"analysis_ai", "analysis"}:
-            clears = [
-                "analysis_approval_id",
-                "roadmap_approval_id",
-                "implementation_approval_id",
-                "qa_approval_id",
-            ]
+        if kind in {"info", "analysis_ai", "analysis"}:
+            clears = _APPROVAL_COLUMNS
         elif kind in {"roadmap_ai", "roadmap"}:
-            clears = ["roadmap_approval_id", "implementation_approval_id", "qa_approval_id"]
-        if not clears:
+            clears = _APPROVAL_COLUMNS[1:]
+        else:
             return
-        assignments = ", ".join(f"{column} = NULL" for column in clears)
+        assignments = sql.assignments(clears, _APPROVAL_COLUMNS)
         conn.execute(
-            text(f"UPDATE loops SET {assignments}, updated_at = :now WHERE id = :id"),
-            {"now": utcnow(), "id": loop_id},
+            text(
+                "UPDATE loops"  # noqa: S608 - from _APPROVAL_COLUMNS
+                f" SET {assignments}, updated_at = :now WHERE id = :id"
+            ),
+            {**dict.fromkeys(clears), "now": utcnow(), "id": loop_id},
         )
         stale_kinds = {
             "info": ("analysis_ai", "analysis", "roadmap_ai", "roadmap"),
@@ -727,10 +725,14 @@ class LoopDocumentService:
                         ),
                         {"id": expected[kind]},
                     )
-                column = "analysis_approval_id" if scope == "analysis" else "roadmap_approval_id"
+                column = sql.identifier(
+                    "analysis_approval_id" if scope == "analysis" else "roadmap_approval_id",
+                    _APPROVAL_COLUMNS,
+                )
                 conn.execute(
                     text(
-                        f"UPDATE loops SET {column} = :approval_id, version = version + 1,"
+                        "UPDATE loops"  # noqa: S608 - from _APPROVAL_COLUMNS
+                        f" SET {column} = :approval_id, version = version + 1,"
                         " updated_at = :now WHERE id = :id"
                     ),
                     {"approval_id": approval_id, "now": utcnow(), "id": loop_id},

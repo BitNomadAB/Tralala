@@ -92,6 +92,6 @@ def ensure_fts(engine: Engine) -> bool:
                 conn.exec_driver_sql(
                     "INSERT INTO loop_history_fts(loop_history_fts) VALUES('rebuild')"
                 )
-        return True
     except Exception:  # noqa: BLE001 - optional capability, must never break startup
         return False
+    return True

@@ -6,6 +6,7 @@ Only hashes of API tokens and passwords are persisted; raw values never touch th
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import logging
@@ -13,8 +14,12 @@ import os
 import secrets
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .platform import PROFILE_WINDOWS, resolve_profile
+
+if TYPE_CHECKING:  # annotation only: config is not imported at run time
+    from .config import Settings
 
 _SCRYPT_N = 2**14
 _SCRYPT_R = 8
@@ -24,7 +29,7 @@ _SCRYPT_DKLEN = 32
 logger = logging.getLogger("tralala.security")
 
 # Published default kept only so an upgraded deployment can be detected and repaired.
-INSECURE_DEFAULT_SECRET = "dev-insecure-secret-change-me"
+INSECURE_DEFAULT_SECRET = "dev-insecure-secret-change-me"  # noqa: S105 - refused, never used
 MIN_SECRET_LENGTH = 32
 WEAK_SECRETS = frozenset(
     {
@@ -37,8 +42,8 @@ WEAK_SECRETS = frozenset(
         "test-secret",
     }
 )
-SECRET_FILE_NAME = ".session-secret"
-BOOTSTRAP_PASSWORD_FILE_NAME = ".bootstrap-password"
+SECRET_FILE_NAME = ".session-secret"  # noqa: S105 - a file name, not a secret
+BOOTSTRAP_PASSWORD_FILE_NAME = ".bootstrap-password"  # noqa: S105 - a file name, not a secret
 
 # Shipped/placeholder values treated as "no password chosen".
 # Values that must never become an administrator password. The last one is the shared test password
@@ -154,22 +159,18 @@ def write_private_file(path: Path, value: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.write(value)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.close(fd)
-        except OSError:
-            pass
         raise
     if resolve_profile(None) == PROFILE_WINDOWS:  # pragma: no cover - exercised on Windows
         # NTFS has no permission bits: this would only clear the read-only flag, and the file's
         # protection comes from the ACL it inherits from its directory.
         return
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
 
 
-def resolve_secret_key(settings) -> str:  # noqa: ANN001 - avoids a config import cycle
+def resolve_secret_key(settings: Settings) -> str:
     """Return the session-signing secret, never a weak or published value.
 
     An explicit secret wins only when it is long enough and not a published placeholder. Otherwise

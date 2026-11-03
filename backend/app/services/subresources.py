@@ -5,8 +5,9 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound, ValidationFailure
 from ..schemas.subresources import (
@@ -30,6 +31,16 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
+
+# What these services format into SQL text (see core/sql.py).
+_LABEL_EDITABLE = ("name", "color")
+_CHECKLIST_ITEM_EDITABLE = ("text", "completed", "position")
+_ACTOR_NAMES = text("SELECT id, name, type FROM actors WHERE id IN :ids").bindparams(
+    bindparam("ids", expanding=True)
+)
+_AGENT_NAMES = text("SELECT id, name FROM agents WHERE id IN :ids").bindparams(
+    bindparam("ids", expanding=True)
+)
 
 
 class LabelService:
@@ -75,9 +86,12 @@ class LabelService:
                 raise NotFound("Label not found")
             updates = payload.model_dump(exclude_none=True)
             if updates:
-                assignments = ", ".join(f"{key} = :{key}" for key in updates)
+                assignments = sql.assignments(updates, _LABEL_EDITABLE)
                 conn.execute(
-                    text(f"UPDATE labels SET {assignments} WHERE id = :id"),
+                    text(
+                        "UPDATE labels"  # noqa: S608 - from _LABEL_EDITABLE
+                        f" SET {assignments} WHERE id = :id"
+                    ),
                     {**updates, "id": label_id},
                 )
                 log_activity(
@@ -158,9 +172,7 @@ class ChecklistService:
         with self.boards.session(board_id) as conn:
             self._card(conn, card_id)
             require_mutable_card(conn, card_id)
-            position = position_for_index(
-                conn, "checklists", "card_id = :card_id", {"card_id": card_id}, None
-            )
+            position = position_for_index(conn, "checklists", {"card_id": card_id}, None)
             conn.execute(
                 text(
                     "INSERT INTO checklists (id, card_id, title, position)"
@@ -250,11 +262,7 @@ class ChecklistService:
                 raise NotFound("Checklist not found")
             require_mutable_card(conn, checklist["card_id"])
             position = position_for_index(
-                conn,
-                "checklist_items",
-                "checklist_id = :checklist_id",
-                {"checklist_id": checklist_id},
-                payload.position,
+                conn, "checklist_items", {"checklist_id": checklist_id}, payload.position
             )
             conn.execute(
                 text(
@@ -308,14 +316,17 @@ class ChecklistService:
                 updates["position"] = position_for_index(
                     conn,
                     "checklist_items",
-                    "checklist_id = :checklist_id AND id != :id",
-                    {"checklist_id": existing["checklist_id"], "id": item_id},
+                    {"checklist_id": existing["checklist_id"]},
                     payload.position,
+                    exclude=item_id,
                 )
             if updates:
-                assignments = ", ".join(f"{key} = :{key}" for key in updates)
+                assignments = sql.assignments(updates, _CHECKLIST_ITEM_EDITABLE)
                 conn.execute(
-                    text(f"UPDATE checklist_items SET {assignments} WHERE id = :id"),
+                    text(
+                        "UPDATE checklist_items"  # noqa: S608 - from _CHECKLIST_ITEM_EDITABLE
+                        f" SET {assignments} WHERE id = :id"
+                    ),
                     {**updates, "id": item_id},
                 )
                 log_activity(
@@ -324,10 +335,11 @@ class ChecklistService:
                     action="checklist.item_updated",
                     entity_type="checklist_item",
                     entity_id=item_id,
-                    changes={key: value for key, value in updates.items()},
+                    changes=dict(updates),
                 )
             row = one(conn, "SELECT * FROM checklist_items WHERE id = :id", {"id": item_id})
-        assert row is not None
+        if row is None:
+            raise NotFound("Checklist item not found")
         return {
             "id": row["id"],
             "checklist_id": row["checklist_id"],
@@ -362,20 +374,12 @@ class CommentService:
         self.registry = board_service.registry
         self.mentions: Any = None
 
-    def _serialize(self, conn: Any, comment: dict[str, Any]) -> dict[str, Any]:
-        return comment
-
     def _decorate(self, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
         actor_ids = {comment["actor_id"] for comment in comments}
         actors = (
             {
                 actor["id"]: actor
-                for actor in self.registry.read(
-                    "SELECT id, name, type FROM actors WHERE id IN ({})".format(
-                        ", ".join(f":a{i}" for i in range(len(actor_ids)))
-                    ),
-                    {f"a{i}": actor_id for i, actor_id in enumerate(actor_ids)},
-                )
+                for actor in self.registry.read(_ACTOR_NAMES, {"ids": list(actor_ids)})
             }
             if actor_ids
             else {}
@@ -388,13 +392,9 @@ class CommentService:
             comment["actor_id"] for comment in comments if comment["actor_name"] is None
         }
         if missing:
-            params = {f"a{index}": actor_id for index, actor_id in enumerate(missing)}
-            placeholders = ", ".join(f":{key}" for key in params)
             agents = {
                 row["id"]: row
-                for row in self.registry.read(
-                    f"SELECT id, name FROM agents WHERE id IN ({placeholders})", params
-                )
+                for row in self.registry.read(_AGENT_NAMES, {"ids": list(missing)})
             }
             for comment in comments:
                 agent = agents.get(comment["actor_id"])
@@ -449,7 +449,7 @@ class CommentService:
         if self.mentions is not None and "@" in payload.content:
             try:
                 self.mentions.queue(actor, board_id, card_id, comment_id, payload.content)
-            except Exception:  # noqa: BLE001 - the comment is saved; mentions are best effort
+            except Exception:  # the comment is saved; mentions are best effort
                 logger.exception("Could not queue mentions for comment %s", comment_id)
         return self._decorate(
             [
@@ -492,7 +492,8 @@ class CommentService:
                 changes={"card_id": existing["card_id"]},
             )
             row = one(conn, "SELECT * FROM comments WHERE id = :id", {"id": comment_id})
-        assert row is not None
+        if row is None:
+            raise NotFound("Comment not found")
         return self._decorate([row])[0]
 
     def delete(self, actor: ActorContext, board_id: str, comment_id: str) -> None:

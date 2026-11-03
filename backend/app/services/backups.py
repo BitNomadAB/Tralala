@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import re
 import zipfile
@@ -14,7 +15,19 @@ from ..storage.sqlite import snapshot_database, utcnow
 from .boards import BoardService
 from .common import archive_file_name
 
-BACKUP_PATTERN = re.compile(r"^backup-\d{8}T\d{6}Z(?:-[a-z0-9-]+)?\.sqlite$")
+# The tables a validation report counts; the names are formatted into SQL text (see core/sql.py).
+_COUNTED_TABLES = ("lists", "cards", "labels", "checklists", "comments", "activity_log")
+
+BACKUP_PATTERN = re.compile(r"backup-[0-9]{8}T[0-9]{6}Z(?:-[a-z0-9-]+)?\.sqlite")
+
+
+def is_backup_name(name: str) -> bool:
+    """Whether ``name`` is a snapshot this service wrote, and so may be restored or pruned.
+
+    The whole name must match: ``match`` with ``$`` would also accept a trailing newline. The digits
+    are ``[0-9]`` because Python's digit class also matches other scripts' digits.
+    """
+    return BACKUP_PATTERN.fullmatch(name) is not None
 
 
 class BackupService:
@@ -34,7 +47,7 @@ class BackupService:
         items = []
         for file in sorted(directory.glob("*.sqlite"), reverse=True):
             stat = file.stat()
-            sidecar = self._attachments_sidecar(board_id, file)
+            sidecar = self._attachments_sidecar(file)
             items.append(
                 {
                     "name": file.name,
@@ -66,7 +79,8 @@ class BackupService:
             "verification": self._check_file(target),
         }
 
-    def _attachments_sidecar(self, board_id: str, snapshot: Path) -> Path:
+    @staticmethod
+    def _attachments_sidecar(snapshot: Path) -> Path:
         """The files that belong to a snapshot, as one zip next to it."""
         return snapshot.with_name(f"{snapshot.stem}-attachments.zip")
 
@@ -77,7 +91,7 @@ class BackupService:
             if directory.exists()
             else []
         )
-        sidecar = self._attachments_sidecar(board_id, snapshot)
+        sidecar = self._attachments_sidecar(snapshot)
         if not files:
             if sidecar.exists():
                 sidecar.unlink()
@@ -95,7 +109,7 @@ class BackupService:
         return {"files": len(files), "size_bytes": sidecar.stat().st_size}
 
     def _restore_attachments(self, board_id: str, snapshot_name: str) -> dict[str, Any]:
-        sidecar = self._attachments_sidecar(board_id, self._directory(board_id) / snapshot_name)
+        sidecar = self._attachments_sidecar(self._directory(board_id) / snapshot_name)
         if not sidecar.exists():
             # Older snapshots carry no files; existing ones are left alone rather than deleted.
             return {"restored": 0, "skipped": True, "reason": "snapshot_has_no_file_archive"}
@@ -114,7 +128,7 @@ class BackupService:
     def prune(self, board_id: str, keep: int) -> list[str]:
         """Delete the oldest snapshots beyond ``keep``.
 
-        Only files matching ``BACKUP_PATTERN`` are candidates: an operator may keep a hand-made copy
+        Only files ``is_backup_name`` accepts are candidates: an operator may keep a hand-made copy
         in the same directory, and this must never delete it.
         """
         self.board_service.require_row(board_id)
@@ -126,7 +140,7 @@ class BackupService:
         snapshots = sorted(
             file
             for file in directory.iterdir()
-            if file.is_file() and BACKUP_PATTERN.match(file.name)
+            if file.is_file() and is_backup_name(file.name)
         )
         # Names carry the UTC timestamp, so lexical order is chronological order.
         stale = snapshots[:-keep] if len(snapshots) > keep else []
@@ -141,12 +155,10 @@ class BackupService:
             except OSError:
                 continue
             removed.append(file.name)
-            sidecar = self._attachments_sidecar(board_id, file)
+            sidecar = self._attachments_sidecar(file)
             if sidecar.exists():
-                try:
+                with contextlib.suppress(OSError):
                     remove_file(sidecar, profile=profile)
-                except OSError:
-                    pass
         return removed
 
     def newest_age_hours(self, board_id: str) -> float | None:
@@ -176,7 +188,7 @@ class BackupService:
     def restore(self, actor: ActorContext, board_id: str, name: str) -> dict[str, Any]:
         actor.require("boards:admin")
         self.board_service.require_row(board_id)
-        if not BACKUP_PATTERN.match(name):
+        if not is_backup_name(name):
             raise ValidationFailure("Invalid backup name")
         source = self._directory(board_id) / name
         if not source.exists():
@@ -220,18 +232,13 @@ class BackupService:
             ]
             from ..storage.schema import runner
 
-            revision = runner.current_revision("board", conn)
+            revision = runner.current_revision(conn)
             version = runner.revision_count("board")
             counts = {
-                table: conn.exec_driver_sql(f"SELECT COUNT(*) FROM {table}").scalar_one()
-                for table in (
-                    "lists",
-                    "cards",
-                    "labels",
-                    "checklists",
-                    "comments",
-                    "activity_log",
-                )
+                table: conn.exec_driver_sql(
+                    f"SELECT COUNT(*) FROM {table}"  # noqa: S608 - from _COUNTED_TABLES
+                ).scalar_one()
+                for table in _COUNTED_TABLES
             }
         return {
             "board_id": board_id,

@@ -15,7 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import IntegrityError
 
 from ..core.context import ActorContext
@@ -34,6 +34,21 @@ from .runtime import EXECUTABLE_CONNECTION_TYPES
 logger = logging.getLogger("tralala.loop_generation")
 
 MAX_REPAIRS = 2
+# The first enabled generator by name; an organisation profile is never a Loop's worker.
+_DEFAULT_AGENT = text(
+    "SELECT a.* FROM agents a LEFT JOIN role_templates r ON r.id = a.role_template_id"
+    " WHERE a.enabled = 1 AND a.connection_type IN :connection_types"
+    " AND COALESCE(r.scope, 'board') != 'organisation'"
+    " ORDER BY a.name LIMIT 1"
+).bindparams(bindparam("connection_types", expanding=True))
+_DEFAULT_BOARD_AGENT = text(
+    "SELECT a.* FROM agents a LEFT JOIN role_templates r ON r.id = a.role_template_id"
+    " WHERE a.enabled = 1 AND a.connection_type IN :connection_types"
+    " AND COALESCE(r.scope, 'board') != 'organisation' AND a.id IN :agent_ids"
+    " ORDER BY a.name LIMIT 1"
+).bindparams(
+    bindparam("connection_types", expanding=True), bindparam("agent_ids", expanding=True)
+)
 CLOSED_LOOP_CODES = {"loop_read_only", "loop_not_found"}
 MAX_OUTPUT_CHARS = 200_000
 FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
@@ -280,28 +295,20 @@ class LoopGenerationService:
         Organisation profiles are excluded either way: they are not a Loop's worker.
         """
         board_agents = self._board_agent_ids(board_id)
-        placeholders = ", ".join(f":agent_{index}" for index in range(len(board_agents)))
-        board_clause = f" AND a.id IN ({placeholders})" if board_agents else ""
-        select = (
-            "SELECT a.* FROM agents a LEFT JOIN role_templates r ON r.id = a.role_template_id"
-            " WHERE a.enabled = 1 AND a.connection_type IN ("
-            + ", ".join(f"'{value}'" for value in EXECUTABLE_CONNECTION_TYPES)
-            + ")"
-            " AND COALESCE(r.scope, 'board') != 'organisation'"
-        )
-        row = self.registry.read_one(
-            select + board_clause + " ORDER BY a.name LIMIT 1",
-            {f"agent_{index}": value for index, value in enumerate(board_agents)},
-        )
-        if row is None and board_agents:
-            row = self.registry.read_one(select + " ORDER BY a.name LIMIT 1")
+        types = list(EXECUTABLE_CONNECTION_TYPES)
+        row = None
+        if board_agents:
+            row = self.registry.read_one(
+                _DEFAULT_BOARD_AGENT, {"connection_types": types, "agent_ids": board_agents}
+            )
+        if row is None:
+            row = self.registry.read_one(_DEFAULT_AGENT, {"connection_types": types})
         return row
 
     # --- start -----------------------------------------------------------------
 
     def _precondition(
         self,
-        conn: Any,
         loop: dict[str, Any],
         purpose: str,
         documents: dict[str, dict[str, Any]],
@@ -358,7 +365,7 @@ class LoopGenerationService:
             documents = self.loops.document_rows(conn, loop_id)
             approvals = self.loops.latest_approvals(conn, loop_id)
             stale = self.loops._stale_reasons(documents, approvals)
-            self._precondition(conn, loop, request.purpose, documents, approvals, stale)
+            self._precondition(loop, request.purpose, documents, approvals, stale)
             context = self.documents.collect_context(conn, loop)
             captured = {
                 "purpose": request.purpose,
@@ -700,7 +707,7 @@ class LoopGenerationService:
                 error_message=f"{type(exc).__name__}",
                 retryable=True,
             )
-        except Exception as exc:  # noqa: BLE001 - a run failure must not break the process
+        except Exception as exc:  # a run failure must not break the process
             logger.exception("loop generation run failed", extra={"run_id": run_id})
             self._finish(
                 board_id,
@@ -889,7 +896,7 @@ class LoopGenerationService:
                         "id": run_id,
                     },
                 )
-        except Exception:  # noqa: BLE001 - never mask the original failure
+        except Exception:  # never mask the original failure
             logger.exception("could not record generation failure", extra={"run_id": run_id})
         del loop_id
 

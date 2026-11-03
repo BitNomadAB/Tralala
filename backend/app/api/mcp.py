@@ -273,4 +273,4 @@ async def llms_txt(request: Request) -> Response:
     )
 
 
-__all__ = ["router", "render_bootstrap", "PROTOCOL_VERSION"]
+__all__ = ["PROTOCOL_VERSION", "render_bootstrap", "router"]

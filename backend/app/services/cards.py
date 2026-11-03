@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.dates import parse_due_filter
 from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
@@ -22,6 +23,7 @@ from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
 from .common import (
+    LABEL_JOIN,
     card_counts,
     decorate_cards,
     one,
@@ -36,6 +38,43 @@ from .common import (
 logger = logging.getLogger("tralala.cards")
 
 PLAN_CHANGE_CODE = "plan_change_required"
+
+# What the card queries format into SQL text (see core/sql.py).
+_CARD_FILTERS: sql.Filters = (
+    ("loop", "c.loop_id = :loop_id"),
+    ("unarchived", "c.archived_at IS NULL"),
+    ("list", "c.list_id = :list_id"),
+    ("q", "(c.title LIKE :q OR c.description LIKE :q)"),
+    ("label", "(l.id = :label OR l.name = :label)"),
+    ("priority", "c.priority = :priority"),
+    ("due_before", "c.due_at IS NOT NULL AND c.due_at <= :due_before"),
+    ("overdue", "c.due_at IS NOT NULL AND c.due_at < :now AND c.completed_at IS NULL"),
+    ("completed", "c.completed_at IS NOT NULL"),
+    ("open", "c.completed_at IS NULL"),
+    ("unassigned", "c.assignee_actor_id IS NULL"),
+    ("assignee", "c.assignee_actor_id = :assignee"),
+)
+_CARD_SORTS = ("created_at", "updated_at", "due_at", "title")
+_BOARD_TICKET_FILTERS: sql.Filters = (
+    ("open", "c.archived_at IS NULL AND l.completed_at IS NULL AND l.archived_at IS NULL"),
+    ("q", "(c.title LIKE :q OR c.ticket_key LIKE :q)"),
+)
+_CARD_EDITABLE = (
+    "title",
+    "description",
+    "priority",
+    "due_at",
+    "completed_at",
+    "human_confirmed_at",
+    "human_confirmed_by_actor_id",
+    "assignee_actor_id",
+    "assignee_type",
+    "assignee_name",
+    "assigned_at",
+    "assigned_by_actor_id",
+    "version",
+    "updated_at",
+)
 
 
 class CardService:
@@ -176,53 +215,55 @@ class CardService:
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
         self.board_service.require_row(board_id)
-        clauses: list[str] = ["c.loop_id = :loop_id"]
+        filters = ["loop"]
         params: dict[str, Any] = {"loop_id": loop_id}
-        joins = ""
         if not include_archived:
-            clauses.append("c.archived_at IS NULL")
+            filters.append("unarchived")
         if list_id:
-            clauses.append("c.list_id = :list_id")
+            filters.append("list")
             params["list_id"] = list_id
         if q:
-            clauses.append("(c.title LIKE :q OR c.description LIKE :q)")
+            filters.append("q")
             params["q"] = f"%{q}%"
         if label:
-            joins += " JOIN card_labels cl ON cl.card_id = c.id JOIN labels l ON l.id = cl.label_id"
-            clauses.append("(l.id = :label OR l.name = :label)")
+            filters.append("label")
             params["label"] = label
         if priority:
-            clauses.append("c.priority = :priority")
+            filters.append("priority")
             params["priority"] = priority
         if due_before:
-            clauses.append("c.due_at IS NOT NULL AND c.due_at <= :due_before")
+            filters.append("due_before")
             params["due_before"] = parse_due_filter(due_before)
         if overdue:
-            clauses.append("c.due_at IS NOT NULL AND c.due_at < :now AND c.completed_at IS NULL")
+            filters.append("overdue")
             params["now"] = utcnow()
         if completed is not None:
-            clauses.append("c.completed_at IS NOT NULL" if completed else "c.completed_at IS NULL")
+            filters.append("completed" if completed else "open")
         if assignee:
             if assignee == "unassigned":
-                clauses.append("c.assignee_actor_id IS NULL")
+                filters.append("unassigned")
             else:
-                clauses.append("c.assignee_actor_id = :assignee")
+                filters.append("assignee")
                 params["assignee"] = assignee
-        where = f" WHERE {' AND '.join(clauses)}"
+        joins = LABEL_JOIN if label else ""
+        where = sql.where(_CARD_FILTERS, filters)
         sort_column = (
-            "c.position"
-            if sort not in {"created_at", "updated_at", "due_at", "title"}
-            else f"c.{sort}"
+            f"c.{sql.identifier(sort, _CARD_SORTS)}" if sort in _CARD_SORTS else "c.position"
         )
         direction = "DESC" if order.lower() == "desc" else "ASC"
-        base = f"FROM cards c{joins}{where}"
         with self.boards.reader(board_id) as conn:
             loop = self._loop_row(conn, board_id, loop_id)
-            total = conn.execute(text(f"SELECT COUNT(DISTINCT c.id) {base}"), params).scalar_one()
+            total = conn.execute(
+                text(
+                    "SELECT COUNT(DISTINCT c.id)"  # noqa: S608 - from LABEL_JOIN and _CARD_FILTERS
+                    f" FROM cards c{joins}{where}"
+                ),
+                params,
+            ).scalar_one()
             records = rows(
                 conn,
-                f"SELECT DISTINCT c.* {base}"
-                f" ORDER BY {sort_column} {direction}, c.id"
+                "SELECT DISTINCT c.*"  # noqa: S608 - from LABEL_JOIN, _CARD_FILTERS, _CARD_SORTS
+                f" FROM cards c{joins}{where} ORDER BY {sort_column} {direction}, c.id"
                 " LIMIT :limit OFFSET :offset",
                 {**params, "limit": limit, "offset": offset},
             )
@@ -233,17 +274,18 @@ class CardService:
     ) -> list[dict[str, Any]]:
         """Explicit Board-level aggregate read; every row identifies its owning Loop."""
         self.board_service.require_row(board_id)
-        clauses = ["c.archived_at IS NULL", "l.completed_at IS NULL", "l.archived_at IS NULL"]
+        filters = ["open"]
         params: dict[str, Any] = {"limit": limit}
         if q:
-            clauses.append("(c.title LIKE :q OR c.ticket_key LIKE :q)")
+            filters.append("q")
             params["q"] = f"%{q}%"
+        where = sql.where(_BOARD_TICKET_FILTERS, filters)
         with self.boards.reader(board_id) as conn:
             records = rows(
                 conn,
-                "SELECT c.*, l.key AS loop_key, l.name AS loop_name, l.stage AS loop_stage"
-                " FROM cards c JOIN loops l ON l.id = c.loop_id"
-                f" WHERE {' AND '.join(clauses)}"
+                "SELECT c.*, l.key AS loop_key,"  # noqa: S608 - from _BOARD_TICKET_FILTERS
+                " l.name AS loop_name, l.stage AS loop_stage"
+                f" FROM cards c JOIN loops l ON l.id = c.loop_id{where}"
                 " ORDER BY l.sequence, c.position, c.id LIMIT :limit",
                 params,
             )
@@ -295,9 +337,7 @@ class CardService:
             )
         card_id = str(uuid4())
         now = utcnow()
-        position = position_for_index(
-            conn, "cards", "list_id = :list_id AND archived_at IS NULL", {"list_id": list_id}, None
-        )
+        position = position_for_index(conn, "cards", {"list_id": list_id}, None)
         conn.execute(
             text(
                 "INSERT INTO cards (id, loop_id, list_id, title, description, position, priority,"
@@ -473,7 +513,7 @@ class CardService:
                                 "message": exc.message,
                             }
                         )
-                    except Exception:  # noqa: BLE001 - partial failure is the contract here
+                    except Exception:  # partial failure is the contract here
                         savepoint.rollback()
                         logger.exception("bulk card creation failed", extra={"index": index})
                         failed.append(
@@ -583,9 +623,12 @@ class CardService:
             if assignments:
                 assignments["version"] = existing["version"] + 1
                 assignments["updated_at"] = utcnow()
-                columns = ", ".join(f"{column} = :{column}" for column in assignments)
+                columns = sql.assignments(assignments, _CARD_EDITABLE)
                 conn.execute(
-                    text(f"UPDATE cards SET {columns} WHERE id = :id"),
+                    text(
+                        "UPDATE cards"  # noqa: S608 - from _CARD_EDITABLE
+                        f" SET {columns} WHERE id = :id"
+                    ),
                     {**assignments, "id": card_id},
                 )
             if changes:
@@ -726,11 +769,7 @@ class CardService:
                     details={"target_loop_id": target["loop_id"]},
                 )
             position = position_for_index(
-                conn,
-                "cards",
-                "list_id = :list_id AND archived_at IS NULL AND id != :id",
-                {"list_id": payload.list_id, "id": card_id},
-                payload.position,
+                conn, "cards", {"list_id": payload.list_id}, payload.position, exclude=card_id
             )
             conn.execute(
                 text(
@@ -802,11 +841,7 @@ class CardService:
             existing = self._card_row(conn, board_id, loop_id, card_id)
             if existing["archived_at"] is not None:
                 position = position_for_index(
-                    conn,
-                    "cards",
-                    "list_id = :list_id AND archived_at IS NULL",
-                    {"list_id": existing["list_id"]},
-                    None,
+                    conn, "cards", {"list_id": existing["list_id"]}, None
                 )
                 conn.execute(
                     text(

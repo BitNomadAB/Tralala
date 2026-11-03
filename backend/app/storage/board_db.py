@@ -126,7 +126,7 @@ class BoardDatabaseManager:
             self._last_used[board_id] = time.monotonic()
             if board_id not in self._verified:
                 with engine.connect() as connection:
-                    current = runner.current_revision("board", connection)
+                    current = runner.current_revision(connection)
                 head = runner.head_revision("board")
                 if current != head:
                     self._engines.pop(board_id, None)
