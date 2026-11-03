@@ -36,6 +36,7 @@ from .core.errors import ApiError
 from .core.identifiers import accepted_request_id
 from .core.logging import bound_request_id, configure_logging
 from .core.ratelimit import LoginThrottle, RateLimiter
+from .core.request_log import bounded_message, request_line
 from .services import Services
 from .storage.sqlite import sqlite_supports_fts5
 
@@ -54,6 +55,9 @@ THREADPOOL_TOKENS = 40
 def _error_response(
     request: Request, status_code: int, code: str, message: str, **extra: object
 ) -> JSONResponse:
+    # The request log names the error: its code and the start of its message, never the details.
+    request.state.error_code = code
+    request.state.error_message = bounded_message(message)
     body = {
         "success": False,
         "error": {"code": code, "message": message, "retryable": False, **extra},
@@ -142,14 +146,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["Referrer-Policy"] = "no-referrer"
             logger.info(
                 "http_request",
-                extra={
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status": response.status_code,
-                    "duration_ms": duration_ms,
-                    "actor_id": getattr(request.state, "actor_id", None),
-                    "replayed": getattr(request.state, "replayed", False),
-                },
+                extra=request_line(
+                    method=request.method,
+                    path=request.url.path,
+                    status=response.status_code,
+                    duration_ms=duration_ms,
+                    actor_id=getattr(request.state, "actor_id", None),
+                    replayed=getattr(request.state, "replayed", False),
+                    error_code=getattr(request.state, "error_code", None),
+                    error_message=getattr(request.state, "error_message", None),
+                ),
             )
             return response
 
