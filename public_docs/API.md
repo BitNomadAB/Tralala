@@ -644,7 +644,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | Tool | Scope | What it does |
 | --- | --- | --- |
 | `read_board` | `boards:read`, `loops:read` | Loops with stage, `execution_allowed` and `blocked_reason`, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | Goal, Info/Analysis/RoadMap documents, plan with per-Ticket readiness, Kanban columns |
+| `read_loop` | `loops:read` | Goal, Info/Analysis/RoadMap documents, plan with per-Ticket readiness, Kanban columns and the Loop's Tickets |
 | `read_ticket` | `cards:read` | Acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
 | `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |

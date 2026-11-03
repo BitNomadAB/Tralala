@@ -705,8 +705,8 @@ def tool_catalog() -> dict[str, AgentTool]:
             name="read_loop",
             description=(
                 "Read one Loop: its goal, the Info/Analysis/RoadMap documents, the plan with "
-                "phase and Ticket readiness, and the Kanban columns. Use this to understand the "
-                "task before touching a Ticket."
+                "phase and Ticket readiness, the Kanban columns and the Tickets. Use this to "
+                "understand the task before touching a Ticket."
             ),
             scopes=("loops:read",),
             input_schema=_object(
