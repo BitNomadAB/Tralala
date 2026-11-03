@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { keys, useAgents } from "@/lib/queries";
 import { DiscussionList } from "./DiscussionList";
 import { DiscussionThread, type ReviewDecision } from "./DiscussionThread";
@@ -90,7 +91,7 @@ export function DiscussionsPage() {
     onError: (error) => {
       toast.push({
         title: "Could not post message",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

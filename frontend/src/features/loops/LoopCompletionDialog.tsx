@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { keys, useQaCycle } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
 
@@ -60,9 +61,6 @@ export function LoopCompletionDialog({
     onChanged();
   };
 
-  const errorText = (error: unknown) =>
-    error instanceof ApiError ? error.message : "Please try again.";
-
   const accept = useMutation({
     mutationFn: () =>
       api.acceptImplementation(boardId, loop.id, {
@@ -78,7 +76,11 @@ export function LoopCompletionDialog({
       toast.push({ title: "Implementation accepted", variant: "success" });
     },
     onError: (error) => {
-      toast.push({ title: "Could not accept", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Could not accept",
+        description: describeError(error),
+        variant: "error",
+      });
     },
   });
 
@@ -99,7 +101,7 @@ export function LoopCompletionDialog({
     onError: (error) => {
       toast.push({
         title: "Could not record results",
-        description: errorText(error),
+        description: describeError(error),
         variant: "error",
       });
     },
@@ -121,7 +123,7 @@ export function LoopCompletionDialog({
     onError: (error) => {
       toast.push({
         title: "Could not record the decision",
-        description: errorText(error),
+        description: describeError(error),
         variant: "error",
       });
     },

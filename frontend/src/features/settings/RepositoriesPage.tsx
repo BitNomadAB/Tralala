@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/useToast";
 import { useAuth } from "@/features/auth/useAuth";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { RepositoryDialog, type RepositoryDraft } from "./RepositoryDialog";
 
 const REPOSITORIES_KEY = ["repositories"];
@@ -34,8 +35,6 @@ export function RepositoriesPage() {
   });
   const repositories = repositoriesQuery.data ?? [];
 
-  const errorText = (error: unknown) =>
-    error instanceof ApiError ? error.message : "Please try again.";
   const invalidate = () => queryClient.invalidateQueries({ queryKey: REPOSITORIES_KEY });
 
   const save = useMutation({
@@ -63,7 +62,7 @@ export function RepositoriesPage() {
       toast.push({ title: "Repository saved", variant: "success" });
     },
     onError: (error) => {
-      toast.push({ title: "Could not save", description: errorText(error), variant: "error" });
+      toast.push({ title: "Could not save", description: describeError(error), variant: "error" });
     },
   });
 
@@ -84,7 +83,7 @@ export function RepositoriesPage() {
     onError: (error) => {
       toast.push({
         title: "Could not check access",
-        description: errorText(error),
+        description: describeError(error),
         variant: "error",
       });
     },
@@ -97,7 +96,11 @@ export function RepositoriesPage() {
       toast.push({ title: "Repository removed", variant: "success" });
     },
     onError: (error) => {
-      toast.push({ title: "Could not remove", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Could not remove",
+        description: describeError(error),
+        variant: "error",
+      });
     },
   });
 

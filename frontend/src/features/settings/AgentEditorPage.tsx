@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { ApiError } from "@/lib/api";
+import { describeError, fieldErrors } from "@/lib/describeError";
 import { presetById, presetRequirements } from "@/lib/providers";
 import { useAgent, useRoleTemplates } from "@/lib/queries";
 import type { Agent, AgentTestResult } from "@/lib/types";
@@ -48,6 +48,8 @@ export function AgentEditorPage() {
     onTested: setTestResult,
     onDeleted: () => setConfirming(false),
   });
+  // The inputs the last save was refused for, by the field the API named; the next save clears them.
+  const invalid = new Set(fieldErrors(actions.save.error).map(({ field }) => field));
 
   if (!isNew && agentQuery.isLoading) {
     return <p className="text-sm text-[var(--muted-foreground)]">Loading agent…</p>;
@@ -55,7 +57,7 @@ export function AgentEditorPage() {
   if (!isNew && agentQuery.error) {
     return (
       <p role="alert" className="text-sm text-[var(--destructive)]">
-        {agentQuery.error instanceof ApiError ? agentQuery.error.message : "Agent unavailable."}
+        {describeError(agentQuery.error, "Agent unavailable.")}
       </p>
     );
   }
@@ -127,7 +129,7 @@ export function AgentEditorPage() {
           if (canSave) actions.save.mutate();
         }}
       >
-        <AgentIdentityFields form={form} onChange={update} roles={roles} />
+        <AgentIdentityFields form={form} onChange={update} roles={roles} invalid={invalid} />
 
         <div className="grid gap-4 sm:grid-cols-2">
           <AgentConnectionFields
@@ -141,8 +143,9 @@ export function AgentEditorPage() {
             endpointLocked={endpointLocked}
             testModels={testModels}
             stored={stored}
+            invalid={invalid}
           />
-          <AgentTuningFields form={form} onChange={update} />
+          <AgentTuningFields form={form} onChange={update} invalid={invalid} />
         </div>
 
         {testResult ? <AgentTestResultPanel result={testResult} /> : null}

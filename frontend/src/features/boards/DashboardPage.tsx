@@ -5,7 +5,8 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { useBoards } from "@/lib/queries";
 import type { Board } from "@/lib/types";
 import { useDashboardTools } from "@/webmcp/useWebMcp";
@@ -54,7 +55,7 @@ export function DashboardPage() {
     onError: (mutationError) => {
       toast.push({
         title: "Action failed",
-        description: mutationError instanceof ApiError ? mutationError.message : undefined,
+        description: describeError(mutationError, undefined),
         variant: "error",
       });
     },
@@ -71,7 +72,7 @@ export function DashboardPage() {
     onError: (mutationError) => {
       toast.push({
         title: "Could not delete board",
-        description: mutationError instanceof ApiError ? mutationError.message : undefined,
+        description: describeError(mutationError, undefined),
         variant: "error",
       });
     },
@@ -87,7 +88,7 @@ export function DashboardPage() {
     onError: (mutationError) => {
       toast.push({
         title: "Import failed",
-        description: mutationError instanceof ApiError ? mutationError.message : undefined,
+        description: describeError(mutationError, undefined),
         variant: "error",
       });
     },
@@ -168,7 +169,7 @@ export function DashboardPage() {
         <p className="text-sm text-[var(--muted-foreground)]">Loading boards…</p>
       ) : error ? (
         <p role="alert" className="text-sm text-[var(--destructive)]">
-          {error instanceof ApiError ? error.message : "Could not load boards."}
+          {describeError(error, "Could not load boards.")}
         </p>
       ) : boards.length === 0 ? (
         <div className="card-surface flex flex-col items-center gap-2 p-10 text-center">

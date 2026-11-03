@@ -7,7 +7,8 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { scopeChoicesFor } from "@/lib/agentAccess";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import type { Credential } from "@/lib/types";
 import { AgentAccessGuide } from "./AgentAccessGuide";
 import { CredentialRow } from "./CredentialRow";
@@ -82,7 +83,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     onError: (error) => {
       toast.push({
         title: "Could not create the agent access",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -109,7 +110,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     onError: (error) => {
       toast.push({
         title: "Could not rotate the access",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

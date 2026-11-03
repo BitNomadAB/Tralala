@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { ROLES, type InviteCreated, type Role, type UserAccount } from "@/lib/types";
 import { clipboard, formatDateTime } from "@/lib/utils";
 
@@ -27,7 +28,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const onError = (title: string) => (error: unknown) => {
     toast.push({
       title,
-      description: error instanceof ApiError ? error.message : undefined,
+      description: describeError(error, undefined),
       variant: "error",
     });
   };

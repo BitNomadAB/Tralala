@@ -7,6 +7,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/useToast";
 import { useCardEvents } from "@/features/cards/useCardEvents";
 import { ApiError, api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { keys, useActivity, useLabels } from "@/lib/queries";
 import type { BoardList } from "@/lib/types";
 import { formatDateTime, fromDateInputValue, toDateInputValue } from "@/lib/utils";
@@ -74,11 +75,9 @@ export function CardDialog({
     toast.push({
       title: "Change rejected",
       description:
-        mutationError instanceof ApiError
-          ? mutationError.code === "version_conflict"
-            ? "Someone else updated this card. Reload to see the latest version."
-            : mutationError.message
-          : undefined,
+        mutationError instanceof ApiError && mutationError.code === "version_conflict"
+          ? "Someone else updated this card. Reload to see the latest version."
+          : describeError(mutationError, undefined),
       variant: "error",
     });
     refresh();
@@ -164,7 +163,7 @@ export function CardDialog({
           <p className="text-sm text-[var(--muted-foreground)]">Loading card…</p>
         ) : error || !card ? (
           <p role="alert" className="text-sm text-[var(--destructive)]">
-            {error instanceof ApiError ? error.message : "Card unavailable."}
+            {describeError(error, "Card unavailable.")}
           </p>
         ) : (
           <div className="flex flex-col gap-4">

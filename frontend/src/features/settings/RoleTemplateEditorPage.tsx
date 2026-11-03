@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { useRoleTemplate } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
 
@@ -54,7 +55,7 @@ export function RoleTemplateEditorPage() {
     onError: (error) => {
       toast.push({
         title: "Could not save role template",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -70,7 +71,7 @@ export function RoleTemplateEditorPage() {
     onError: (error) => {
       toast.push({
         title: "Could not duplicate role",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -86,7 +87,7 @@ export function RoleTemplateEditorPage() {
     onError: (error) => {
       toast.push({
         title: "Could not restore defaults",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -103,7 +104,7 @@ export function RoleTemplateEditorPage() {
     onError: (error) => {
       toast.push({
         title: "Could not delete role template",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -115,7 +116,7 @@ export function RoleTemplateEditorPage() {
   if (!isNew && roleQuery.error) {
     return (
       <p role="alert" className="text-sm text-[var(--destructive)]">
-        {roleQuery.error instanceof ApiError ? roleQuery.error.message : "Role unavailable."}
+        {describeError(roleQuery.error, "Role unavailable.")}
       </p>
     );
   }

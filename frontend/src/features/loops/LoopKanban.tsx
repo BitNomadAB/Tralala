@@ -17,6 +17,7 @@ import { CardTile } from "@/features/board/CardTile";
 import { dragData } from "@/features/board/dragData";
 import { ListColumn } from "@/features/board/ListColumn";
 import { ApiError, api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { BoardList, Card } from "@/lib/types";
 import { LIST_LIMIT } from "./loopUi";
@@ -57,7 +58,7 @@ export function LoopKanban({
     onError: (error) => {
       toast.push({
         title: "Could not create ticket",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -102,9 +103,7 @@ export function LoopKanban({
         description:
           error instanceof ApiError && error.code === "version_conflict"
             ? "The ticket changed elsewhere. The loop has been refreshed."
-            : error instanceof ApiError
-              ? error.message
-              : undefined,
+            : describeError(error, undefined),
         variant: "error",
       });
     },

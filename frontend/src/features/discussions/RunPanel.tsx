@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import type { Discussion, DiscussionRunSummary } from "@/lib/types";
 
 const RUN_TONES: Record<string, BadgeTone> = {
@@ -84,8 +85,7 @@ export function RunPanel({
     });
   };
 
-  const failureMessage = (error: unknown) =>
-    error instanceof ApiError ? error.message : undefined;
+  const failureMessage = (error: unknown) => describeError(error, undefined);
 
   const startMutation = useMutation({
     mutationFn: (input: {

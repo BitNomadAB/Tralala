@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import type { BoardTemplate } from "@/lib/types";
 import { TemplateLabelsField, type LabelDraft } from "./TemplateLabelsField";
 import { TemplateListsField } from "./TemplateListsField";
@@ -65,7 +66,7 @@ export function TemplateEditorPage() {
     onError: (error) => {
       toast.push({
         title: "Could not save template",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -82,7 +83,7 @@ export function TemplateEditorPage() {
     onError: (error) => {
       toast.push({
         title: "Could not delete template",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -95,9 +96,7 @@ export function TemplateEditorPage() {
   if (!isNew && templateQuery.error) {
     return (
       <p role="alert" className="text-sm text-[var(--destructive)]">
-        {templateQuery.error instanceof ApiError
-          ? templateQuery.error.message
-          : "Template unavailable."}
+        {describeError(templateQuery.error, "Template unavailable.")}
       </p>
     );
   }

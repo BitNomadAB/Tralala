@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import type { AgentTestResult } from "@/lib/types";
 import { agentPayload, type AgentForm } from "./agentForm";
 
@@ -46,7 +47,7 @@ export function useAgentActions({
     onError: (error) => {
       toast.push({
         title: "Could not save agent",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -81,7 +82,7 @@ export function useAgentActions({
     onError: (error) => {
       toast.push({
         title: "Test failed",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -97,7 +98,7 @@ export function useAgentActions({
     onError: (error) => {
       toast.push({
         title: "Could not duplicate agent",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -114,7 +115,7 @@ export function useAgentActions({
     onError: (error) => {
       toast.push({
         title: "Could not delete agent",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

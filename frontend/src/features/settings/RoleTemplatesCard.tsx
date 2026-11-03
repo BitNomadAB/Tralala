@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { useRoleTemplates } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
 
@@ -27,7 +28,7 @@ export function RoleTemplatesCard() {
     onError: (error) => {
       toast.push({
         title: "Could not delete role template",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { providerLabelFor } from "@/lib/providers";
 import { useAgents } from "@/lib/queries";
 import type { Agent } from "@/lib/types";
@@ -38,7 +39,7 @@ export function AgentsCard() {
     onError: (error) => {
       toast.push({
         title: "Could not update agent",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -54,7 +55,7 @@ export function AgentsCard() {
     onError: (error) => {
       toast.push({
         title: "Could not delete agent",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

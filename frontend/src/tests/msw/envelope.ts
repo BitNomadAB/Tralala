@@ -21,7 +21,7 @@ interface SuccessEnvelope {
 
 interface ErrorEnvelope {
   success: false;
-  error: { code: string; message: string; retryable: boolean };
+  error: { code: string; message: string; retryable: boolean; details?: unknown };
   request_id: string;
 }
 
@@ -36,11 +36,14 @@ export function ok(data: unknown, meta?: PageMeta) {
   return HttpResponse.json(body, { headers: { "X-Request-ID": REQUEST_ID } });
 }
 
-/** An error as the backend's handlers write it; a 401 also names the scheme, as the server does. */
-export function failure(status: number, code: string, message: string) {
+/**
+ * An error as the backend's handlers write it (`main._error_response`), with `details` when the
+ * test gives them; a 401 also names the scheme, as the server does.
+ */
+export function failure(status: number, code: string, message: string, details?: unknown) {
   const body: ErrorEnvelope = {
     success: false,
-    error: { code, message, retryable: false },
+    error: { code, message, retryable: false, ...(details === undefined ? {} : { details }) },
     request_id: REQUEST_ID,
   };
   const headers: Record<string, string> = { "X-Request-ID": REQUEST_ID };

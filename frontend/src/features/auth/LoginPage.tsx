@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { ApiError } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { useAuth } from "./useAuth";
 
 export function LoginPage() {
@@ -24,9 +24,7 @@ export function LoginPage() {
       await login(username, password);
       void navigate(target, { replace: true });
     } catch (loginError) {
-      setError(
-        loginError instanceof ApiError ? loginError.message : "Unable to sign in right now.",
-      );
+      setError(describeError(loginError, "Unable to sign in right now."));
     } finally {
       setPending(false);
     }

@@ -7,7 +7,8 @@ import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { AgentPicker } from "@/features/boards/AgentPicker";
 import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { useTemplates } from "@/lib/queries";
 
 /**
@@ -56,7 +57,7 @@ export function NewBoardDialog({
     onError: (mutationError) => {
       toast.push({
         title: "Could not create board",
-        description: mutationError instanceof ApiError ? mutationError.message : undefined,
+        description: describeError(mutationError, undefined),
         variant: "error",
       });
     },

@@ -2,8 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import type { DocumentKind, Loop, LoopDocuments } from "@/lib/types";
-import { errorText, type PlanScope } from "./loopUi";
+import type { PlanScope } from "./loopUi";
 
 /**
  * The human side of the planning documents: the Info draft, the review feedback, the reset
@@ -37,7 +38,11 @@ export function usePlanReview({
       toast.push({ title: "Info saved as a new revision", variant: "success" });
     },
     onError: (error) => {
-      toast.push({ title: "Could not save Info", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Could not save Info",
+        description: describeError(error),
+        variant: "error",
+      });
     },
   });
 
@@ -70,7 +75,7 @@ export function usePlanReview({
     onError: (error) => {
       toast.push({
         title: "Could not record the decision",
-        description: errorText(error),
+        description: describeError(error),
         variant: "error",
       });
     },
@@ -92,7 +97,7 @@ export function usePlanReview({
     onError: (error) => {
       toast.push({
         title: "Could not reset the scope",
-        description: errorText(error),
+        description: describeError(error),
         variant: "error",
       });
     },

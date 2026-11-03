@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { useAuth } from "./useAuth";
 
 /**
@@ -33,11 +34,7 @@ export function EnrolPage() {
       await refresh();
       void navigate("/", { replace: true });
     } catch (enrolError) {
-      setError(
-        enrolError instanceof ApiError
-          ? enrolError.message
-          : "Unable to use this invitation right now.",
-      );
+      setError(describeError(enrolError, "Unable to use this invitation right now."));
     } finally {
       setPending(false);
     }

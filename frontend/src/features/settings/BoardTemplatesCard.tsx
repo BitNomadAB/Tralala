@@ -5,7 +5,8 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { useTemplates } from "@/lib/queries";
 import type { BoardTemplate } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
@@ -27,7 +28,7 @@ export function BoardTemplatesCard() {
     onError: (error) => {
       toast.push({
         title: "Could not delete template",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

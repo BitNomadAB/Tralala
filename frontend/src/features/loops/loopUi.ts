@@ -1,5 +1,4 @@
 import type { BadgeTone } from "@/components/ui/badge";
-import { ApiError } from "@/lib/api";
 import type { DocumentKind, LoopStage } from "@/lib/types";
 
 export const STAGE_TONES: Record<LoopStage, BadgeTone> = {
@@ -26,9 +25,6 @@ export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
 /** The planning documents dialog's tabs; the last two are the scopes an agent generates. */
 export type PlanTab = "info" | "analysis" | "roadmap";
 export type PlanScope = Exclude<PlanTab, "info">;
-
-export const errorText = (error: unknown) =>
-  error instanceof ApiError ? error.message : "Please try again.";
 
 /** How many cards one column loads; the drag and drop writes to the same query keys. */
 export const LIST_LIMIT = 200;

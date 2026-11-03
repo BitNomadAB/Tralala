@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/useToast";
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
 import { CardDialog } from "@/features/cards/CardDialog";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { keys, useBoard, useLists, useLoop } from "@/lib/queries";
 import type { Card } from "@/lib/types";
 import { useLoopTools } from "@/webmcp/useWebMcp";
@@ -121,7 +122,7 @@ export function LoopPage() {
     onError: (error) => {
       toast.push({
         title: "Could not save template",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -144,7 +145,7 @@ export function LoopPage() {
     const error = boardQuery.error ?? loopQuery.error;
     return (
       <p role="alert" className="text-sm text-[var(--destructive)]">
-        {error instanceof ApiError ? error.message : "Loop unavailable."}
+        {describeError(error, "Loop unavailable.")}
       </p>
     );
   }
@@ -166,7 +167,7 @@ export function LoopPage() {
     } catch (error) {
       toast.push({
         title: "Migration failed",
-        description: error instanceof ApiError ? error.message : "See the server log.",
+        description: describeError(error, "See the server log."),
         variant: "error",
       });
     } finally {

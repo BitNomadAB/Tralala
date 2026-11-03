@@ -2,9 +2,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useEffectEvent, useState } from "react";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { GenerationRun } from "@/lib/types";
-import { errorText, type PlanScope, type PlanTab } from "./loopUi";
+import type { PlanScope, PlanTab } from "./loopUi";
 
 /**
  * Starts a generation run for the open scope and follows it until it finishes, keeping a failed run
@@ -46,7 +47,7 @@ export function useGenerationRun({
     onError: (error) => {
       toast.push({
         title: "Generation unavailable",
-        description: errorText(error),
+        description: describeError(error),
         variant: "error",
       });
     },

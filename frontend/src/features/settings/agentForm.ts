@@ -111,6 +111,17 @@ export function withProvider(form: AgentForm, providerId: string): AgentForm {
   return next;
 }
 
+/** A field of the agent's request, spelled as the API names it when it refuses a save. */
+export type AgentField = Exclude<keyof AgentPayload, "clear_api_key">;
+
+/**
+ * What ties an input to the request field it is sent as: its `name`, and `aria-invalid` while the
+ * last save was refused for that field.
+ */
+export function fieldMark(invalid: ReadonlySet<string>, field: AgentField) {
+  return { name: field, "aria-invalid": invalid.has(field) || undefined };
+}
+
 /** Everything the agent stores except its credential. */
 export function agentPayload(form: AgentForm) {
   return {

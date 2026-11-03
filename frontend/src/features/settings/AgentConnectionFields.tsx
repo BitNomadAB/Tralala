@@ -1,7 +1,7 @@
 import { Field, Input, Select } from "@/components/ui/input";
 import { PROVIDER_PRESETS, type PresetRequirements, type ProviderPreset } from "@/lib/providers";
 import type { Agent, ConnectionType } from "@/lib/types";
-import type { AgentForm } from "./agentForm";
+import { fieldMark, type AgentForm } from "./agentForm";
 
 /** How Tralala reaches the agent: transport, provider preset, endpoint, model and credential. */
 export function AgentConnectionFields({
@@ -13,6 +13,7 @@ export function AgentConnectionFields({
   endpointLocked,
   testModels,
   stored,
+  invalid,
 }: {
   form: AgentForm;
   onChange: (patch: Partial<AgentForm>) => void;
@@ -22,6 +23,8 @@ export function AgentConnectionFields({
   endpointLocked: boolean;
   testModels: string[];
   stored: Agent | undefined;
+  /** The request fields the last save was refused for. */
+  invalid: ReadonlySet<string>;
 }) {
   const { connectionType, noKey } = form;
   const hasStoredKey = Boolean(stored?.has_api_key);
@@ -38,6 +41,7 @@ export function AgentConnectionFields({
       >
         <Select
           id="agent-connection"
+          {...fieldMark(invalid, "connection_type")}
           value={connectionType}
           onChange={(event) => onChange({ connectionType: event.target.value as ConnectionType })}
         >
@@ -75,6 +79,7 @@ export function AgentConnectionFields({
       >
         <Input
           id="agent-base-url"
+          {...fieldMark(invalid, "base_url")}
           value={form.baseUrl}
           onChange={(event) => onChange({ baseUrl: event.target.value })}
           placeholder={
@@ -113,6 +118,7 @@ export function AgentConnectionFields({
       >
         <Input
           id="agent-model"
+          {...fieldMark(invalid, "model")}
           value={form.model}
           onChange={(event) => onChange({ model: event.target.value })}
           placeholder={
@@ -151,6 +157,7 @@ export function AgentConnectionFields({
       >
         <Input
           id="agent-api-key"
+          {...fieldMark(invalid, "api_key")}
           type="password"
           autoComplete="off"
           value={noKey ? "" : form.apiKey}
@@ -183,15 +190,19 @@ export function AgentConnectionFields({
 export function AgentTuningFields({
   form,
   onChange,
+  invalid,
 }: {
   form: AgentForm;
   onChange: (patch: Partial<AgentForm>) => void;
+  /** The request fields the last save was refused for. */
+  invalid: ReadonlySet<string>;
 }) {
   return (
     <>
       <Field label="Temperature" htmlFor="agent-temperature">
         <Input
           id="agent-temperature"
+          {...fieldMark(invalid, "temperature")}
           type="number"
           step="0.1"
           min={0}
@@ -203,6 +214,7 @@ export function AgentTuningFields({
       <Field label="Max output tokens" htmlFor="agent-max-tokens">
         <Input
           id="agent-max-tokens"
+          {...fieldMark(invalid, "max_output_tokens")}
           type="number"
           min={1}
           value={form.maxTokens}
@@ -212,6 +224,7 @@ export function AgentTuningFields({
       <Field label="Timeout (seconds)" htmlFor="agent-timeout">
         <Input
           id="agent-timeout"
+          {...fieldMark(invalid, "timeout_seconds")}
           type="number"
           min={1}
           max={600}
@@ -222,6 +235,7 @@ export function AgentTuningFields({
       <label className="mt-6 flex items-center gap-2 text-sm">
         <input
           type="checkbox"
+          {...fieldMark(invalid, "enabled")}
           checked={form.enabled}
           onChange={(event) => onChange({ enabled: event.target.checked })}
         />

@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { Agent, DiscussionBoard } from "@/lib/types";
 
@@ -75,7 +76,7 @@ export function NewDiscussionDialog({
     onError: (error) => {
       toast.push({
         title: "Could not create discussion",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

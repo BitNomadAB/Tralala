@@ -2,17 +2,20 @@ import { Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import type { RoleTemplate } from "@/lib/types";
-import { randomName, type AgentForm } from "./agentForm";
+import { fieldMark, randomName, type AgentForm } from "./agentForm";
 
 /** Name, role template, description and the role prompt override. */
 export function AgentIdentityFields({
   form,
   onChange,
   roles,
+  invalid,
 }: {
   form: AgentForm;
   onChange: (patch: Partial<AgentForm>) => void;
   roles: RoleTemplate[];
+  /** The request fields the last save was refused for. */
+  invalid: ReadonlySet<string>;
 }) {
   return (
     <>
@@ -21,6 +24,7 @@ export function AgentIdentityFields({
           <div className="flex gap-1.5">
             <Input
               id="agent-name"
+              {...fieldMark(invalid, "name")}
               value={form.name}
               onChange={(event) => onChange({ name: event.target.value })}
               required
@@ -44,6 +48,7 @@ export function AgentIdentityFields({
         >
           <Select
             id="agent-role"
+            {...fieldMark(invalid, "role_template_id")}
             value={form.roleTemplateId}
             onChange={(event) => onChange({ roleTemplateId: event.target.value })}
           >
@@ -61,6 +66,7 @@ export function AgentIdentityFields({
       <Field label="Description" htmlFor="agent-description">
         <Textarea
           id="agent-description"
+          {...fieldMark(invalid, "description")}
           className="min-h-16"
           value={form.description}
           onChange={(event) => onChange({ description: event.target.value })}
@@ -75,6 +81,7 @@ export function AgentIdentityFields({
       >
         <Textarea
           id="agent-override"
+          {...fieldMark(invalid, "role_prompt_override")}
           className="min-h-32 font-mono text-xs"
           value={form.override}
           onChange={(event) => onChange({ override: event.target.value })}

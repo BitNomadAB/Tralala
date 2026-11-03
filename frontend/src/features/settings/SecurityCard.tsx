@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { useAuth } from "@/features/auth/useAuth";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 
 export function SecurityCard() {
   const { signOutLocally } = useAuth();
@@ -28,7 +29,7 @@ export function SecurityCard() {
     onError: (error) => {
       toast.push({
         title: "Could not change the password",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

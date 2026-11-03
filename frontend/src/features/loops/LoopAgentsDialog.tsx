@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { generationAgents } from "@/lib/boardAgents";
+import { describeError } from "@/lib/describeError";
 import { useAgents, useBoard, useLoopAgents } from "@/lib/queries";
 import type { Loop, LoopAgentPreferences } from "@/lib/types";
 
@@ -79,7 +80,7 @@ export function LoopAgentsDialog({
     onError: (error) => {
       toast.push({
         title: "Could not save",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

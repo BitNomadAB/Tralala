@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import type { ReviewDecision } from "./DiscussionThread";
 
 /** Records a human decision on a thread's outcome; veto and rework need an explanation. */
@@ -36,7 +37,7 @@ export function ReviewDiscussionDialog({
     onError: (error) => {
       toast.push({
         title: "Could not record the decision",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },

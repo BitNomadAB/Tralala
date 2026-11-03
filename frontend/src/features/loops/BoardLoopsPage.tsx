@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api, api as apiClient } from "@/lib/api";
+import { api, api as apiClient } from "@/lib/api";
+import { describeError } from "@/lib/describeError";
 import { keys, useAgents, useBoard, useLoops } from "@/lib/queries";
 import { BoardContext } from "./BoardContext";
 import { EditBoardDialog, type BoardEditDraft } from "./EditBoardDialog";
@@ -52,7 +53,7 @@ export function BoardLoopsPage() {
     onError: (error) => {
       toast.push({
         title: "Could not create the Loop",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -68,7 +69,7 @@ export function BoardLoopsPage() {
     onError: (error) => {
       toast.push({
         title: "Migration still fails",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -93,7 +94,7 @@ export function BoardLoopsPage() {
     onError: (error) => {
       toast.push({
         title: "Could not update the board",
-        description: error instanceof ApiError ? error.message : undefined,
+        description: describeError(error, undefined),
         variant: "error",
       });
     },
@@ -105,7 +106,7 @@ export function BoardLoopsPage() {
   if (boardQuery.error || !boardQuery.data) {
     return (
       <p role="alert" className="text-sm text-[var(--destructive)]">
-        {boardQuery.error instanceof ApiError ? boardQuery.error.message : "Board unavailable."}
+        {describeError(boardQuery.error, "Board unavailable.")}
       </p>
     );
   }
