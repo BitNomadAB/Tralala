@@ -14,11 +14,11 @@ from __future__ import annotations
 import json
 import logging
 from threading import Event, Thread
-from typing import Any
+from typing import Protocol, TypedDict
 
 from ..core.context import SCOPES, ActorContext
-from ..storage.registry import Registry
-from .backups import BackupService
+from ..repositories.registry import RegistryUnitOfWork
+from .backups import BackupCreated
 
 logger = logging.getLogger("tralala.backups")
 
@@ -38,12 +38,43 @@ def system_actor() -> ActorContext:
     )
 
 
+class Backups(Protocol):
+    """What the scheduler asks of ``BackupService``."""
+
+    def newest_age_hours(self, board_id: str) -> float | None: ...
+
+    def create(self, actor: ActorContext, board_id: str) -> BackupCreated: ...
+
+    def prune(self, board_id: str, keep: int) -> list[str]: ...
+
+
+class CreatedEntry(TypedDict):
+    board_id: str
+    name: str
+
+
+class PrunedEntry(TypedDict):
+    board_id: str
+    names: list[str]
+
+
+class FailedEntry(TypedDict):
+    board_id: str
+    error: str
+
+
+class CycleReport(TypedDict):
+    created: list[CreatedEntry]
+    pruned: list[PrunedEntry]
+    failed: list[FailedEntry]
+
+
 class BackupScheduler:
     def __init__(
-        self, backups: BackupService, *, registry: Registry, interval_hours: int, keep: int
+        self, backups: Backups, *, store: RegistryUnitOfWork, interval_hours: int, keep: int
     ) -> None:
         self.backups = backups
-        self.registry = registry
+        self.store = store
         self.interval_hours = int(interval_hours)
         self.keep = int(keep)
         self._stop = Event()
@@ -81,16 +112,16 @@ class BackupScheduler:
                 )
             delay = min(self.interval_hours * 3600.0, MAX_CHECK_SECONDS)
 
-    def run_once(self) -> dict[str, Any]:
+    def run_once(self) -> CycleReport:
         """Snapshot every board that is due, then prune; returns a small report."""
-        report: dict[str, Any] = {"created": [], "pruned": [], "failed": []}
+        report: CycleReport = {"created": [], "pruned": [], "failed": []}
         if not self.enabled:
             return report
         actor = system_actor()
-        for row in self.registry.read(
-            "SELECT id, name FROM boards WHERE status = 'active' ORDER BY name"
-        ):
-            board_id = str(row["id"])
+        with self.store.reader() as repos:
+            active = sorted(repos.boards.with_status("active"), key=lambda row: row.name)
+        for row in active:
+            board_id = row.id
             try:
                 age = self.backups.newest_age_hours(board_id)
                 if age is not None and age < self.interval_hours:

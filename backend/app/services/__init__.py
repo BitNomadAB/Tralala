@@ -4,6 +4,7 @@ import json
 import logging
 
 from ..core.config import Settings
+from ..repositories.sql.backups import SqliteBoardSnapshots
 from ..repositories.sql.board import (
     SqlBoardUnitOfWork,
     board_files,
@@ -133,10 +134,16 @@ class Services:
             plans=self.loop_plan,
             index=full_text_index(self.boards),
         )
-        self.backup = BackupService(self.board, boards=self.boards)
+        self.backup = BackupService(
+            self.board,
+            self.boards,
+            SqliteBoardSnapshots(self.boards),
+            backups_dir=settings.backups_dir,
+            file_profile=settings.file_profile,
+        )
         self.backup_scheduler = BackupScheduler(
             self.backup,
-            registry=self.registry,
+            store=self.registry_store,
             interval_hours=settings.backup_interval_hours,
             keep=settings.backup_keep,
         )
