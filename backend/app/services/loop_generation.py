@@ -627,7 +627,8 @@ class LoopGenerationService:
                 conn.execute(
                     text(
                         "UPDATE loop_generation_runs SET status = 'running',"
-                        " started_at = :now, attempts = attempts + 1 WHERE id = :id"
+                        " started_at = :now, attempts = attempts + 1, phase = 'reading_info'"
+                        " WHERE id = :id"
                     ),
                     {"now": utcnow(), "id": run_id},
                 )
@@ -637,6 +638,7 @@ class LoopGenerationService:
             # board lock — and never from the model. What the model saw is then written back to the
             # run, so a later reader can tell exactly which commit an analysis was based on.
             if captured.get("purpose") in {"analysis", "roadmap"}:
+                self._phase(board_id, run_id, "analysing_repository")
                 captured = self._attach_repositories(board_id, loop_id, run_id, captured)
             agent_row = self.registry.read_one(
                 "SELECT * FROM agents WHERE id = :id", {"id": agent_id}
@@ -651,6 +653,7 @@ class LoopGenerationService:
                     error_message="The configured generation agent no longer exists",
                 )
                 return
+            self._phase(board_id, run_id, "generating")
             result = self._generate(captured["purpose"], captured, agent_row)
             if not result["ok"]:
                 self._finish(
@@ -702,6 +705,21 @@ class LoopGenerationService:
                 error_message=f"{type(exc).__name__}",
                 retryable=True,
             )
+
+    def _phase(self, board_id: str, run_id: str, phase: str) -> None:
+        """Record which step a run is on, so a watcher sees progress and a failure names its step.
+
+        A run must never fail because its progress could not be written down, so this is best
+        effort: the phase is decoration around the real work.
+        """
+        try:
+            with self.boards.session(board_id) as conn:
+                conn.execute(
+                    text("UPDATE loop_generation_runs SET phase = :phase WHERE id = :id"),
+                    {"phase": phase, "id": run_id},
+                )
+        except Exception:  # noqa: BLE001 - progress reporting never breaks a run
+            logger.warning("could not record generation phase", extra={"run_id": run_id})
 
     def _attach_repositories(
         self,

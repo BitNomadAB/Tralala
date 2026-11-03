@@ -126,6 +126,43 @@ def test_provider_failure_is_reported_not_fabricated(
     assert run["error_code"] == "provider_error"
 
 
+def test_run_reports_the_step_it_is_on(
+    api: Api, board: dict[str, Any], loop: dict[str, Any], monkeypatch: Any
+) -> None:
+    """A watcher must see which step a run is on, and a failure must name the step it died on."""
+    _agent(api)
+    api.data(api.put(f"{_base(board, loop)}/documents/info", json={"content": "Intent"}))
+    seen: dict[str, str | None] = {}
+
+    def current_phase() -> str | None:
+        latest = api.data(api.get(f"{_base(board, loop)}/generation-runs"))
+        return latest[0]["phase"]
+
+    class FakeSnapshots:
+        def for_board(self, board_id: str) -> list[Any]:
+            del board_id
+            seen["repositories"] = current_phase()
+            return []
+
+    def fake_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        seen["model"] = current_phase()
+        return {"ok": False, "error": "HTTP 503", "text": ""}
+
+    services = api.client.app.state.services  # type: ignore[attr-defined]
+    monkeypatch.setattr(services.loop_generation, "snapshots", FakeSnapshots())
+    monkeypatch.setattr(runtime, "call_completion", fake_call)
+    started = api.data(
+        api.post(f"{_base(board, loop)}/generation-runs", json={"purpose": "analysis"})
+    )
+    run = _wait_run(api, f"{_base(board, loop)}/generation-runs", started["id"])
+    assert run["status"] == "failed"
+    # The repository step ran before the provider call, and the failure names the step it reached.
+    assert seen["repositories"] == "analysing_repository"
+    assert seen["model"] == "generating"
+    assert run["phase"] == "generating"
+    assert run["error_code"] == "provider_error"
+
+
 def test_generation_without_an_agent_is_explained(
     api: Api, board: dict[str, Any], loop: dict[str, Any]
 ) -> None:

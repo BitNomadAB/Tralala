@@ -49,6 +49,14 @@ Worth knowing when you look at the dashboard:
 - **A failed generation now says why.** A provider rejection used to read only "HTTP 400", and the
   message lived in a toast that disappeared; the Loop's document dialog shows the last run for the
   purpose, with the provider's own sentence, until it is retried.
+- **Generation shows which step it is on, and which one failed.** A second panel beside the documents
+  dialog lists *Reading Info data*, *Analysing repository* and *Generating analysis* (or *RoadMap*)
+  with the step reached marked. A failure marks the step it died on and keeps the provider's answer
+  there as JSON until it is dismissed. *Generate* is locked and glows while a run is in flight.
+- **An approval can be taken back.** The red *Un-approve* button at the bottom-left of the Analysis
+  and RoadMap tabs withdraws the approval and clears the documents it authorized, so the work has to
+  be generated again; it asks first, because the text is retired rather than edited. This is a
+  person's action and rejects agent tokens like any other approval decision.
 - **A discussion is capped at four rounds** per run, with default token and time budgets
   (`TRALALA_DISCUSSION_TOKEN_BUDGET`, `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`). There is no
   per-token rate limit. See

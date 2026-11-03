@@ -1277,3 +1277,128 @@ def test_reopening_a_prerequisite_invalidates_qa(
     loop_row = api.data(api.get(_base(api, board, loop)))
     assert loop_row["qa"] is None or loop_row["qa"]["open"] is False
     assert loop_row["stage"] in {"in_progress", "ready"}
+
+
+# --- withdrawing an approval ------------------------------------------------------
+
+
+def test_withdrawing_an_analysis_clears_its_documents(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    """Withdrawing is not a rejection: the approved text is retired, not sent back for changes."""
+    api.data(
+        api.put(
+            f"{_base(api, board, loop)}/documents/info",
+            json={"content": "Users must confirm their email address."},
+        )
+    )
+    _submit_analysis(api, board, loop)
+    _approve_analysis(api, board, loop)
+    approved = _documents(api, board, loop)
+    assert approved["documents"]["analysis"]["state"] == "approved"
+
+    withdrawn = api.data(
+        api.post(
+            f"{_base(api, board, loop)}/reviews/analysis/withdraw",
+            json={"version": _version(api, board, loop)},
+        )
+    )
+    assert withdrawn["scope"] == "analysis"
+    assert withdrawn["cleared"] == ["analysis_ai", "analysis"]
+
+    documents = _documents(api, board, loop)
+    for kind in ("analysis_ai", "analysis"):
+        assert documents["documents"][kind]["current_content"] == ""
+        assert documents["documents"][kind]["current_payload"] is None
+        assert documents["documents"][kind]["state"] == "draft"
+        assert documents["documents"][kind]["approved_revision_id"] is None
+    assert documents["documents"]["info"]["current_content"].strip() != ""
+    assert documents["approvals"] == {}
+    loop_row = api.data(api.get(_base(api, board, loop)))
+    assert loop_row["analysis_approval_id"] is None
+
+    # Nothing downstream may proceed from an approval that no longer exists.
+    refused = api.post(
+        f"{_base(api, board, loop)}/candidates",
+        json=_plan(phase_id=str(uuid.uuid4()), ticket_id=str(uuid.uuid4())),
+    )
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "approval_required"
+
+
+def test_withdrawing_a_roadmap_keeps_the_approved_analysis(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    _ready_loop(api, board, loop)
+    withdrawn = api.data(
+        api.post(
+            f"{_base(api, board, loop)}/reviews/roadmap/withdraw",
+            json={"version": _version(api, board, loop)},
+        )
+    )
+    assert withdrawn["cleared"] == ["roadmap_ai", "roadmap"]
+    documents = _documents(api, board, loop)
+    assert documents["documents"]["roadmap"]["current_content"] == ""
+    assert documents["documents"]["analysis"]["state"] == "approved"
+    assert set(documents["approvals"]) == {"analysis"}
+    loop_row = api.data(api.get(_base(api, board, loop)))
+    assert loop_row["roadmap_approval_id"] is None
+
+
+def test_withdrawal_needs_a_current_approval(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    api.data(
+        api.put(
+            f"{_base(api, board, loop)}/documents/info",
+            json={"content": "Users must confirm their email address."},
+        )
+    )
+    _submit_analysis(api, board, loop)
+    response = api.post(
+        f"{_base(api, board, loop)}/reviews/analysis/withdraw",
+        json={"version": _version(api, board, loop)},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "approval_missing"
+
+
+def test_withdrawal_refuses_a_stale_version(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    api.data(
+        api.put(
+            f"{_base(api, board, loop)}/documents/info",
+            json={"content": "Users must confirm their email address."},
+        )
+    )
+    _submit_analysis(api, board, loop)
+    _approve_analysis(api, board, loop)
+    response = api.post(
+        f"{_base(api, board, loop)}/reviews/analysis/withdraw",
+        json={"version": _version(api, board, loop) - 1},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "version_conflict"
+
+
+def test_withdrawal_is_human_only(
+    api: Api, board: dict[str, Any], loop: dict[str, Any]
+) -> None:
+    api.data(
+        api.put(
+            f"{_base(api, board, loop)}/documents/info",
+            json={"content": "Users must confirm their email address."},
+        )
+    )
+    _submit_analysis(api, board, loop)
+    _approve_analysis(api, board, loop)
+    headers = _agent_headers(api, ["boards:read", "cards:read"])
+    response = api.post(
+        f"{_base(api, board, loop)}/reviews/analysis/withdraw",
+        json={"version": _version(api, board, loop)},
+        headers=headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "human_action_required"
+

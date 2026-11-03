@@ -8,6 +8,7 @@ function run(source_revisions: GenerationRun["source_revisions"]): GenerationRun
     loop_id: "loop",
     purpose: "analysis",
     status: "completed",
+    phase: "generating",
     error_code: null,
     error_message: null,
     attempts: 1,

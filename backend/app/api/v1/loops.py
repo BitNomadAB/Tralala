@@ -30,6 +30,8 @@ from ...schemas.loops import (
     QaInstructions,
     QaResultSubmission,
     ReadinessOut,
+    WithdrawalOut,
+    WithdrawalRequest,
 )
 from ..deps import RequestContext, get_context, idempotency_key, ok
 
@@ -216,6 +218,25 @@ async def review_scope(
     return ok(
         request,
         ctx.services.loop_document.review(ctx.actor, board_id, loop_id, scope, payload),
+    )
+
+
+@router.post(
+    "/boards/{board_id}/loops/{loop_id}/reviews/{scope}/withdraw",
+    response_model=Envelope[WithdrawalOut],
+)
+async def withdraw_review(
+    board_id: str,
+    loop_id: str,
+    scope: str,
+    payload: WithdrawalRequest,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict:
+    """Take back an approval and empty the documents it authorized. Human only."""
+    return ok(
+        request,
+        ctx.services.loop_document.withdraw(ctx.actor, board_id, loop_id, scope, payload),
     )
 
 

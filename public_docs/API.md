@@ -207,6 +207,7 @@ document slots; there is no Board-level Kanban.
 | POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/roadmap` | Human-only; publishes the plan atomically |
+| POST | `/boards/{board_id}/loops/{loop_id}/reviews/{scope}/withdraw` | Human-only; supersedes the approval and replaces the scope's documents with an empty draft |
 | GET | `/boards/{board_id}/loops/{loop_id}/plan` | Active plan with phases and readiness |
 | GET | `/boards/{board_id}/loops/{loop_id}/agents` | The agent this Loop prefers per purpose |
 | PUT | `/boards/{board_id}/loops/{loop_id}/agents` | Sets that preference (`boards:write`; omitted field keeps its value, `null` clears) |
@@ -276,10 +277,9 @@ contract and the JSON schema, and the whole composed text is what a run snapshot
 An analysis or RoadMap run also carries a **repository snapshot**: for every enabled repository linked
 to the board, Tralala resolves the commit at the configured branch, reads the tarball for that commit
 and places a bounded, filtered set of files in the prompt as data — never as instructions. The caps
-are part of the decision (`docs/decisions/0011`, not shipped with the repository): at most 2 MB of
-archive, 200 files and 200 KB of text per repository, 15 s timeout, `github.com`/`api.github.com`/
-`codeload.github.com` only, no clone and no `git` binary. Build output, dependencies, lock files,
-binaries and images are skipped.
+are fixed: at most 2 MB of archive, 200 files and 200 KB of text per repository, 15 s timeout,
+`github.com`/`api.github.com`/`codeload.github.com` only, no clone and no `git` binary. Build output,
+dependencies, lock files, binaries and images are skipped.
 
 A repository that cannot be read does not fail the run: it appears in the snapshot as
 `{id, name, error}` with a class such as `unauthorized`, `not_found`, `rate_limited`, `too_large` or
@@ -287,6 +287,18 @@ A repository that cannot be read does not fail the run: it appears in the snapsh
 keeps the commit and the file paths (`source_revisions.repositories`); the file contents stay in the
 run's own input, and `GET …/generation-runs/{run_id}` returns only the name, branch, commit,
 file count and `truncated` flag. No token, path or content ever appears in a log line or an error.
+
+Every run also reports `phase` — `reading_info`, `analysing_repository` or `generating` — the step it
+last reached, so a caller can show progress instead of one opaque wait. When a run fails, `phase`
+names the step that failed alongside `error_code` and `error_message`; the dialogue shows that step
+with the error as JSON rather than a toast that scrolls away.
+
+Withdrawing an approval (`POST …/reviews/{scope}/withdraw`, `{version}`) is the counterpart of
+approving and equally human-only. It supersedes the approval row — the history stays — replaces the
+scope's documents with an empty draft revision chained to its inputs, clears every approval that
+depended on them, and returns `{scope, approval_id, cleared, version}`. `409 approval_missing` means
+there was nothing current to withdraw; `409 document_empty` refuses an approval when the document
+text is blank, which is what a withdrawal leaves behind.
 
 `scope` says where a profile works. `board` profiles answer inside one board; `organisation`
 profiles (`coordinator`, `architect`) work across the whole installation and cannot be selected as

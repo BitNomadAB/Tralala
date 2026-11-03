@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Bot, ClipboardCheck, FileText, ListChecks, Sparkles } from "lucide-react";
+import { AlertTriangle, Bot, ClipboardCheck, FileText, ListChecks, Lock, Sparkles } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -18,11 +19,12 @@ import {
 import { useAuth } from "@/features/auth/AuthProvider";
 import { generationAgents } from "@/lib/boardAgents";
 import { renderMarkdown } from "@/lib/markdown";
-import type { Card, DocumentKind, Loop } from "@/lib/types";
+import type { Card, DocumentKind, GenerationRun, Loop } from "@/lib/types";
 import { describeRunRepositories } from "@/lib/loopRuns";
 import { LoopAgentsDialog } from "./LoopAgentsDialog";
 import { LoopCompletionDialog } from "./LoopCompletionDialog";
 import { LoopPlanDialog } from "./LoopPlanDialog";
+import { RunPhases } from "./RunPhases";
 
 const STAGE_TONES: Record<Loop["stage"], BadgeTone> = {
   draft: "neutral",
@@ -232,6 +234,8 @@ function LoopDocumentDialog({
   const [infoDraft, setInfoDraft] = useState<string | null>(null);
   const [feedback, setFeedback] = useState("");
   const [runId, setRunId] = useState<string | null>(null);
+  const [failure, setFailure] = useState<GenerationRun | null>(null);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [agentId, setAgentId] = useState("");
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -280,6 +284,8 @@ function LoopDocumentDialog({
       api.startGeneration(boardId, loop.id, purpose, agentId || undefined),
     onSuccess: (run) => {
       setRunId(run.id);
+      setFailure(null);
+      setConfirmWithdraw(false);
       invalidate();
       toast.push({ title: "Generation started", description: "Following the run?", variant: "success" });
     },
@@ -313,15 +319,21 @@ function LoopDocumentDialog({
   const lastRun = purposeRuns[0];
 
   useEffect(() => {
-    if (!runFinished) return;
+    if (!runFinished || !run) return;
     invalidate();
     setRunId(null);
-    if (run?.status === "completed") {
+    if (run.status === "completed") {
+      setFailure(null);
       toast.push({ title: "Draft ready for review", variant: "success" });
       return;
     }
+    if (run.status === "failed") {
+      // Keep the step that failed on screen, with the provider's own answer, instead of a toast that
+      // scrolls away.
+      setFailure(run);
+    }
     toast.push({
-      title: "Generation failed",
+      title: run.status === "cancelled" ? "Generation cancelled" : "Generation failed",
       description: run?.error_message ?? "The provider did not return a usable answer.",
       variant: "error",
     });
@@ -359,6 +371,23 @@ function LoopDocumentDialog({
       toast.push({ title: "Could not record the decision", description: errorText(error), variant: "error" }),
   });
 
+  const withdraw = useMutation({
+    mutationFn: (scope: "analysis" | "roadmap") =>
+      api.withdrawReview(boardId, loop.id, scope, { version: loop.version }),
+    onSuccess: () => {
+      setConfirmWithdraw(false);
+      setFeedback("");
+      invalidate();
+      toast.push({
+        title: "Approval withdrawn",
+        description: "The document is cleared, so it has to be generated again.",
+        variant: "success",
+      });
+    },
+    onError: (error) =>
+      toast.push({ title: "Could not withdraw the approval", description: errorText(error), variant: "error" }),
+  });
+
   const visible = useMemo(() => {
     if (tab === "info") return ["info"] as DocumentKind[];
     if (tab === "analysis") return [technical ? "analysis_ai" : "analysis"] as DocumentKind[];
@@ -366,14 +395,31 @@ function LoopDocumentDialog({
   }, [tab, technical]);
 
   const scopeDocuments = tab === "analysis" ? ["analysis_ai", "analysis"] : ["roadmap_ai", "roadmap"];
-  const canReviewScope = isHuman && scopeDocuments.every((kind) => {
-    const document = documents?.[kind as DocumentKind];
-    return document?.current_revision_id && document.state !== "stale";
-  });
+  // An empty document is what a withdrawal leaves behind, so there is nothing to approve and the
+  // server would refuse it anyway.
+  const scopeHasText = Boolean(
+    documents?.[(tab === "analysis" ? "analysis_ai" : "roadmap_ai") as DocumentKind]?.current_content?.trim(),
+  );
+  const canReviewScope =
+    isHuman &&
+    scopeHasText &&
+    scopeDocuments.every((kind) => {
+      const document = documents?.[kind as DocumentKind];
+      return document?.current_revision_id && document.state !== "stale";
+    });
   const approvedForScope =
     tab === "analysis"
       ? documents?.analysis.state === "approved"
       : documents?.roadmap.state === "approved";
+  const scope: "analysis" | "roadmap" = tab === "analysis" ? "analysis" : "roadmap";
+  const scopeLabel = tab === "analysis" ? "analysis" : "RoadMap";
+  const generating = Boolean(runId) && !runFinished;
+  // A failed run keeps its panel until dismissed, so the step and the provider's answer stay put.
+  const visibleRun = generating ? run : tab === "info" ? undefined : failure;
+
+  useEffect(() => {
+    setConfirmWithdraw(false);
+  }, [tab]);
 
   return (
     <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
@@ -382,6 +428,16 @@ function LoopDocumentDialog({
         description="Info is written by a person. Analysis and RoadMap pair a technical view with a plain-language one."
         className="w-[min(960px,96vw)]"
       >
+        {visibleRun ? (
+          <div className="mt-2 2xl:hidden">
+            <RunPhases
+              purpose={scope}
+              run={visibleRun}
+              compact
+              onDismiss={generating ? undefined : () => setFailure(null)}
+            />
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-2">
           {(["info", "analysis", "roadmap"] as Tab[]).map((entry) => (
             <Button
@@ -422,7 +478,7 @@ function LoopDocumentDialog({
                 {candidates.agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
                     {agent.name}
-                    {agent.model ? ` ? ${agent.model}` : ""}
+                    {agent.model ? ` · ${agent.model}` : ""}
                   </option>
                 ))}
               </Select>
@@ -432,16 +488,31 @@ function LoopDocumentDialog({
             <Button
               size="sm"
               variant="outline"
-              disabled={readOnly || generate.isPending || Boolean(runId)}
+              aria-busy={generating}
+              data-generating={generating ? "true" : undefined}
+              className={
+                generating
+                  ? "animate-pulse border-[var(--primary)] text-[var(--primary)] shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100"
+                  : undefined
+              }
+              disabled={readOnly || generate.isPending || generating}
               onClick={() => generate.mutate(tab)}
             >
-              <Sparkles size={14} />{" "}
-              {runId && !runFinished
-                ? "Generating?"
-                : `Generate ${tab === "analysis" ? "analysis" : "RoadMap"}`}
+              {generating ? <Lock size={14} /> : <Sparkles size={14} />}{" "}
+              {generating ? "Generating…" : `Generate ${tab === "analysis" ? "analysis" : "RoadMap"}`}
             </Button>
           ) : null}
         </div>
+        {visibleRun ? (
+          <div className="mt-2 2xl:hidden">
+            <RunPhases
+              purpose={scope}
+              run={visibleRun}
+              compact
+              onDismiss={generating ? undefined : () => setFailure(null)}
+            />
+          </div>
+        ) : null}
         {tab !== "info" ? (
           <p
             role="status"
@@ -575,35 +646,87 @@ function LoopDocumentDialog({
                   disabled={readOnly || !isHuman}
                 />
               </Field>
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  variant="outline"
-                  disabled={readOnly || !isHuman || review.isPending}
-                  onClick={() =>
-                    review.mutate({
-                      scope: tab === "analysis" ? "analysis" : "roadmap",
-                      decision: "changes_requested",
-                    })
-                  }
-                >
-                  Request changes
-                </Button>
-                <Button
-                  disabled={readOnly || !canReviewScope || review.isPending || approvedForScope}
-                  onClick={() =>
-                    review.mutate({
-                      scope: tab === "analysis" ? "analysis" : "roadmap",
-                      decision: "approved",
-                    })
-                  }
-                >
-                  {approvedForScope ? "Approved" : `Approve ${tab === "analysis" ? "analysis" : "RoadMap"}`}
-                </Button>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {approvedForScope ? (
+                    confirmWithdraw ? (
+                      <>
+                        <span className="text-[11px] text-[var(--destructive)]">
+                          Withdrawing clears the {scopeLabel}. It has to be generated again.
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          disabled={readOnly || !isHuman || withdraw.isPending}
+                          onClick={() => withdraw.mutate(scope)}
+                        >
+                          Withdraw and clear
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setConfirmWithdraw(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={readOnly || !isHuman || withdraw.isPending}
+                        onClick={() => setConfirmWithdraw(true)}
+                      >
+                        Un-approve {scopeLabel}
+                      </Button>
+                    )
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={readOnly || !isHuman || review.isPending}
+                    onClick={() =>
+                      review.mutate({
+                        scope,
+                        decision: "changes_requested",
+                      })
+                    }
+                  >
+                    Request changes
+                  </Button>
+                  <Button
+                    disabled={readOnly || !canReviewScope || review.isPending || approvedForScope}
+                    onClick={() =>
+                      review.mutate({
+                        scope,
+                        decision: "approved",
+                      })
+                    }
+                  >
+                    {approvedForScope ? "Approved" : `Approve ${scopeLabel}`}
+                  </Button>
+                </div>
               </div>
             </div>
           )}
         </div>
       </DialogContent>
+      {visibleRun
+        ? createPortal(
+            // Outside the dialog content on purpose: that element scrolls, so a panel positioned
+            // beside it would be clipped. This one sits at the right edge of the window instead, and
+            // it takes pointer events because a modal dialog sets `pointer-events: none` on the body.
+            <aside className="pointer-events-auto fixed right-6 top-1/2 z-50 hidden w-60 -translate-y-1/2 2xl:block">
+              <RunPhases
+                purpose={scope}
+                run={visibleRun}
+                onDismiss={generating ? undefined : () => setFailure(null)}
+              />
+            </aside>,
+            document.body,
+          )
+        : null}
     </Dialog>
   );
 }

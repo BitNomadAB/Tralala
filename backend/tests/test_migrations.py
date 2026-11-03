@@ -533,3 +533,55 @@ def test_registry_upgrade_keeps_customized_roles_and_agent_references(settings: 
             assert link == agent_id
     finally:
         engine.dispose()
+
+
+def test_board_upgrade_adds_the_run_phase(settings: Settings) -> None:
+    """0010 adds the phase of a generation run; a run recorded before it keeps its row."""
+    from app.storage.sqlite import create_sqlite_engine
+
+    settings.ensure_dirs()
+    board_id = str(uuid.uuid4())
+    database = settings.data_dir / "boards" / board_id / "board.sqlite"
+    database.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(database)
+    try:
+        with engine.begin() as conn:
+            runner.upgrade("board", conn, "0009_loop_agent_preferences")
+            now = "2026-11-01T00:00:00Z"
+            loop_id = str(uuid.uuid4())
+            run_id = str(uuid.uuid4())
+            conn.execute(
+                text(
+                    "INSERT INTO loops (id, name, goal, sequence, key_prefix, key,"
+                    " created_by_actor_id, created_by_actor_type, created_by_name,"
+                    " created_at, updated_at) VALUES (:id, 'Before the phase', '', 1, 'L', 'L-1',"
+                    " 'actor', 'user', 'Owner', :now, :now)"
+                ),
+                {"id": loop_id, "now": now},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO loop_generation_runs (id, loop_id, purpose, status, input_hash,"
+                    " created_by_actor_id, created_by_actor_type, created_at)"
+                    " VALUES (:id, :loop, 'analysis', 'failed', 'hash', 'actor', 'user', :now)"
+                ),
+                {"id": run_id, "loop": loop_id, "now": now},
+            )
+            runner.upgrade("board", conn, "head")
+
+            columns = {
+                row[1]
+                for row in conn.exec_driver_sql(
+                    "PRAGMA table_info(loop_generation_runs)"
+                ).fetchall()
+            }
+            assert "phase" in columns
+            phase, status = conn.execute(
+                text("SELECT phase, status FROM loop_generation_runs WHERE id = :id"),
+                {"id": run_id},
+            ).one()
+            # A run from before this revision simply has no phase to report.
+            assert phase is None
+            assert status == "failed"
+    finally:
+        engine.dispose()

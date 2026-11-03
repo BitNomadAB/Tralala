@@ -354,6 +354,8 @@ export interface GenerationRun {
   loop_id: string;
   purpose: "analysis" | "roadmap" | "qa";
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  /** The step the run reached: reading_info, analysing_repository, generating (null before 0010). */
+  phase: string | null;
   error_code: string | null;
   error_message: string | null;
   attempts: number;

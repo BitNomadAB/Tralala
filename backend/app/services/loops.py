@@ -392,6 +392,10 @@ class LoopService:
     ) -> dict[str, dict[str, Any]]:
         latest: dict[str, dict[str, Any]] = {}
         for record in records:
+            # A superseded row is history: either a newer decision replaced it, or the person
+            # withdrew the approval. Neither counts as the Loop's current approval.
+            if record.get("superseded_at"):
+                continue
             latest.setdefault(record["scope"], record)
         return latest
 

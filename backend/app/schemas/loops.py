@@ -242,6 +242,17 @@ class ApprovalOut(OutModel):
     superseded_at: str | None = None
 
 
+class WithdrawalRequest(StrictModel):
+    version: int = Field(ge=1)
+
+
+class WithdrawalOut(OutModel):
+    scope: str
+    approval_id: str
+    cleared: list[str] = Field(default_factory=list)
+    version: int
+
+
 # --- Publication ------------------------------------------------------------------
 
 class PlanItemOut(OutModel):

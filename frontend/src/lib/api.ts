@@ -336,6 +336,20 @@ export const api = {
     );
   },
 
+  async withdrawReview(
+    boardId: string,
+    loopId: string,
+    scope: "analysis" | "roadmap",
+    payload: { version: number },
+  ): Promise<{ scope: string; approval_id: string; cleared: string[]; version: number }> {
+    return json(
+      await request<{ scope: string; approval_id: string; cleared: string[]; version: number }>(
+        `/boards/${boardId}/loops/${loopId}/reviews/${scope}/withdraw`,
+        { method: "POST", body: payload },
+      ),
+    );
+  },
+
   async getLoopPlan(boardId: string, loopId: string): Promise<LoopPlanView> {
     return json(await request<LoopPlanView>(`/boards/${boardId}/loops/${loopId}/plan`));
   },

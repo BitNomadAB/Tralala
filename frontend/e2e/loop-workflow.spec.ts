@@ -126,4 +126,91 @@ test.describe("loop planning and completion", () => {
     await record.getByRole("button").click();
     await expect(page.getByRole("dialog", { name: "Email verification" })).toBeVisible();
   });
+
+  test("withdraws an approval, which clears the analysis so it can be generated again", async ({
+    page,
+  }) => {
+    await login(page);
+    const boardName = uniqueName("Withdraw journey");
+    await boardWithLoop(page, boardName, "Session expiry");
+    const boardId = boardIdFromUrl(page);
+    const loopId = page.url().split("/loops/")[1];
+    const loopBase = `/api/v1/boards/${boardId}/loops/${loopId}`;
+    const headers = { "X-CSRF-Token": await csrfToken(page) };
+
+    await page.getByRole("button", { name: /^Info/ }).click();
+    const infoDialog = page.getByRole("dialog", { name: /planning documents/ });
+    await infoDialog
+      .getByLabel("Write or revise Info")
+      .fill("Sessions must expire after 30 minutes of inactivity.");
+    await infoDialog.getByRole("button", { name: "Save as new revision" }).click();
+    await page.getByRole("button", { name: "Close dialog" }).click();
+
+    const analysis = await page.request.post(`${loopBase}/candidates`, {
+      headers,
+      data: {
+        kind: "analysis",
+        analysis: {
+          outcome: "Expire idle sessions",
+          findings: [
+            {
+              id: "F-01",
+              title: "The session table has no expiry column",
+              category: "change",
+              technical_detail: "backend/app/services/auth.py",
+              plain_language: "Sessions never time out today.",
+            },
+          ],
+          assumptions: [],
+          open_questions: [],
+          recommendation: "Add an expiry column.",
+          verification: ["An idle session is rejected"],
+        },
+      },
+    });
+    expect(analysis.status()).toBe(201);
+
+    await page.reload();
+    await page.getByRole("button", { name: "Analysis" }).click();
+    const dialog = page.getByRole("dialog", { name: /planning documents/ });
+    await expect(dialog.getByText(/Sessions never time out today/)).toBeVisible();
+    await dialog.getByRole("button", { name: "Approve analysis" }).click();
+    await expect(dialog.getByRole("button", { name: "Approved" })).toBeVisible();
+
+    // Withdrawing is a two-step action: it throws the approved text away, so it asks first.
+    await dialog.getByRole("button", { name: "Un-approve analysis" }).click();
+    await expect(dialog.getByText(/Withdrawing clears the analysis/)).toBeVisible();
+    await dialog.getByRole("button", { name: "Withdraw and clear" }).click();
+    await expect(dialog.getByText("Nothing here yet.").first()).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Approve analysis" })).toBeVisible();
+
+    // The Loop is back to needing an analysis before a RoadMap can be generated.
+    const refused = await page.request.post(`${loopBase}/candidates`, {
+      headers,
+      data: {
+        kind: "roadmap",
+        plan: {
+          summary: "Too early",
+          phases: [
+            {
+              id: crypto.randomUUID(),
+              number: 1,
+              name: "Only phase",
+              objective: "Prove the gate",
+              tickets: [
+                {
+                  id: crypto.randomUUID(),
+                  title: "A ticket",
+                  instructions: "Do the work.",
+                  acceptance_criteria: ["it works"],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    expect(refused.status()).toBe(409);
+    expect((await refused.json()).error.code).toBe("approval_required");
+  });
 });

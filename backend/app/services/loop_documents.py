@@ -23,6 +23,7 @@ from ..schemas.loops import (
     InfoRevisionWrite,
     PlanPayload,
     QaInstructions,
+    WithdrawalRequest,
 )
 from ..storage.sqlite import utcnow
 from .activity import log_activity
@@ -33,6 +34,7 @@ from .loops import DOCUMENT_KINDS, LoopService
 
 ANALYSIS_SCOPE_KINDS = ("info", "analysis_ai", "analysis")
 ROADMAP_SCOPE_KINDS = ("info", "analysis_ai", "analysis", "roadmap_ai", "roadmap")
+REVIEW_SCOPES = ("analysis", "roadmap")
 MATERIAL_FINDING_CATEGORIES = {"risk", "blocker", "legal", "security", "question"}
 MAX_DOCUMENT_PAYLOAD = 200_000
 
@@ -678,6 +680,17 @@ class LoopDocumentService:
                 )
             documents = self.loops.document_rows(conn, loop_id)
             expected = self._expected_revisions(documents, scope)
+            for kind in expected:
+                current = documents[kind]["current"]
+                blank = current is not None and not (current["content"] or "").strip()
+                if kind != "info" and blank:
+                    # Text can be withdrawn or cleared; saying "approved" to nothing would let
+                    # delivery start from an empty document.
+                    raise Conflict(
+                        "There is nothing to approve; generate the document first",
+                        code="document_empty",
+                        details={"kind": kind},
+                    )
             if payload.revisions:
                 for kind, revision_id in payload.revisions.items():
                     if kind not in expected:
@@ -759,6 +772,142 @@ class LoopDocumentService:
                 conn, "SELECT * FROM loop_approvals WHERE id = :id", {"id": approval_id}
             )
             return self._serialize_approval(approval)
+
+    def withdraw(
+        self,
+        actor: ActorContext,
+        board_id: str,
+        loop_id: str,
+        scope: str,
+        payload: WithdrawalRequest,
+    ) -> dict[str, Any]:
+        """Take back an approval and empty the documents it authorized.
+
+        Withdrawing is not a rejection: a rejection asks for changes and keeps the text. This is the
+        person saying "this should never have been approved", so the approved revision is retired —
+        the approval row stays as history but is superseded, and both documents of the scope are
+        emptied so nothing downstream can execute against them. A withdrawal is a human decision and
+        rejects agent tokens for the same reason an approval does.
+        """
+        actor.require_human(
+            "Withdrawing an analysis approval"
+            if scope == "analysis"
+            else "Withdrawing a RoadMap approval"
+        )
+        actor.require("loops:review")
+        if scope not in REVIEW_SCOPES:
+            raise ValidationFailure(
+                "Unknown review scope", details={"allowed": list(REVIEW_SCOPES)}
+            )
+        self.board_service.ensure_active(board_id)
+        with self.boards.session(board_id) as conn:
+            loop = self.loops.require_loop_row(conn, board_id, loop_id)
+            self.loops.ensure_writable(loop)
+            if loop["version"] != payload.version:
+                raise VersionConflict(
+                    "Loop was modified by another actor",
+                    details={
+                        "expected_version": payload.version,
+                        "current_version": loop["version"],
+                    },
+                )
+            approval = self.loops.latest_approvals(conn, loop_id).get(scope)
+            if approval is None or approval["decision"] != "approved":
+                raise Conflict(
+                    "There is no current approval to withdraw",
+                    code="approval_missing",
+                    details={"scope": scope},
+                )
+            now = utcnow()
+            conn.execute(
+                text("UPDATE loop_approvals SET superseded_at = :now WHERE id = :id"),
+                {"now": now, "id": approval["id"]},
+            )
+            documents = self.loops.document_rows(conn, loop_id)
+
+            def current_id(kind: str) -> str | None:
+                row = documents[kind]["current"]
+                return row["id"] if row else None
+
+            # The cleared revisions chain to their inputs, so the scope reads as an ordinary draft
+            # rather than as stale text that was left behind.
+            if scope == "analysis":
+                technical = self._write_revision(
+                    conn,
+                    loop_id=loop_id,
+                    kind="analysis_ai",
+                    content="",
+                    payload=None,
+                    actor=actor,
+                    status="draft",
+                    sources={"info": current_id("info")},
+                    provenance={"withdrawn_approval_id": approval["id"]},
+                )
+                self._write_revision(
+                    conn,
+                    loop_id=loop_id,
+                    kind="analysis",
+                    content="",
+                    payload=None,
+                    actor=actor,
+                    status="draft",
+                    sources={"analysis_ai": technical["id"]},
+                    provenance={"withdrawn_approval_id": approval["id"]},
+                )
+                cleared = ["analysis_ai", "analysis"]
+            else:
+                technical = self._write_revision(
+                    conn,
+                    loop_id=loop_id,
+                    kind="roadmap_ai",
+                    content="",
+                    payload=None,
+                    actor=actor,
+                    status="draft",
+                    sources={
+                        "info": current_id("info"),
+                        "analysis_ai": current_id("analysis_ai"),
+                        "analysis": current_id("analysis"),
+                    },
+                    provenance={"withdrawn_approval_id": approval["id"]},
+                )
+                self._write_revision(
+                    conn,
+                    loop_id=loop_id,
+                    kind="roadmap",
+                    content="",
+                    payload=None,
+                    actor=actor,
+                    status="draft",
+                    sources={"roadmap_ai": technical["id"]},
+                    provenance={"withdrawn_approval_id": approval["id"]},
+                )
+                cleared = ["roadmap_ai", "roadmap"]
+            self._invalidate_downstream(
+                conn, loop_id, "analysis" if scope == "analysis" else "roadmap_ai"
+            )
+            conn.execute(
+                text(
+                    "UPDATE loops SET version = version + 1, updated_at = :now WHERE id = :id"
+                ),
+                {"now": now, "id": loop_id},
+            )
+            log_activity(
+                conn,
+                actor,
+                action=f"loop.{scope}_withdrawn",
+                entity_type="loop",
+                entity_id=loop_id,
+                changes={"approval_id": approval["id"], "cleared": cleared},
+            )
+            self.loops.refresh_stage(conn, loop_id)
+            version = one(conn, "SELECT version FROM loops WHERE id = :id", {"id": loop_id})
+            return {
+                "scope": scope,
+                "approval_id": approval["id"],
+                "cleared": cleared,
+                "version": int(version["version"]),
+            }
 
     def _record_approval(
         self,
