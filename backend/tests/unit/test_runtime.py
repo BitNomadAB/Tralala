@@ -220,6 +220,113 @@ def test_a_private_model_is_not_called_when_private_endpoints_are_disabled(
     assert recorder.requests == []
 
 
+# --- the answer's format: a JSON schema where the provider takes one ----------------------------
+
+SCHEMA: runtime.ResponseSchema = {
+    "name": "analysis",
+    "schema": {"type": "object", "properties": {"outcome": {"type": "string"}}},
+}
+RESPONSE_FORMAT = {"type": "json_schema", "json_schema": SCHEMA}
+REFUSED = {
+    "error": {
+        "message": "Invalid parameter: 'response_format' of type 'json_schema' is not supported",
+        "param": "response_format",
+    }
+}
+
+
+def _requires_the_schema(request: httpx.Request) -> httpx.Response:
+    """A provider that answers only a request that asks for the JSON schema."""
+    if json.loads(request.content).get("response_format") != RESPONSE_FORMAT:
+        return httpx.Response(400, json={"error": {"message": "this model needs a schema"}})
+    return _completion('{"outcome": "ok"}')
+
+
+def _refuses_the_schema(request: httpx.Request) -> httpx.Response:
+    """A provider that refuses ``response_format`` and answers everything else."""
+    if "response_format" in json.loads(request.content):
+        return httpx.Response(400, json=REFUSED)
+    return _completion('{"outcome": "ok"}')
+
+
+def test_an_agent_whose_provider_takes_a_schema_is_sent_it(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(_requires_the_schema)
+    agent = _agent(supports_json_schema=1)
+    result = runtime.call_completion(
+        settings, agent, system_prompt="s", messages=[], response_schema=SCHEMA
+    )
+    assert (result["ok"], result["text"]) == (True, '{"outcome": "ok"}')
+    assert len(recorder.requests) == 1
+    assert recorder.body()["response_format"] == RESPONSE_FORMAT
+
+
+def test_a_provider_that_refuses_the_schema_is_asked_again_without_it(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(_refuses_the_schema)
+    agent = _agent(supports_json_schema=1)
+    result = runtime.call_completion(
+        settings, agent, system_prompt="s", messages=[], response_schema=SCHEMA
+    )
+    assert (result["ok"], result["error"], result["text"]) == (True, None, '{"outcome": "ok"}')
+    first, second = recorder.body(0), recorder.body(1)
+    assert first["response_format"] == RESPONSE_FORMAT
+    assert second == {key: value for key, value in first.items() if key != "response_format"}
+
+
+@pytest.mark.parametrize(
+    ("supports", "schema"), [(0, SCHEMA), (1, None)], ids=["provider without", "no schema"]
+)
+def test_the_schema_is_sent_only_with_a_provider_that_takes_one(
+    settings: Settings,
+    provider: Callable[[Handler], Provider],
+    supports: int,
+    schema: runtime.ResponseSchema | None,
+) -> None:
+    recorder = provider(_refuses_the_schema)
+    agent = _agent(supports_json_schema=supports)
+    result = runtime.call_completion(
+        settings, agent, system_prompt="s", messages=[], response_schema=schema
+    )
+    assert result["ok"] is True
+    assert len(recorder.requests) == 1
+    assert "response_format" not in recorder.body()
+
+
+def test_a_refusal_that_does_not_name_the_format_is_reported_not_retried(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(
+        lambda _request: httpx.Response(400, json={"error": {"message": "context too long"}})
+    )
+    agent = _agent(supports_json_schema=1)
+    result = runtime.call_completion(
+        settings, agent, system_prompt="s", messages=[], response_schema=SCHEMA
+    )
+    assert result == {"ok": False, "error": "HTTP 400: context too long", "text": ""}
+    assert len(recorder.requests) == 1
+
+
+def test_a_refusal_names_the_format_only_in_a_400() -> None:
+    assert runtime.refuses_response_format(httpx.Response(400, json=REFUSED))
+    assert not runtime.refuses_response_format(httpx.Response(422, json=REFUSED))
+    assert not runtime.refuses_response_format(httpx.Response(400, json={"error": "bad model"}))
+
+
+def test_an_a2a_agent_never_gets_the_schema(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(_a2a(lambda _message: _task("ok"), None))
+    agent = _agent("a2a", supports_json_schema=1)
+    result = runtime.call_completion(
+        settings, agent, system_prompt="s", messages=[], response_schema=SCHEMA
+    )
+    assert result["ok"] is True
+    assert "response_format" not in recorder.body()
+
+
 def test_a_discussion_call_adds_the_position(
     settings: Settings, provider: Callable[[Handler], Provider]
 ) -> None:

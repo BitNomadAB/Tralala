@@ -7,6 +7,7 @@ client is an ``httpx.MockTransport``, so no test touches DNS or opens a socket.
 from __future__ import annotations
 
 import ast
+import json
 import socket
 from collections.abc import Callable, Iterator, Mapping
 from functools import partial
@@ -475,3 +476,86 @@ def test_a_probe_reports_a_refused_address_without_connecting(
     assert (result["ok"], result["status"]) == (False, "unreachable")
     assert "ForbiddenAddressError" in str(result["message"])
     assert upstream.requests == []
+
+
+# --- the trial call asks for a JSON schema as the answer's format -------------------------------
+
+
+def _chat(text: str) -> httpx.Response:
+    return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+
+
+def _answers(response: httpx.Response) -> Callable[[httpx.Request], httpx.Response]:
+    """A server that answers every request with ``response``."""
+
+    def answer(_request: httpx.Request) -> httpx.Response:
+        return response
+
+    return answer
+
+
+def _sent(request: httpx.Request) -> dict[str, object]:
+    """The JSON object a request carried."""
+    body: dict[str, object] = json.loads(request.content)
+    return body
+
+
+def _trial() -> connections.CompletionProbe:
+    return connections.probe_completion(
+        "https://api.example.com/v1",
+        model="example-model",
+        api_key=None,
+        timeout=5,
+        allow_private=False,
+    )
+
+
+def test_a_model_that_answers_the_schema_call_takes_a_json_schema(upstream: Upstream) -> None:
+    upstream.answer = _answers(_chat('{"answer": "ok"}'))
+    result = _trial()
+    assert (result["ok"], result["supports_json_schema"]) == (True, True)
+    (sent,) = upstream.requests
+    assert _sent(sent)["response_format"] == connections.PROBE_RESPONSE_FORMAT
+
+
+@pytest.mark.parametrize("status", [400, 422])
+def test_a_provider_that_refuses_the_schema_is_tested_without_it(
+    upstream: Upstream, status: int
+) -> None:
+    def refuse_the_format(request: httpx.Request) -> httpx.Response:
+        if "response_format" in _sent(request):
+            return httpx.Response(status, json={"error": {"message": "response_format unknown"}})
+        return _chat("ok")
+
+    upstream.answer = refuse_the_format
+    result = _trial()
+    assert result == {
+        "ok": True,
+        "status": "completed",
+        "message": "Model example-model answered: ok",
+        "latency_ms": result["latency_ms"],
+        "supports_json_schema": False,
+    }
+    first, second = (_sent(request) for request in upstream.requests)
+    assert second == {key: value for key, value in first.items() if key != "response_format"}
+
+
+def test_a_model_the_plain_call_cannot_reach_fails_the_test_with_its_own_refusal(
+    upstream: Upstream,
+) -> None:
+    upstream.answer = _answers(httpx.Response(404, json={"error": {"message": "no such model"}}))
+    result = _trial()
+    assert (result["ok"], result["status"], result["supports_json_schema"]) == (
+        False,
+        "http_404",
+        False,
+    )
+    assert result["message"] == "The model call was refused: HTTP 404: no such model"
+    assert len(upstream.requests) == 2
+
+
+def test_a_server_error_is_reported_without_a_second_call(upstream: Upstream) -> None:
+    upstream.answer = _answers(httpx.Response(503, text="busy"))
+    result = _trial()
+    assert (result["ok"], result["status"]) == (False, "http_503")
+    assert len(upstream.requests) == 1

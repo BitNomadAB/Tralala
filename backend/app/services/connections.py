@@ -52,12 +52,17 @@ class EndpointProbe(TypedDict):
 
 
 class CompletionProbe(TypedDict):
-    """What the smallest real chat completion found."""
+    """What the smallest real chat completion found.
+
+    ``supports_json_schema`` is true when the model answered a call that asked for a JSON schema
+    as the answer's format (``response_format``), false when it did not or was not reached.
+    """
 
     ok: bool
     status: str
     message: str
     latency_ms: int
+    supports_json_schema: bool
 
 
 class ForbiddenAddressError(httpx.ConnectError):
@@ -327,6 +332,21 @@ def probe_openai_compatible(
     }
 
 
+# The trial call's answer format: the smallest schema a provider that takes one has to honour.
+PROBE_RESPONSE_FORMAT: dict[str, object] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "connection_test",
+        "schema": {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
 def probe_completion(
     base_url: str, *, model: str, api_key: str | None, timeout: float, allow_private: bool
 ) -> CompletionProbe:
@@ -336,13 +356,18 @@ def probe_completion(
     or whether the parameters Tralala sends are accepted. That gap is exactly a green test next to a
     generation that fails with ``HTTP 400``, so the answer is one tiny request that costs a handful
     of tokens. The provider's own sentence is carried through when it refuses.
+
+    The call also asks for a JSON schema as the answer's format (``response_format``): a model that
+    answers it takes one (``supports_json_schema``), and a generation then sends the purpose's
+    schema. A provider that refuses that request (any 4xx) is asked once more without it, so the
+    test still says whether the model call itself works; only the plain call's answer decides that.
     """
     from .runtime import provider_error
 
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    payload = {
+    plain = {
         "model": model,
         "messages": [
             {"role": "system", "content": "Answer with the single word: ok"},
@@ -351,16 +376,23 @@ def probe_completion(
         "max_tokens": 16,
         "temperature": 0,
     }
+    url = f"{base_url}/chat/completions"
+    supports_json_schema = True
     started = time.monotonic()
     try:
         with endpoint_client(timeout=timeout, allow_private=allow_private) as client:
-            response = client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+            schema_call = {**plain, "response_format": PROBE_RESPONSE_FORMAT}
+            response = client.post(url, headers=headers, json=schema_call)
+            if 400 <= response.status_code < 500:
+                supports_json_schema = False
+                response = client.post(url, headers=headers, json=plain)
     except Exception as exc:  # noqa: BLE001 - network failures are reported, not raised
         return {
             "ok": False,
             "status": "unreachable",
             "message": f"The model call did not reach the endpoint ({type(exc).__name__})",
             "latency_ms": int((time.monotonic() - started) * 1000),
+            "supports_json_schema": False,
         }
     latency = int((time.monotonic() - started) * 1000)
     if response.status_code >= 400:
@@ -369,6 +401,7 @@ def probe_completion(
             "status": f"http_{response.status_code}",
             "message": f"The model call was refused: {provider_error(response)}",
             "latency_ms": latency,
+            "supports_json_schema": False,
         }
     try:
         answer = response.json()["choices"][0]["message"]["content"]
@@ -378,6 +411,7 @@ def probe_completion(
             "status": "malformed_response",
             "message": "The model call answered, but not with a chat completion",
             "latency_ms": latency,
+            "supports_json_schema": False,
         }
     preview = " ".join(str(answer or "").split())[:60]
     return {
@@ -385,6 +419,7 @@ def probe_completion(
         "status": "completed",
         "message": f"Model {model} answered" + (f": {preview}" if preview else ""),
         "latency_ms": latency,
+        "supports_json_schema": supports_json_schema,
     }
 
 

@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from typing import Any
+from typing import Any, TypedDict
 
 import httpx
+from pydantic import JsonValue
 
 from ..core.errors import ValidationFailure
 from ..core.secrets import CredentialError, open_secret
@@ -30,6 +31,18 @@ VERDICT_LINE = re.compile(
 VERDICT_LONE_LINE = re.compile(
     r"^[ \t>*_#-]*(AGREE|DISAGREE|ABSTAIN)[.!*_ \t]*$", re.IGNORECASE | re.MULTILINE
 )
+
+
+class ResponseSchema(TypedDict):
+    """The JSON schema an answer must follow, named as ``response_format`` names it.
+
+    ``name`` is what OpenAI-compatible providers require beside the schema (letters, digits, ``_``
+    and ``-``). The schema is sent without ``strict``: strict mode would refuse every schema whose
+    optional fields are not all listed as required, and the answer is validated afterwards anyway.
+    """
+
+    name: str
+    schema: dict[str, JsonValue]
 
 
 def provider_error(response: httpx.Response) -> str:
@@ -57,6 +70,16 @@ def provider_error(response: httpx.Response) -> str:
         detail = " ".join((response.text or "").split())
     detail = detail.strip()[:200]
     return f"HTTP {response.status_code}" + (f": {detail}" if detail else "")
+
+
+def refuses_response_format(response: httpx.Response) -> bool:
+    """A 400 whose error names ``response_format``: the provider does not take the JSON schema.
+
+    The connection test records whether a provider takes one, but a provider can change under a
+    saved agent (another model, an upgrade), so a call that sends the schema checks the refusal
+    and asks once more without it.
+    """
+    return response.status_code == 400 and "response_format" in (response.text or "")
 
 
 def extract_position(text: str) -> tuple[str, str]:
@@ -214,17 +237,25 @@ def call_completion(
     messages: list[dict[str, str]],
     temperature: float | None = None,
     max_tokens: int | None = None,
+    response_schema: ResponseSchema | None = None,
 ) -> dict[str, Any]:
     """Call an agent and return the raw answer, whichever transport it speaks.
 
     Loop planning, RoadMap and QA generation reuse this provider call; discussion verdict
     extraction stays a separate concern layered on top of it.
+
+    ``response_schema`` is sent as ``response_format`` only to an OpenAI-compatible agent whose
+    connection test found that its provider takes a JSON schema (``supports_json_schema``); the
+    provider then keeps the answer to the schema instead of the repair loop catching it afterwards.
+    A provider that refuses it after all (a 400 that names ``response_format``) is asked once more
+    without it, and that answer is returned as if nothing had happened. An A2A agent has no such
+    field and never gets it.
     """
     if str(agent_row.get("connection_type") or "openai_compatible") == "a2a":
         return call_a2a(settings, agent_row, system_prompt=system_prompt, messages=messages)
     api_key = _agent_key(settings, agent_row)
     headers = _agent_headers(api_key)
-    payload = {
+    payload: dict[str, Any] = {
         "model": agent_row.get("model") or "default",
         "messages": [{"role": "system", "content": system_prompt}, *messages],
         "temperature": (
@@ -236,6 +267,11 @@ def call_completion(
     limit = max_tokens or agent_row.get("max_output_tokens")
     if limit:
         payload["max_tokens"] = limit
+    if response_schema is not None and agent_row.get("supports_json_schema"):
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": response_schema["name"], "schema": response_schema["schema"]},
+        }
     url = f"{str(agent_row['base_url']).rstrip('/')}/chat/completions"
     timeout = float(agent_row.get("timeout_seconds") or 60)
     try:
@@ -243,6 +279,9 @@ def call_completion(
             timeout=timeout, allow_private=bool(settings.agents_allow_private_endpoints)
         ) as client:
             response = client.post(url, headers=headers, json=payload)
+            if "response_format" in payload and refuses_response_format(response):
+                del payload["response_format"]
+                response = client.post(url, headers=headers, json=payload)
     except Exception as exc:  # noqa: BLE001 - surfaced as an agent failure
         return {"ok": False, "error": f"{type(exc).__name__}", "text": ""}
     if response.status_code >= 400:

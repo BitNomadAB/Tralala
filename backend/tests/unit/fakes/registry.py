@@ -325,6 +325,7 @@ def agent_row(
     api_key_hint: str | None = None,
     timeout_seconds: int = 30,
     enabled: bool = True,
+    supports_json_schema: bool = False,
 ) -> AgentsRow:
     return AgentsRow(
         id=agent_id,
@@ -346,6 +347,7 @@ def agent_row(
         last_tested_at=None,
         created_at=CREATED,
         updated_at=CREATED,
+        supports_json_schema=1 if supports_json_schema else 0,
     )
 
 
@@ -944,11 +946,22 @@ class FakeAgentRepository:
             raise ConstraintViolationError("agents.name is unique")
         self._state.agents[agent_id] = row.__replace__(**changes, updated_at=now)
 
-    def record_test(self, agent_id: str, *, status: str, message: str, now: str) -> None:
+    def record_test(
+        self,
+        agent_id: str,
+        *,
+        status: str,
+        message: str,
+        now: str,
+        supports_json_schema: bool,
+    ) -> None:
         row = self._state.agents.get(agent_id)
         if row is not None:
             self._state.agents[agent_id] = row.__replace__(
-                last_test_status=status, last_test_message=message, last_tested_at=now
+                last_test_status=status,
+                last_test_message=message,
+                last_tested_at=now,
+                supports_json_schema=1 if supports_json_schema else 0,
             )
 
     def clear_role_template(self, role_id: str) -> None:

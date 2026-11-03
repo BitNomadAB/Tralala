@@ -69,6 +69,11 @@ Worth knowing when you look at the dashboard:
   a wrong model name passed the test and failed the first generation. It now sends one real
   completion, reports the provider's sentence when that is refused, and offers the model names
   it found as suggestions.
+- **A provider that can hold an answer to a schema is asked to.** The connection test's completion
+  asks for the answer in a fixed JSON shape and records whether the model managed it
+  (`supports_json_schema`). Analysis, RoadMap and QA runs on such an agent then send their schema
+  the same way, so fewer answers need a repair round; a provider that refuses is asked again
+  without it. Existing agents start without the flag: test the connection once to set it.
 - **An analysis can read the code, within stated limits.** When a board links repositories, analysis
   and RoadMap runs carry a snapshot of the branch head — at most 2 MB of archive, 200 files and
   200 KB of text per repository, filtered for what informs a decision. The prompt names the caps and

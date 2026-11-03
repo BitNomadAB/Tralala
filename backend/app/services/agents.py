@@ -76,6 +76,7 @@ class AgentEntry(TypedDict):
     last_test_status: str | None
     last_test_message: str | None
     last_tested_at: str | None
+    supports_json_schema: bool
     created_at: str
     updated_at: str
     role_template_name: str | None
@@ -135,13 +136,18 @@ class RoleSnapshot(TypedDict):
 
 
 class ProbeOutcome(TypedDict):
-    """A connection test: the endpoint probe, plus the model call when a model was named."""
+    """A connection test: the endpoint probe, plus the model call when a model was named.
+
+    ``supports_json_schema`` is what the model call found (``connections.probe_completion``), and
+    false when no model call was made or it failed.
+    """
 
     ok: bool
     status: str
     message: str
     latency_ms: int
     models: list[str]
+    supports_json_schema: bool
     completion: NotRequired[CompletionProbe]
 
 
@@ -207,6 +213,7 @@ def _agent_entry(row: AgentsRow, roles: Mapping[str, RoleTemplatesRow]) -> Agent
         "last_test_status": row.last_test_status,
         "last_test_message": row.last_test_message,
         "last_tested_at": row.last_tested_at,
+        "supports_json_schema": bool(row.supports_json_schema),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "role_template_name": role.name if role else None,
@@ -611,6 +618,7 @@ class AgentService:
             last_tested_at=None,
             created_at=now,
             updated_at=now,
+            supports_json_schema=0,
         )
         try:
             with self.store.writer() as repos:
@@ -686,6 +694,7 @@ class AgentService:
             last_test_status=None,
             last_test_message=None,
             last_tested_at=None,
+            supports_json_schema=0,
             created_at=now,
             updated_at=now,
         )
@@ -773,7 +782,12 @@ class AgentService:
     # --- connection testing ----------------------------------------------------------------------
 
     def test(self, actor: ActorContext, agent_id: str, payload: AgentTestRequest) -> ProbeOutcome:
-        """Probe a stored agent and record the outcome on it."""
+        """Probe a stored agent and record the outcome on it.
+
+        The outcome includes whether the model took a JSON schema as the answer's format, which a
+        generation reads (``runtime.call_completion``); every test writes it afresh, so a failed
+        test or one without a model call leaves the agent without it until a test shows it again.
+        """
         actor.require("agents:write")
         row = self.get_row(agent_id)
         result = self._probe(payload, row=row, agent_id=agent_id)
@@ -783,6 +797,7 @@ class AgentService:
                 status=result["status"],
                 message=result["message"][:500],
                 now=self._clock(),
+                supports_json_schema=result["supports_json_schema"],
             )
         return result
 
@@ -860,6 +875,7 @@ class AgentService:
             "message": found["message"],
             "latency_ms": found["latency_ms"],
             "models": found["models"],
+            "supports_json_schema": False,
         }
 
         completion: CompletionProbe | None = None
@@ -873,6 +889,7 @@ class AgentService:
             )
             result["completion"] = completion
             if completion["ok"]:
+                result["supports_json_schema"] = completion["supports_json_schema"]
                 result["message"] = (
                     f"{result['message']}; model {selected_model} answered "
                     f"in {completion['latency_ms']} ms"

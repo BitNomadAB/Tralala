@@ -124,8 +124,17 @@ class AgentRepository(Protocol):
         when the new name is taken."""
         ...
 
-    def record_test(self, agent_id: str, *, status: str, message: str, now: str) -> None:
-        """The outcome of the last connection test; ``updated_at`` stays."""
+    def record_test(
+        self,
+        agent_id: str,
+        *,
+        status: str,
+        message: str,
+        now: str,
+        supports_json_schema: bool,
+    ) -> None:
+        """The outcome of the last connection test, with whether it found that the provider takes
+        a JSON schema as the answer's format; ``updated_at`` stays."""
         ...
 
     def clear_role_template(self, role_id: str) -> None:

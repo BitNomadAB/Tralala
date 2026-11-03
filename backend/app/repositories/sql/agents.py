@@ -84,15 +84,16 @@ _ADD_AGENT = text(
     " (id, name, description, role_template_id, role_prompt_override, connection_type,"
     "  base_url, model, api_key_ciphertext, api_key_hint, temperature, max_output_tokens,"
     "  timeout_seconds, enabled, last_test_status, last_test_message, last_tested_at,"
-    "  created_at, updated_at)"
+    "  created_at, updated_at, supports_json_schema)"
     " VALUES (:id, :name, :description, :role_template_id, :role_prompt_override,"
     "         :connection_type, :base_url, :model, :api_key_ciphertext, :api_key_hint,"
     "         :temperature, :max_output_tokens, :timeout_seconds, :enabled, :last_test_status,"
-    "         :last_test_message, :last_tested_at, :created_at, :updated_at)"
+    "         :last_test_message, :last_tested_at, :created_at, :updated_at,"
+    "         :supports_json_schema)"
 )
 _RECORD_TEST = text(
     "UPDATE agents SET last_test_status = :status, last_test_message = :message,"
-    " last_tested_at = :now WHERE id = :id"
+    " last_tested_at = :now, supports_json_schema = :supports_json_schema WHERE id = :id"
 )
 _CLEAR_ROLE_TEMPLATE = text(
     "UPDATE agents SET role_template_id = NULL WHERE role_template_id = :id"
@@ -237,6 +238,7 @@ class SqlAgentRepository:
             "last_tested_at": row.last_tested_at,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
+            "supports_json_schema": row.supports_json_schema,
         }
         try:
             self._connection.execute(_ADD_AGENT, parameters)
@@ -254,8 +256,22 @@ class SqlAgentRepository:
         except IntegrityError as exc:
             raise ConstraintViolationError(str(exc.orig)) from exc
 
-    def record_test(self, agent_id: str, *, status: str, message: str, now: str) -> None:
-        parameters = {"status": status, "message": message, "now": now, "id": agent_id}
+    def record_test(
+        self,
+        agent_id: str,
+        *,
+        status: str,
+        message: str,
+        now: str,
+        supports_json_schema: bool,
+    ) -> None:
+        parameters = {
+            "status": status,
+            "message": message,
+            "now": now,
+            "supports_json_schema": 1 if supports_json_schema else 0,
+            "id": agent_id,
+        }
         self._connection.execute(_RECORD_TEST, parameters)
 
     def clear_role_template(self, role_id: str) -> None:

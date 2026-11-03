@@ -26,6 +26,7 @@ from app.services.loop_documents import LoopDocumentService
 from app.services.loop_generation import MAX_REPAIRS, PURPOSE_PROMPTS, LoopGenerationService
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_plans import LoopPlanService
+from app.services.runtime import ResponseSchema
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -159,6 +160,7 @@ class Call:
     messages: list[dict[str, str]]
     running: dict[str, str | None]
     """The phase of every running run when the provider was called."""
+    response_schema: ResponseSchema | None = None
 
 
 @dataclass
@@ -179,10 +181,20 @@ class Provider:
         *,
         system_prompt: str,
         messages: list[dict[str, str]],
+        response_schema: ResponseSchema | None,
     ) -> Answer:
         runs = self.state.generation_runs.values()
         running = {row.id: row.phase for row in runs if row.status == "running"}
-        self.calls.append(Call(settings, agent_row["id"], system_prompt, list(messages), running))
+        self.calls.append(
+            Call(
+                settings,
+                agent_row["id"],
+                system_prompt,
+                list(messages),
+                running,
+                response_schema,
+            )
+        )
         hook, self.before = self.before, None
         if hook is not None:
             hook()
@@ -606,6 +618,8 @@ def test_a_qa_run_hands_its_instructions_to_the_qa_workflow() -> None:
     run = w.run()
     assert run.status == "completed"
     assert w.qa.applied == [(LOOP, QaInstructions.model_validate(QA), "id-1", PROVENANCE)]
+    (call,) = w.provider.calls
+    assert call.response_schema == {"name": "qa", "schema": QaInstructions.model_json_schema()}
     assert json.loads(run.output_json)["_references"] == {"cycle_id": "cycle-1"}
     # QA instructions are written from the documents; the repositories are never fetched.
     assert w.snapshots.phases == []
@@ -627,6 +641,9 @@ def test_invalid_output_is_repaired_by_a_second_call() -> None:
     assert repair.messages[2]["role"] == "user"
     assert repair.messages[2]["content"].startswith("That response did not validate.")
     assert w.kinds() == ["info", "analysis_ai", "analysis"]
+    # Both calls hand the runtime the schema the prompt shows, for a provider that takes one.
+    schema = {"name": "analysis", "schema": AnalysisPayload.model_json_schema()}
+    assert first.response_schema == repair.response_schema == schema
 
 
 def test_output_still_invalid_after_the_repairs_fails_for_good() -> None:

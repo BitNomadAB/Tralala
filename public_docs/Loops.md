@@ -66,6 +66,12 @@ Generation runs on a chosen agent, and the agent's role prompt is the first part
 snapshots. The built-in `analytics_agent` role is written for turning Info into a structured
 analysis and for investigating a codebase.
 
+The schema's field order is the order the model writes in, so it puts evidence before judgement:
+an analysis lists its findings before its recommendation. When the agent's connection test found
+that its provider takes a JSON schema as the answer's format (`supports_json_schema`), the run also
+sends the schema that way and the provider keeps the answer to it; other providers get the schema in
+the prompt only, and an answer that does not validate is sent back for repair as before.
+
 Which agents work on a Loop is decided one level up, on the **Board**: *New board* and *Edit board*
 list every agent as a checkbox (`agent_ids`), and the Loop's *Agent* dropdown offers those agents
 only. A board that lists none keeps the old behaviour — any enabled OpenAI-compatible agent — so a

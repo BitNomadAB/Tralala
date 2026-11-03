@@ -26,7 +26,7 @@ then sees what the first committed, instead of failing with `database is locked`
 | `idempotency_records` | Replay protection for board-level creation |
 | `board_templates` | Reusable board templates: id, name (unique, case-insensitive), description, `lists_json`, `labels_json`, timestamps |
 | `role_templates` | Central AI role definitions: name (unique), description, `system_prompt`, `default_system_prompt` (factory copy), `built_in`, `builtin_key`, timestamps |
-| `agents` | AI agent identities: name (unique), role reference, optional prompt override, connection type/URL/model, encrypted API key + hint, sampling limits, enabled flag, last test result |
+| `agents` | AI agent identities: name (unique), role reference, optional prompt override, connection type/URL/model, encrypted API key + hint, sampling limits, enabled flag, last test result, `supports_json_schema` (0/1, written by every connection test: the model answered a call that asked for a JSON schema as the answer's format, so generations send one) |
 
 Templates are global because they are chosen before a board (and therefore a board database)
 exists. A template stores column names in order plus optional `{name, color}` labels. Creating a

@@ -17,6 +17,7 @@ from app.db.generated.board import LoopGenerationRunsRow
 from app.services.loop_generation import (
     MAX_OUTPUT_CHARS,
     PURPOSE_PROMPTS,
+    SCHEMAS,
     SNAPSHOT_CAPS,
     LoopGenerationService,
     _strip_fences,
@@ -186,6 +187,41 @@ def test_the_role_comes_first_and_the_schema_last(purpose: str) -> None:
     assert prompt == LoopGenerationService._compose_system_prompt(
         purpose, "You are the Analytics agent."
     )
+
+
+# The order a model writes each answer in: evidence before judgement (the comment on SCHEMAS). A
+# change here changes what the model reasons from, so it is made on purpose, never as a tidy-up.
+SCHEMA_ORDER = {
+    "analysis": [
+        "schema_version",
+        "outcome",
+        "scope",
+        "non_goals",
+        "findings",
+        "assumptions",
+        "open_questions",
+        "options",
+        "recommendation",
+        "verification",
+        "sources",
+        "repository_revision",
+    ],
+    "roadmap": ["schema_version", "summary", "phases"],
+    "qa": ["schema_version", "summary", "known_risks", "scenarios"],
+}
+
+
+def test_every_purpose_has_a_pinned_field_order() -> None:
+    assert list(SCHEMA_ORDER) == list(SCHEMAS)
+
+
+@pytest.mark.parametrize("purpose", list(SCHEMA_ORDER))
+def test_the_schema_lists_its_fields_in_writing_order(purpose: str) -> None:
+    prompt = LoopGenerationService._compose_system_prompt(purpose, "")
+    shown = json.loads(prompt.split("JSON schema:\n", 1)[1])
+    assert list(shown["properties"]) == SCHEMA_ORDER[purpose]
+    # The schema a provider may be held to is the one the prompt shows, named after the purpose.
+    assert LoopGenerationService._response_schema(purpose) == {"name": purpose, "schema": shown}
 
 
 def test_without_a_role_the_prompt_starts_with_the_purpose() -> None:

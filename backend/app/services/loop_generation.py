@@ -50,8 +50,7 @@ from .loops import (
     require_loop,
     stale_reasons,
 )
-from .orchestrator import AgentCall
-from .runtime import EXECUTABLE_CONNECTION_TYPES
+from .runtime import EXECUTABLE_CONNECTION_TYPES, ResponseSchema
 
 logger = logging.getLogger("tralala.loop_generation")
 
@@ -61,6 +60,13 @@ CLOSED_LOOP_CODES = {"loop_read_only", "loop_not_found"}
 MAX_OUTPUT_CHARS = 200_000
 FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
+# The machine contract per purpose. Field order is the model's writing order: the schema is shown in
+# the prompt and sent as ``response_format``, and a model writes the keys in the order the schema
+# lists them, so evidence comes before judgement. An analysis states its outcome, scope and findings
+# before its recommendation, a RoadMap its summary before its Phases, QA its known risks before its
+# scenarios; a recommendation written first is a conclusion the findings are then fitted to.
+# Reordering the fields of these models changes what the model reasons from, not just how the JSON
+# looks (tests/unit/test_loop_generation.py pins the order).
 SCHEMAS = {
     "analysis": AnalysisPayload,
     "roadmap": PlanPayload,
@@ -169,6 +175,22 @@ class RepositorySnapshots(Protocol):
     def for_board(self, board_id: str) -> Sequence[Mapping[str, JsonValue]]: ...
 
 
+class CompletionCall(Protocol):
+    """``runtime.call_completion`` as a generation calls it: the discussions' ``AgentCall`` plus the
+    schema the answer must follow, which the runtime sends only where the agent's provider takes
+    one (``agents.supports_json_schema``)."""
+
+    def __call__(
+        self,
+        settings: object,
+        agent_row: dict[str, object],
+        *,
+        system_prompt: str,
+        messages: list[dict[str, str]],
+        response_schema: ResponseSchema | None,
+    ) -> Mapping[str, object]: ...
+
+
 class RolePrompt(TypedDict):
     system_prompt: str
     role_source: str
@@ -270,7 +292,7 @@ class LoopGenerationService:
         snapshots: RepositorySnapshots | None = None,
         *,
         idempotency_ttl_seconds: int,
-        call_completion: AgentCall = runtime.call_completion,
+        call_completion: CompletionCall = runtime.call_completion,
         clock: Callable[[], datetime] = _now,
         new_id: Callable[[], str] = _new_id,
         background: bool = True,
@@ -667,11 +689,22 @@ class LoopGenerationService:
         validated = model.model_validate(payload)
         return validated.model_dump()
 
+    @staticmethod
+    def _response_schema(purpose: str) -> ResponseSchema:
+        """The purpose's schema as ``response_format`` carries it, named after the purpose."""
+        return {"name": purpose, "schema": SCHEMAS[purpose].model_json_schema()}
+
     def _generate(self, purpose: str, captured: JsonObject, agent: AgentsRow) -> Outcome:
         system_prompt = self._system_prompt(purpose, agent)
         messages = [{"role": "user", "content": self._user_message(captured)}]
+        # The same schema the prompt shows; the runtime sends it only to a provider that takes one.
+        response_schema = self._response_schema(purpose)
         outcome = self._call_completion(
-            self.settings, asdict(agent), system_prompt=system_prompt, messages=messages
+            self.settings,
+            asdict(agent),
+            system_prompt=system_prompt,
+            messages=messages,
+            response_schema=response_schema,
         )
         if not outcome["ok"]:
             return _call_failed(outcome)
@@ -703,6 +736,7 @@ class LoopGenerationService:
                     asdict(agent),
                     system_prompt=system_prompt,
                     messages=[*messages, {"role": "assistant", "content": text}, repair],
+                    response_schema=response_schema,
                 )
                 if not outcome["ok"]:
                     return _call_failed(outcome)

@@ -424,6 +424,17 @@ a green test and a run that fails with `400`. A refused completion fails the tes
 provider's own sentence, while `models` still comes back so the form can offer the names the
 endpoint knows.
 
+That completion first asks for a JSON schema as the answer's format (`response_format` with
+`type: json_schema`). When the model answers it, the result says `supports_json_schema: true` (on
+the outcome and on `completion`), and testing a saved agent records it on the agent
+(`supports_json_schema` in `GET /agents/{id}`). A provider that refuses the request (any `4xx`) is
+asked once more without it, so the test still says whether the model itself works, and the agent is
+recorded without it. Every test writes the flag afresh; a test without a model call, or one that
+fails, leaves it `false`. Analysis, RoadMap and QA generations send the purpose's schema only to an
+agent with the flag set, so the provider keeps the answer to the schema instead of the repair round
+catching it afterwards; a provider that refuses it after all (a `400` that names `response_format`)
+is asked once more without it, and the generation goes on as before.
+
 Both endpoints write a pair of structured log events per attempt — `agent_probe_started` and then
 `agent_probe_finished` or `agent_probe_failed` (a warning) — carrying the endpoint, the model, whether
 a key was used, the status, the latency, how many models were reported and, on failure, the reason cut
