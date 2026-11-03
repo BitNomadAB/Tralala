@@ -123,6 +123,8 @@ Run these from `backend/`.
 | `python -m ruff check app tests migrations tools` | Lint everything; what CI runs. |
 | `python -m pyright` | Strict type check of the scope in `pyrightconfig.json` (generated rows, repositories, converted services, unit tests, build tools); what CI runs after ruff. Needs Node.js on the `PATH`. |
 | `python -m ruff check app --fix` | Apply the mechanical fixes. |
+| `python -m tools.deps licences` | The licence of every dependency, backend and frontend, runtime and development, counted per licence; fails on a licence outside the list in `AGENTS.md` (kept as SPDX ids in `tools/deps/licences.toml`). Needs both installs; what CI runs. `--list` prints every package. |
+| `python -m tools.deps audit` | Known vulnerabilities: pip-audit over `requirements.txt` and `requirements-dev.txt` (any advisory fails) and pnpm audit over the frontend lockfile (high and critical fail). Needs the network and pnpm; what CI runs. |
 | `python -m app.dev_reset` | List what a development reset would erase — it changes nothing. |
 | `python -m app.dev_reset --confirm` | Erase boards, backups and the registry; the schema is recreated on next start. |
 
@@ -212,7 +214,31 @@ and would then fail `pnpm lint` on files nobody touched.
 
 `requirements.txt` holds what the app imports at runtime (`httpx` and `anyio` included, because the
 provider calls and the event stream need them). `requirements-dev.txt` adds pytest, pytest-xdist,
-ruff and pyright.
+ruff, pyright and pip-audit.
+
+### Updates, advisories and licences
+
+Dependabot opens the update pull requests (`.github/dependabot.yml`): weekly, one grouped pull
+request for the minor and patch updates of the backend, one for the frontend and one for the CI
+actions, and a pull request of its own for each major update. CI checks every one like any other
+change, the dependency job included.
+
+| Command | What it does |
+| --- | --- |
+| `(cd backend && ../.venv/bin/python -m tools.deps audit)` | Both audits, as CI runs them. A finding names the advisory, the package and the version that fixes it. |
+| `(cd backend && ../.venv/bin/python -m tools.deps licences)` | The licence inventory, as CI runs it; run it after adding or upgrading a dependency. |
+| `(cd frontend && pnpm why <package>)` | Which dependency pulls in a flagged frontend package. |
+
+A finding is fixed by a bump: raise the floor in `requirements.txt`, or upgrade the frontend
+package that pulls the flagged one in. When a fixed version exists only outside the range a
+parent package declares, an entry under `pnpm.overrides` in `frontend/package.json` forces it;
+remove the entry once the parent itself requires the fixed version. Only an advisory without
+a usable fix goes into `backend/tools/deps/audit_allowlist.toml`, with the reason and an
+expiry date at most 90 days ahead; an expired entry fails the audit again.
+
+A licence outside the list stops the inventory. A new licence is an owner decision, never part of
+an upgrade: either pick another package, or record the decision and add the licence to
+`AGENTS.md` and `licences.toml` together.
 
 ### Python and SQLite
 

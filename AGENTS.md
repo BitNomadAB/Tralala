@@ -92,6 +92,7 @@ backend/app/db/generated   typed rows written by tools/dbgen from the migrations
 backend/app/repositories/sql   the SQL implementations of the repository Protocols
 backend/migrations/{registry,board}
 backend/tools/dbgen   the first build step: migrations, generated rows, static SQL check
+backend/tools/deps    the dependency checks: licence inventory and vulnerability audit
 backend/tests/{unit,infrastructure}   unit tests and guards (the default); the minimal SQLite suite
 frontend/src/{app,components,features,lib,webmcp,themes,tests}
 frontend/e2e/    the Playwright journeys
@@ -125,6 +126,8 @@ Backend (run from `backend/`):
 ..\.venv\Scripts\python.exe -m pyright                                # strict scope: pyrightconfig.json
 ..\.venv\Scripts\python.exe -m pytest                                 # unit tests (primary gate)
 ..\.venv\Scripts\python.exe -m pytest tests/infrastructure            # the minimal SQLite suite
+..\.venv\Scripts\python.exe -m tools.deps licences                    # every dependency's licence
+..\.venv\Scripts\python.exe -m tools.deps audit                       # pip-audit + pnpm audit
 ..\.venv\Scripts\python.exe -m uvicorn app.main:create_app --factory --reload
 ```
 
@@ -286,6 +289,11 @@ else. State the rule instead of pointing at where it was decided.
 - Scopes are enforced server-side on every request; WebMCP only registers tools the actor may use.
 - Card text is never interpreted as instructions or executed; only `http(s)` links are rendered.
 - Path inputs are validated (UUID board ids, backup filename pattern) before filesystem access.
+- A known vulnerability in a dependency fails CI: `python -m tools.deps audit` runs pip-audit over
+  both requirements files (any advisory fails) and pnpm audit over the lockfile (high and critical
+  fail). Fix it by a bump; only an advisory without a usable fix goes into
+  `backend/tools/deps/audit_allowlist.toml`, with a reason and an expiry at most 90 days ahead.
+  Dependabot (`.github/dependabot.yml`) proposes the weekly updates.
 
 ## Licensing invariants
 
@@ -308,4 +316,8 @@ log (`docs/decisions/0009`, untracked).
   `minimatch`, used by the lint tooling) and two data licences: CC-BY-4.0 (only `caniuse-lite`, data
   with an attribution notice and no code) and CC0-1.0 (only `language-subtag-registry`, the IANA
   language list the accessibility linter reads). Nothing copyleft.
+- `python -m tools.deps licences` holds every installed dependency to that set, Python and npm,
+  runtime and development alike, and runs in CI. `backend/tools/deps/licences.toml` is the set as
+  SPDX ids (change it and the sentence above together; a test compares them), plus an override
+  with a reason for a package whose metadata names no readable licence.
 - Never publish signed contributor agreements in the repository.

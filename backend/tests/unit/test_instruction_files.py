@@ -47,8 +47,9 @@ PATH_SUFFIXES = {".py", ".json", ".ts", ".tsx", ".js", ".mjs", ".css", ".md", ".
 LICENCE_TEXTS = ("CLA.md",)
 # pnpm's own commands; anything else after `pnpm` must be a script in package.json.
 PNPM_BUILTINS = {"install", "add", "remove", "exec", "dlx"}
-# Words in a command line that are a subcommand rather than a path (`ruff check app`).
-SUBCOMMANDS = {"check", "format"}
+# Words in a command line that are a subcommand rather than a path (`ruff check app`,
+# `tools.deps licences`).
+SUBCOMMANDS = {"check", "format", "licences", "audit"}
 
 _FENCE = re.compile(r"^ {0,3}(```|~~~).*?^ {0,3}\1[ \t]*$", re.MULTILINE | re.DOTALL)
 _INLINE_CODE = re.compile(r"(`+)(.+?)\1", re.DOTALL)

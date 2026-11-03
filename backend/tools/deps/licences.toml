@@ -1,0 +1,53 @@
+# The licence policy `python -m tools.deps licences` enforces: the list in AGENTS.md (Licensing
+# invariants), spelled as SPDX ids. Change this file and AGENTS.md together; a unit test holds the
+# two to each other. A copyleft licence is a decision for the decision log, never an entry here.
+
+allowed = [
+  "MIT",
+  "MIT-0",
+  "ISC",
+  "0BSD",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  # A Python package whose metadata says only "BSD" (the classifier `BSD License`, or the bare
+  # word) without the clause count. AGENTS.md allows the BSD family, so the count does not decide.
+  "BSD",
+  "Apache-2.0",
+  # PSF: the Python Software Foundation licence, and the Python licence that contains it (npm's
+  # argparse is a port of Python's and declares Python-2.0).
+  "PSF-2.0",
+  "Python-2.0",
+  "MPL-2.0",
+]
+
+# A licence allowed for one package only. Each is an owner decision recorded in AGENTS.md. An entry
+# the installed packages no longer need stops the check, so the list cannot outlive its reason.
+
+[[scoped]]
+licence = "BlueOak-1.0.0"
+ecosystem = "npm"
+package = "minimatch"
+reason = "Glob matching required by ESLint 10 and typescript-eslint; dev tooling only."
+
+[[scoped]]
+licence = "CC-BY-4.0"
+ecosystem = "npm"
+package = "caniuse-lite"
+reason = "Browser support data with an attribution notice and no code; read by the build tools."
+
+[[scoped]]
+licence = "CC0-1.0"
+ecosystem = "npm"
+package = "language-subtag-registry"
+reason = "The IANA language list as data, read by the accessibility lint rules; dev tooling only."
+
+# Packages whose metadata names no licence the check can read (no SPDX expression and no licence
+# classifier, or a field holding prose). Each entry says which licence the package's own licence
+# file carries and why the metadata cannot. An entry stops the check once the metadata becomes
+# readable, so it is removed instead of masking a change. The format:
+#
+# [[override]]
+# ecosystem = "pypi"            # or "npm"
+# package = "example-package"   # the PyPI name in normalised form, or the npm name
+# licence = "MIT"               # an SPDX expression; the policy above still decides it
+# reason = "License field holds the full licence text and there is no classifier; LICENSE is MIT."
