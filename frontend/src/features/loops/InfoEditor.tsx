@@ -1,7 +1,12 @@
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Textarea } from "@/components/ui/input";
 
-/** The Info tab's editor: only a person writes Info, and each save is a new revision. */
+/**
+ * The Info tab's editor: only a person writes Info, and each save is a new revision. `saveGuard`,
+ * when given, takes the save button's place: the question asked before a save that would leave a
+ * running generation without a result.
+ */
 export function InfoEditor({
   value,
   onChange,
@@ -9,6 +14,7 @@ export function InfoEditor({
   readOnly,
   canSave,
   onSave,
+  saveGuard,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -16,6 +22,7 @@ export function InfoEditor({
   readOnly: boolean;
   canSave: boolean;
   onSave: () => void;
+  saveGuard?: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -36,9 +43,11 @@ export function InfoEditor({
         </p>
       ) : null}
       <div className="flex justify-end">
-        <Button disabled={!canSave} onClick={onSave}>
-          Save as new revision
-        </Button>
+        {saveGuard ?? (
+          <Button disabled={!canSave} onClick={onSave}>
+            Save as new revision
+          </Button>
+        )}
       </div>
     </div>
   );

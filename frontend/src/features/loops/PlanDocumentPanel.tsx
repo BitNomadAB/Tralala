@@ -1,7 +1,8 @@
+import { Fragment } from "react";
 import { Badge } from "@/components/ui/badge";
 import { renderMarkdown } from "@/lib/markdown";
 import type { DocumentKind, LoopDocument } from "@/lib/types";
-import { DOCUMENT_LABELS } from "./loopUi";
+import { DOCUMENT_LABELS, staleReasonText } from "./loopUi";
 
 /** One planning document: its state, current text, approved baseline and revision list. */
 export function PlanDocumentPanel({
@@ -11,6 +12,8 @@ export function PlanDocumentPanel({
   kind: DocumentKind;
   document: LoopDocument;
 }) {
+  // Both approvals can supersede the same document, and one sentence says it once.
+  const reasons = [...new Set(document.stale_reasons)];
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -35,9 +38,15 @@ export function PlanDocumentPanel({
           </span>
         ) : null}
       </div>
-      {document.stale_reasons.length > 0 ? (
+      {reasons.length > 0 ? (
         <p className="text-[11px] text-[var(--warning)]">
-          Needs regeneration: {document.stale_reasons.join(", ")}
+          Needs regeneration:
+          {reasons.map((reason) => (
+            <Fragment key={reason}>
+              {" "}
+              <span title={reason}>{staleReasonText(reason)}</span>
+            </Fragment>
+          ))}
         </p>
       ) : null}
       {document.current_content ? (

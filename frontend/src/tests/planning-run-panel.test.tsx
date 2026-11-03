@@ -5,105 +5,16 @@ import { http } from "msw";
 import { describe, expect, it } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
 import { LoopDocumentDialog } from "@/features/loops/LoopDocumentDialog";
-import type { DocumentKind, GenerationRun, Loop, LoopDocument } from "@/lib/types";
 import { apiPath, ok } from "./msw/envelope";
+import { BOARD_ID, generationRun, LOOP, LOOP_PATH, planningDialogHandlers } from "./msw/loops";
 import { server } from "./msw/server";
-
-const BOARD_ID = "board-1";
-const LOOP_ID = "loop-1";
-const NOW = "2026-11-03T10:00:00Z";
-const KINDS: DocumentKind[] = ["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"];
-
-function emptyDocument(kind: DocumentKind): LoopDocument {
-  return {
-    loop_id: LOOP_ID,
-    kind,
-    state: "empty",
-    current_revision_id: null,
-    current_revision_number: null,
-    current_content: null,
-    current_payload: null,
-    current_created_at: null,
-    approved_revision_id: null,
-    approved_revision_number: null,
-    approved_content: null,
-    stale: false,
-    stale_reasons: [],
-    revisions: [],
-  };
-}
-
-const documents = Object.fromEntries(KINDS.map((kind) => [kind, emptyDocument(kind)])) as Record<
-  DocumentKind,
-  LoopDocument
->;
-
-const LOOP: Loop = {
-  id: LOOP_ID,
-  board_id: BOARD_ID,
-  name: "Session expiry",
-  goal: "",
-  key: "SES-1",
-  key_prefix: "SES",
-  sequence: 1,
-  stage: "draft",
-  version: 1,
-  created_at: NOW,
-  updated_at: NOW,
-  archived_at: null,
-  cancelled_at: null,
-  completed_at: null,
-  history_id: null,
-  documents,
-  plan: null,
-  qa: null,
-  progress: { ticket_total: 0, ticket_completed: 0, ticket_archived_incomplete: 0 },
-  warnings: [],
-};
-
-function generationRun(status: GenerationRun["status"], phase: string | null): GenerationRun {
-  return {
-    id: "run-1",
-    loop_id: LOOP_ID,
-    purpose: "analysis",
-    status,
-    phase,
-    error_code: null,
-    error_message: null,
-    attempts: 1,
-    output: {},
-    source_revisions: {},
-    created_at: NOW,
-    started_at: status === "queued" ? null : NOW,
-    finished_at: null,
-    model: null,
-    agent_name: null,
-    usage: {},
-  };
-}
 
 /** A Loop with nothing generated yet; a started analysis run stays on its generating step. */
 function planningServer() {
-  const loop = `/boards/${BOARD_ID}/loops/${LOOP_ID}`;
   server.use(
-    http.get(apiPath(`/boards/${BOARD_ID}`), () =>
-      ok({ id: BOARD_ID, name: "Platform", agent_ids: [], repository_ids: [] }),
-    ),
-    http.get(apiPath("/agents"), () => ok([])),
-    http.get(apiPath(`${loop}/documents`), () =>
-      ok({ loop_id: LOOP_ID, loop_version: 1, documents, approvals: {} }),
-    ),
-    http.get(apiPath(`${loop}/agents`), () =>
-      ok({
-        loop_id: LOOP_ID,
-        analysis_agent_id: null,
-        roadmap_agent_id: null,
-        qa_agent_id: null,
-      }),
-    ),
-    http.get(apiPath(`${loop}/generation-runs`), () => ok([])),
-    http.post(apiPath(`${loop}/generation-runs`), () => ok(generationRun("queued", null))),
-    http.get(apiPath(`${loop}/generation-runs/run-1`), () =>
+    ...planningDialogHandlers().handlers,
+    http.post(apiPath(`${LOOP_PATH}/generation-runs`), () => ok(generationRun("queued", null))),
+    http.get(apiPath(`${LOOP_PATH}/generation-runs/run-1`), () =>
       ok(generationRun("running", "generating")),
     ),
   );

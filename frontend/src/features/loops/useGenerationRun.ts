@@ -7,6 +7,9 @@ import { keys } from "@/lib/queries";
 import type { GenerationRun } from "@/lib/types";
 import type { PlanScope, PlanTab } from "./loopUi";
 
+const inFlight = (run: Pick<GenerationRun, "status">) =>
+  run.status === "queued" || run.status === "running";
+
 /**
  * Starts a generation run for the open scope and follows it until it finishes, keeping a failed run
  * on screen until it is dismissed.
@@ -58,22 +61,21 @@ export function useGenerationRun({
     queryKey: ["generation-run", loopId, runId],
     queryFn: () => api.getGenerationRun(boardId, loopId, String(runId)),
     enabled: Boolean(runId),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "queued" || status === "running" ? 1500 : false;
-    },
+    refetchInterval: (query) => (query.state.data && inFlight(query.state.data) ? 1500 : false),
   });
   const run = runId ? runQuery.data : undefined;
   const runFinished = run ? ["completed", "failed", "cancelled"].includes(run.status) : false;
 
   // A failed run used to exist only as a toast that scrolled away, so "I pressed Generate and
   // nothing happened" was the honest description of a failed provider call. The last run for the
-  // purpose stays on screen instead, with whatever the provider said.
+  // purpose stays on screen instead, with whatever the provider said. The Info tab reads the list
+  // too: a save there asks first while any run of the Loop is in flight, including one started
+  // before the dialog opened, so the list is followed for as long as it shows one.
   const runsQuery = useQuery({
     queryKey: keys.generationRuns(boardId, loopId),
     queryFn: () => api.listGenerationRuns(boardId, loopId),
-    enabled: tab !== "info",
-    refetchInterval: runId && !runFinished ? 1500 : false,
+    refetchInterval: (query) =>
+      (runId && !runFinished) || query.state.data?.some(inFlight) ? 1500 : false,
   });
   const purposeRuns = (runsQuery.data ?? []).filter((entry) => entry.purpose === tab);
   const lastRun = purposeRuns.at(0);
@@ -97,9 +99,15 @@ export function useGenerationRun({
       toast.push({ title: "Draft ready for review", variant: "success" });
       return;
     }
+    const cancelled = finished.status === "cancelled";
     toast.push({
-      title: finished.status === "cancelled" ? "Generation cancelled" : "Generation failed",
-      description: finished.error_message ?? "The provider did not return a usable answer.",
+      title: cancelled ? "Generation cancelled" : "Generation failed",
+      // A cancelled run records no message, and "the provider did not answer" was not why it ended.
+      description:
+        finished.error_message ??
+        (cancelled
+          ? "The run was stopped before its result was used."
+          : "The provider did not return a usable answer."),
       variant: "error",
     });
   });
@@ -112,12 +120,27 @@ export function useGenerationRun({
   // A failed run keeps its panel until dismissed, so the step and the provider's answer stay put.
   const visibleRun = generating ? run : tab === "info" ? undefined : failure;
 
+  const cancelRun = useMutation({
+    mutationFn: (id: string) => api.cancelGenerationRun(boardId, loopId, id),
+    onSuccess: invalidate,
+    onError: (error) => {
+      toast.push({
+        title: "Could not cancel the run",
+        description: describeError(error),
+        variant: "error",
+      });
+    },
+  });
+
   return {
     generate,
     /** A run is being followed; the agent choice is locked until it finishes. */
     following: Boolean(runId),
     generating,
     visibleRun,
+    /** The run of any purpose a save of Info would leave without a result, or null when none is. */
+    activeRunId: generating ? runId : (runsQuery.data?.find(inFlight)?.id ?? null),
+    cancelRun,
     lastRun,
     lastRunLoading: runsQuery.isLoading,
     dismissFailure: () => {

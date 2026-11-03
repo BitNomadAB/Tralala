@@ -6,6 +6,8 @@ import { keys, useAgents, useBoard, useLoopAgents, useLoopDocuments } from "@/li
 import type { DocumentKind, Loop } from "@/lib/types";
 import { GenerationRunAside, GenerationRunPanel, LastRunStatus } from "./GenerationRunPanel";
 import { InfoEditor } from "./InfoEditor";
+import { InfoSaveGuard } from "./InfoSaveGuard";
+import { KeptCandidate } from "./KeptCandidate";
 import { LoopPlanTabs } from "./LoopPlanTabs";
 import type { PlanScope, PlanTab } from "./loopUi";
 import { PlanDocumentPanel } from "./PlanDocumentPanel";
@@ -95,8 +97,26 @@ export function LoopDocumentDialog({
     });
   const scope: PlanScope = tab === "analysis" ? "analysis" : "roadmap";
   const scopeLabel = tab === "analysis" ? "analysis" : "RoadMap";
-  const { generating, visibleRun } = generation;
+  const { generating, visibleRun, activeRunId } = generation;
   const dismissRun = generating ? undefined : generation.dismissFailure;
+  const generateDisabled = readOnly || generation.generate.isPending || generating;
+
+  // A save while a run is in flight asks first; the question goes away by itself once the run ends,
+  // so a later run cannot bring back a question nobody asked again.
+  const [confirmInfoSave, setConfirmInfoSave] = useState(false);
+  if (confirmInfoSave && activeRunId === null) setConfirmInfoSave(false);
+  const saveInfoNow = () => {
+    setConfirmInfoSave(false);
+    planReview.saveInfo.mutate();
+  };
+  const requestInfoSave = () => {
+    if (activeRunId === null) saveInfoNow();
+    else setConfirmInfoSave(true);
+  };
+  const cancelRunThenSave = () => {
+    if (activeRunId === null) saveInfoNow();
+    else generation.cancelRun.mutate(activeRunId, { onSuccess: saveInfoNow });
+  };
 
   return (
     <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
@@ -108,8 +128,11 @@ export function LoopDocumentDialog({
         <LoopPlanTabs
           tab={tab}
           onTabChange={(entry) => {
-            // A pending reset confirmation belongs to the tab it was asked on.
-            if (entry !== tab) setConfirmWithdraw(false);
+            // A pending reset or save confirmation belongs to the tab it was asked on.
+            if (entry !== tab) {
+              setConfirmWithdraw(false);
+              setConfirmInfoSave(false);
+            }
             setTab(entry);
           }}
           technical={technical}
@@ -120,7 +143,7 @@ export function LoopDocumentDialog({
           savedAgentName={savedAgentName}
           agentLocked={readOnly || generation.following}
           generating={generating}
-          generateDisabled={readOnly || generation.generate.isPending || generating}
+          generateDisabled={generateDisabled}
           onGenerate={(purpose) => generation.generate.mutate(purpose)}
         />
         {/* Once, under the button that started the run; from 2xl the aside below shows it instead. */}
@@ -128,11 +151,19 @@ export function LoopDocumentDialog({
           <GenerationRunPanel scope={scope} run={visibleRun} onDismiss={dismissRun} />
         ) : null}
         {tab !== "info" ? (
-          <LastRunStatus
-            scope={tab}
-            lastRun={generation.lastRun}
-            loading={generation.lastRunLoading}
-          />
+          <>
+            <LastRunStatus
+              scope={tab}
+              lastRun={generation.lastRun}
+              loading={generation.lastRunLoading}
+            />
+            <KeptCandidate
+              run={generation.lastRun}
+              scopeLabel={scopeLabel}
+              regenerateDisabled={generateDisabled}
+              onRegenerate={() => generation.generate.mutate(scope)}
+            />
+          </>
         ) : null}
 
         <div className="mt-3 flex flex-col gap-4">
@@ -154,7 +185,17 @@ export function LoopDocumentDialog({
                 !planReview.saveInfo.isPending &&
                 planReview.infoDraft !== null
               }
-              onSave={() => planReview.saveInfo.mutate()}
+              onSave={requestInfoSave}
+              saveGuard={
+                confirmInfoSave && activeRunId !== null ? (
+                  <InfoSaveGuard
+                    pending={generation.cancelRun.isPending || planReview.saveInfo.isPending}
+                    onCancelRunFirst={cancelRunThenSave}
+                    onSaveAnyway={saveInfoNow}
+                    onBack={() => setConfirmInfoSave(false)}
+                  />
+                ) : undefined
+              }
             />
           ) : (
             <ScopeReview

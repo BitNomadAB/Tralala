@@ -165,6 +165,20 @@ export const loopWorkflowApi = {
     );
   },
 
+  /** Stops a queued or running run; a run that already finished is returned unchanged. */
+  async cancelGenerationRun(
+    boardId: string,
+    loopId: string,
+    runId: string,
+  ): Promise<GenerationRun> {
+    return json(
+      await request<GenerationRun>(
+        `/boards/${boardId}/loops/${loopId}/generation-runs/${runId}/cancel`,
+        { method: "POST" },
+      ),
+    );
+  },
+
   async acceptImplementation(
     boardId: string,
     loopId: string,
