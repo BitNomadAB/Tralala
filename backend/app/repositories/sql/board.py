@@ -18,6 +18,7 @@ from ..cards import CardRepository
 from ..checklists import ChecklistItemRepository, ChecklistRepository
 from ..comments import CommentRepository
 from ..counters import CounterRepository
+from ..events import EventRepository
 from ..idempotency import BoardIdempotencyRepository
 from ..labels import LabelRepository
 from ..lists import ListRepository
@@ -39,6 +40,7 @@ from .cards import SqlCardRepository
 from .checklists import SqlChecklistItemRepository, SqlChecklistRepository
 from .comments import SqlCommentRepository
 from .counters import SqlCounterRepository
+from .events import SqlEventRepository
 from .idempotency import SqlBoardIdempotencyRepository
 from .labels import SqlLabelRepository
 from .lists import SqlListRepository
@@ -84,6 +86,7 @@ class SqlBoardRepositories:
         self.attachments: AttachmentRepository = SqlAttachmentRepository(connection)
         self.search: CardSearchRepository = SqlCardSearchRepository(connection)
         self.loop_agents: LoopAgentRepository = SqlLoopAgentRepository(connection)
+        self.events: EventRepository = SqlEventRepository(connection)
 
     @contextmanager
     def savepoint(self) -> Generator[None]:

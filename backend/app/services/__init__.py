@@ -147,7 +147,7 @@ class Services:
         self.discussion = DiscussionService(
             self.board, self.agent, boards=self.boards, registry=self.registry
         )
-        self.event = EventService(self.board, boards=self.boards)
+        self.event = EventService(self.board, self.board_store)
         self.orchestrator = Orchestrator(
             settings, self.board, self.event, boards=self.boards, registry=self.registry
         )

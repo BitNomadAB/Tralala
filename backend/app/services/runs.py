@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure
+from ..repositories.sql.board import SqlBoardRepositories
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
@@ -192,7 +193,8 @@ class RunService:
         if self.events is None:
             return None
         return self.events.record(
-            conn, discussion_id=discussion_id, type=type, payload=payload, actor=actor
+            SqlBoardRepositories(conn),
+            discussion_id=discussion_id, type=type, payload=payload, actor=actor
         )
 
     def _publish(self, board_id: str, *events: dict[str, Any] | None) -> None:

@@ -24,6 +24,7 @@ from sqlalchemy import bindparam, text
 
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound
+from ..repositories.sql.board import SqlBoardRepositories
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
@@ -706,7 +707,7 @@ class MentionService:
         if self.events is None:
             return None
         return self.events.record_card(
-            conn, card_id=card_id, type=type, payload=payload, actor=actor
+            SqlBoardRepositories(conn), card_id=card_id, type=type, payload=payload, actor=actor
         )
 
     def _publish(self, board_id: str, event: dict[str, Any] | None) -> None:

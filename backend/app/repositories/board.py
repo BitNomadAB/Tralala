@@ -18,6 +18,7 @@ from .cards import CardRepository
 from .checklists import ChecklistItemRepository, ChecklistRepository
 from .comments import CommentRepository
 from .counters import CounterRepository
+from .events import EventRepository
 from .idempotency import BoardIdempotencyRepository
 from .labels import LabelRepository
 from .lists import ListRepository
@@ -102,6 +103,9 @@ class BoardRepositories(Protocol):
 
     @property
     def loop_agents(self) -> LoopAgentRepository: ...
+
+    @property
+    def events(self) -> EventRepository: ...
 
     def savepoint(self) -> AbstractContextManager[None]:
         """A nested transaction inside a writer: it keeps its writes when the block ends normally

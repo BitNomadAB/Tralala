@@ -10,6 +10,7 @@ from sqlalchemy import text
 from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, ValidationFailure
+from ..repositories.sql.board import SqlBoardRepositories
 from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
@@ -73,7 +74,8 @@ class DiscussionService:
         if self.events is None:
             return None
         return self.events.record(
-            conn, discussion_id=discussion_id, type=type, payload=payload, actor=actor
+            SqlBoardRepositories(conn),
+            discussion_id=discussion_id, type=type, payload=payload, actor=actor
         )
 
     def _publish(self, board_id: str, *events: dict[str, Any] | None) -> None:

@@ -14,11 +14,14 @@ from app.db.generated.board import (
     AttachmentsRow,
     BoardLoopDefaultsRow,
     BoardMetadataRow,
+    CardEventsRow,
     CardLabelsRow,
     CardsRow,
     ChecklistItemsRow,
     ChecklistsRow,
     CommentsRow,
+    DiscussionEventsRow,
+    DiscussionThreadsRow,
     IdempotencyRecordsRow,
     LabelsRow,
     ListsRow,
@@ -52,6 +55,7 @@ from app.repositories.checklists import (
 )
 from app.repositories.comments import CommentRepository
 from app.repositories.counters import BoardCounts, CounterRepository
+from app.repositories.events import EventRepository, NewEvent
 from app.repositories.idempotency import BoardIdempotencyRepository
 from app.repositories.labels import LabelChanges, LabelRepository
 from app.repositories.lists import ListRepository
@@ -106,6 +110,11 @@ class BoardState:
     loop_agents: dict[tuple[str, str], LoopAgentPreferencesRow] = field(
         default_factory=dict[tuple[str, str], LoopAgentPreferencesRow]
     )
+    discussions: dict[str, DiscussionThreadsRow] = field(
+        default_factory=dict[str, DiscussionThreadsRow]
+    )
+    discussion_events: list[DiscussionEventsRow] = field(default_factory=list[DiscussionEventsRow])
+    card_events: list[CardEventsRow] = field(default_factory=list[CardEventsRow])
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -130,6 +139,9 @@ class BoardState:
             idempotency=dict(self.idempotency),
             attachments=dict(self.attachments),
             loop_agents=dict(self.loop_agents),
+            discussions=dict(self.discussions),
+            discussion_events=list(self.discussion_events),
+            card_events=list(self.card_events),
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -154,6 +166,9 @@ class BoardState:
         self.idempotency = snapshot.idempotency
         self.attachments = snapshot.attachments
         self.loop_agents = snapshot.loop_agents
+        self.discussions = snapshot.discussions
+        self.discussion_events = snapshot.discussion_events
+        self.card_events = snapshot.card_events
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -312,6 +327,36 @@ def approval_row(
         loop_version=1,
         superseded_at=superseded_at,
         created_at=created_at,
+    )
+
+
+def discussion_row(
+    discussion_id: str,
+    *,
+    card_id: str | None = None,
+    status: str = "open",
+    run_state: str = "idle",
+) -> DiscussionThreadsRow:
+    return DiscussionThreadsRow(
+        id=discussion_id,
+        card_id=card_id,
+        title=f"Discussion {discussion_id}",
+        goal="",
+        mode="discussion",
+        status=status,
+        created_by_actor_id="actor-1",
+        created_by_type="user",
+        created_by_name="Ada",
+        max_rounds=3,
+        origin_comment_id=None,
+        escalation_depth=0,
+        created_at=CREATED,
+        updated_at=CREATED,
+        last_activity_at=CREATED,
+        round_count=0,
+        run_state=run_state,
+        tokens_used=0,
+        elapsed_ms=0,
     )
 
 
@@ -1626,6 +1671,52 @@ class FakeLoopAgentRepository:
             )
 
 
+def _next_seq(rows: Iterable[CardEventsRow] | Iterable[DiscussionEventsRow]) -> int:
+    return max((row.seq for row in rows), default=0) + 1
+
+
+class FakeEventRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def add_discussion_event(self, discussion_id: str, event: NewEvent) -> int:
+        if discussion_id not in self._state.discussions:
+            raise ConstraintError("FOREIGN KEY constraint failed")
+        seq = _next_seq(self._state.discussion_events)
+        self._state.discussion_events.append(
+            DiscussionEventsRow(seq=seq, discussion_id=discussion_id, **event)
+        )
+        return seq
+
+    def add_card_event(self, card_id: str, event: NewEvent) -> int:
+        if card_id not in self._state.cards:
+            raise ConstraintError("FOREIGN KEY constraint failed")
+        seq = _next_seq(self._state.card_events)
+        self._state.card_events.append(CardEventsRow(seq=seq, card_id=card_id, **event))
+        return seq
+
+    def discussion_events(
+        self, discussion_id: str, *, after: int, limit: int
+    ) -> list[DiscussionEventsRow]:
+        found = [
+            row
+            for row in self._state.discussion_events
+            if row.discussion_id == discussion_id and row.seq > after
+        ]
+        return sorted(found, key=lambda row: row.seq)[:limit]
+
+    def card_events(self, card_id: str, *, after: int, limit: int) -> list[CardEventsRow]:
+        found = [
+            row
+            for row in self._state.card_events
+            if row.card_id == card_id and row.seq > after
+        ]
+        return sorted(found, key=lambda row: row.seq)[:limit]
+
+    def discussion_exists(self, discussion_id: str) -> bool:
+        return discussion_id in self._state.discussions
+
+
 class FakeBoardRepositories:
     def __init__(self, state: BoardState) -> None:
         self._state = state
@@ -1652,6 +1743,7 @@ class FakeBoardRepositories:
         self.attachments: AttachmentRepository = FakeAttachmentRepository(state)
         self.search: CardSearchRepository = FakeCardSearchRepository(state)
         self.loop_agents: LoopAgentRepository = FakeLoopAgentRepository(state)
+        self.events: EventRepository = FakeEventRepository(state)
         self.savepoints = 0
 
     @contextmanager

@@ -31,7 +31,7 @@ from app.schemas.cards import CardUpdate
 from app.schemas.loops import LoopUpdate
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
 from app.schemas.subresources import ChecklistItemUpdate, LabelUpdate
-from app.services import discussions, events
+from app.services import discussions
 
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 FILTERS: sql.Filters = (("a", "a = :a"), ("b", "b IS NULL"), ("c", "(c LIKE :c OR d LIKE :c)"))
@@ -259,9 +259,8 @@ def test_thread_and_activity_filters_match_the_former_literals() -> None:
     # schema, and a unit test does not import the SQL repositories.
 
 
-def test_event_and_approval_identifiers_are_the_fixed_names() -> None:
-    assert events._EVENT_TABLES == ("discussion_events", "card_events")
-    assert events._SCOPE_COLUMNS == ("discussion_id", "card_id")
+def test_approval_identifiers_are_the_fixed_names() -> None:
+    # The event statements are fixed literals in app/repositories/sql/events.py now, one per table.
     # Changing an input invalidates its approval and everything downstream of it, in this order.
     assert loop_repositories.LOOP_APPROVAL_COLUMNS == (
         "analysis_approval_id",

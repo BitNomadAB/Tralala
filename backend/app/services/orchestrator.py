@@ -14,6 +14,7 @@ from uuid import uuid4
 from sqlalchemy import text
 
 from ..core.errors import NotFound
+from ..repositories.sql.board import SqlBoardRepositories
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
@@ -198,7 +199,7 @@ class Orchestrator:
             if self.events is None:
                 return None
             return self.events.record(
-                conn, discussion_id=discussion_id, type=type, payload=payload
+                SqlBoardRepositories(conn), discussion_id=discussion_id, type=type, payload=payload
             )
 
         in_round: list[str] = []
