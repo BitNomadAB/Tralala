@@ -3,6 +3,9 @@
 A run is the unit a human steers: it carries the requested rounds, the token and time budgets, the
 pause/stop flags and the round history. The engine executes exactly one round at a time; this
 service decides whether another round follows, so pause and stop take effect between steps.
+
+A run's JSON lives in ``runs_views`` and the round and finish writes in ``runs_rounds``; this module
+keeps the service, its executor and locks, and re-exports what callers import from it.
 """
 
 from __future__ import annotations
@@ -10,7 +13,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
 from threading import Lock
 from typing import ClassVar, Protocol
 from uuid import uuid4
@@ -19,32 +21,40 @@ from weakref import WeakValueDictionary
 from ..core.context import ActorContext
 from ..core.dates import utcnow
 from ..core.errors import Conflict, NotFound, ValidationFailure
-from ..db.generated.board import (
-    DiscussionOutcomesRow,
-    DiscussionRoundsRow,
-    DiscussionRunsRow,
-)
+from ..db.generated.board import DiscussionRunsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
-from .activity import activity_entry
-from .events import (
-    CONSENSUS_PROPOSED,
-    ROUND_COMPLETED,
-    RUN_FINISHED,
-    RUN_STARTED,
-    STATUS_CHANGED,
-    Event,
-    EventService,
-)
+from .events import RUN_FINISHED, RUN_STARTED, STATUS_CHANGED, Event, EventService
 from .orchestrator import Failure, RoundOutcome
+from .runs_rounds import (
+    classify,
+    finish_run,
+    log_run_activity,
+    record_event,
+    record_round,
+    time_exhausted,
+)
+from .runs_views import RunEntry, recent_runs, require_run, serialize_run
+
+__all__ = [
+    "ACTIVE_RUN_STATUSES",
+    "CLOSED_THREAD_STATUSES",
+    "WORKER_THREADS",
+    "BoardChecks",
+    "RoundEngine",
+    "RunEntry",
+    "RunService",
+    "RunSettings",
+    "classify",
+    "recent_runs",
+    "serialize_run",
+    "time_exhausted",
+]
 
 logger = logging.getLogger("tralala.runs")
 
 ACTIVE_RUN_STATUSES = ("running", "paused")
 CLOSED_THREAD_STATUSES = {"approved", "vetoed", "cancelled"}
 WORKER_THREADS = 4
-
-RunEntry = dict[str, object]
-"""A run as the API answers it: its columns, ``autonomy`` as a boolean and its rounds."""
 
 
 class BoardChecks(Protocol):
@@ -78,57 +88,6 @@ class RoundEngine(Protocol):
 
 def _new_id() -> str:
     return str(uuid4())
-
-
-def serialize_run(
-    repos: BoardRepositories, run: DiscussionRunsRow, *, with_rounds: bool = True
-) -> RunEntry:
-    entry: RunEntry = dict(asdict(run))
-    entry["autonomy"] = bool(run.autonomy)
-    entry["rounds"] = [asdict(row) for row in repos.rounds.for_run(run.id)] if with_rounds else []
-    return entry
-
-
-def recent_runs(
-    repos: BoardRepositories, discussion_id: str, *, limit: int = 10
-) -> list[RunEntry]:
-    """The thread's latest runs, newest first, each with its rounds."""
-    return [serialize_run(repos, run) for run in repos.runs.recent(discussion_id, limit=limit)]
-
-
-def classify(run: DiscussionRunsRow, outcome: RoundOutcome) -> tuple[str, str | None]:
-    """How a round ends the run, if it does: the run status and the reason."""
-    if outcome["interrupted"] in {"stopped", "paused"}:
-        return str(outcome["interrupted"]), str(outcome["interrupted"])
-    if outcome["answers"] == 0 and len(outcome["failures"]) >= outcome["participants"]:
-        return "failed", "all_participants_failed"
-    if outcome["answers"] == 0 and outcome["repeats"]:
-        return "no_progress", "duplicate_answers"
-    if outcome["budget_hit"]:
-        return "budget_exhausted", "token_budget"
-    if outcome["unanimous"]:
-        return "completed", "consensus"
-    elapsed = run.elapsed_ms + outcome["elapsed_ms"]
-    budget = run.time_budget_seconds
-    if budget is not None and elapsed > budget * 1000:
-        return "budget_exhausted", "time_budget"
-    return "completed", None
-
-
-def time_exhausted(run: DiscussionRunsRow) -> bool:
-    budget = run.time_budget_seconds
-    if budget is None:
-        return False
-    return run.elapsed_ms > budget * 1000
-
-
-def _started_by(run: DiscussionRunsRow) -> ActorContext:
-    return ActorContext(
-        actor_id=run.started_by_actor_id,
-        actor_type=run.started_by_type,
-        actor_name=run.started_by_name,
-        scopes=frozenset({"discussions:write"}),
-    )
 
 
 class RunService:
@@ -191,7 +150,7 @@ class RunService:
     def get(self, board_id: str, discussion_id: str, run_id: str) -> RunEntry:
         self.board_service.require_row(board_id)
         with self.store.reader(board_id) as repos:
-            return serialize_run(repos, _run(repos, discussion_id, run_id))
+            return serialize_run(repos, require_run(repos, discussion_id, run_id))
 
     # --- helpers -------------------------------------------------------------
 
@@ -210,11 +169,7 @@ class RunService:
         payload: Mapping[str, object],
         actor: ActorContext | None = None,
     ) -> Event | None:
-        if self.events is None:
-            return None
-        return self.events.record(
-            repos, discussion_id=discussion_id, type=type, payload=payload, actor=actor
-        )
+        return record_event(self.events, repos, discussion_id, type, payload, actor)
 
     def _publish(self, board_id: str, *events: Event | None) -> None:
         if self.events is None:
@@ -232,17 +187,7 @@ class RunService:
         changes: Mapping[str, object],
         now: str,
     ) -> None:
-        repos.activity.add(
-            activity_entry(
-                actor,
-                action=action,
-                entity_type="discussion",
-                entity_id=discussion_id,
-                changes=changes,
-                entry_id=self._new_id(),
-                timestamp=now,
-            )
-        )
+        log_run_activity(repos, actor, action, discussion_id, changes, now, new_id=self._new_id)
 
     # --- commands ------------------------------------------------------------
 
@@ -282,7 +227,7 @@ class RunService:
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
-            run = _run(repos, discussion_id, run_id)
+            run = require_run(repos, discussion_id, run_id)
             if run.status != "running":
                 raise Conflict("Only a running run can be paused", details={"status": run.status})
             now = self._clock()
@@ -300,7 +245,7 @@ class RunService:
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
-            run = _run(repos, discussion_id, run_id)
+            run = require_run(repos, discussion_id, run_id)
             if run.status != "paused":
                 raise Conflict("Only a paused run can be resumed", details={"status": run.status})
             now = self._clock()
@@ -319,7 +264,7 @@ class RunService:
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
-            run = _run(repos, discussion_id, run_id)
+            run = require_run(repos, discussion_id, run_id)
             if run.status not in ACTIVE_RUN_STATUSES:
                 raise Conflict("Run is already finished", details={"status": run.status})
             now = self._clock()
@@ -514,97 +459,18 @@ class RunService:
         status: str,
     ) -> None:
         now = self._clock()
-        thread_status = "consensus_proposed" if outcome["unanimous"] else "discussing"
-        failures = len(outcome["failures"])
         with self.store.writer(board_id) as repos:
-            repos.rounds.add(
-                DiscussionRoundsRow(
-                    id=self._new_id(),
-                    discussion_id=discussion_id,
-                    run_id=run.id,
-                    round_number=outcome["round_number"],
-                    status=status,
-                    answers=outcome["answers"],
-                    failures=failures,
-                    repeats=outcome["repeats"],
-                    tokens_used=outcome["tokens"],
-                    elapsed_ms=outcome["elapsed_ms"],
-                    created_at=now,
-                    finished_at=now,
-                )
-            )
-            repos.runs.record_round(
-                run.id, round_number=outcome["round_number"], elapsed_ms=outcome["elapsed_ms"]
-            )
-            repos.threads.record_round(
+            published = record_round(
+                repos,
                 discussion_id,
-                status=thread_status,
-                tokens=outcome["tokens"],
-                elapsed_ms=outcome["elapsed_ms"],
+                run,
+                outcome,
+                status,
                 now=now,
+                new_id=self._new_id,
+                events=self.events,
             )
-            if outcome["unanimous"]:
-                repos.outcomes.add(
-                    DiscussionOutcomesRow(
-                        id=self._new_id(),
-                        discussion_id=discussion_id,
-                        summary="All participating agents agreed.",
-                        payload_json="{}",
-                        created_at=now,
-                    )
-                )
-            round_event = self._record(
-                repos,
-                discussion_id,
-                ROUND_COMPLETED,
-                {
-                    "run_id": run.id,
-                    "round_number": outcome["round_number"],
-                    "status": status,
-                    "answers": outcome["answers"],
-                    "repeats": outcome["repeats"],
-                    "failures": failures,
-                    "tokens_used": outcome["tokens"],
-                    "elapsed_ms": outcome["elapsed_ms"],
-                },
-            )
-            status_event = self._record(
-                repos,
-                discussion_id,
-                STATUS_CHANGED,
-                {
-                    "status": thread_status,
-                    "run_state": "running",
-                    "run_id": run.id,
-                    "round_number": outcome["round_number"],
-                },
-            )
-            consensus_event = (
-                self._record(
-                    repos,
-                    discussion_id,
-                    CONSENSUS_PROPOSED,
-                    {"run_id": run.id, "round_number": outcome["round_number"]},
-                )
-                if outcome["unanimous"]
-                else None
-            )
-            self._log(
-                repos,
-                _started_by(run),
-                "discussion.round_completed",
-                discussion_id,
-                {
-                    "run_id": run.id,
-                    "round": outcome["round_number"],
-                    "answers": outcome["answers"],
-                    "repeats": outcome["repeats"],
-                    "failures": failures,
-                    "status": status,
-                },
-                now,
-            )
-        self._publish(board_id, round_event, status_event, consensus_event)
+        self._publish(board_id, *published)
 
     def _finish(
         self,
@@ -616,49 +482,18 @@ class RunService:
     ) -> None:
         now = self._clock()
         with self.store.writer(board_id) as repos:
-            if status == "paused":
-                repos.runs.pause(run_id, reason)
-            else:
-                repos.runs.end(run_id, status=status, reason=reason, now=now)
-            run = _run(repos, discussion_id, run_id)
-            if run.status == "running":
-                return
-            run_state = self.RUN_STATES.get(run.status, "idle")
-            repos.threads.set_run_state(discussion_id, run_state, now=now)
-            finished_event = self._record(
+            published = finish_run(
                 repos,
                 discussion_id,
-                RUN_FINISHED,
-                {
-                    "run_id": run_id,
-                    "run_status": run.status,
-                    "stop_reason": run.stop_reason,
-                    "rounds_completed": run.rounds_completed,
-                    "rounds_requested": run.rounds_requested,
-                    "tokens_used": run.tokens_used,
-                    "elapsed_ms": run.elapsed_ms,
-                },
+                run_id,
+                status,
+                reason,
+                now=now,
+                new_id=self._new_id,
+                events=self.events,
+                run_states=self.RUN_STATES,
             )
-            thread = repos.threads.get(discussion_id)
-            status_event = self._record(
-                repos,
-                discussion_id,
-                STATUS_CHANGED,
-                {
-                    "run_state": run_state,
-                    "run_id": run_id,
-                    "status": thread.status if thread is not None else None,
-                },
-            )
-            self._log(
-                repos,
-                _started_by(run),
-                "discussion.run_finished",
-                discussion_id,
-                {"run_id": run_id, "status": run.status, "stop_reason": run.stop_reason},
-                now,
-            )
-        self._publish(board_id, finished_event, status_event)
+        self._publish(board_id, *published)
 
     def _fail(self, board_id: str, discussion_id: str, run_id: str, error: str) -> None:
         now = self._clock()
@@ -678,7 +513,7 @@ class RunService:
     def _summary(self, board_id: str, discussion_id: str, run_id: str) -> RunEntry:
         with self.store.reader(board_id) as repos:
             thread = repos.threads.get(discussion_id)
-            run = _run(repos, discussion_id, run_id)
+            run = require_run(repos, discussion_id, run_id)
             last_round = repos.rounds.last_for_run(run_id)
             latest: dict[str, dict[str, object]] = {}
             for vote in repos.votes.newest_first(discussion_id):
@@ -708,9 +543,3 @@ class RunService:
             "run": summary,
         }
 
-
-def _run(repos: BoardRepositories, discussion_id: str, run_id: str) -> DiscussionRunsRow:
-    run = repos.runs.get(run_id)
-    if run is None or run.discussion_id != discussion_id:
-        raise NotFound("Discussion run not found")
-    return run

@@ -7,6 +7,8 @@ on an in-process executor: no broker is introduced for this.
 
 Retry is safe because ``uq_comment_mentions_once`` allows one job per (comment, agent) and the
 answer insert is guarded by the job's ``response_comment_id``.
+
+The prompt a mentioned agent receives is built in ``mentions_prompt``.
 """
 
 from __future__ import annotations
@@ -17,16 +19,15 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
-from pathlib import Path
 from threading import Lock
-from typing import Protocol, TypedDict, TypeGuard
+from typing import Protocol, TypeGuard
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from ..core.context import ActorContext
 from ..core.dates import utcnow
 from ..core.errors import Conflict, NotFound
-from ..db.generated.board import AttachmentsRow, CommentMentionJobsRow, CommentsRow
+from ..db.generated.board import CommentMentionJobsRow, CommentsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.board_files import AttachmentFiles
 from ..repositories.registry import RegistryUnitOfWork
@@ -34,20 +35,13 @@ from . import runtime
 from .activity import activity_entry
 from .agents import RoleSnapshot
 from .events import AGENT_COMPLETED, AGENT_FAILED, AGENT_STARTED, Event, EventService
+from .mentions_prompt import mention_messages
 from .orchestrator import AgentCall, usage_tokens
 
 logger = logging.getLogger("tralala.mentions")
 
 WORKER_THREADS = 2
 MAX_MENTIONS_PER_COMMENT = 5
-RECENT_COMMENTS = 20
-CONTEXT_CHARS = 4000
-# A mentioned agent should be able to read the notes that were uploaded with the ticket, but not
-# swallow a whole file: only text-like attachments, and only a bounded head of each.
-TEXT_ATTACHMENT_TYPES = {"application/json", "application/xml", "application/x-yaml"}
-ATTACHMENT_EXCERPTS = 3
-ATTACHMENT_EXCERPT_BYTES = 200_000
-ATTACHMENT_EXCERPT_CHARS = 2_000
 
 MentionJobEntry = dict[str, object]
 """A job as the API answers it: its columns without the snapshot, the role it ran with, and
@@ -64,11 +58,6 @@ class MentionAgents(Protocol):
     def list(self, *, enabled: bool | None = None) -> Sequence[Mapping[str, object]]: ...
 
     def role_snapshot(self, agent_id: str) -> RoleSnapshot: ...
-
-
-class Speaker(TypedDict):
-    name: str
-    type: str
 
 
 def extract_mentions(content: str, agents: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -146,31 +135,6 @@ def agent_actor(agent_id: str, agent_name: str) -> ActorContext:
         actor_name=agent_name,
         scopes=frozenset({"comments:write"}),
     )
-
-
-def attachment_excerpt(directory: Path, attachment: AttachmentsRow) -> str:
-    """Head of a text attachment, for the agent that was mentioned on its ticket.
-
-    Binary formats stay metadata only: extracting them would need a parser per format, and a
-    mention should never attach megabytes to a prompt.
-    """
-    content_type = attachment.content_type or ""
-    if not (content_type.startswith("text/") or content_type in TEXT_ATTACHMENT_TYPES):
-        return ""
-    if attachment.size_bytes > ATTACHMENT_EXCERPT_BYTES:
-        return ""
-    if not attachment.stored_filename:
-        return ""
-    try:
-        raw = (directory / attachment.stored_filename).read_bytes()
-    except OSError:
-        return ""
-    text = raw.decode("utf-8", errors="replace").strip()
-    if not text:
-        return ""
-    if len(text) <= ATTACHMENT_EXCERPT_CHARS:
-        return text
-    return text[:ATTACHMENT_EXCERPT_CHARS] + "\n(truncated)"
 
 
 def _new_id() -> str:
@@ -521,82 +485,7 @@ class MentionService:
     def _messages(
         self, repos: BoardRepositories, job: CommentMentionJobsRow, board_id: str
     ) -> list[dict[str, str]] | None:
-        card = repos.cards.get(job.card_id)
-        comment = repos.comments.get(job.comment_id)
-        if card is None or comment is None:
-            return None
-        listed = repos.lists.get(card.list_id) if card.list_id else None
-        loop = repos.loops.get(card.loop_id)
-        labels = [label.name for label in repos.cards.labels([job.card_id]).get(job.card_id, [])]
-        checklists = repos.checklists.for_card(job.card_id)
-        items = repos.checklist_items.for_card(job.card_id)
-        earlier = [
-            entry for entry in repos.comments.for_card(job.card_id) if entry.id != job.comment_id
-        ]
-        history = earlier[-RECENT_COMMENTS:]
-        attachments = repos.attachments.live(card_id=job.card_id)
-        speakers = self._speakers(history)
-
-        lines = [
-            f"Loop: {(loop.name if loop else None) or '(unknown)'}"
-            f" ({(loop.key if loop else None) or 'no key'})",
-            f"Ticket: {card.title}",
-            f"Ticket id: {job.card_id} (key: {card.ticket_key or 'not keyed yet'})",
-            f"List: {(listed.name if listed else None) or '(unknown)'}",
-            f"Priority: {card.priority}",
-            f"Due: {card.due_at or 'none'}",
-            f"Status: {'completed' if card.completed_at else 'open'}",
-            f"Labels: {', '.join(labels) if labels else 'none'}",
-            f"Description:\n{(card.description or '(empty)')[:CONTEXT_CHARS]}",
-        ]
-        if checklists:
-            lines.append("Checklists:")
-            for checklist in checklists:
-                entries = [item for item in items if item.checklist_id == checklist.id]
-                rendered = "; ".join(
-                    f"[{'x' if item.completed else ' '}] {item.text}" for item in entries
-                )
-                lines.append(f"- {checklist.title}: {rendered or '(no items)'}")
-        if attachments:
-            lines.append("Attachments:")
-            excerpts = 0
-            for attachment in attachments[:20]:
-                lines.append(
-                    f"- {attachment.original_filename} ({attachment.content_type},"
-                    f" {attachment.size_bytes} bytes)"
-                )
-                if excerpts < ATTACHMENT_EXCERPTS:
-                    excerpt = attachment_excerpt(self.files.attachments_dir(board_id), attachment)
-                    if excerpt:
-                        excerpts += 1
-                        lines.append("  content:\n" + excerpt)
-        transcript = "\n".join(_spoken(entry, speakers) for entry in history)
-        sections = ["\n".join(lines)]
-        if transcript:
-            sections.append(f"Recent comments:\n{transcript}")
-        sections.append(f"Comment that mentioned you:\n{comment.content[:CONTEXT_CHARS]}")
-        sections.append(
-            "You were mentioned in this ticket. Answer the comment in the ticket thread as your "
-            "role: be concise, concrete and actionable. Do not repeat the ticket back. Never "
-            "mention other agents."
-        )
-        return [{"role": "user", "content": "\n\n".join(sections)}]
-
-    def _speakers(self, comments: Sequence[CommentsRow]) -> dict[str, Speaker]:
-        """Who wrote each comment: a person or token by its actor, an agent by its name."""
-        missing = {comment.actor_id for comment in comments if comment.actor_id}
-        if not missing:
-            return {}
-        with self.registry.reader() as registry:
-            actors = registry.actors.many(missing)
-            agents = registry.agents.names(missing)
-        known: dict[str, Speaker] = {
-            actor_id: {"name": row.name, "type": row.type} for actor_id, row in actors.items()
-        }
-        known.update(
-            {agent_id: {"name": name, "type": "agent"} for agent_id, name in agents.items()}
-        )
-        return known
+        return mention_messages(repos, job, board_id, registry=self.registry, files=self.files)
 
     def _log(
         self,
@@ -642,11 +531,4 @@ class MentionService:
             self.events.publish(board_id, event)
 
 
-def _spoken(comment: CommentsRow, speakers: Mapping[str, Speaker]) -> str:
-    speaker = speakers.get(comment.actor_id)
-    name = speaker["name"] if speaker else None
-    kind = speaker["type"] if speaker else None
-    return f"[{name or 'Unknown'} · {kind or 'user'}] {comment.content[:1000]}"
-
-
-__all__ = ["MentionService", "extract_mentions"]
+__all__ = ["MentionAgents", "MentionService", "extract_mentions", "serialize_job"]
