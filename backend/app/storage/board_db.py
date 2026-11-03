@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -10,9 +11,10 @@ from threading import RLock
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import DBAPIError
 
 from ..core.config import Settings
-from ..core.errors import NotFound, ServiceUnavailable
+from ..core.errors import BoardUnreadable, NotFound, ServiceUnavailable
 from ..core.identifiers import canonical_board_id
 from ..core.platform import remove_tree
 from .schema import ensure_fts, runner
@@ -21,6 +23,32 @@ from .sqlite import create_sqlite_engine, snapshot_database, utcnow
 MAX_CACHED_BOARDS = 64
 
 logger = logging.getLogger("tralala")
+
+# SQLite's answers about the file itself: it is not a database, or it is damaged. Retrying cannot
+# help, unlike a busy or locked database.
+UNREADABLE_CODES = frozenset({sqlite3.SQLITE_NOTADB, sqlite3.SQLITE_CORRUPT})
+
+
+@contextmanager
+def _readable() -> Iterator[None]:
+    """SQLite refusing a board's file, raised as ``BoardUnreadable`` instead of a driver error.
+
+    Callers that step past a board they cannot open (the board list's counters, startup recovery,
+    the discussions overview) catch ``ServiceUnavailable``, so one damaged file never fails them,
+    and a request for that board answers ``503 board_database_unreadable`` instead of a 500.
+    """
+    try:
+        yield
+    except DBAPIError as exc:
+        original = exc.orig
+        if not isinstance(original, sqlite3.Error):
+            raise
+        if original.sqlite_errorcode & 0xFF not in UNREADABLE_CODES:
+            raise
+        raise BoardUnreadable(
+            "Board database cannot be read",
+            details={"sqlite_error": original.sqlite_errorname},
+        ) from exc
 
 
 class BoardDatabaseManager:
@@ -129,13 +157,15 @@ class BoardDatabaseManager:
                 self._engines[board_id] = engine
             self._last_used[board_id] = time.monotonic()
             if board_id not in self._verified:
-                with engine.connect() as connection:
-                    current = runner.current_revision(connection)
+                try:
+                    with _readable(), engine.connect() as connection:
+                        current = runner.current_revision(connection)
+                except BoardUnreadable:
+                    self._drop(board_id, engine)
+                    raise
                 head = runner.head_revision("board")
                 if current != head:
-                    self._engines.pop(board_id, None)
-                    self._last_used.pop(board_id, None)
-                    engine.dispose()
+                    self._drop(board_id, engine)
                     raise ServiceUnavailable(
                         "Board schema is not at the current revision",
                         code="board_schema_outdated",
@@ -144,6 +174,12 @@ class BoardDatabaseManager:
                 self._verified.add(board_id)
             self._evict_overflow()
             return engine
+
+    def _drop(self, board_id: str, engine: Engine) -> None:
+        """Forget an engine that failed its check, so the next open looks at the file again."""
+        self._engines.pop(board_id, None)
+        self._last_used.pop(board_id, None)
+        engine.dispose()
 
     def fts_available(self, board_id: str) -> bool:
         if board_id not in self._fts:
@@ -156,7 +192,7 @@ class BoardDatabaseManager:
         """Single transactional unit of work against one board database."""
         with self._board_lock(board_id):
             engine = self.open(board_id)
-            with engine.begin() as conn:
+            with _readable(), engine.begin() as conn:
                 yield conn
             with self._lock:
                 self._last_used[board_id] = time.monotonic()
@@ -166,7 +202,7 @@ class BoardDatabaseManager:
     def reader(self, board_id: str) -> Iterator[Connection]:
         with self._board_lock(board_id):
             engine = self.open(board_id)
-            with engine.connect() as conn:
+            with _readable(), engine.connect() as conn:
                 yield conn
 
     def close(self, board_id: str) -> None:

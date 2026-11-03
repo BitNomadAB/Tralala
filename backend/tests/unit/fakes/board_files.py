@@ -5,7 +5,8 @@
 holds a short marker instead of SQLite pages: ``snapshot`` writes a marker and keeps a copy of the
 rows under it, and opening a file whose board has no rows yet takes the rows of its marker. So a
 duplicated, exported or imported board carries its rows the way the real file copy does, and no
-test opens SQLite.
+test opens SQLite. Judging an imported file accepts a marker this fake wrote and calls anything
+else not a database, as SQLite would.
 """
 
 from __future__ import annotations
@@ -16,11 +17,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.core.errors import NotFound, ServiceUnavailable
+from app.core.errors import BoardUnreadable, NotFound, ServiceUnavailable
 from app.core.identifiers import canonical_board_id
 from app.db.generated.board import BoardMetadataRow
 from app.repositories.board import BoardUnitOfWork
-from app.repositories.board_files import BoardFiles, BoardMigrator, MigrationOutcome
+from app.repositories.board_files import (
+    BoardFiles,
+    BoardMigrator,
+    DatabaseProblem,
+    MigrationOutcome,
+)
 from tests.unit.fakes.board import CREATED, BoardState, FakeBoardRepositories
 
 
@@ -38,8 +44,15 @@ class FakeBoardDatabases:
     states: dict[str, BoardState] = field(default_factory=dict[str, BoardState])
     # A database file's marker -> the rows a copy of it carries.
     images: dict[bytes, BoardState] = field(default_factory=dict[bytes, BoardState])
-    # Boards whose schema is being repaired: opening one answers 503, as the manager does.
+    # Boards whose schema is being repaired (or not yet migrated): opening one answers 503, as
+    # the manager does, until the board is migrated.
     unavailable: set[str] = field(default_factory=set[str])
+    # Boards whose file SQLite refuses (not a database, or damaged): 503, not retryable.
+    unreadable: set[str] = field(default_factory=set[str])
+    # What judging an imported file answers, by the file's content; a marker this fake did not
+    # write is not a database.
+    problems: dict[bytes, DatabaseProblem] = field(default_factory=dict[bytes, DatabaseProblem])
+    checked: list[str] = field(default_factory=list[str])
     # Boards whose files the host holds open: deleting them raises, as remove_tree would.
     busy: set[str] = field(default_factory=set[str])
     # What migrating a board answers; "up_to_date" when absent.
@@ -105,6 +118,8 @@ class FakeBoardDatabases:
             raise ServiceUnavailable(
                 "Board schema is not at the current revision", code="board_schema_outdated"
             )
+        if board_id in self.unreadable:
+            raise BoardUnreadable("Board database cannot be read")
         key = canonical_board_id(board_id)
         state = self.states.get(key)
         if state is None:
@@ -138,9 +153,21 @@ class FakeBoardDatabases:
 
     # --- the migrator ------------------------------------------------------------------------
 
+    def check_imported(self, board_id: str) -> DatabaseProblem | None:
+        self.checked.append(board_id)
+        content = self.path(board_id).read_bytes()
+        if content in self.problems:
+            return self.problems[content]
+        if content in self.images or content.startswith(b"created:"):
+            return None
+        return DatabaseProblem(reason="not_a_database", detail="file is not a database")
+
     def migrate_board(self, board_id: str) -> MigrationOutcome:
         self.migrated.append(board_id)
-        return FakeMigration(self.migration_status.get(board_id, "up_to_date"))
+        status = self.migration_status.get(board_id, "up_to_date")
+        if status != "failed":
+            self.unavailable.discard(board_id)
+        return FakeMigration(status)
 
 
 def as_unit_of_work(databases: FakeBoardDatabases) -> BoardUnitOfWork:

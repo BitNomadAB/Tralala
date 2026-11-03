@@ -7,6 +7,7 @@ by the typed fakes in ``tests/unit/fakes``.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -38,6 +39,7 @@ NOW = datetime(2026, 11, 3, 10, 0, 0, 400_000, tzinfo=UTC)
 NOW_TEXT = "2026-11-03T10:00:00Z"
 MISSING = "5d0c4a1e-0000-4000-8000-000000000001"
 REPAIRING = "5d0c4a1e-0000-4000-8000-000000000002"
+BROKEN = "5d0c4a1e-0000-4000-8000-000000000003"
 TTL = 60
 
 
@@ -50,8 +52,8 @@ class Cache:
 
 
 def make_cache(settings: Settings, *, ttl: int = TTL, now: datetime = NOW) -> Cache:
-    """``BOARD_ID`` holds 2 open Loops, 2 open lists and 1 open card; ``MISSING`` has no database
-    and ``REPAIRING`` is being migrated."""
+    """``BOARD_ID`` holds 2 open Loops, 2 open lists and 1 open card; ``MISSING`` has no database,
+    ``REPAIRING`` is being migrated and SQLite cannot read ``BROKEN``'s file."""
     board = BoardState()
     board.loops = {
         "open": loop_row("open"),
@@ -69,9 +71,16 @@ def make_cache(settings: Settings, *, ttl: int = TTL, now: datetime = NOW) -> Ca
         "1": card_row("1", "a", "open"),
         "2": card_row("2", "a", "open", archived_at=CREATED),
     }
-    boards = FakeBoardUnitOfWork(board, databases=(BOARD_ID, REPAIRING), unavailable=(REPAIRING,))
+    boards = FakeBoardUnitOfWork(
+        board,
+        databases=(BOARD_ID, REPAIRING, BROKEN),
+        unavailable=(REPAIRING,),
+        unreadable=(BROKEN,),
+    )
     registry = RegistryState()
-    registry.boards = {board_id: board_row(board_id) for board_id in (BOARD_ID, MISSING, REPAIRING)}
+    registry.boards = {
+        board_id: board_row(board_id) for board_id in (BOARD_ID, MISSING, REPAIRING, BROKEN)
+    }
     store = FakeRegistryUnitOfWork(registry)
     configured = settings.model_copy(update={"board_counts_cache_seconds": ttl})
     cache = BoardStatsCache(configured, store, boards, clock=lambda: now)
@@ -148,6 +157,51 @@ def test_a_board_that_cannot_be_opened_counts_zero(cache: Cache) -> None:
     zeros = (0, 0, 0)
     assert cache.cache.counts_for([MISSING, REPAIRING]) == {MISSING: zeros, REPAIRING: zeros}
     assert cache.registry.board_stats[REPAIRING] == stored(REPAIRING, NOW_TEXT, (0, 0, 0))
+
+
+def _unreadable_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if json.loads(record.getMessage())["event"] == "board_database_unreadable"
+    ]
+
+
+def test_a_board_whose_file_cannot_be_read_counts_zero_and_is_logged_once(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    cache = make_cache(settings, ttl=0)  # measured on every call
+    with caplog.at_level(logging.INFO, logger="tralala"):
+        assert cache.cache.counts_for([BROKEN, BOARD_ID]) == {
+            BROKEN: (0, 0, 0),
+            BOARD_ID: (2, 2, 1),
+        }
+        assert cache.cache.counts(BROKEN) == (0, 0, 0)
+        assert cache.cache.counts_for([REPAIRING, MISSING]) == {
+            REPAIRING: (0, 0, 0),
+            MISSING: (0, 0, 0),
+        }
+    [line] = _unreadable_lines(caplog)
+    assert json.loads(line) == {
+        "event": "board_database_unreadable",
+        "board_id": BROKEN,
+        "skipped": "board_counts",
+    }
+    assert cache.registry.boards[BROKEN].status == "active"  # the cache never changes a status
+
+
+def test_a_board_that_reads_again_is_logged_again_when_it_breaks_again(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    cache = make_cache(settings, ttl=0)
+    with caplog.at_level(logging.INFO, logger="tralala"):
+        cache.cache.counts(BROKEN)
+        cache.boards.unreadable.clear()  # restored from a backup
+        assert cache.cache.counts(BROKEN) == (2, 2, 1)
+        cache.boards.unreadable.add(BROKEN)
+        cache.cache.counts(BROKEN)
+        cache.cache.counts(BROKEN)
+    assert len(_unreadable_lines(caplog)) == 2
 
 
 def test_many_boards_are_answered_once_each_in_one_lookup(cache: Cache) -> None:

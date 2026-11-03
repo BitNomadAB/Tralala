@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import zipfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -20,12 +21,27 @@ import pytest
 
 from app.core.config import Settings
 from app.core.context import ActorContext, scopes_for_role
-from app.core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, ValidationFailure
+from app.core.errors import (
+    BoardUnreadable,
+    Conflict,
+    Forbidden,
+    NotFound,
+    ServiceUnavailable,
+    ValidationFailure,
+)
 from app.db.generated.board import BoardLoopDefaultsRow, LabelsRow
 from app.db.generated.registry import BoardRepositoriesRow, IdempotencyRecordsRow
+from app.repositories.board_files import DatabaseProblem, ProblemReason
 from app.schemas.boards import BoardCreate, BoardUpdate
 from app.services.agents import AgentService
-from app.services.boards import BoardCounters, BoardSchema, BoardService, Counts
+from app.services.board_stats import BoardStatsCache
+from app.services.boards import (
+    IMPORT_REFUSALS,
+    BoardCounters,
+    BoardSchema,
+    BoardService,
+    Counts,
+)
 from app.services.lists import BoardChecks
 from app.services.repositories import RepositoryService
 from app.services.templates import TemplateService
@@ -798,6 +814,7 @@ def test_an_import_restores_the_exported_board_under_a_new_id(boards: Boards) ->
         {"source_format": 2},
     )
     assert (boards.databases.attachments_dir(new_id) / "a1.bin").read_bytes() == b"first"
+    assert boards.databases.checked == [new_id]
     assert boards.databases.migrated == [new_id]
     with pytest.raises(Forbidden):
         boards.service.import_archive(WRITER, data)
@@ -912,21 +929,188 @@ def test_a_manifest_number_reads_as_int_reads_it(boards: Boards) -> None:
         )
 
 
-def test_an_import_that_fails_its_checks_is_left_in_error(boards: Boards) -> None:
+def _left_behind(boards: Boards, board_id: str) -> list[str]:
+    """What a board id still has: its row, its directory, its backups directory."""
+    return [
+        what
+        for what, there in (
+            ("row", board_id in boards.registry.boards),
+            ("files", boards.databases.path(board_id).parent.exists()),
+            ("backups", (boards.settings.backups_dir / board_id).exists()),
+        )
+        if there
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reason", "detail"),
+    [
+        ("integrity_check_failed", "*** in database main ***; Page 7: btreeInitPage() returns 11"),
+        ("not_a_board_database", "missing tables: cards, lists"),
+        ("unknown_schema_revision", "0099_from_a_newer_release"),
+    ],
+)
+def test_an_archive_whose_database_cannot_become_a_board_is_refused_and_leaves_nothing(
+    boards: Boards, reason: ProblemReason, detail: str
+) -> None:
     boards.service.export_archive(ADMIN, SOURCE)
-    boards.databases.images[b"image:1"].integrity = "*** in database main ***"
-    with pytest.raises(ValidationFailure, match="failed integrity check") as raised:
-        boards.service.import_archive(ADMIN, _archive({"format_version": 2}))
-    assert raised.value.details == {"result": "*** in database main ***"}
-    assert boards.registry.boards[uuid(1)].status == "error"
+    boards.databases.problems[b"image:1"] = DatabaseProblem(reason=reason, detail=detail)
+    attached = {"attachments/a.bin": b"x"}
+    with pytest.raises(ValidationFailure) as raised:
+        boards.service.import_archive(ADMIN, _archive({"format_version": 2}, extra=attached))
+    refusal = raised.value
+    assert (refusal.status_code, refusal.code, refusal.message) == (
+        422,
+        "board_import_invalid",
+        IMPORT_REFUSALS[reason],
+    )
+    assert refusal.details == {"reason": reason, "detail": detail}
+    # Judged before it had a row, so nothing could list, recover, migrate or open it.
+    assert boards.databases.checked == [uuid(1)]
     assert boards.databases.migrated == []
-    boards.databases.images[b"image:1"].integrity = "ok"
-    boards.databases.migration_status[uuid(2)] = "failed"
-    with pytest.raises(ValidationFailure, match="could not be migrated") as raised:
+    assert _left_behind(boards, uuid(1)) == []
+    assert uuid(1) not in boards.databases.states
+
+
+def test_an_archive_whose_database_is_not_a_database_is_refused_with_what_sqlite_said(
+    boards: Boards,
+) -> None:
+    with pytest.raises(ValidationFailure) as raised:
+        boards.service.import_archive(ADMIN, _archive({"format_version": 2}, board=b"garbage"))
+    assert (raised.value.code, raised.value.message, raised.value.details) == (
+        "board_import_invalid",
+        "The archive's board.sqlite is not a database this installation can read",
+        {"reason": "not_a_database", "detail": "file is not a database"},
+    )
+    assert _left_behind(boards, uuid(1)) == []
+    assert set(boards.registry.boards) == {SOURCE}
+
+
+def test_an_archive_that_cannot_be_migrated_is_refused_and_leaves_nothing(boards: Boards) -> None:
+    boards.service.export_archive(ADMIN, SOURCE)
+    boards.databases.migration_status[uuid(1)] = "failed"
+    # The Migration Manager keeps a pre-migration backup of a board it could not upgrade.
+    backups = boards.settings.backups_dir / uuid(1)
+    backups.mkdir(parents=True)
+    (backups / "backup-20261103T100000Z-pre-migration.sqlite").write_bytes(b"image:1")
+    with pytest.raises(ValidationFailure) as raised:
         boards.service.import_archive(ADMIN, _archive({"format_version": 2}))
-    assert raised.value.details == {"status": "migration_failed"}
-    assert boards.registry.boards[uuid(2)].status == "error"
-    assert boards.databases.states[uuid(2)].activity == []
+    assert (raised.value.code, raised.value.message, raised.value.details) == (
+        "board_import_invalid",
+        "Imported board could not be migrated to the current schema",
+        {"reason": "migration_failed", "detail": "the backend log names the cause"},
+    )
+    assert boards.databases.migrated == [uuid(1)]
+    assert _left_behind(boards, uuid(1)) == []
+    assert set(boards.registry.boards) == {SOURCE}
+
+
+def test_an_import_that_fails_after_its_row_takes_the_row_and_files_away(boards: Boards) -> None:
+    data = boards.service.export_archive(ADMIN, SOURCE)
+    # Migrated, then the file cannot be read when the board claims it.
+    boards.databases.unreadable.add(uuid(1))
+    with pytest.raises(BoardUnreadable):
+        boards.service.import_archive(ADMIN, data)
+    assert boards.databases.migrated == [uuid(1)]
+    assert _left_behind(boards, uuid(1)) == []
+    assert set(boards.registry.boards) == {SOURCE}
+
+
+def test_a_refused_import_whose_files_are_held_keeps_its_row_in_error_and_logs_the_leftover(
+    boards: Boards, caplog: pytest.LogCaptureFixture
+) -> None:
+    boards.service.export_archive(ADMIN, SOURCE)
+    boards.databases.migration_status[uuid(1)] = "failed"
+    boards.databases.busy.add(uuid(1))
+    with (
+        caplog.at_level(logging.WARNING, logger="tralala"),
+        pytest.raises(ValidationFailure, match="could not be migrated"),
+    ):
+        boards.service.import_archive(ADMIN, _archive({"format_version": 2}))
+    assert boards.registry.boards[uuid(1)].status == "error"
+    assert _left_behind(boards, uuid(1)) == ["row", "files"]
+    [line] = [record.getMessage() for record in caplog.records]
+    assert json.loads(line) == {
+        "event": "board_import_leftover",
+        "board_id": uuid(1),
+        "leftover": f"boards/{uuid(1)}",
+        "reason": "PermissionError",
+    }
+
+
+def test_a_refused_import_whose_files_are_held_before_it_had_a_row_adds_none(
+    boards: Boards, caplog: pytest.LogCaptureFixture
+) -> None:
+    boards.databases.busy.add(uuid(1))
+    with (
+        caplog.at_level(logging.WARNING, logger="tralala"),
+        pytest.raises(ValidationFailure, match="not a database"),
+    ):
+        boards.service.import_archive(ADMIN, _archive({"format_version": 2}, board=b"garbage"))
+    assert set(boards.registry.boards) == {SOURCE}
+    assert '"event": "board_import_leftover"' in caplog.text
+
+
+def test_an_archive_from_an_older_release_is_migrated_before_it_is_opened(boards: Boards) -> None:
+    data = boards.service.export_archive(ADMIN, SOURCE)
+    # Opening a board checks its revision, so an older database answers 503 until it is migrated.
+    boards.databases.unavailable.add(uuid(1))
+    entry = boards.service.import_archive(ADMIN, data)
+    assert (entry["id"], entry["status"]) == (uuid(1), "active")
+    assert boards.databases.migrated == [uuid(1)]
+    assert boards.databases.states[uuid(1)].metadata is not None
+    assert boards.databases.states[uuid(1)].activity[0].action == "board.imported"
+
+
+def test_every_refusal_reason_has_its_own_message() -> None:
+    reasons = {
+        "not_a_database",
+        "integrity_check_failed",
+        "not_a_board_database",
+        "unknown_schema_revision",
+        "migration_failed",
+    }
+    assert set(IMPORT_REFUSALS) == reasons
+    assert len(set(IMPORT_REFUSALS.values())) == len(reasons)
+
+
+# --- a board whose database cannot be read -------------------------------------------------------
+
+
+def test_the_list_steps_past_a_board_whose_file_cannot_be_read_and_logs_it_once(
+    boards: Boards, caplog: pytest.LogCaptureFixture
+) -> None:
+    measured = boards.settings.model_copy(update={"board_counts_cache_seconds": 0})
+    databases = as_unit_of_work(boards.databases)
+    service = BoardService(
+        measured,
+        boards.store,
+        databases,
+        as_files(boards.databases),
+        migrations=as_migrator(boards.databases),
+        schema=BoardSchema(head_revision=HEAD, version=10),
+        stats=BoardStatsCache(measured, boards.store, databases, clock=boards.clock),
+        agents=AgentService(measured, boards.store),
+        repositories=RepositoryService(measured, boards.store),
+        clock=boards.clock,
+        new_id=Ids(),
+    )
+    broken = uuid(7)
+    boards.registry.boards[broken] = board_row(broken, name="Broken", status="error")
+    boards.databases.create_database(broken, "")
+    boards.databases.unreadable.add(broken)
+    with caplog.at_level(logging.INFO, logger="tralala"):
+        first, total = service.list(sort="name", order="asc")
+        again, _ = service.list(sort="name", order="asc")
+        single = service.get(broken)
+    summary = [(e["name"], e["status"], e["loop_count"], e["list_count"]) for e in first]
+    assert (summary, total) == ([("Broken", "error", 0, 0), ("Source", "active", 1, 2)], 2)
+    assert again == first
+    assert single == first[0]
+    assert [json.loads(record.getMessage()) for record in caplog.records] == [
+        {"event": "board_database_unreadable", "board_id": broken, "skipped": "board_counts"}
+    ]
+    assert boards.registry.boards[broken].status == "error"
 
 
 # --- recovery ------------------------------------------------------------------------------------

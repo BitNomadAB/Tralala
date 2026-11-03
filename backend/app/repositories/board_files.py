@@ -10,8 +10,22 @@ uses a fake over a temporary directory.
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
+
+type ProblemReason = Literal[
+    "not_a_database", "integrity_check_failed", "not_a_board_database", "unknown_schema_revision"
+]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DatabaseProblem:
+    """Why a database file nobody here wrote cannot become a board."""
+
+    reason: ProblemReason
+    detail: str
+    """What SQLite answered or what the check found, short and free of paths."""
 
 
 class BoardFiles(Protocol):
@@ -48,6 +62,15 @@ class MigrationOutcome(Protocol):
 
 
 class BoardMigrator(Protocol):
+    def check_imported(self, board_id: str) -> DatabaseProblem | None:
+        """Judge the database file at the board's path before anything else opens it: ``None``
+        when it is a sound board database the migrations can bring to the head, else why not.
+
+        The file is read only, as a file of unknown origin: nothing in it runs, nothing is written
+        next to it, and SQLite's integrity check is the first statement.
+        """
+        ...
+
     def migrate_board(self, board_id: str) -> MigrationOutcome:
         """Bring the board's database to the schema head, with a verified backup first."""
         ...

@@ -7,13 +7,14 @@ without a database or a wait.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
 from ..core.config import Settings
 from ..core.dates import iso_utc
-from ..core.errors import NotFound, ServiceUnavailable
+from ..core.errors import BoardUnreadable, NotFound, ServiceUnavailable
 from ..db.generated.registry import BoardStatsRow
 from ..repositories.board import BoardUnitOfWork
 from ..repositories.registry import RegistryUnitOfWork
@@ -39,8 +40,10 @@ class BoardStatsCache:
     ``board_counts_cache_seconds`` is the backstop for a file that changed behind the manager's
     back: after that long, a stale row is measured again.
 
-    A measurement that fails because the board's schema is being repaired returns zeros, so a broken
-    board still appears in the dashboard.
+    A measurement that fails because the board's schema is being repaired, or because SQLite cannot
+    read the board's file at all, returns zeros, so a broken board still appears in the dashboard
+    and never fails the list. An unreadable file is logged once with the board id, not on every
+    list; once it reads again, a later failure is logged again.
     """
 
     def __init__(
@@ -55,6 +58,9 @@ class BoardStatsCache:
         self.store = store
         self.boards = boards
         self._clock = clock
+        # Boards already logged as unreadable, so a dashboard that lists every few seconds does not
+        # repeat the same line.
+        self._unreadable: set[str] = set()
 
     def counts(self, board_id: str) -> Counts:
         return self.counts_for([board_id]).get(board_id, (0, 0, 0))
@@ -101,9 +107,27 @@ class BoardStatsCache:
         try:
             with self.boards.reader(board_id) as repos:
                 counts = repos.counters.counts()
+        except BoardUnreadable:
+            self._report_unreadable(board_id)
+            return 0, 0, 0
         except (NotFound, ServiceUnavailable):
             return 0, 0, 0
+        self._unreadable.discard(board_id)
         return counts.loops, counts.lists, counts.cards
+
+    def _report_unreadable(self, board_id: str) -> None:
+        if board_id in self._unreadable:
+            return
+        self._unreadable.add(board_id)
+        logger.error(
+            json.dumps(
+                {
+                    "event": "board_database_unreadable",
+                    "board_id": board_id,
+                    "skipped": "board_counts",
+                }
+            )
+        )
 
     def _is_fresh(self, measured_at: str) -> bool:
         ttl = self.settings.board_counts_cache_seconds

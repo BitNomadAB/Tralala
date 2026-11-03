@@ -4,7 +4,6 @@ import json
 import logging
 
 from ..core.config import Settings
-from ..core.errors import NotFound, ServiceUnavailable
 from ..repositories.sql.board import SqlBoardUnitOfWork, board_files, board_migrator
 from ..repositories.sql.registry import SqlRegistryUnitOfWork
 from ..storage.board_db import BoardDatabaseManager
@@ -12,6 +11,7 @@ from ..storage.migration_manager import MigrationManager, MigrationReport
 from ..storage.process_lock import DataDirectoryLock
 from ..storage.registry import Registry
 from ..storage.schema import runner
+from . import recovery
 from .agents import AgentService, RoleTemplateService
 from .attachments import AttachmentService
 from .auth import AuthService
@@ -173,20 +173,10 @@ class Services:
 
     def recover_async_work(self) -> int:
         """Resolve runs and mention jobs interrupted by the previous process stopping."""
-        recovered = 0
-        for row in self.registry.read("SELECT id FROM boards"):
-            try:
-                recovered += self.run.recover(row["id"])
-                recovered += self.mention.recover(row["id"])
-                recovered += self.loop_generation.recover(row["id"])
-            except (NotFound, ServiceUnavailable):
-                # A board mid-repair is resolved above or on its next start; never block startup.
-                continue
-        if recovered:
-            logger.info(
-                json.dumps({"event": "async_work_recovered", "items": recovered})
-            )
-        return recovered
+        board_ids = [str(row["id"]) for row in self.registry.read("SELECT id FROM boards")]
+        return recovery.recover_async_work(
+            board_ids, (self.run.recover, self.mention.recover, self.loop_generation.recover)
+        )
 
     def shutdown(self) -> None:
         self.backup_scheduler.stop()

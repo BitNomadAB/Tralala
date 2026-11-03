@@ -134,6 +134,10 @@ SQLite has no cross-file transactions, so:
 - Board creation inserts a `maintenance` registry row, creates the database at the board chain
   head through Alembic, then flips the row to `active`. Failures set `error`;
   `BoardService.recover()` repairs rows left in `maintenance` during startup.
+- Board import writes the archive's database into the new board's directory and has the Migration
+  Manager judge it (read only, untrusted, `integrity_check` first) before a registry row exists, then
+  adds the row, migrates, and activates. A refusal or any later failure removes the files, the
+  pre-migration snapshot and the row, so a bad archive never becomes a board.
 - Schema upgrades are owned by `MigrationManager`: the registry chain runs first, then every board
   is migrated eagerly and sequentially before requests are served, with a verified pre-migration
   snapshot and post-migration integrity checks. A failed board is marked `migration_failed` and

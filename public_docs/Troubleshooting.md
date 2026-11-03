@@ -72,6 +72,15 @@ facts that explain most surprises:
 - **Board shows `migration_failed`** — read the backend log event `migration_failed`, fix the cause,
   then use the retry button or `POST /api/v1/boards/<id>/migrate`. The pre-migration snapshot is
   kept.
+- **`422 board_import_invalid` on an import** — the archive's `board.sqlite` is not a board this
+  installation can take; `details.reason` says why and `details.detail` carries SQLite's answer.
+  Nothing was created. `unknown_schema_revision` means the archive comes from a newer release: import
+  it there, or upgrade this installation first.
+- **`503 board_database_unreadable`, or the log event `board_database_unreadable`** — SQLite cannot
+  read that board's `board.sqlite` (`details.sqlite_error`: `SQLITE_NOTADB` or `SQLITE_CORRUPT`). The
+  board list and startup step past it, and the next start marks it `migration_failed`. Stop the
+  backend, copy a snapshot from `data/backups/<board id>/` over `data/boards/<board id>/board.sqlite`
+  and start again; or archive the board and delete it.
 - **`409 board_files_busy` when deleting a board** — a file in the board directory is held by
   another process (on Windows a scanner or an indexer; elsewhere a permission, a read-only volume or a
   network share). The board was **not** deleted and still has its data; the response names the

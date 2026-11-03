@@ -7,7 +7,7 @@ from collections.abc import Collection, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from app.core.errors import Conflict, NotFound, ServiceUnavailable
+from app.core.errors import BoardUnreadable, Conflict, NotFound, ServiceUnavailable
 from app.db.generated.board import (
     ActivityLogRow,
     BoardLoopDefaultsRow,
@@ -41,8 +41,6 @@ class BoardState:
     labels: dict[str, LabelsRow] = field(default_factory=dict[str, LabelsRow])
     metadata: BoardMetadataRow | None = None
     loop_defaults: BoardLoopDefaultsRow | None = None
-    # What PRAGMA quick_check answers for this database.
-    integrity: str = "ok"
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -53,7 +51,6 @@ class BoardState:
             labels=dict(self.labels),
             metadata=self.metadata,
             loop_defaults=self.loop_defaults,
-            integrity=self.integrity,
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -64,7 +61,6 @@ class BoardState:
         self.labels = snapshot.labels
         self.metadata = snapshot.metadata
         self.loop_defaults = snapshot.loop_defaults
-        self.integrity = snapshot.integrity
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -309,9 +305,6 @@ class FakeBoardMetadataRepository:
         if self._state.metadata is not None:
             self._state.metadata = self._state.metadata.__replace__(id=board_id, updated_at=now)
 
-    def quick_check(self) -> str:
-        return self._state.integrity
-
 
 class FakeLoopDefaultsRepository:
     def __init__(self, state: BoardState) -> None:
@@ -362,11 +355,14 @@ class FakeBoardUnitOfWork:
         *,
         databases: Collection[str] = (BOARD_ID,),
         unavailable: Collection[str] = (),
+        unreadable: Collection[str] = (),
     ) -> None:
         self.state = state
         self.databases = set(databases)
         # Boards whose schema is being repaired: opening one answers 503, as the manager does.
         self.unavailable = set(unavailable)
+        # Boards whose file SQLite refuses (not a database, or damaged): 503, not retryable.
+        self.unreadable = set(unreadable)
         self.commits = 0
         self.rollbacks = 0
 
@@ -380,6 +376,8 @@ class FakeBoardUnitOfWork:
             raise ServiceUnavailable(
                 "Board schema is not at the current revision", code="board_schema_outdated"
             )
+        if board_id in self.unreadable:
+            raise BoardUnreadable("Board database cannot be read")
         return self.state.snapshot()
 
     @contextmanager

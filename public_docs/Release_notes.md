@@ -28,6 +28,10 @@ Worth knowing when you look at the dashboard:
 - **The web tier is Caddy**, not nginx: TLS, HTTP/2 and the body limit come from
   `frontend/Caddyfile`, and `TRALALA_SITE_ADDRESS` decides whether Caddy serves plain HTTP on `:80`
   or gets a certificate.
+- **A bad board archive is refused, not half-imported.** An archive whose `board.sqlite` is not a
+  sound board database answers `422 board_import_invalid` and leaves nothing behind; before, it left
+  a board in `error` that broke the board list and the next start. A board whose file cannot be read
+  is now skipped by the list and at startup (`board_database_unreadable`).
 - **A held file no longer half-deletes a board.** Host filesystem behaviour follows
   `TRALALA_PLATFORM_PROFILE`, and a board delete that cannot remove its files answers
   `409 board_files_busy` with the leftover directory.

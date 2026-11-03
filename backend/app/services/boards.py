@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Protocol, TypedDict, TypeIs
+from typing import Final, Literal, Protocol, TypedDict, TypeIs
 from uuid import uuid4
 
 from pydantic import JsonValue
@@ -30,13 +31,15 @@ from ..core.platform import copy_file, remove_file, remove_tree, retry_io
 from ..db.generated.board import BoardLoopDefaultsRow, LabelsRow
 from ..db.generated.registry import BoardsRow, IdempotencyRecordsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
-from ..repositories.board_files import BoardFiles, BoardMigrator
+from ..repositories.board_files import BoardFiles, BoardMigrator, ProblemReason
 from ..repositories.board_rows import BOARD_SORTS, BoardChanges
 from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.boards import BoardCreate, BoardUpdate
 from .activity import activity_entry
 from .common import archive_file_name, request_fingerprint
 from .templates import TemplateEntry
+
+logger = logging.getLogger("tralala")
 
 MANIFEST_MAX_BYTES = 1024 * 1024
 EXPORT_FORMAT_VERSION = 2
@@ -47,6 +50,19 @@ type Counts = tuple[int, int, int]
 """Open Loops, unarchived lists and unarchived cards, in that order."""
 
 type JsonObject = dict[str, JsonValue]
+
+type ImportRefusal = ProblemReason | Literal["migration_failed"]
+"""Why an archive's database was refused: ``details.reason`` of ``422 board_import_invalid``."""
+
+IMPORT_REFUSALS: Final[Mapping[ImportRefusal, str]] = {
+    "not_a_database": "The archive's board.sqlite is not a database this installation can read",
+    "integrity_check_failed": "Imported database failed integrity check",
+    "not_a_board_database": "The archive's board.sqlite is not a board database",
+    "unknown_schema_revision": (
+        "The archive's board is at a schema revision this installation does not know"
+    ),
+    "migration_failed": "Imported board could not be migrated to the current schema",
+}
 
 
 class BoardEntry(TypedDict):
@@ -162,19 +178,13 @@ def _archive_member(archive: zipfile.ZipFile, name: str, limit: int) -> bytes:
     return payload
 
 
-def _require_intact(quick_check: str) -> None:
-    if quick_check != "ok":
-        raise ValidationFailure(
-            "Imported database failed integrity check", details={"result": quick_check}
-        )
-
-
-def _require_migrated(status: str) -> None:
-    if status == "failed":
-        raise ValidationFailure(
-            "Imported board could not be migrated to the current schema",
-            details={"status": "migration_failed"},
-        )
+def _refused(reason: ImportRefusal, detail: str) -> ValidationFailure:
+    """The refusal of an archive whose database cannot become a board."""
+    return ValidationFailure(
+        IMPORT_REFUSALS[reason],
+        code="board_import_invalid",
+        details={"reason": reason, "detail": detail},
+    )
 
 
 class BoardService:
@@ -742,28 +752,85 @@ class BoardService:
         board = _json_object(manifest.get("board", {}), "the manifest's board")
         name = str(board.get("name") or "Imported board")[:200]
         description = str(board.get("description") or "")[:20_000]
-        self._add_row(new_id, name, description)
         try:
-            destination = self.files.path(new_id)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(board_bytes)
-            if attachments:
-                directory = self.files.attachments_dir(new_id)
-                directory.mkdir(parents=True, exist_ok=True)
-                for file_name, payload in attachments:
-                    (directory / file_name).write_bytes(payload)
-            with self.boards.reader(new_id) as imported:
-                _require_intact(imported.metadata.quick_check())
-            _require_migrated(self.migrations.migrate_board(new_id).status)
-            with self.boards.writer(new_id) as imported:
-                imported.metadata.claim(new_id, now=self._now())
-                changes = {"source_format": EXPORT_FORMAT_VERSION}
-                self._log(imported, actor, "board.imported", new_id, changes)
-            self._activate(new_id)
+            self._accept_import(
+                actor,
+                new_id,
+                name=name,
+                description=description,
+                database=board_bytes,
+                attachments=attachments,
+            )
         except Exception:
-            self._update_row(new_id, {"status": "error"})
+            self._discard_import(new_id)
             raise
         return self.get(new_id)
+
+    def _accept_import(
+        self,
+        actor: ActorContext,
+        board_id: str,
+        *,
+        name: str,
+        description: str,
+        database: bytes,
+        attachments: list[tuple[str, bytes]],
+    ) -> None:
+        destination = self.files.path(board_id)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(database)
+        # Judged before anything opens it, and before it has a row: a file that is not a sound
+        # board database is never listed, recovered, migrated or opened as a board.
+        problem = self.migrations.check_imported(board_id)
+        if problem is not None:
+            raise _refused(problem.reason, problem.detail)
+        if attachments:
+            directory = self.files.attachments_dir(board_id)
+            directory.mkdir(parents=True, exist_ok=True)
+            for file_name, payload in attachments:
+                (directory / file_name).write_bytes(payload)
+        self._add_row(board_id, name, description)
+        # Migrated before it is opened: opening checks the revision, so an archive from an older
+        # release is brought to the head first.
+        if self.migrations.migrate_board(board_id).status == "failed":
+            raise _refused("migration_failed", "the backend log names the cause")
+        with self.boards.writer(board_id) as imported:
+            imported.metadata.claim(board_id, now=self._now())
+            changes = {"source_format": EXPORT_FORMAT_VERSION}
+            self._log(imported, actor, "board.imported", board_id, changes)
+        self._activate(board_id)
+
+    def _discard_import(self, board_id: str) -> None:
+        """Take away what a refused or failed import wrote: its files and the pre-migration backup
+        the Migration Manager may have taken, then its row. An import is all or nothing.
+
+        Files go first, as in ``delete``: when the host will not let go of one, the row stays,
+        marked ``error``, so the leftover is visible and can be deleted later.
+        """
+        profile = self.settings.file_profile
+        with self.store.reader() as repos:
+            registered = repos.boards.get(board_id) is not None
+        try:
+            with self.files.locked(board_id):
+                self.files.delete_database(board_id)
+                remove_tree(self.settings.backups_dir / board_id, profile=profile)
+        except OSError as exc:
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "board_import_leftover",
+                        "board_id": board_id,
+                        "leftover": f"boards/{board_id}",
+                        "reason": type(exc).__name__,
+                    }
+                )
+            )
+            if registered:
+                self._update_row(board_id, {"status": "error"})
+            return
+        if registered:
+            with self.store.writer() as repos:
+                repos.boards.delete(board_id)
 
     # --- recovery --------------------------------------------------------------------------------
 

@@ -13,10 +13,6 @@ class BoardMetadataRepository(Protocol):
         database still names the board it came from."""
         ...
 
-    def quick_check(self) -> str:
-        """SQLite's ``PRAGMA quick_check`` of this database: ``ok``, or the problem it found."""
-        ...
-
 
 class LoopDefaultsRepository(Protocol):
     def add(self, row: BoardLoopDefaultsRow) -> None:
