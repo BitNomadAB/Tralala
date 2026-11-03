@@ -31,7 +31,6 @@ NOT_YET_ON_REPOSITORIES = frozenset(
         "activity.py",  # log_activity(conn) stays for the unconverted callers below
         "common.py",  # SQL helpers the unconverted callers below still use
         "loop_bridge.py",  # transitional; deleted when loop_qa and loop_generation are converted
-        "loop_generation.py",
     }
 )
 

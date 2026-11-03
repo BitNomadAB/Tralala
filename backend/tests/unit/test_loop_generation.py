@@ -149,7 +149,9 @@ def test_the_json_object_is_taken_out_of_fences_and_prose(text: str) -> None:
 def test_valid_output_becomes_the_validated_structure() -> None:
     parsed = LoopGenerationService._parse("analysis", "```json\n" + _analysis_json() + "\n```")
     assert parsed["outcome"] == "Verify email"
-    assert parsed["findings"][0]["plain_language"] == "This must be built from scratch."
+    findings = parsed["findings"]
+    assert isinstance(findings, list) and isinstance(findings[0], dict)
+    assert findings[0]["plain_language"] == "This must be built from scratch."
     assert parsed["non_goals"] == []
     assert LoopGenerationService._parse("analysis", _analysis_json()) == parsed
 
@@ -197,7 +199,7 @@ def test_repository_content_is_framed_as_data(purpose: str) -> None:
     assert SNAPSHOT_CAPS in PURPOSE_PROMPTS[purpose]
 
 
-def _captured(repositories: object, **extra: object) -> dict[str, object]:
+def _captured(repositories: JsonValue, **extra: JsonValue) -> dict[str, JsonValue]:
     return {
         "purpose": "analysis",
         "board_name": "Board",
@@ -214,7 +216,7 @@ def _context(message: str) -> dict[str, JsonValue]:
 
 
 def test_a_linked_repository_is_sent_as_untrusted_material() -> None:
-    files = [{"path": "src/app.py", "content": "print('hello')"}]
+    files: list[JsonValue] = [{"path": "src/app.py", "content": "print('hello')"}]
     message = LoopGenerationService._user_message(
         _captured([{"name": "acme app", "commit_sha": "abc123", "files": files}])
     )
@@ -237,7 +239,7 @@ def test_a_board_without_a_repository_says_so() -> None:
 
 
 def test_oversized_repository_content_is_dropped_before_the_json_is_cut() -> None:
-    big = [{"path": "src/big.py", "content": "x" * (MAX_OUTPUT_CHARS + 10)}]
+    big: list[JsonValue] = [{"path": "src/big.py", "content": "x" * (MAX_OUTPUT_CHARS + 10)}]
     message = LoopGenerationService._user_message(
         _captured([{"name": "acme app", "commit_sha": "abc123", "files": big}])
     )

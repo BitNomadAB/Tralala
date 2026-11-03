@@ -108,15 +108,16 @@ class Services:
             self.board, self.board_store, self.boards, self.boards
         )
         self.loop_generation = LoopGenerationService(
+            settings,
             self.board,
-            self.loop_helpers,
+            self.board_store,
+            self.registry_store,
             self.loop_document,
             self.loop_links,
             self.agent,
             self.loop_agents,
             snapshots=self.repo_snapshot,
-            boards=self.boards,
-            registry=self.registry,
+            idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
         )
         self.loop_qa = LoopQaService(
             self.board,
