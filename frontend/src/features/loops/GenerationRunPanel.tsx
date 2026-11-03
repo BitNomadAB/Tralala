@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { describeRunRepositories } from "@/lib/loopRuns";
+import { describeRunCost, describeRunRepositories } from "@/lib/loopRuns";
 import type { GenerationRun } from "@/lib/types";
 import type { PlanScope } from "./loopUi";
 import { RunPhases } from "./RunPhases";
@@ -59,6 +59,7 @@ export function LastRunStatus({
           {lastRun.error_message ? ` — ${lastRun.error_message}` : ""} ·{" "}
           {new Date(lastRun.created_at).toLocaleString()}
           {lastRun.agent_name ? ` · ${lastRun.agent_name}` : ""}
+          {describeRunCost(lastRun)?.replace(/^/, " · ") ?? ""}
           {describeRunRepositories(lastRun) ? (
             <>
               {" · based on "}

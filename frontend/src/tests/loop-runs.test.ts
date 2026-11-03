@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeRunRepositories, runRepositories } from "@/lib/loopRuns";
+import { describeRunCost, describeRunRepositories, runRepositories } from "@/lib/loopRuns";
 import type { GenerationRun } from "@/lib/types";
 
 function run(source_revisions: GenerationRun["source_revisions"]): GenerationRun {
@@ -113,5 +113,37 @@ describe("run repository provenance", () => {
   it("says out loud when the board had no repository", () => {
     const entry = run({ info: "abc", repositories: [] });
     expect(describeRunRepositories(entry)).toBe("no enabled repository linked to this board");
+  });
+});
+
+describe("what a finished run cost", () => {
+  const finished = (fields: Partial<GenerationRun>): GenerationRun => ({
+    ...run({}),
+    started_at: "2026-11-03T10:00:00Z",
+    finished_at: "2026-11-03T10:02:21Z",
+    ...fields,
+  });
+
+  it("shows the tokens and the duration from the run", () => {
+    const usage = {
+      prompt_tokens: 38_200,
+      completion_tokens: 2_900,
+      completion_tokens_details: { reasoning_tokens: 2_600 },
+    };
+    expect(describeRunCost(finished({ usage }))).toBe("41 k tokens (3 k reasoning) · 2 min 21 s");
+    expect(describeRunCost(finished({ usage: { total_tokens: 950 } }))).toBe(
+      "950 tokens · 2 min 21 s",
+    );
+  });
+
+  it("shows the duration only when the run has no usage", () => {
+    expect(describeRunCost(finished({ usage: {}, status: "failed" }))).toBe("2 min 21 s");
+    expect(describeRunCost(finished({ usage: {}, finished_at: "2026-11-03T10:00:45Z" }))).toBe(
+      "45 s",
+    );
+  });
+
+  it("shows nothing for a run that has not finished", () => {
+    expect(describeRunCost(finished({ status: "running", finished_at: null }))).toBeNull();
   });
 });
