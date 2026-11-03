@@ -678,7 +678,8 @@ writes, provider configuration and the approval decisions themselves.
 
 A tool lists **every** scope it needs, and `tools/list` hides a tool unless the token holds all of
 them — advertising a call that would fail is worse than not advertising it. Calling a tool the token
-may not use is a JSON-RPC error (`-32602`) rather than a silent downgrade. A tool that fails returns
+may not use is a JSON-RPC error (`-32602`) rather than a silent downgrade, and so is a `tools/call`
+whose `params` or `arguments` is not a JSON object. A tool that fails returns
 `isError: true` with the API error code in the text content, so a client sees `version_conflict` or
 `human_action_required` instead of a broken transport.
 

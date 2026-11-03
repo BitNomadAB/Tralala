@@ -49,6 +49,16 @@ def _error(message_id: JsonValue, code: int, message: str) -> dict[str, object]:
     return {"jsonrpc": "2.0", "id": message_id, "error": {"code": code, "message": message}}
 
 
+def tool_call(params: JsonValue) -> tuple[str, dict[str, JsonValue]] | str:
+    """A ``tools/call``'s tool name and arguments, or why they are invalid params (-32602)."""
+    if not isinstance(params, dict):
+        return "params must be an object"
+    arguments = params.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        return "arguments must be an object"
+    return str(params.get("name") or ""), arguments
+
+
 def tool_list(actor: ActorContext) -> list[dict[str, object]]:
     """The ``tools/list`` payload: each catalogue entry the actor holds the scopes for, in order."""
     return [
@@ -127,14 +137,10 @@ async def mcp_endpoint(request: Request) -> Response:
         return JSONResponse(_result(message_id, {"tools": tool_list(ctx.actor)}))
 
     if method == "tools/call":
-        if not isinstance(params, dict):
-            # A params that is not an object ends the request as a server error (500); the
-            # endpoint does not answer it with a JSON-RPC error.
-            raise TypeError("tools/call params must be an object")
-        name = str(params.get("name") or "")
-        arguments: JsonValue = params.get("arguments") or {}
-        if not isinstance(arguments, dict):
-            return JSONResponse(_error(message_id, -32602, "arguments must be an object"))
+        call = tool_call(params)
+        if isinstance(call, str):
+            return JSONResponse(_error(message_id, -32602, call))
+        name, arguments = call
         tool = tool_catalog().get(name)
         if tool is None:
             return JSONResponse(_error(message_id, -32602, f"Unknown tool: {name}"))
