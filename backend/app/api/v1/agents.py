@@ -24,7 +24,7 @@ router = APIRouter(tags=["agents"])
 
 
 @router.get("/role-templates", response_model=Envelope[list[RoleTemplateOut]])
-async def list_role_templates(
+def list_role_templates(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict:
@@ -33,7 +33,7 @@ async def list_role_templates(
 
 
 @router.post("/role-templates", response_model=Envelope[RoleTemplateOut], status_code=201)
-async def create_role_template(
+def create_role_template(
     payload: RoleTemplateCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -42,7 +42,7 @@ async def create_role_template(
 
 
 @router.get("/role-templates/{role_id}", response_model=Envelope[RoleTemplateOut])
-async def get_role_template(
+def get_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -52,7 +52,7 @@ async def get_role_template(
 
 
 @router.patch("/role-templates/{role_id}", response_model=Envelope[RoleTemplateOut])
-async def update_role_template(
+def update_role_template(
     role_id: str,
     payload: RoleTemplateUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -66,7 +66,7 @@ async def update_role_template(
     response_model=Envelope[RoleTemplateOut],
     status_code=201,
 )
-async def duplicate_role_template(
+def duplicate_role_template(
     role_id: str,
     payload: RoleTemplateDuplicate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -79,7 +79,7 @@ async def duplicate_role_template(
     "/role-templates/{role_id}/restore-defaults",
     response_model=Envelope[RoleTemplateOut],
 )
-async def restore_role_template(
+def restore_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -88,7 +88,7 @@ async def restore_role_template(
 
 
 @router.delete("/role-templates/{role_id}", response_model=Envelope[dict])
-async def delete_role_template(
+def delete_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -98,7 +98,7 @@ async def delete_role_template(
 
 
 @router.get("/agents", response_model=Envelope[list[AgentOut]])
-async def list_agents(
+def list_agents(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     q: Annotated[str | None, Query(max_length=200)] = None,
@@ -109,7 +109,7 @@ async def list_agents(
 
 
 @router.get("/agents/directory", response_model=Envelope[list[AgentDirectoryEntry]])
-async def agent_directory(
+def agent_directory(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict:
@@ -119,7 +119,7 @@ async def agent_directory(
 
 
 @router.post("/agents", response_model=Envelope[AgentOut], status_code=201)
-async def create_agent(
+def create_agent(
     payload: AgentCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -128,7 +128,7 @@ async def create_agent(
 
 
 @router.get("/agents/{agent_id}", response_model=Envelope[AgentOut])
-async def get_agent(
+def get_agent(
     agent_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -138,7 +138,7 @@ async def get_agent(
 
 
 @router.patch("/agents/{agent_id}", response_model=Envelope[AgentOut])
-async def update_agent(
+def update_agent(
     agent_id: str,
     payload: AgentUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -148,7 +148,7 @@ async def update_agent(
 
 
 @router.post("/agents/{agent_id}/duplicate", response_model=Envelope[AgentOut], status_code=201)
-async def duplicate_agent(
+def duplicate_agent(
     agent_id: str,
     payload: AgentDuplicate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -158,7 +158,7 @@ async def duplicate_agent(
 
 
 @router.post("/agents/test", response_model=Envelope[AgentTestResult])
-async def probe_agent(
+def probe_agent(
     payload: AgentTestRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -168,7 +168,7 @@ async def probe_agent(
 
 
 @router.post("/agents/{agent_id}/test", response_model=Envelope[AgentTestResult])
-async def test_agent(
+def test_agent(
     agent_id: str,
     payload: AgentTestRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -178,7 +178,7 @@ async def test_agent(
 
 
 @router.delete("/agents/{agent_id}", response_model=Envelope[dict])
-async def delete_agent(
+def delete_agent(
     agent_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,

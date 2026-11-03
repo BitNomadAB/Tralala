@@ -16,7 +16,7 @@ PREFIX = "/boards/{board_id}/loops/{loop_id}/lists"
 
 
 @router.get(PREFIX, response_model=Envelope[list[ListOut]])
-async def list_lists(
+def list_lists(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -31,7 +31,7 @@ async def list_lists(
 
 
 @router.post(PREFIX, response_model=Envelope[ListOut], status_code=201)
-async def create_list(
+def create_list(
     board_id: str,
     loop_id: str,
     payload: ListCreate,
@@ -42,7 +42,7 @@ async def create_list(
 
 
 @router.get(f"{PREFIX}/{{list_id}}", response_model=Envelope[ListOut])
-async def get_list(
+def get_list(
     board_id: str,
     loop_id: str,
     list_id: str,
@@ -54,7 +54,7 @@ async def get_list(
 
 
 @router.patch(f"{PREFIX}/{{list_id}}", response_model=Envelope[ListOut])
-async def update_list(
+def update_list(
     board_id: str,
     loop_id: str,
     list_id: str,
@@ -68,7 +68,7 @@ async def update_list(
 
 
 @router.post(f"{PREFIX}/{{list_id}}/move", response_model=Envelope[list[ListOut]])
-async def move_list(
+def move_list(
     board_id: str,
     loop_id: str,
     list_id: str,
@@ -82,7 +82,7 @@ async def move_list(
 
 
 @router.post(f"{PREFIX}/{{list_id}}/archive", response_model=Envelope[ListOut])
-async def archive_list(
+def archive_list(
     board_id: str,
     loop_id: str,
     list_id: str,
@@ -93,7 +93,7 @@ async def archive_list(
 
 
 @router.post(f"{PREFIX}/{{list_id}}/restore", response_model=Envelope[ListOut])
-async def restore_list(
+def restore_list(
     board_id: str,
     loop_id: str,
     list_id: str,
@@ -104,7 +104,7 @@ async def restore_list(
 
 
 @router.delete(f"{PREFIX}/{{list_id}}", response_model=Envelope[dict])
-async def delete_list(
+def delete_list(
     board_id: str,
     loop_id: str,
     list_id: str,

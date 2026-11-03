@@ -18,7 +18,7 @@ router = APIRouter(tags=["templates"])
 
 
 @router.get("/templates", response_model=Envelope[TemplateListOut])
-async def list_templates(
+def list_templates(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict:
@@ -28,7 +28,7 @@ async def list_templates(
 
 
 @router.post("/templates", response_model=Envelope[TemplateOut], status_code=201)
-async def create_template(
+def create_template(
     payload: TemplateCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -37,7 +37,7 @@ async def create_template(
 
 
 @router.get("/templates/{template_id}", response_model=Envelope[TemplateOut])
-async def get_template(
+def get_template(
     template_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -47,7 +47,7 @@ async def get_template(
 
 
 @router.patch("/templates/{template_id}", response_model=Envelope[TemplateOut])
-async def update_template(
+def update_template(
     template_id: str,
     payload: TemplateUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -57,7 +57,7 @@ async def update_template(
 
 
 @router.delete("/templates/{template_id}", response_model=Envelope[dict])
-async def delete_template(
+def delete_template(
     template_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -71,7 +71,7 @@ async def delete_template(
     response_model=Envelope[TemplateOut],
     status_code=201,
 )
-async def save_loop_as_template(
+def save_loop_as_template(
     board_id: str,
     loop_id: str,
     payload: TemplateFromBoard,

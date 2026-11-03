@@ -34,7 +34,7 @@ PREFIX = "/boards/{board_id}/loops/{loop_id}/cards"
 
 
 @router.get("/boards/{board_id}/tickets", response_model=Envelope[list[BoardTicketOut]])
-async def list_board_tickets(
+def list_board_tickets(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -48,7 +48,7 @@ async def list_board_tickets(
 
 
 @router.get(PREFIX, response_model=Envelope[list[CardOut]])
-async def list_cards(
+def list_cards(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -97,7 +97,7 @@ async def list_cards(
 
 
 @router.post(PREFIX, response_model=Envelope[CardOut], status_code=201)
-async def create_card(
+def create_card(
     board_id: str,
     loop_id: str,
     payload: CardCreate,
@@ -114,7 +114,7 @@ async def create_card(
 
 
 @router.post(f"{PREFIX}/bulk", response_model=Envelope[BulkCreateResult], status_code=201)
-async def bulk_create_cards(
+def bulk_create_cards(
     board_id: str,
     loop_id: str,
     payload: BulkCardCreate,
@@ -131,7 +131,7 @@ async def bulk_create_cards(
 
 
 @router.get(f"{PREFIX}/{{card_id}}", response_model=Envelope[CardOut])
-async def get_card(
+def get_card(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -150,7 +150,7 @@ async def get_card(
 
 
 @router.patch(f"{PREFIX}/{{card_id}}", response_model=Envelope[CardOut])
-async def update_card(
+def update_card(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -164,7 +164,7 @@ async def update_card(
 
 
 @router.post(f"{PREFIX}/{{card_id}}/move", response_model=Envelope[CardOut])
-async def move_card(
+def move_card(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -176,7 +176,7 @@ async def move_card(
 
 
 @router.post(f"{PREFIX}/{{card_id}}/archive", response_model=Envelope[CardOut])
-async def archive_card(
+def archive_card(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -187,7 +187,7 @@ async def archive_card(
 
 
 @router.post(f"{PREFIX}/{{card_id}}/restore", response_model=Envelope[CardOut])
-async def restore_card(
+def restore_card(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -198,7 +198,7 @@ async def restore_card(
 
 
 @router.get(f"{PREFIX}/{{card_id}}/comments", response_model=Envelope[list[CommentOut]])
-async def list_comments(
+def list_comments(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -215,7 +215,7 @@ async def list_comments(
     response_model=Envelope[CommentOut],
     status_code=201,
 )
-async def add_comment(
+def add_comment(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -230,7 +230,7 @@ async def add_comment(
 @router.get(
     f"{PREFIX}/{{card_id}}/mentions", response_model=Envelope[list[CommentMentionOut]]
 )
-async def list_mentions(
+def list_mentions(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -247,7 +247,7 @@ async def list_mentions(
     response_model=Envelope[CommentMentionOut],
     status_code=202,
 )
-async def retry_mention(
+def retry_mention(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -262,7 +262,7 @@ async def retry_mention(
 @router.get(
     f"{PREFIX}/{{card_id}}/events/history", response_model=Envelope[CardEventListOut]
 )
-async def card_event_history(
+def card_event_history(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -287,7 +287,7 @@ async def card_event_history(
         }
     },
 )
-async def card_event_stream(
+def card_event_stream(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -317,7 +317,7 @@ async def card_event_stream(
 
 
 @router.get(f"{PREFIX}/{{card_id}}/checklists", response_model=Envelope[list[ChecklistOut]])
-async def list_checklists(
+def list_checklists(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -334,7 +334,7 @@ async def list_checklists(
     response_model=Envelope[ChecklistOut],
     status_code=201,
 )
-async def create_checklist(
+def create_checklist(
     board_id: str,
     loop_id: str,
     card_id: str,

@@ -49,7 +49,7 @@ def _agent_preferences(loop_id: str, stored: dict[str, str | None]) -> dict:
 
 
 @router.get("/boards/{board_id}/loops", response_model=Envelope[list[LoopOut]])
-async def list_loops(
+def list_loops(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -70,7 +70,7 @@ async def list_loops(
 @router.post(
     "/boards/{board_id}/loops", response_model=Envelope[LoopOut], status_code=201
 )
-async def create_loop(
+def create_loop(
     board_id: str,
     payload: LoopCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -86,7 +86,7 @@ async def create_loop(
 
 
 @router.get("/boards/{board_id}/loops/{loop_id}", response_model=Envelope[LoopOut])
-async def get_loop(
+def get_loop(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -97,7 +97,7 @@ async def get_loop(
 
 
 @router.patch("/boards/{board_id}/loops/{loop_id}", response_model=Envelope[LoopOut])
-async def update_loop(
+def update_loop(
     board_id: str,
     loop_id: str,
     payload: LoopUpdate,
@@ -108,7 +108,7 @@ async def update_loop(
 
 
 @router.post("/boards/{board_id}/loops/{loop_id}/cancel", response_model=Envelope[LoopOut])
-async def cancel_loop(
+def cancel_loop(
     board_id: str,
     loop_id: str,
     payload: LoopCancel,
@@ -119,7 +119,7 @@ async def cancel_loop(
 
 
 @router.post("/boards/{board_id}/loops/{loop_id}/archive", response_model=Envelope[LoopOut])
-async def archive_loop(
+def archive_loop(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -132,7 +132,7 @@ async def archive_loop(
     "/boards/{board_id}/loops/{loop_id}/documents",
     response_model=Envelope[DocumentListOut],
 )
-async def get_documents(
+def get_documents(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -143,7 +143,7 @@ async def get_documents(
 
 
 @router.get("/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions")
-async def list_document_revisions(
+def list_document_revisions(
     board_id: str,
     loop_id: str,
     kind: str,
@@ -172,7 +172,7 @@ async def list_document_revisions(
     "/boards/{board_id}/loops/{loop_id}/documents/info",
     response_model=Envelope[DocumentListOut],
 )
-async def save_info(
+def save_info(
     board_id: str,
     loop_id: str,
     payload: InfoRevisionWrite,
@@ -189,7 +189,7 @@ async def save_info(
     response_model=Envelope[DocumentListOut],
     status_code=201,
 )
-async def submit_candidate(
+def submit_candidate(
     board_id: str,
     loop_id: str,
     payload: CandidateSubmission,
@@ -207,7 +207,7 @@ async def submit_candidate(
     response_model=Envelope[ApprovalOut],
     status_code=201,
 )
-async def review_scope(
+def review_scope(
     board_id: str,
     loop_id: str,
     scope: str,
@@ -225,7 +225,7 @@ async def review_scope(
     "/boards/{board_id}/loops/{loop_id}/reviews/{scope}/reset",
     response_model=Envelope[ScopeResetOut],
 )
-async def reset_scope(
+def reset_scope(
     board_id: str,
     loop_id: str,
     scope: str,
@@ -241,7 +241,7 @@ async def reset_scope(
 
 
 @router.get("/boards/{board_id}/loops/{loop_id}/plan", response_model=Envelope[PlanOut])
-async def get_plan(
+def get_plan(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -254,7 +254,7 @@ async def get_plan(
 @router.get(
     "/boards/{board_id}/loops/{loop_id}/readiness", response_model=Envelope[ReadinessOut]
 )
-async def get_readiness(
+def get_readiness(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -267,7 +267,7 @@ async def get_readiness(
 @router.get(
     "/boards/{board_id}/loops/{loop_id}/context", response_model=Envelope[LoopContextOut]
 )
-async def get_context_resource(
+def get_context_resource(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -280,7 +280,7 @@ async def get_context_resource(
 @router.get(
     "/boards/{board_id}/loops/{loop_id}/agents", response_model=Envelope[LoopAgentPreferencesOut]
 )
-async def get_loop_agents(
+def get_loop_agents(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -294,7 +294,7 @@ async def get_loop_agents(
 @router.put(
     "/boards/{board_id}/loops/{loop_id}/agents", response_model=Envelope[LoopAgentPreferencesOut]
 )
-async def set_loop_agents(
+def set_loop_agents(
     board_id: str,
     loop_id: str,
     payload: LoopAgentPreferencesUpdate,
@@ -317,7 +317,7 @@ async def set_loop_agents(
     response_model=Envelope[GenerationRunOut],
     status_code=202,
 )
-async def start_generation(
+def start_generation(
     board_id: str,
     loop_id: str,
     payload: GenerationRequest,
@@ -337,7 +337,7 @@ async def start_generation(
     "/boards/{board_id}/loops/{loop_id}/generation-runs",
     response_model=Envelope[list[GenerationRunOut]],
 )
-async def list_generation_runs(
+def list_generation_runs(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -354,7 +354,7 @@ async def list_generation_runs(
     "/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}",
     response_model=Envelope[GenerationRunOut],
 )
-async def get_generation_run(
+def get_generation_run(
     board_id: str,
     loop_id: str,
     run_id: str,
@@ -369,7 +369,7 @@ async def get_generation_run(
     "/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/cancel",
     response_model=Envelope[GenerationRunOut],
 )
-async def cancel_generation_run(
+def cancel_generation_run(
     board_id: str,
     loop_id: str,
     run_id: str,
@@ -386,7 +386,7 @@ async def cancel_generation_run(
     response_model=Envelope[GenerationRunOut],
     status_code=202,
 )
-async def retry_generation_run(
+def retry_generation_run(
     board_id: str,
     loop_id: str,
     run_id: str,
@@ -403,7 +403,7 @@ async def retry_generation_run(
     "/boards/{board_id}/loops/{loop_id}/completion",
     response_model=Envelope[dict],
 )
-async def accept_implementation(
+def accept_implementation(
     board_id: str,
     loop_id: str,
     payload: ImplementationAcceptance,
@@ -417,7 +417,7 @@ async def accept_implementation(
 
 
 @router.get("/boards/{board_id}/loops/{loop_id}/qa", response_model=Envelope[QaCycleOut])
-async def get_qa_cycle(
+def get_qa_cycle(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -431,7 +431,7 @@ async def get_qa_cycle(
     "/boards/{board_id}/loops/{loop_id}/qa/instructions",
     response_model=Envelope[QaCycleOut],
 )
-async def submit_qa_instructions(
+def submit_qa_instructions(
     board_id: str,
     loop_id: str,
     payload: QaInstructions,
@@ -449,7 +449,7 @@ async def submit_qa_instructions(
     response_model=Envelope[QaCycleOut],
     status_code=201,
 )
-async def submit_qa_results(
+def submit_qa_results(
     board_id: str,
     loop_id: str,
     payload: QaResultSubmission,
@@ -464,7 +464,7 @@ async def submit_qa_results(
 @router.post(
     "/boards/{board_id}/loops/{loop_id}/qa/decision", response_model=Envelope[dict]
 )
-async def decide_qa(
+def decide_qa(
     board_id: str,
     loop_id: str,
     payload: QaDecision,
@@ -484,7 +484,7 @@ async def decide_qa(
     "/boards/{board_id}/loops/{loop_id}/cards/{card_id}/confirm",
     response_model=Envelope[dict],
 )
-async def confirm_human_ticket(
+def confirm_human_ticket(
     board_id: str,
     loop_id: str,
     card_id: str,

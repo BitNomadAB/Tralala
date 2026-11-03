@@ -7,6 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any, get_args
 
+import anyio.to_thread
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,6 +39,15 @@ from .services import Services
 from .storage.sqlite import sqlite_supports_fts5
 
 logger = logging.getLogger("tralala")
+
+# Routes and dependencies are plain functions, so FastAPI runs each in an anyio worker thread and
+# the event loop keeps to connections, middleware, request bodies and event streams. This is how
+# many run at once. It is anyio's default, set explicitly so the bound is a decision:
+# requests to one board already queue on that board's lock, SQLite takes one writer per database,
+# the discussion, generation and mention executors have pools of their own, and open event streams
+# wait on their own limiter (``EVENT_STREAM_TOKENS`` in ``api/v1/streaming.py``). Forty requests
+# in flight is ample for one process serving a team on a private network.
+THREADPOOL_TOKENS = 40
 
 
 def _configure_logging() -> None:
@@ -91,13 +101,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Served locally so the schema and Swagger UI can require a session instead of being
         # publicly enumerable. Bearer-only agents can fetch /openapi.json with their token.
         @app.get("/openapi.json", include_in_schema=False)
-        async def openapi_schema(request: Request) -> JSONResponse:
+        def openapi_schema(request: Request) -> JSONResponse:
             if settings.docs_require_auth:
                 get_context(request)
             return JSONResponse(app.openapi())
 
         @app.get("/docs", include_in_schema=False)
-        async def swagger_docs(request: Request) -> HTMLResponse:
+        def swagger_docs(request: Request) -> HTMLResponse:
             if settings.docs_require_auth:
                 get_context(request)
             return get_swagger_ui_html(
@@ -206,11 +216,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/api/v1/health", tags=["system"])
-    async def health() -> dict:
+    def health() -> dict:
         return {"success": True, "data": {"status": "ok"}}
 
     @app.get("/api/v1/meta", tags=["system"])
-    async def meta(request: Request) -> dict:
+    def meta(request: Request) -> dict:
         ctx = get_context(request)
         from .core.context import MEMBER_TOKEN_SCOPES, SCOPES
         from .schemas.auth import Scope
@@ -267,6 +277,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # anyio keeps one default limiter per event loop, so it is sized here, inside the loop.
+        anyio.to_thread.current_default_thread_limiter().total_tokens = THREADPOOL_TOKENS
         app.state.services.initialize()
         purged = app.state.services.registry.purge_expired_sessions()
         logger.info(

@@ -15,7 +15,7 @@ router = APIRouter(tags=["search"])
 @router.get(
     "/boards/{board_id}/loops/{loop_id}/search", response_model=Envelope[list[CardOut]]
 )
-async def search_board(
+def search_board(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -57,7 +57,7 @@ async def search_board(
 
 
 @router.get("/search", response_model=Envelope[list[CardOut]])
-async def search_all_boards(
+def search_all_boards(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     q: Annotated[str, Query(min_length=1, max_length=200)],
@@ -77,7 +77,7 @@ async def search_all_boards(
 
 
 @router.get("/boards/{board_id}/activity", response_model=Envelope[list[ActivityOut]])
-async def activity(
+def activity(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,

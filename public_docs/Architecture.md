@@ -126,6 +126,14 @@ cache is capped so a host with many boards cannot exhaust file handles.
 Board access is guarded by a re-entrant per-board lock shared by `open`, `session`, `reader` and
 `restore`, so a restore is exclusive inside the process.
 
+Routes and their dependencies are plain functions, so FastAPI runs each request in a worker thread
+and the event loop keeps to connections, middleware, request bodies and event streams: a slow
+request does not hold up the others. The three endpoints that read raw bytes stay asynchronous and
+hand authentication and the service call to the same pool. It runs 40 requests at once
+(`THREADPOOL_TOKENS` in `app/main.py`); requests to one board still queue on that board's lock, and
+SQLite takes one writer per database. An open event stream waits for its next event on a limiter of
+its own (100 streams), so open streams cannot use up the threads that requests run in.
+
 ## Consistency across databases
 
 SQLite has no cross-file transactions, so:

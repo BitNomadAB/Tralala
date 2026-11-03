@@ -148,6 +148,12 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   Typed, ruff-clean (line length 100), no blocking work in async paths. The Ruff rule set and its
   few ignores live in `backend/pyproject.toml`, each ignore with its reason; an inline `# noqa`
   names its rule and says why. No `print` in `app/`: use a logger.
+- Routes and FastAPI dependencies are plain `def`, which FastAPI runs in a worker thread, so a
+  slow request never holds up another. `async def` is only for a route that awaits (today the
+  three that read a raw request body), and such a route calls `get_context` and every service
+  through `run_in_threadpool`; `backend/tests/unit/test_async_routes.py` enforces both. The pool
+  size is `THREADPOOL_TOKENS` in `backend/app/main.py`, and event streams wait on a limiter of
+  their own. Requests run in parallel, so in-memory state shared between them takes a lock.
 - SQL text is literal and values are bind parameters (a list is an expanding parameter,
   `IN :ids`). The only things formatted into a statement are identifiers and fragments taken from
   a module-level tuple of string literals through `app/core/sql.py`; such a line carries

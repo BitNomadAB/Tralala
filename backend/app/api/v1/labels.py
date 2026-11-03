@@ -24,7 +24,7 @@ router = APIRouter(tags=["labels"])
 
 
 @router.get("/boards/{board_id}/labels", response_model=Envelope[list[LabelOut]])
-async def list_labels(
+def list_labels(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -34,7 +34,7 @@ async def list_labels(
 
 
 @router.post("/boards/{board_id}/labels", response_model=Envelope[LabelOut], status_code=201)
-async def create_label(
+def create_label(
     board_id: str,
     payload: LabelCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -44,7 +44,7 @@ async def create_label(
 
 
 @router.patch("/boards/{board_id}/labels/{label_id}", response_model=Envelope[LabelOut])
-async def update_label(
+def update_label(
     board_id: str,
     label_id: str,
     payload: LabelUpdate,
@@ -55,7 +55,7 @@ async def update_label(
 
 
 @router.delete("/boards/{board_id}/labels/{label_id}", response_model=Envelope[dict])
-async def delete_label(
+def delete_label(
     board_id: str,
     label_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -71,7 +71,7 @@ checklists = APIRouter(tags=["checklists"])
 @checklists.patch(
     "/boards/{board_id}/checklists/{checklist_id}", response_model=Envelope[ChecklistOut]
 )
-async def update_checklist(
+def update_checklist(
     board_id: str,
     checklist_id: str,
     payload: ChecklistUpdate,
@@ -82,7 +82,7 @@ async def update_checklist(
 
 
 @checklists.delete("/boards/{board_id}/checklists/{checklist_id}", response_model=Envelope[dict])
-async def delete_checklist(
+def delete_checklist(
     board_id: str,
     checklist_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -97,7 +97,7 @@ async def delete_checklist(
     response_model=Envelope[ChecklistItemOut],
     status_code=201,
 )
-async def add_checklist_item(
+def add_checklist_item(
     board_id: str,
     checklist_id: str,
     payload: ChecklistItemCreate,
@@ -110,7 +110,7 @@ async def add_checklist_item(
 @checklists.patch(
     "/boards/{board_id}/checklist-items/{item_id}", response_model=Envelope[ChecklistItemOut]
 )
-async def update_checklist_item(
+def update_checklist_item(
     board_id: str,
     item_id: str,
     payload: ChecklistItemUpdate,
@@ -121,7 +121,7 @@ async def update_checklist_item(
 
 
 @checklists.delete("/boards/{board_id}/checklist-items/{item_id}", response_model=Envelope[dict])
-async def delete_checklist_item(
+def delete_checklist_item(
     board_id: str,
     item_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -135,7 +135,7 @@ comments = APIRouter(tags=["comments"])
 
 
 @comments.patch("/boards/{board_id}/comments/{comment_id}", response_model=Envelope[CommentOut])
-async def update_comment(
+def update_comment(
     board_id: str,
     comment_id: str,
     payload: CommentCreate,
@@ -146,7 +146,7 @@ async def update_comment(
 
 
 @comments.delete("/boards/{board_id}/comments/{comment_id}", response_model=Envelope[dict])
-async def delete_comment(
+def delete_comment(
     board_id: str,
     comment_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],

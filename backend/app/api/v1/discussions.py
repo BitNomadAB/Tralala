@@ -25,7 +25,7 @@ router = APIRouter(tags=["discussions"])
 
 
 @router.get("/discussions/overview", response_model=Envelope[DiscussionBoardListOut])
-async def discussion_board_overview(
+def discussion_board_overview(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict:
@@ -36,7 +36,7 @@ async def discussion_board_overview(
 
 
 @router.get("/boards/{board_id}/discussions", response_model=Envelope[DiscussionListOut])
-async def list_discussions(
+def list_discussions(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -51,7 +51,7 @@ async def list_discussions(
 @router.post(
     "/boards/{board_id}/discussions", response_model=Envelope[DiscussionOut], status_code=201
 )
-async def create_discussion(
+def create_discussion(
     board_id: str,
     payload: DiscussionCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -64,7 +64,7 @@ async def create_discussion(
     "/boards/{board_id}/discussions/{discussion_id}",
     response_model=Envelope[DiscussionOut],
 )
-async def get_discussion(
+def get_discussion(
     board_id: str,
     discussion_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -78,7 +78,7 @@ async def get_discussion(
     "/boards/{board_id}/discussions/{discussion_id}/start",
     response_model=Envelope[dict],
 )
-async def start_discussion(
+def start_discussion(
     board_id: str,
     discussion_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -105,7 +105,7 @@ async def start_discussion(
     response_model=Envelope[dict],
     status_code=202,
 )
-async def create_run(
+def create_run(
     board_id: str,
     discussion_id: str,
     payload: DiscussionRunStart,
@@ -131,7 +131,7 @@ async def create_run(
     "/boards/{board_id}/discussions/{discussion_id}/runs",
     response_model=Envelope[DiscussionRunListOut],
 )
-async def list_runs(
+def list_runs(
     board_id: str,
     discussion_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -147,7 +147,7 @@ async def list_runs(
     "/boards/{board_id}/discussions/{discussion_id}/runs/{run_id}",
     response_model=Envelope[DiscussionRunOut],
 )
-async def get_run(
+def get_run(
     board_id: str,
     discussion_id: str,
     run_id: str,
@@ -162,7 +162,7 @@ async def get_run(
     "/boards/{board_id}/discussions/{discussion_id}/runs/{run_id}/pause",
     response_model=Envelope[dict],
 )
-async def pause_run(
+def pause_run(
     board_id: str,
     discussion_id: str,
     run_id: str,
@@ -176,7 +176,7 @@ async def pause_run(
     "/boards/{board_id}/discussions/{discussion_id}/runs/{run_id}/resume",
     response_model=Envelope[dict],
 )
-async def resume_run(
+def resume_run(
     board_id: str,
     discussion_id: str,
     run_id: str,
@@ -190,7 +190,7 @@ async def resume_run(
     "/boards/{board_id}/discussions/{discussion_id}/runs/{run_id}/stop",
     response_model=Envelope[dict],
 )
-async def stop_run(
+def stop_run(
     board_id: str,
     discussion_id: str,
     run_id: str,
@@ -205,7 +205,7 @@ async def stop_run(
     "/boards/{board_id}/discussions/{discussion_id}/review",
     response_model=Envelope[DiscussionOut],
 )
-async def review_discussion(
+def review_discussion(
     board_id: str,
     discussion_id: str,
     payload: DiscussionReview,
@@ -229,7 +229,7 @@ async def review_discussion(
     response_model=Envelope[DiscussionOut],
     status_code=201,
 )
-async def post_discussion_message(
+def post_discussion_message(
     board_id: str,
     discussion_id: str,
     payload: DiscussionMessageCreate,
@@ -245,7 +245,7 @@ async def post_discussion_message(
     "/boards/{board_id}/discussions/{discussion_id}/events/history",
     response_model=Envelope[DiscussionEventListOut],
 )
-async def discussion_event_history(
+def discussion_event_history(
     board_id: str,
     discussion_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -268,7 +268,7 @@ async def discussion_event_history(
         }
     },
 )
-async def discussion_event_stream(
+def discussion_event_stream(
     board_id: str,
     discussion_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],

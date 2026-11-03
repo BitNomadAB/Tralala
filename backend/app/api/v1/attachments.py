@@ -4,6 +4,7 @@ from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from ...core.errors import PayloadTooLarge
 from ...schemas.attachments import AttachmentOut
@@ -15,7 +16,7 @@ router = APIRouter(tags=["attachments"])
 
 
 @router.get("/boards/{board_id}/attachments", response_model=Envelope[list[AttachmentOut]])
-async def list_attachments(
+def list_attachments(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -35,10 +36,12 @@ async def upload_attachment(
     card_id: Annotated[str, Query(max_length=64)],
     filename: Annotated[str, Query(min_length=1, max_length=255)],
 ) -> dict:
+    # Reading the body awaits, so this route stays async and the upload runs in the thread pool.
     data = await read_limited_body(request)
     if not data:
         raise PayloadTooLarge("Uploaded file is empty")
-    attachment = ctx.services.attachment.upload(
+    attachment = await run_in_threadpool(
+        ctx.services.attachment.upload,
         ctx.actor,
         board_id,
         card_id=card_id,
@@ -53,7 +56,7 @@ async def upload_attachment(
     "/boards/{board_id}/attachments/{attachment_id}",
     response_model=Envelope[AttachmentOut],
 )
-async def get_attachment(
+def get_attachment(
     board_id: str,
     attachment_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -64,7 +67,7 @@ async def get_attachment(
 
 
 @router.get("/boards/{board_id}/attachments/{attachment_id}/download")
-async def download_attachment(
+def download_attachment(
     board_id: str,
     attachment_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -84,7 +87,7 @@ async def download_attachment(
 
 
 @router.delete("/boards/{board_id}/attachments/{attachment_id}", response_model=Envelope[dict])
-async def delete_attachment(
+def delete_attachment(
     board_id: str,
     attachment_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],

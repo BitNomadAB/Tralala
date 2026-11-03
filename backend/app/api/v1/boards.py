@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from ...core.errors import PayloadTooLarge
 from ...schemas.boards import BoardCreate, BoardDelete, BoardOut, BoardUpdate
@@ -14,7 +15,7 @@ router = APIRouter(tags=["boards"])
 
 
 @router.get("/boards", response_model=Envelope[list[BoardOut]])
-async def list_boards(
+def list_boards(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     page: Annotated[Pagination, Depends(pagination)],
@@ -47,7 +48,7 @@ async def list_boards(
 
 
 @router.post("/boards", response_model=Envelope[BoardOut], status_code=201)
-async def create_board(
+def create_board(
     payload: BoardCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -64,15 +65,16 @@ async def import_board(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict:
+    # Reading the body awaits, so this route stays async and the import runs in the thread pool.
     data = await read_limited_body(request)
     if not data:
         raise PayloadTooLarge("Import payload is empty")
-    board = ctx.services.board.import_archive(ctx.actor, data)
+    board = await run_in_threadpool(ctx.services.board.import_archive, ctx.actor, data)
     return ok(request, board)
 
 
 @router.get("/boards/{board_id}", response_model=Envelope[BoardOut])
-async def get_board(
+def get_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -82,7 +84,7 @@ async def get_board(
 
 
 @router.patch("/boards/{board_id}", response_model=Envelope[BoardOut])
-async def update_board(
+def update_board(
     board_id: str,
     payload: BoardUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -92,7 +94,7 @@ async def update_board(
 
 
 @router.post("/boards/{board_id}/archive", response_model=Envelope[BoardOut])
-async def archive_board(
+def archive_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -101,7 +103,7 @@ async def archive_board(
 
 
 @router.post("/boards/{board_id}/restore", response_model=Envelope[BoardOut])
-async def restore_board(
+def restore_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -110,7 +112,7 @@ async def restore_board(
 
 
 @router.post("/boards/{board_id}/duplicate", response_model=Envelope[BoardOut], status_code=201)
-async def duplicate_board(
+def duplicate_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -120,7 +122,7 @@ async def duplicate_board(
 
 
 @router.delete("/boards/{board_id}", response_model=Envelope[dict])
-async def delete_board(
+def delete_board(
     board_id: str,
     payload: BoardDelete,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -134,7 +136,7 @@ async def delete_board(
     "/boards/{board_id}/export",
     responses={200: {"content": {"application/zip": {}}, "description": "Board export archive"}},
 )
-async def export_board(
+def export_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
 ) -> Response:
@@ -148,7 +150,7 @@ async def export_board(
 
 
 @router.get("/boards/{board_id}/actors", response_model=Envelope[dict])
-async def list_board_actors(
+def list_board_actors(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -170,7 +172,7 @@ async def list_board_actors(
 
 
 @router.get("/boards/{board_id}/validate", response_model=Envelope[dict])
-async def validate_board(
+def validate_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -180,7 +182,7 @@ async def validate_board(
 
 
 @router.post("/boards/{board_id}/migrate", response_model=Envelope[dict])
-async def retry_board_migration(
+def retry_board_migration(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -191,7 +193,7 @@ async def retry_board_migration(
 
 
 @router.get("/boards/{board_id}/backups", response_model=Envelope[list[dict]])
-async def list_backups(
+def list_backups(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -201,7 +203,7 @@ async def list_backups(
 
 
 @router.post("/boards/{board_id}/backups", response_model=Envelope[dict], status_code=201)
-async def create_backup(
+def create_backup(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -210,7 +212,7 @@ async def create_backup(
 
 
 @router.post("/boards/{board_id}/backups/{name}/restore", response_model=Envelope[dict])
-async def restore_backup(
+def restore_backup(
     board_id: str,
     name: str,
     ctx: Annotated[RequestContext, Depends(get_context)],

@@ -38,8 +38,10 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
   and disabling an account all revoke them. Expired sessions are purged at startup.
 - The cookie is `HttpOnly` with `SameSite=Lax`; the CSRF token is a separate script-readable cookie
   and must be echoed in `X-CSRF-Token` on cookie-authenticated writes.
-- Sign-in is throttled per username and per client address with exponential backoff. Cookies are
-  signed with a per-install secret; a session value from another installation is invalid.
+- Sign-in is throttled per username and per client address with exponential backoff. An attempt
+  counts from the moment it starts, so parallel requests try no more passwords before the lock than
+  the same requests one after another. Cookies are signed with a per-install secret; a session value
+  from another installation is invalid.
 
 ## Agent access keys
 

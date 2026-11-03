@@ -14,7 +14,7 @@ router = APIRouter(tags=["history"])
 
 
 @router.get("/boards/{board_id}/history", response_model=Envelope[list[HistorySummary]])
-async def search_history(
+def search_history(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -53,7 +53,7 @@ async def search_history(
 
 
 @router.get("/boards/{board_id}/history/{history_id}", response_model=Envelope[HistoryDetail])
-async def get_history_record(
+def get_history_record(
     board_id: str,
     history_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -68,7 +68,7 @@ async def get_history_record(
     response_model=Envelope[HistoryDetail],
     status_code=201,
 )
-async def import_legacy_record(
+def import_legacy_record(
     board_id: str,
     payload: LegacyImportRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],

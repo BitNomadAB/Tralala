@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import pytest
 
 from app.core import ratelimit
@@ -94,3 +96,51 @@ def test_a_successful_sign_in_clears_the_record() -> None:
     throttle.record_failure("user:alice")
     throttle.reset("user:alice")
     throttle.check("user:alice")
+
+
+@pytest.mark.usefixtures("clock")
+def test_parallel_attempts_are_capped_at_the_failures_left() -> None:
+    throttle = LoginThrottle(max_failures=3, base_seconds=30, max_seconds=100)
+    with ExitStack() as running:
+        for _ in range(3):
+            running.enter_context(throttle.attempt("user:alice", "ip:192.168.1.10"))
+        with pytest.raises(RateLimited) as refused:
+            running.enter_context(throttle.attempt("user:alice", "ip:192.168.1.11"))
+        assert refused.value.details == {"retry_after_seconds": 1}
+        with pytest.raises(RateLimited):
+            running.enter_context(throttle.attempt("user:bob", "ip:192.168.1.10"))
+        running.enter_context(throttle.attempt("user:bob", "ip:192.168.1.11"))
+    with throttle.attempt("user:alice", "ip:192.168.1.10"):
+        throttle.record_failure("user:alice", "ip:192.168.1.10")
+    with ExitStack() as running:
+        for _ in range(2):
+            running.enter_context(throttle.attempt("user:alice"))
+        with pytest.raises(RateLimited):
+            running.enter_context(throttle.attempt("user:alice"))
+
+
+def test_a_key_at_the_limit_admits_one_attempt_at_a_time(clock: Clock) -> None:
+    throttle = LoginThrottle(max_failures=2, base_seconds=30, max_seconds=100)
+    for _ in range(2):
+        with throttle.attempt("user:alice"):
+            throttle.record_failure("user:alice")
+    with ExitStack() as running:
+        with pytest.raises(RateLimited) as refused:
+            running.enter_context(throttle.attempt("user:alice"))
+        assert refused.value.details == {"retry_after_seconds": 31}
+
+        clock.now += 30
+        running.enter_context(throttle.attempt("user:alice"))
+        with pytest.raises(RateLimited):
+            running.enter_context(throttle.attempt("user:alice"))
+
+
+@pytest.mark.usefixtures("clock")
+def test_an_attempt_is_released_whatever_ends_it() -> None:
+    throttle = LoginThrottle(max_failures=1, base_seconds=30, max_seconds=100)
+    with pytest.raises(RuntimeError), throttle.attempt("user:alice"):
+        raise RuntimeError("the password check failed unexpectedly")
+    with throttle.attempt("user:alice"):
+        throttle.reset("user:alice")
+    with throttle.attempt("user:alice"):
+        pass

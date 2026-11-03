@@ -88,7 +88,8 @@ async def mcp_endpoint(request: Request) -> Response:
     # Every method is authenticated, including initialize: an unauthenticated MCP surface would be
     # a second, undocumented entry point into the installation. The actor is resolved before the
     # body is read, so an unauthenticated caller cannot make the process parse or buffer anything.
-    ctx = get_context(request)
+    # Resolving it reads the registry, so it runs in the thread pool like every other blocking call.
+    ctx = await run_in_threadpool(get_context, request)
     try:
         message = await read_limited_json(request)
     except ValueError:
@@ -147,7 +148,7 @@ async def mcp_endpoint(request: Request) -> Response:
 
 
 @router.get("/mcp")
-async def mcp_get() -> Response:
+def mcp_get() -> Response:
     """No server-initiated messages, so the SSE stream is not offered."""
     return JSONResponse(
         _error(None, -32000, "Method not allowed; POST JSON-RPC messages to this endpoint"),
@@ -265,7 +266,7 @@ def render_bootstrap(settings: Settings) -> str:
 
 
 @router.get("/llms.txt", response_class=PlainTextResponse)
-async def llms_txt(request: Request) -> Response:
+def llms_txt(request: Request) -> Response:
     settings = request.app.state.settings
     return PlainTextResponse(
         render_bootstrap(settings),

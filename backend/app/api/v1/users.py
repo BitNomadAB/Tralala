@@ -19,14 +19,14 @@ router = APIRouter(tags=["users"])
 
 
 @router.get("/users", response_model=Envelope[list[UserOut]])
-async def list_users(
+def list_users(
     ctx: Annotated[RequestContext, Depends(get_context)], request: Request
 ) -> dict:
     return ok(request, ctx.services.auth.list_users(ctx.actor))
 
 
 @router.post("/users", response_model=Envelope[UserOut], status_code=201)
-async def create_user(
+def create_user(
     payload: UserCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -40,7 +40,7 @@ async def create_user(
 
 
 @router.patch("/users/{user_id}", response_model=Envelope[UserOut])
-async def update_user(
+def update_user(
     user_id: str,
     payload: UserUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -55,7 +55,7 @@ async def update_user(
 
 
 @router.post("/users/{user_id}/password", response_model=Envelope[dict])
-async def reset_user_password(
+def reset_user_password(
     user_id: str,
     payload: UserPasswordReset,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -67,7 +67,7 @@ async def reset_user_password(
 
 
 @router.post("/users/{user_id}/invite", response_model=Envelope[InviteCreated], status_code=201)
-async def invite_user(
+def invite_user(
     user_id: str,
     payload: InviteCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
