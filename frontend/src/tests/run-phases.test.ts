@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  failedStepKey,
-  repositoryOutcome,
-  runFailureJson,
-  runSteps,
-} from "@/lib/runPhases";
+import { failedStepKey, repositoryOutcome, runFailureJson, runSteps } from "@/lib/runPhases";
 
 describe("run steps", () => {
   it("shows the first step as active before the server recorded a phase", () => {
@@ -84,7 +79,15 @@ describe("run steps", () => {
     expect(steps[1]?.state).toBe("done");
   });
 
-  it("has no failure json unless the run failed", () => {    expect(runFailureJson({ status: "running", phase: "generating", error_code: null, error_message: null })).toBeNull();
+  it("has no failure json unless the run failed", () => {
+    expect(
+      runFailureJson({
+        status: "running",
+        phase: "generating",
+        error_code: null,
+        error_message: null,
+      }),
+    ).toBeNull();
     const json = runFailureJson({
       status: "failed",
       phase: "generating",

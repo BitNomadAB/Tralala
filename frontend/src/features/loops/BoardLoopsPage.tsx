@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient, useQuery  } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, Bot, GitBranch, History, Pencil, Plus } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -9,7 +9,7 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { AgentPicker } from "@/features/boards/AgentPicker";
 import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
-import { ApiError, api, api as apiClient  } from "@/lib/api";
+import { ApiError, api, api as apiClient } from "@/lib/api";
 import { keys, useAgents, useBoard, useLoops } from "@/lib/queries";
 import type { Loop, LoopStage } from "@/lib/types";
 
@@ -175,11 +175,7 @@ export function BoardLoopsPage() {
           >
             <History size={14} /> Board history
           </Link>
-          <Button
-            size="sm"
-            onClick={() => setCreating(true)}
-            disabled={board.status !== "active"}
-          >
+          <Button size="sm" onClick={() => setCreating(true)} disabled={board.status !== "active"}>
             <Plus size={14} /> New Loop
           </Button>
         </div>
@@ -206,11 +202,7 @@ export function BoardLoopsPage() {
             >
               Retry migration
             </Button>
-            <a
-              className="underline"
-              href={api.exportUrl(boardId)}
-              download={`${board.name}.zip`}
-            >
+            <a className="underline" href={api.exportUrl(boardId)} download={`${board.name}.zip`}>
               Download export archive
             </a>
           </div>
@@ -330,15 +322,7 @@ export function BoardLoopsPage() {
   );
 }
 
-function LoopList({
-  loops,
-  boardId,
-  empty,
-}: {
-  loops: Loop[];
-  boardId: string;
-  empty: string;
-}) {
+function LoopList({ loops, boardId, empty }: { loops: Loop[]; boardId: string; empty: string }) {
   if (loops.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-[var(--border)] p-4 text-xs text-[var(--muted-foreground)]">

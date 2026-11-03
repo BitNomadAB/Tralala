@@ -97,8 +97,9 @@ test.describe("generation progress", () => {
 
     const templates = (await (await page.request.get("/api/v1/role-templates")).json()).data;
     const role =
-      templates.find((entry: { builtin_key?: string }) => entry.builtin_key === "analytics_agent") ??
-      templates[0];
+      templates.find(
+        (entry: { builtin_key?: string }) => entry.builtin_key === "analytics_agent",
+      ) ?? templates[0];
     const agentName = uniqueName("Slow agent");
     const agent = await page.request.post("/api/v1/agents", {
       headers,
@@ -142,9 +143,7 @@ test.describe("generation progress", () => {
     await expect(panel.getByText("Generating analysis")).toBeVisible();
     // The repository step says what it actually got: this board links none, and a green tick alone
     // would look like the code had been read.
-    await expect(
-      panel.getByText("No enabled repository is linked to this board."),
-    ).toBeVisible();
+    await expect(panel.getByText("No enabled repository is linked to this board.")).toBeVisible();
     // And the step itself is marked as skipped, not as done: a tick there claimed code was read.
     await expect(panel.getByText("Skipped: no code was sent to the model")).toBeVisible();
 

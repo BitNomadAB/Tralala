@@ -160,9 +160,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
                   ? "Enable: the person can sign in again; revoked agent access stays revoked"
                   : "Disable: signs the person out and revokes their agent access"
               }
-              onClick={() =>
-                updateMutation.mutate({ userId: user.id, disabled: !user.disabled })
-              }
+              onClick={() => updateMutation.mutate({ userId: user.id, disabled: !user.disabled })}
             >
               <Power size={14} />
             </Button>
@@ -234,11 +232,16 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
         >
           <div className="flex flex-col gap-3">
             <Field label="Link" htmlFor="invite-link" hint="Shown once; a new link replaces it.">
-              <Input id="invite-link" value={inviteLink} readOnly onFocus={(event) => event.currentTarget.select()} />
+              <Input
+                id="invite-link"
+                value={inviteLink}
+                readOnly
+                onFocus={(event) => event.currentTarget.select()}
+              />
             </Field>
             <p className="text-[11px] text-[var(--muted-foreground)]">
-              Valid until {invited ? formatDateTime(invited.expires_at) : ""}. Anyone with the link can
-              claim the account until it is used or a new link is created.
+              Valid until {invited ? formatDateTime(invited.expires_at) : ""}. Anyone with the link
+              can claim the account until it is used or a new link is created.
             </p>
             <div className="flex justify-end gap-2">
               <Button

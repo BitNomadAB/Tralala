@@ -34,9 +34,7 @@ export function useDiscussionEvents(
       // Nothing to follow: `live` starts false, and the previous subscription's cleanup resets it.
       return;
     }
-    const source = new EventSource(
-      `/api/v1/boards/${boardId}/discussions/${discussionId}/events`,
-    );
+    const source = new EventSource(`/api/v1/boards/${boardId}/discussions/${discussionId}/events`);
     let timer: number | undefined;
     const notify = () => {
       if (timer !== undefined) return;

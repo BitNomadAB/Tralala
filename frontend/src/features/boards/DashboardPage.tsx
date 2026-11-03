@@ -82,10 +82,7 @@ export function DashboardPage() {
   });
 
   const lifecycleMutation = useMutation({
-    mutationFn: async (action: {
-      type: "archive" | "restore" | "duplicate";
-      board: Board;
-    }) => {
+    mutationFn: async (action: { type: "archive" | "restore" | "duplicate"; board: Board }) => {
       if (action.type === "archive") return api.archiveBoard(action.board.id);
       if (action.type === "restore") return api.restoreBoard(action.board.id);
       return api.duplicateBoard(action.board.id);
@@ -247,7 +244,15 @@ export function DashboardPage() {
                     {board.description || "No description"}
                   </p>
                 </div>
-                <Badge tone={board.status === "active" ? "success" : board.status === "archived" ? "neutral" : "danger"}>
+                <Badge
+                  tone={
+                    board.status === "active"
+                      ? "success"
+                      : board.status === "archived"
+                        ? "neutral"
+                        : "danger"
+                  }
+                >
                   {board.status}
                 </Badge>
               </div>
@@ -347,7 +352,10 @@ export function DashboardPage() {
           }
         }}
       >
-        <DialogContent title="New board" description="A dedicated SQLite database is created for it.">
+        <DialogContent
+          title="New board"
+          description="A dedicated SQLite database is created for it."
+        >
           <form
             className="flex flex-col gap-3"
             onSubmit={(event) => {
@@ -432,10 +440,7 @@ export function DashboardPage() {
               if (deleting) deleteMutation.mutate(deleting);
             }}
           >
-            <Field
-              label={`Type "${deleting?.name ?? ""}" to confirm`}
-              htmlFor="confirm-name"
-            >
+            <Field label={`Type "${deleting?.name ?? ""}" to confirm`} htmlFor="confirm-name">
               <Input
                 id="confirm-name"
                 value={confirmName}

@@ -48,8 +48,7 @@ export function LoopCompletionDialog({
 
   const scenarios = useMemo(() => {
     const instructions = qaQuery.data?.human_instructions as
-      | { scenarios?: { id: string; title: string }[] }
-      | undefined;
+      { scenarios?: { id: string; title: string }[] } | undefined;
     return instructions?.scenarios ?? [];
   }, [qaQuery.data]);
 
@@ -98,7 +97,11 @@ export function LoopCompletionDialog({
       toast.push({ title: "QA results recorded", variant: "success" });
     },
     onError: (error) => {
-      toast.push({ title: "Could not record results", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Could not record results",
+        description: errorText(error),
+        variant: "error",
+      });
     },
   });
 
@@ -116,7 +119,11 @@ export function LoopCompletionDialog({
       toast.push({ title: "QA decision recorded", variant: "success" });
     },
     onError: (error) => {
-      toast.push({ title: "Could not record the decision", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Could not record the decision",
+        description: errorText(error),
+        variant: "error",
+      });
     },
   });
 

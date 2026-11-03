@@ -40,9 +40,7 @@ export function LoopPage() {
   const listsQuery = useLists(boardId, loopId);
   // A discussion or search result deep-links the Ticket it points at.
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(
-    searchParams.get("card"),
-  );
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(searchParams.get("card"));
   const [retrying, setRetrying] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [addingList, setAddingList] = useState(false);

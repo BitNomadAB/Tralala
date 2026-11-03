@@ -123,10 +123,7 @@ async function request<T>(
     return { data: undefined as T };
   }
 
-  const payload = (await response.json().catch(() => null)) as
-    | Envelope<T>
-    | ErrorEnvelope
-    | null;
+  const payload = (await response.json().catch(() => null)) as Envelope<T> | ErrorEnvelope | null;
 
   if (!response.ok || !payload?.success) {
     const error = (payload as ErrorEnvelope | null)?.error;
@@ -144,7 +141,7 @@ async function request<T>(
   return { data: payload.data, meta: payload.meta };
 }
 
-const json = <T,>(result: ApiResult<T>): T => result.data;
+const json = <T>(result: ApiResult<T>): T => result.data;
 
 export interface TemplatePayload {
   name: string;
@@ -200,7 +197,9 @@ export const api = {
     theme_mode?: UserPreferences["theme_mode"];
     theme_kit?: UserPreferences["theme_kit"];
   }): Promise<UserPreferences> {
-    return json(await request<UserPreferences>("/auth/preferences", { method: "PUT", body: payload }));
+    return json(
+      await request<UserPreferences>("/auth/preferences", { method: "PUT", body: payload }),
+    );
   },
 
   async listBoards(
@@ -410,15 +409,9 @@ export const api = {
     );
   },
 
-  async getGenerationRun(
-    boardId: string,
-    loopId: string,
-    runId: string,
-  ): Promise<GenerationRun> {
+  async getGenerationRun(boardId: string, loopId: string, runId: string): Promise<GenerationRun> {
     return json(
-      await request<GenerationRun>(
-        `/boards/${boardId}/loops/${loopId}/generation-runs/${runId}`,
-      ),
+      await request<GenerationRun>(`/boards/${boardId}/loops/${loopId}/generation-runs/${runId}`),
     );
   },
 
@@ -497,10 +490,10 @@ export const api = {
     payload: { version: number; note?: string },
   ): Promise<Card> {
     return json(
-      await request<Card>(
-        `/boards/${boardId}/loops/${loopId}/cards/${cardId}/confirm`,
-        { method: "POST", body: payload },
-      ),
+      await request<Card>(`/boards/${boardId}/loops/${loopId}/cards/${cardId}/confirm`, {
+        method: "POST",
+        body: payload,
+      }),
     );
   },
 
@@ -602,15 +595,10 @@ export const api = {
   },
 
   async createRoleTemplate(payload: RoleTemplatePayload): Promise<RoleTemplate> {
-    return json(
-      await request<RoleTemplate>("/role-templates", { method: "POST", body: payload }),
-    );
+    return json(await request<RoleTemplate>("/role-templates", { method: "POST", body: payload }));
   },
 
-  async updateRoleTemplate(
-    roleId: string,
-    payload: RoleTemplatePayload,
-  ): Promise<RoleTemplate> {
+  async updateRoleTemplate(roleId: string, payload: RoleTemplatePayload): Promise<RoleTemplate> {
     return json(
       await request<RoleTemplate>(`/role-templates/${roleId}`, {
         method: "PATCH",
@@ -734,7 +722,10 @@ export const api = {
     },
   ): Promise<Discussion> {
     return json(
-      await request<Discussion>(`/boards/${boardId}/discussions`, { method: "POST", body: payload }),
+      await request<Discussion>(`/boards/${boardId}/discussions`, {
+        method: "POST",
+        body: payload,
+      }),
     );
   },
 
@@ -770,9 +761,7 @@ export const api = {
     runId: string,
   ): Promise<DiscussionRun> {
     return json(
-      await request<DiscussionRun>(
-        `/boards/${boardId}/discussions/${discussionId}/runs/${runId}`,
-      ),
+      await request<DiscussionRun>(`/boards/${boardId}/discussions/${discussionId}/runs/${runId}`),
     );
   },
 
@@ -863,9 +852,7 @@ export const api = {
   },
 
   async listLists(boardId: string, loopId: string): Promise<BoardList[]> {
-    return json(
-      await request<BoardList[]>(`/boards/${boardId}/loops/${loopId}/lists`),
-    );
+    return json(await request<BoardList[]>(`/boards/${boardId}/loops/${loopId}/lists`));
   },
 
   async createList(boardId: string, loopId: string, name: string): Promise<BoardList> {
@@ -907,10 +894,9 @@ export const api = {
 
   async archiveList(boardId: string, loopId: string, listId: string): Promise<BoardList> {
     return json(
-      await request<BoardList>(
-        `/boards/${boardId}/loops/${loopId}/lists/${listId}/archive`,
-        { method: "POST" },
-      ),
+      await request<BoardList>(`/boards/${boardId}/loops/${loopId}/lists/${listId}/archive`, {
+        method: "POST",
+      }),
     );
   },
 
@@ -1088,15 +1074,15 @@ export const api = {
   },
 
   async checkRepository(repositoryId: string): Promise<RepositoryCheck> {
-    return json(await request<RepositoryCheck>(`/repositories/${repositoryId}/check`, {
-      method: "POST",
-    }));
+    return json(
+      await request<RepositoryCheck>(`/repositories/${repositoryId}/check`, {
+        method: "POST",
+      }),
+    );
   },
 
   async retryMigration(boardId: string): Promise<{ status: string; to_revision: string | null }> {
-    return json(
-      await request(`/boards/${boardId}/migrate`, { method: "POST" }),
-    );
+    return json(await request(`/boards/${boardId}/migrate`, { method: "POST" }));
   },
 
   async listLabels(boardId: string): Promise<Label[]> {
@@ -1172,9 +1158,7 @@ export const api = {
 
   async listMentions(boardId: string, loopId: string, cardId: string): Promise<MentionJob[]> {
     return json(
-      await request<MentionJob[]>(
-        `/boards/${boardId}/loops/${loopId}/cards/${cardId}/mentions`,
-      ),
+      await request<MentionJob[]>(`/boards/${boardId}/loops/${loopId}/cards/${cardId}/mentions`),
     );
   },
 
@@ -1278,5 +1262,3 @@ export const api = {
     });
   },
 };
-
-

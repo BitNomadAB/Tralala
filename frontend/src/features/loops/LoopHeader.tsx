@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Bot, ClipboardCheck, FileText, ListChecks, Lock, Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  Bot,
+  ClipboardCheck,
+  FileText,
+  ListChecks,
+  Lock,
+  Sparkles,
+} from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
@@ -68,13 +76,11 @@ export function LoopHeader({
   const readiness = useReadiness(boardId, loop.id);
   const { actor } = useAuth();
   const isHuman = actor?.type === "user";
-  const readOnly = boardStatus !== "active" || loop.stage === "completed" || loop.stage === "cancelled";
+  const readOnly =
+    boardStatus !== "active" || loop.stage === "completed" || loop.stage === "cancelled";
 
   const humanActions = useMemo(
-    () =>
-      (readiness.data?.items ?? []).filter(
-        (item) => item.human_action_required && item.ready,
-      ),
+    () => (readiness.data?.items ?? []).filter((item) => item.human_action_required && item.ready),
     [readiness.data],
   );
 
@@ -122,9 +128,7 @@ export function LoopHeader({
         </div>
       </div>
 
-      {loop.goal ? (
-        <p className="text-xs text-[var(--muted-foreground)]">{loop.goal}</p>
-      ) : null}
+      {loop.goal ? <p className="text-xs text-[var(--muted-foreground)]">{loop.goal}</p> : null}
 
       {loop.warnings.length > 0 ? (
         <ul className="flex flex-wrap gap-2 text-[11px]">
@@ -289,10 +293,18 @@ function LoopDocumentDialog({
       setFailure(null);
       setConfirmWithdraw(false);
       invalidate();
-      toast.push({ title: "Generation started", description: "Following the run?", variant: "success" });
+      toast.push({
+        title: "Generation started",
+        description: "Following the run?",
+        variant: "success",
+      });
     },
     onError: (error) => {
-      toast.push({ title: "Generation unavailable", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Generation unavailable",
+        description: errorText(error),
+        variant: "error",
+      });
     },
   });
 
@@ -352,7 +364,10 @@ function LoopDocumentDialog({
   }, [finishedRun]);
 
   const review = useMutation({
-    mutationFn: (args: { scope: "analysis" | "roadmap"; decision: "approved" | "changes_requested" }) => {
+    mutationFn: (args: {
+      scope: "analysis" | "roadmap";
+      decision: "approved" | "changes_requested";
+    }) => {
       const revisions: Record<string, string> = {};
       const kinds =
         args.scope === "analysis"
@@ -378,7 +393,11 @@ function LoopDocumentDialog({
       toast.push({ title: "Decision recorded", variant: "success" });
     },
     onError: (error) => {
-      toast.push({ title: "Could not record the decision", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Could not record the decision",
+        description: errorText(error),
+        variant: "error",
+      });
     },
   });
 
@@ -396,7 +415,11 @@ function LoopDocumentDialog({
       });
     },
     onError: (error) => {
-      toast.push({ title: "Could not reset the scope", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Could not reset the scope",
+        description: errorText(error),
+        variant: "error",
+      });
     },
   });
 
@@ -406,7 +429,8 @@ function LoopDocumentDialog({
     return [technical ? "roadmap_ai" : "roadmap"] as DocumentKind[];
   }, [tab, technical]);
 
-  const scopeDocuments = tab === "analysis" ? ["analysis_ai", "analysis"] : ["roadmap_ai", "roadmap"];
+  const scopeDocuments =
+    tab === "analysis" ? ["analysis_ai", "analysis"] : ["roadmap_ai", "roadmap"];
   const scopeHasText = scopeDocuments.some((kind) =>
     Boolean(documents?.[kind as DocumentKind]?.current_content?.trim()),
   );
@@ -512,7 +536,9 @@ function LoopDocumentDialog({
               onClick={() => generate.mutate(tab)}
             >
               {generating ? <Lock size={14} /> : <Sparkles size={14} />}{" "}
-              {generating ? "Generating…" : `Generate ${tab === "analysis" ? "analysis" : "RoadMap"}`}
+              {generating
+                ? "Generating…"
+                : `Generate ${tab === "analysis" ? "analysis" : "RoadMap"}`}
             </Button>
           ) : null}
         </div>
@@ -544,7 +570,10 @@ function LoopDocumentDialog({
                 {new Date(lastRun.created_at).toLocaleString()}
                 {lastRun.agent_name ? ` · ${lastRun.agent_name}` : ""}
                 {describeRunRepositories(lastRun) ? (
-                  <>{" · based on "}{describeRunRepositories(lastRun)}</>
+                  <>
+                    {" · based on "}
+                    {describeRunRepositories(lastRun)}
+                  </>
                 ) : null}
               </>
             ) : (
@@ -563,7 +592,15 @@ function LoopDocumentDialog({
                   <span className="font-medium text-[var(--foreground)]">
                     {DOCUMENT_LABELS[kind]}
                   </span>
-                  <Badge tone={document.state === "approved" ? "success" : document.state === "stale" ? "warning" : "neutral"}>
+                  <Badge
+                    tone={
+                      document.state === "approved"
+                        ? "success"
+                        : document.state === "stale"
+                          ? "warning"
+                          : "neutral"
+                    }
+                  >
                     {document.state.replace("_", " ")}
                   </Badge>
                   {document.current_revision_number ? (
@@ -593,7 +630,9 @@ function LoopDocumentDialog({
                 document.approved_content &&
                 document.approved_revision_number !== document.current_revision_number ? (
                   <details className="text-xs text-[var(--muted-foreground)]">
-                    <summary>Show the approved baseline (r{document.approved_revision_number})</summary>
+                    <summary>
+                      Show the approved baseline (r{document.approved_revision_number})
+                    </summary>
                     <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-[var(--border)] p-2 scrollbar-thin">
                       {renderMarkdown(document.approved_content)}
                     </div>
@@ -676,11 +715,7 @@ function LoopDocumentDialog({
                         >
                           Reset and clear
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setConfirmWithdraw(false)}
-                        >
+                        <Button size="sm" variant="ghost" onClick={() => setConfirmWithdraw(false)}>
                           Cancel
                         </Button>
                       </>

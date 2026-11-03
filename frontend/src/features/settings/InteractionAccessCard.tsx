@@ -199,9 +199,9 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         </div>
         <p className="mt-1 text-xs text-[var(--muted-foreground)]">
           A key for an agent on your own machine. It can read boards, open Loops, write the Info you
-          agree on, ask the local agents and track Tickets — never approve a plan, manage accounts or
-          change a board&apos;s structure. The key is shown once; &quot;last used&quot; is how you
-          recognise which machine is connected.
+          agree on, ask the local agents and track Tickets — never approve a plan, manage accounts
+          or change a board&apos;s structure. The key is shown once; &quot;last used&quot; is how
+          you recognise which machine is connected.
         </p>
 
         <div className="mt-2">
@@ -218,9 +218,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
           ) : null}
           {mine.map((credential) => renderRow(credential, false))}
           {!credentialsQuery.isLoading && mine.length === 0 ? (
-            <li className="py-2.5 text-xs text-[var(--muted-foreground)]">
-              No agent access yet.
-            </li>
+            <li className="py-2.5 text-xs text-[var(--muted-foreground)]">No agent access yet.</li>
           ) : null}
         </ul>
       </div>
@@ -333,9 +331,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
             </Button>
           </div>
           <p className="mt-3 text-[11px] text-[var(--muted-foreground)]">
-            Paste it into your MCP client as{" "}
-            <code>Authorization: Bearer &lt;token&gt;</code>. The card above now shows the config
-            with this token filled in.
+            Paste it into your MCP client as <code>Authorization: Bearer &lt;token&gt;</code>. The
+            card above now shows the config with this token filled in.
           </p>
           <div className="mt-3 flex justify-end">
             <Button onClick={() => setIssued(null)}>Done</Button>

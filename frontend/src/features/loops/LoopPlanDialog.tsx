@@ -119,17 +119,13 @@ function TicketRow({
             <User size={11} /> Human action required
           </Badge>
         ) : null}
-        {ticket.execution_mode === "pre_phase_gate" ? (
-          <Badge tone="brand">gate</Badge>
-        ) : null}
+        {ticket.execution_mode === "pre_phase_gate" ? <Badge tone="brand">gate</Badge> : null}
         {ticket.completed_at ? (
           <Badge tone="success">
             <Check size={11} /> done
           </Badge>
         ) : null}
-        {!ticket.ready && !ticket.completed_at ? (
-          <Badge tone="neutral">blocked</Badge>
-        ) : null}
+        {!ticket.ready && !ticket.completed_at ? <Badge tone="neutral">blocked</Badge> : null}
       </div>
       {ticket.human_action_required && ticket.human_action_reason ? (
         <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">

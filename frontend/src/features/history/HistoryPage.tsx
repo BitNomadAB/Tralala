@@ -75,8 +75,7 @@ export function HistoryPage() {
 
       <p className="text-xs text-[var(--muted-foreground)]">
         {historyQuery.data?.meta?.total ?? items.length} record(s) ·{" "}
-        {(historyQuery.data?.meta as { engine?: string } | undefined)?.engine ?? "like"}{" "}
-        search
+        {(historyQuery.data?.meta as { engine?: string } | undefined)?.engine ?? "like"} search
       </p>
 
       {historyQuery.isLoading ? (
@@ -105,7 +104,9 @@ export function HistoryPage() {
                   QA {record.qa_status}
                 </Badge>
                 <span className="ml-auto text-[11px] text-[var(--muted-foreground)]">
-                  {new Date(record.completed_at ?? record.imported_at ?? record.created_at).toLocaleString()}
+                  {new Date(
+                    record.completed_at ?? record.imported_at ?? record.created_at,
+                  ).toLocaleString()}
                 </span>
                 {record.label ? (
                   <span className="w-full text-[11px] text-[var(--warning)]">{record.label}</span>

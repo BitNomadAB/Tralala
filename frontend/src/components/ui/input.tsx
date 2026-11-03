@@ -34,7 +34,10 @@ export function Label({
   return (
     <label
       htmlFor={htmlFor}
-      className={cn("text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]", className)}
+      className={cn(
+        "text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]",
+        className,
+      )}
       {...props}
     />
   );

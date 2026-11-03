@@ -19,7 +19,13 @@ export function ActivityPanel({ boardId, onClose }: { boardId: string; onClose: 
       <header className="flex items-center gap-2 border-b border-[var(--border)] p-3">
         <History size={15} className="text-[var(--muted-foreground)]" />
         <h2 className="text-sm font-semibold">Activity</h2>
-        <Button size="icon" variant="ghost" className="ml-auto" aria-label="Close activity" onClick={onClose}>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="ml-auto"
+          aria-label="Close activity"
+          onClick={onClose}
+        >
           <X size={15} />
         </Button>
       </header>

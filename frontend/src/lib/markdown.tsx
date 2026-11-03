@@ -29,12 +29,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       const [, label, href] = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token) ?? [];
       if (label !== undefined && href !== undefined && /^https?:\/\//i.test(href)) {
         nodes.push(
-          <a
-            key={`${keyPrefix}-a-${offset}`}
-            href={href}
-            rel="noreferrer noopener"
-            target="_blank"
-          >
+          <a key={`${keyPrefix}-a-${offset}`} href={href} rel="noreferrer noopener" target="_blank">
             {label}
           </a>,
         );
@@ -142,9 +137,7 @@ export function renderMarkdown(source: string): ReactNode {
           !next.trim().startsWith("```"),
       ),
     ];
-    blocks.push(
-      <p key={`p-${key++}`}>{renderInline(paragraph.join(" "), `p-${key}`)}</p>,
-    );
+    blocks.push(<p key={`p-${key++}`}>{renderInline(paragraph.join(" "), `p-${key}`)}</p>);
   }
 
   return <>{blocks}</>;

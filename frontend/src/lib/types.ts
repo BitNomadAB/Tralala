@@ -1,9 +1,4 @@
-export type BoardStatus =
-  | "active"
-  | "archived"
-  | "maintenance"
-  | "error"
-  | "migration_failed";
+export type BoardStatus = "active" | "archived" | "maintenance" | "error" | "migration_failed";
 export type Priority = "none" | "low" | "medium" | "high" | "urgent";
 
 export interface UserPreferences {
@@ -154,12 +149,7 @@ export type LoopStage =
 export type DocumentKind = "info" | "analysis_ai" | "analysis" | "roadmap_ai" | "roadmap";
 
 export type DocumentState =
-  | "empty"
-  | "draft"
-  | "ready_for_review"
-  | "approved"
-  | "changes_requested"
-  | "stale";
+  "empty" | "draft" | "ready_for_review" | "approved" | "changes_requested" | "stale";
 
 export interface LoopDocument {
   loop_id: string;
@@ -718,4 +708,3 @@ export interface Discussion {
     created_at: string;
   }[];
 }
-

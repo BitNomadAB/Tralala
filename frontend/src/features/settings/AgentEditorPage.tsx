@@ -249,15 +249,13 @@ export function AgentEditorPage() {
     !apiKey.trim() &&
     !hasStoredKey;
   const modelMissing =
-    connectionType === "openai_compatible" &&
-    requirements.model === "required" &&
-    !model.trim();
+    connectionType === "openai_compatible" && requirements.model === "required" && !model.trim();
   const canSave = Boolean(
     name.trim() &&
-      baseUrl.trim() &&
-      (roleTemplateId || override.trim()) &&
-      !keyMissing &&
-      !modelMissing,
+    baseUrl.trim() &&
+    (roleTemplateId || override.trim()) &&
+    !keyMissing &&
+    !modelMissing,
   );
 
   return (
@@ -315,7 +313,11 @@ export function AgentEditorPage() {
               </Button>
             </div>
           </Field>
-          <Field label="Role template" htmlFor="agent-role" hint="Applied to future discussions only.">
+          <Field
+            label="Role template"
+            htmlFor="agent-role"
+            hint="Applied to future discussions only."
+          >
             <Select
               id="agent-role"
               value={roleTemplateId}
@@ -371,7 +373,9 @@ export function AgentEditorPage() {
               value={connectionType}
               onChange={(event) => setConnectionType(event.target.value as ConnectionType)}
             >
-              <option value="openai_compatible">OpenAI-compatible API — a model you point at</option>
+              <option value="openai_compatible">
+                OpenAI-compatible API — a model you point at
+              </option>
               <option value="a2a">A2A agent — an agent that already exists</option>
             </Select>
           </Field>
@@ -422,9 +426,7 @@ export function AgentEditorPage() {
               value={baseUrl}
               onChange={(event) => setBaseUrl(event.target.value)}
               placeholder={
-                connectionType === "a2a"
-                  ? "http://127.0.0.1:9001"
-                  : "http://127.0.0.1:8080/v1"
+                connectionType === "a2a" ? "http://127.0.0.1:9001" : "http://127.0.0.1:8080/v1"
               }
               readOnly={endpointLocked}
               required
@@ -454,7 +456,8 @@ export function AgentEditorPage() {
                 ? "Optional. The A2A agent chooses its own model."
                 : testModels.length > 0
                   ? `${testModels.length} model(s) reported by the endpoint — pick one, or type a name it accepts.`
-                  : (preset?.hint ?? "Run the connection test to see which models the endpoint offers.")
+                  : (preset?.hint ??
+                    "Run the connection test to see which models the endpoint offers.")
             }
           >
             <Input
@@ -462,7 +465,9 @@ export function AgentEditorPage() {
               value={model}
               onChange={(event) => setModel(event.target.value)}
               placeholder={
-                connectionType === "a2a" ? "" : (preset?.modelPlaceholder ?? "llama-3.1-8b-instruct")
+                connectionType === "a2a"
+                  ? ""
+                  : (preset?.modelPlaceholder ?? "llama-3.1-8b-instruct")
               }
               list={testModels.length > 0 ? "agent-model-options" : undefined}
             />
@@ -517,8 +522,8 @@ export function AgentEditorPage() {
             </label>
             {noKey ? (
               <p className="text-[11px] text-[var(--muted-foreground)]">
-                No <code>Authorization</code> header is sent, in the test or in a call. A model on the
-                same machine or network usually works this way.
+                No <code>Authorization</code> header is sent, in the test or in a call. A model on
+                the same machine or network usually works this way.
               </p>
             ) : null}
           </Field>

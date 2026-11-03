@@ -20,8 +20,12 @@ test.describe("role templates and agents", () => {
     await login(page);
     await openSettings(page);
 
-    await roleRow(page, "Lead Developer").getByRole("button", { name: "Edit Lead Developer" }).click();
-    await expect(page.getByRole("heading", { name: /Edit Lead Developer/, level: 1 })).toBeVisible();
+    await roleRow(page, "Lead Developer")
+      .getByRole("button", { name: "Edit Lead Developer" })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: /Edit Lead Developer/, level: 1 }),
+    ).toBeVisible();
     await expect(page.getByLabel("System prompt")).toHaveValue(/Lead Developer/);
     await page.getByLabel("System prompt").fill("You are a very terse lead developer.");
     await page.getByRole("button", { name: "Save role" }).click();
@@ -29,7 +33,9 @@ test.describe("role templates and agents", () => {
     await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
     await expect(roleRow(page, "Lead Developer")).toContainText("customized");
 
-    await roleRow(page, "Lead Developer").getByRole("button", { name: "Edit Lead Developer" }).click();
+    await roleRow(page, "Lead Developer")
+      .getByRole("button", { name: "Edit Lead Developer" })
+      .click();
     await page.getByRole("button", { name: "Restore factory prompt" }).click();
     await expect(page.getByLabel("System prompt")).toHaveValue(/Lead Developer/);
     await page.getByRole("button", { name: "Save role" }).click();
@@ -47,21 +53,29 @@ test.describe("role templates and agents", () => {
     await page.getByRole("button", { name: "Save role" }).click();
     await expect(roleRow(page, source)).toBeVisible();
 
-    await roleRow(page, source).getByRole("button", { name: `Edit ${source}` }).click();
+    await roleRow(page, source)
+      .getByRole("button", { name: `Edit ${source}` })
+      .click();
     await page.getByRole("button", { name: "Duplicate" }).click();
     const copyName = `${source} (copy)`;
     await expect(page.getByRole("heading", { name: `Edit ${copyName}`, level: 1 })).toBeVisible();
     await page.getByRole("button", { name: "Save role" }).click();
     await expect(roleRow(page, copyName)).toBeVisible();
 
-    await roleRow(page, copyName).getByRole("button", { name: `Delete ${copyName}` }).click();
-    await page.getByRole("dialog", { name: "Delete role template" })
+    await roleRow(page, copyName)
+      .getByRole("button", { name: `Delete ${copyName}` })
+      .click();
+    await page
+      .getByRole("dialog", { name: "Delete role template" })
       .getByRole("button", { name: "Delete role" })
       .click();
     await expect(roleRow(page, copyName)).toHaveCount(0);
 
-    await roleRow(page, source).getByRole("button", { name: `Delete ${source}` }).click();
-    await page.getByRole("dialog", { name: "Delete role template" })
+    await roleRow(page, source)
+      .getByRole("button", { name: `Delete ${source}` })
+      .click();
+    await page
+      .getByRole("dialog", { name: "Delete role template" })
       .getByRole("button", { name: "Delete role" })
       .click();
     await expect(roleRow(page, source)).toHaveCount(0);
@@ -92,10 +106,14 @@ test.describe("role templates and agents", () => {
 
     await row.getByRole("button", { name: `Disable ${agentName}` }).click();
     await expect(agentRow(page, agentName)).toContainText("disabled");
-    await agentRow(page, agentName).getByRole("button", { name: `Enable ${agentName}` }).click();
+    await agentRow(page, agentName)
+      .getByRole("button", { name: `Enable ${agentName}` })
+      .click();
     await expect(agentRow(page, agentName)).toContainText("enabled");
 
-    await agentRow(page, agentName).getByRole("button", { name: `Delete ${agentName}` }).click();
+    await agentRow(page, agentName)
+      .getByRole("button", { name: `Delete ${agentName}` })
+      .click();
     const dialog = page.getByRole("dialog", { name: "Delete agent" });
     await dialog.getByRole("button", { name: "Delete agent" }).click();
     await expect(agentRow(page, agentName)).toHaveCount(0);

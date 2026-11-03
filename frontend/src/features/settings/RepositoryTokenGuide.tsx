@@ -29,8 +29,8 @@ export function RepositoryTokenGuide({ url }: { url: string }) {
         <p className="text-[11px] italic">
           {hasRepository ? (
             <>
-              The steps name the repository in the URL field (<span className="font-mono">{slug}</span>);
-              they fit any repository you add here.
+              The steps name the repository in the URL field (
+              <span className="font-mono">{slug}</span>); they fit any repository you add here.
             </>
           ) : (
             <>
@@ -73,9 +73,7 @@ export function RepositoryTokenGuide({ url }: { url: string }) {
               <strong>Expiration</strong>: as short as your workflow allows. A token that expires is
               a token that cannot be forgotten.
             </li>
-            <li>
-              Generate the token and copy it now — GitHub shows it once.
-            </li>
+            <li>Generate the token and copy it now — GitHub shows it once.</li>
           </ol>
         </div>
 
@@ -83,7 +81,10 @@ export function RepositoryTokenGuide({ url }: { url: string }) {
           <p className="flex items-center gap-1.5 font-medium text-[var(--foreground)]">
             <Terminal size={13} /> 2. Check it on your machine before pasting
           </p>
-          <p className="mt-1">A 200 means the key works; 401 means wrong or expired; 404 means it cannot see this repository.</p>
+          <p className="mt-1">
+            A 200 means the key works; 401 means wrong or expired; 404 means it cannot see this
+            repository.
+          </p>
           <Code>{`# bash, macOS, Linux
 export GITHUB_TOKEN=github_pat_...
 curl -sS -o /dev/null -w "%{http_code}\\n" \\
@@ -112,9 +113,10 @@ $env:GITHUB_TOKEN = "github_pat_..."
           <p className="mt-1">
             A repository entry holds one token for one repository, which is what a board needs. An
             organisation profile such as the Architect reads the whole picture, so give that agent a
-            token of its own: same recipe, but <em>Repository access</em> = <em>All repositories</em>{" "}
-            (or every repository of one owner), still <em>Contents: Read-only</em>. Keep it separate
-            from the tokens you enter here so one leak cannot spread.
+            token of its own: same recipe, but <em>Repository access</em> ={" "}
+            <em>All repositories</em> (or every repository of one owner), still{" "}
+            <em>Contents: Read-only</em>. Keep it separate from the tokens you enter here so one
+            leak cannot spread.
           </p>
         </div>
 
@@ -124,8 +126,8 @@ $env:GITHUB_TOKEN = "github_pat_..."
           </p>
           <p className="mt-1">
             An SSH key gives a <em>git client</em> access and is issued locally with{" "}
-            <span className="font-mono">ssh-keygen</span>. Tralala never uses SSH or a git binary, so
-            it cannot read one. Keep it for your own clone on the machine that runs an agent:
+            <span className="font-mono">ssh-keygen</span>. Tralala never uses SSH or a git binary,
+            so it cannot read one. Keep it for your own clone on the machine that runs an agent:
           </p>
           <Code>{`ssh-keygen -t ed25519 -f ~/.ssh/${keyName} -C "analysis-agent"
 # register the .pub file as a Deploy Key at

@@ -43,9 +43,7 @@ export function RoleTemplateEditorPage() {
         description,
         system_prompt: systemPrompt.trim(),
       };
-      return isNew
-        ? api.createRoleTemplate(payload)
-        : api.updateRoleTemplate(roleId, payload);
+      return isNew ? api.createRoleTemplate(payload) : api.updateRoleTemplate(roleId, payload);
     },
     onSuccess: (role) => {
       void invalidate();
@@ -230,7 +228,10 @@ export function RoleTemplateEditorPage() {
           >
             Cancel
           </Button>
-          <Button type="submit" disabled={!name.trim() || !systemPrompt.trim() || saveMutation.isPending}>
+          <Button
+            type="submit"
+            disabled={!name.trim() || !systemPrompt.trim() || saveMutation.isPending}
+          >
             {saveMutation.isPending ? "Saving…" : "Save role"}
           </Button>
         </div>

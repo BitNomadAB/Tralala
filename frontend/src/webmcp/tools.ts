@@ -18,9 +18,7 @@ function optionalText(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-export function dashboardTools(options: {
-  onOpenBoard: (boardId: string) => void;
-}): McpTool[] {
+export function dashboardTools(options: { onOpenBoard: (boardId: string) => void }): McpTool[] {
   return [
     {
       name: "list_boards",
@@ -33,14 +31,16 @@ export function dashboardTools(options: {
       },
       execute: async (input) => {
         const { items } = await api.listBoards({ status: input.status as string | undefined });
-        return { boards: items.map((board) => ({
-          id: board.id,
-          name: board.name,
-          status: board.status,
-          loop_count: board.loop_count,
-          list_count: board.list_count,
-          card_count: board.card_count,
-        })) };
+        return {
+          boards: items.map((board) => ({
+            id: board.id,
+            name: board.name,
+            status: board.status,
+            loop_count: board.loop_count,
+            list_count: board.list_count,
+            card_count: board.card_count,
+          })),
+        };
       },
     },
     {
@@ -300,7 +300,9 @@ export function loopTools(options: {
           overdue: input.overdue === true,
           limit: 50,
         });
-        return { cards: items.map((card) => ({ id: card.id, title: card.title, list_id: card.list_id })) };
+        return {
+          cards: items.map((card) => ({ id: card.id, title: card.title, list_id: card.list_id })),
+        };
       },
     },
     {

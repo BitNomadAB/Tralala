@@ -82,8 +82,7 @@ export function DiscussionsPage() {
     queryKey: ["discussion", activeBoard, selectedId],
     queryFn: () => api.getDiscussion(activeBoard, String(selectedId)),
     enabled: Boolean(activeBoard && selectedId),
-    refetchInterval: (query) =>
-      query.state.data?.run_state === "running" && !live ? 1500 : false,
+    refetchInterval: (query) => (query.state.data?.run_state === "running" && !live ? 1500 : false),
   });
 
   const selected = detailQuery.data ?? discussions.find((item) => item.id === selectedId) ?? null;
@@ -214,9 +213,7 @@ export function DiscussionsPage() {
                 </span>
               </div>
               {discussionsQuery.isLoading ? (
-                <p className="p-3 text-xs text-[var(--muted-foreground)]">
-                  Loading discussions…
-                </p>
+                <p className="p-3 text-xs text-[var(--muted-foreground)]">Loading discussions…</p>
               ) : discussions.length === 0 ? (
                 <p className="p-3 text-xs text-[var(--muted-foreground)]">
                   No discussions yet. Reference an existing ticket to start one.
@@ -239,7 +236,8 @@ export function DiscussionsPage() {
                         <p className="mt-0.5 truncate text-[11px] text-[var(--muted-foreground)]">
                           {discussion.card_title ?? discussion.card_id}
                           {discussion.loop_name ? ` · ${discussion.loop_name}` : ""} ·{" "}
-                          {discussion.message_count} messages · {discussion.participant_count} agents
+                          {discussion.message_count} messages · {discussion.participant_count}{" "}
+                          agents
                         </p>
                         <p className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
                           <Badge tone={discussion.status === "open" ? "neutral" : "brand"}>
@@ -387,11 +385,7 @@ export function DiscussionsPage() {
                     Each agent answers with its snapshotted role and an explicit verdict.
                   </span>
                 </div>
-                <RunPanel
-                  boardId={activeBoard}
-                  discussion={selected}
-                  onChanged={invalidate}
-                />
+                <RunPanel boardId={activeBoard} discussion={selected} onChanged={invalidate} />
                 {(selected.votes ?? []).length > 0 ? (
                   <ul className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                     {(selected.votes ?? []).map((vote) => (
@@ -630,8 +624,7 @@ export function DiscussionsPage() {
                 type="submit"
                 variant={reviewing?.decision === "approve" ? "primary" : "danger"}
                 disabled={
-                  reviewMutation.isPending ||
-                  (reviewing?.decision !== "approve" && !reason.trim())
+                  reviewMutation.isPending || (reviewing?.decision !== "approve" && !reason.trim())
                 }
               >
                 Confirm

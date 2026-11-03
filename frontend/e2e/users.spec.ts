@@ -51,9 +51,7 @@ test("the last enabled administrator cannot be disabled", async ({ page }) => {
   await login(page);
   await page.goto("/settings");
   await page.getByRole("button", { name: "Disable admin" }).click();
-  await expect(
-    page.getByText("At least one enabled administrator must remain"),
-  ).toBeVisible();
+  await expect(page.getByText("At least one enabled administrator must remain")).toBeVisible();
 });
 
 test("disabling a person revokes the agent access they issued", async ({ page, browser }) => {

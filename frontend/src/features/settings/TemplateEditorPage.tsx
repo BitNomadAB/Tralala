@@ -175,7 +175,9 @@ export function TemplateEditorPage() {
                 placeholder={`List ${index + 1}`}
                 onChange={(event) =>
                   setLists((current) =>
-                    current.map((value, position) => (position === index ? event.target.value : value)),
+                    current.map((value, position) =>
+                      position === index ? event.target.value : value,
+                    ),
                   )
                 }
               />

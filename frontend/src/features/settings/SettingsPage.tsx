@@ -62,14 +62,8 @@ export function SettingsPage() {
                   className="flex h-9 w-9 flex-none items-center justify-center gap-0.5 rounded-md border border-[var(--border)]"
                   style={{ background: swatch.background }}
                 >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ background: swatch.primary }}
-                  />
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ background: swatch.accent }}
-                  />
+                  <span className="h-2 w-2 rounded-full" style={{ background: swatch.primary }} />
+                  <span className="h-2 w-2 rounded-full" style={{ background: swatch.accent }} />
                 </span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">{option.label}</span>

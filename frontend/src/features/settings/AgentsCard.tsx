@@ -104,13 +104,12 @@ export function AgentsCard() {
                   </p>
                   <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
                     {agent.role_template_name ?? "No role"} ·{" "}
-                    {providerLabelFor(agent.base_url) ?? (agent.connection_type === "a2a" ? "A2A" : "OpenAI-compatible")} ·{" "}
-                    {agent.model ?? "no model"} · {agent.base_url}
+                    {providerLabelFor(agent.base_url) ??
+                      (agent.connection_type === "a2a" ? "A2A" : "OpenAI-compatible")}{" "}
+                    · {agent.model ?? "no model"} · {agent.base_url}
                   </p>
                   <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
-                    <Badge tone={testTone(agent)}>
-                      {agent.last_test_status ?? "not tested"}
-                    </Badge>
+                    <Badge tone={testTone(agent)}>{agent.last_test_status ?? "not tested"}</Badge>
                     {agent.last_tested_at ? (
                       <span>tested {formatDateTime(agent.last_tested_at)}</span>
                     ) : null}

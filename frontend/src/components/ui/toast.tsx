@@ -27,16 +27,13 @@ const tones: Record<ToastVariant, string> = {
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const push = useCallback(
-    ({ title, description, variant = "info" }: ToastInput) => {
-      const id = Date.now() + Math.random();
-      setToasts((current) => [...current, { id, title, description, variant }]);
-      window.setTimeout(() => {
-        setToasts((current) => current.filter((toast) => toast.id !== id));
-      }, 5000);
-    },
-    [],
-  );
+  const push = useCallback(({ title, description, variant = "info" }: ToastInput) => {
+    const id = Date.now() + Math.random();
+    setToasts((current) => [...current, { id, title, description, variant }]);
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+    }, 5000);
+  }, []);
 
   const value = useMemo(() => ({ push }), [push]);
 

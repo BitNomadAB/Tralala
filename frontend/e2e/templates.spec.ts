@@ -45,7 +45,9 @@ test.describe("board templates", () => {
     await expect(row).toContainText("Two week delivery board");
 
     await row.getByRole("button", { name: `Edit ${templateName}` }).click();
-    await expect(page.getByRole("heading", { name: `Edit ${templateName}`, level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: `Edit ${templateName}`, level: 1 }),
+    ).toBeVisible();
     await expect(page.getByLabel("List 1", { exact: true })).toHaveValue("Ideas");
     await expect(page.getByLabel("List 3", { exact: true })).toHaveValue("Done");
     await page.getByLabel("List 2", { exact: true }).fill("Building");
@@ -113,4 +115,3 @@ test.describe("board templates", () => {
     }
   });
 });
-

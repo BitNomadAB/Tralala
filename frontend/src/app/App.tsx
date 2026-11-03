@@ -73,19 +73,13 @@ export function App() {
                 >
                   <Route path="/" element={<DashboardPage />} />
                   <Route path="/boards/:boardId" element={<BoardLoopsPage />} />
-                  <Route
-                    path="/boards/:boardId/loops/:loopId"
-                    element={<LoopPage />}
-                  />
+                  <Route path="/boards/:boardId/loops/:loopId" element={<LoopPage />} />
                   <Route path="/boards/:boardId/history" element={<HistoryPage />} />
                   <Route path="/discussions" element={<DiscussionsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/settings/repositories" element={<RepositoriesPage />} />
                   <Route path="/settings/templates/:templateId" element={<TemplateEditorPage />} />
-                  <Route
-                    path="/settings/roles/:roleId"
-                    element={<RoleTemplateEditorPage />}
-                  />
+                  <Route path="/settings/roles/:roleId" element={<RoleTemplateEditorPage />} />
                   <Route path="/settings/agents/:agentId" element={<AgentEditorPage />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
@@ -97,4 +91,3 @@ export function App() {
     </QueryClientProvider>
   );
 }
-

@@ -54,7 +54,11 @@ export function CardDialog({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { data: card, isLoading, error } = useQuery({
+  const {
+    data: card,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: keys.card(boardId, loopId, cardId),
     queryFn: () => api.getCard(boardId, loopId, cardId),
   });
@@ -185,9 +189,7 @@ export function CardDialog({
 
   const suggestions = useMemo(
     () =>
-      mentionToken
-        ? matchingAgents(agentsQuery.data ?? [], mentionToken.query).slice(0, 6)
-        : [],
+      mentionToken ? matchingAgents(agentsQuery.data ?? [], mentionToken.query).slice(0, 6) : [],
     [mentionToken, agentsQuery.data],
   );
 
@@ -219,7 +221,11 @@ export function CardDialog({
         draft.description !== card.description ||
         draft.priority !== card.priority ||
         draft.due !== toDateInputValue(card.due_at) ||
-        draft.labels.slice().sort().join() !== card.labels.map((l) => l.id).sort().join()
+        draft.labels.slice().sort().join() !==
+          card.labels
+            .map((l) => l.id)
+            .sort()
+            .join()
       : false;
 
   function save() {
@@ -239,7 +245,9 @@ export function CardDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         title={card?.title ?? "Card"}
-        description={card ? `Updated ${formatDateTime(card.updated_at)} · version ${card.version}` : undefined}
+        description={
+          card ? `Updated ${formatDateTime(card.updated_at)} · version ${card.version}` : undefined
+        }
         className="w-[min(760px,96vw)]"
       >
         {isLoading || !draft ? (
@@ -254,9 +262,13 @@ export function CardDialog({
               <div className="flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-2 text-[11px]">
                 <div className="flex flex-wrap items-center gap-2">
                   {card.ticket_key ? (
-                    <span className="font-mono text-[var(--muted-foreground)]">{card.ticket_key}</span>
+                    <span className="font-mono text-[var(--muted-foreground)]">
+                      {card.ticket_key}
+                    </span>
                   ) : null}
-                  {card.phase_number ? <Badge tone="neutral">Phase {card.phase_number}</Badge> : null}
+                  {card.phase_number ? (
+                    <Badge tone="neutral">Phase {card.phase_number}</Badge>
+                  ) : null}
                   {card.human_action_required ? (
                     <Badge tone="warning">
                       <User size={11} /> Human action required
@@ -425,7 +437,12 @@ export function CardDialog({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 border-y border-[var(--border)] py-3">
-              <Button variant="secondary" size="sm" onClick={save} disabled={!dirty || updateMutation.isPending}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={save}
+                disabled={!dirty || updateMutation.isPending}
+              >
                 {updateMutation.isPending ? "Saving…" : "Save changes"}
               </Button>
               <Button
@@ -489,7 +506,10 @@ export function CardDialog({
               ) : (
                 <div className="flex flex-col gap-3">
                   {(card.checklists ?? []).map((checklist) => (
-                    <div key={checklist.id} className="rounded-lg border border-[var(--border)] p-2.5">
+                    <div
+                      key={checklist.id}
+                      className="rounded-lg border border-[var(--border)] p-2.5"
+                    >
                       <div className="mb-1.5 flex items-center gap-2">
                         <CheckSquare size={14} className="text-[var(--muted-foreground)]" />
                         <span className="text-xs font-semibold">{checklist.title}</span>
@@ -645,8 +665,7 @@ export function CardDialog({
                       } else if (event.key === "ArrowUp") {
                         event.preventDefault();
                         setMentionIndex(
-                          (current) =>
-                            (current - 1 + suggestions.length) % suggestions.length,
+                          (current) => (current - 1 + suggestions.length) % suggestions.length,
                         );
                       } else if (event.key === "Enter") {
                         event.preventDefault();
@@ -689,7 +708,12 @@ export function CardDialog({
                     </div>
                   ) : null}
                 </div>
-                <Button type="submit" size="icon" aria-label="Send comment" disabled={!comment.trim()}>
+                <Button
+                  type="submit"
+                  size="icon"
+                  aria-label="Send comment"
+                  disabled={!comment.trim()}
+                >
                   <Send size={14} />
                 </Button>
               </form>
@@ -707,9 +731,7 @@ export function CardDialog({
                     <span className="ml-auto">{formatDateTime(entry.timestamp)}</span>
                   </li>
                 ))}
-                {(activityQuery.data ?? []).length === 0 ? (
-                  <li>No history yet.</li>
-                ) : null}
+                {(activityQuery.data ?? []).length === 0 ? <li>No history yet.</li> : null}
               </ul>
             </section>
           </div>

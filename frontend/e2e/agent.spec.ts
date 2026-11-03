@@ -20,9 +20,7 @@ test.describe("agent access", () => {
     const boardId = boardIdFromUrl(page);
     const loopId = await resolveLoopId(page, boardId);
 
-    const listsResponse = await page.request.get(
-      `/api/v1/boards/${boardId}/loops/${loopId}/lists`,
-    );
+    const listsResponse = await page.request.get(`/api/v1/boards/${boardId}/loops/${loopId}/lists`);
     expect(listsResponse.ok()).toBe(true);
     const lists = (await listsResponse.json()).data as { id: string; name: string }[];
     const todo = lists.find((list) => list.name === "Todo");
@@ -111,7 +109,10 @@ test.describe("browser safety", () => {
     await addCard(page, "Todo", "Unsafe card");
 
     const dialog = page.getByRole("dialog");
-    await page.getByRole("region", { name: "List Todo" }).getByRole("button", { name: "Unsafe card" }).click();
+    await page
+      .getByRole("region", { name: "List Todo" })
+      .getByRole("button", { name: "Unsafe card" })
+      .click();
     await expect(dialog).toBeVisible();
     await dialog
       .getByLabel("Card description (Markdown)")

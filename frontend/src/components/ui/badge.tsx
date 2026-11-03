@@ -3,10 +3,14 @@ import { cn } from "@/lib/utils";
 
 const tones = {
   neutral: "border-[var(--border)] bg-[var(--surface-raised)] text-[var(--muted-foreground)]",
-  brand: "border-transparent bg-[color-mix(in_srgb,var(--primary)_18%,transparent)] text-[var(--primary)]",
-  success: "border-transparent bg-[color-mix(in_srgb,var(--success)_18%,transparent)] text-[var(--success)]",
-  warning: "border-transparent bg-[color-mix(in_srgb,var(--warning)_18%,transparent)] text-[var(--warning)]",
-  danger: "border-transparent bg-[color-mix(in_srgb,var(--destructive)_18%,transparent)] text-[var(--destructive)]",
+  brand:
+    "border-transparent bg-[color-mix(in_srgb,var(--primary)_18%,transparent)] text-[var(--primary)]",
+  success:
+    "border-transparent bg-[color-mix(in_srgb,var(--success)_18%,transparent)] text-[var(--success)]",
+  warning:
+    "border-transparent bg-[color-mix(in_srgb,var(--warning)_18%,transparent)] text-[var(--warning)]",
+  danger:
+    "border-transparent bg-[color-mix(in_srgb,var(--destructive)_18%,transparent)] text-[var(--destructive)]",
 } as const;
 
 export type BadgeTone = keyof typeof tones;

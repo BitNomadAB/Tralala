@@ -122,7 +122,10 @@ export function ListColumn({
           isOver && "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
         )}
       >
-        <SortableContext items={cards.map((card) => card.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext
+          items={cards.map((card) => card.id)}
+          strategy={verticalListSortingStrategy}
+        >
           <ul className="flex flex-col gap-2">
             {cards.map((card) => (
               <CardTile key={card.id} card={card} onOpen={onOpenCard} />

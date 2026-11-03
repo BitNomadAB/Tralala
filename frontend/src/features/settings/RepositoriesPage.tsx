@@ -81,7 +81,10 @@ export function RepositoriesPage() {
   const check = useMutation({
     mutationFn: (repositoryId: string) => api.checkRepository(repositoryId),
     onSuccess: (result, repositoryId) => {
-      setChecks((current) => ({ ...current, [repositoryId]: `${result.status}: ${result.detail ?? ""}` }));
+      setChecks((current) => ({
+        ...current,
+        [repositoryId]: `${result.status}: ${result.detail ?? ""}`,
+      }));
       void invalidate();
       toast.push({
         title: result.status === "ok" ? "Access verified" : "Access failed",
@@ -90,7 +93,11 @@ export function RepositoriesPage() {
       });
     },
     onError: (error) => {
-      toast.push({ title: "Could not check access", description: errorText(error), variant: "error" });
+      toast.push({
+        title: "Could not check access",
+        description: errorText(error),
+        variant: "error",
+      });
     },
   });
 
@@ -122,8 +129,8 @@ export function RepositoriesPage() {
         <div>
           <h1 className="text-lg font-semibold">GitHub repositories</h1>
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-            Read-only access for the Analytics agent. Boards select which repositories they are about;
-            the token is stored sealed and never shown again.
+            Read-only access for the Analytics agent. Boards select which repositories they are
+            about; the token is stored sealed and never shown again.
           </p>
         </div>
         <Button size="sm" className="ml-auto" onClick={() => setDraft({ ...EMPTY })}>
@@ -163,8 +170,10 @@ export function RepositoriesPage() {
                 )}
                 {!repository.enabled ? <Badge tone="neutral">disabled</Badge> : null}
               </div>
-              <p className="break-all text-[11px] text-[var(--muted-foreground)]">{repository.url}</p>
-              {checks[repository.id] ?? repository.last_check_detail ? (
+              <p className="break-all text-[11px] text-[var(--muted-foreground)]">
+                {repository.url}
+              </p>
+              {(checks[repository.id] ?? repository.last_check_detail) ? (
                 <p className="flex items-center gap-1.5 text-[11px]">
                   <CheckCircle2 size={12} className="text-[var(--muted-foreground)]" />
                   {checks[repository.id] ??
@@ -256,7 +265,11 @@ function RepositoryDialog({
             if (draft.url.trim()) onSave();
           }}
         >
-          <Field label="Name" htmlFor="repository-name" hint="Shown in lists; defaults to the repository name.">
+          <Field
+            label="Name"
+            htmlFor="repository-name"
+            hint="Shown in lists; defaults to the repository name."
+          >
             <Input
               id="repository-name"
               value={draft.name}
@@ -274,7 +287,11 @@ function RepositoryDialog({
               maxLength={500}
             />
           </Field>
-          <Field label="Branch (optional)" htmlFor="repository-branch" hint="Defaults to the default branch.">
+          <Field
+            label="Branch (optional)"
+            htmlFor="repository-branch"
+            hint="Defaults to the default branch."
+          >
             <Input
               id="repository-branch"
               value={draft.branch}

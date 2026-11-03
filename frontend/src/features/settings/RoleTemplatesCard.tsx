@@ -48,8 +48,8 @@ export function RoleTemplatesCard() {
         </Button>
       </div>
       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-        Central role definitions. Agents reference a template; editing it changes future
-        discussions only, because each discussion stores a snapshot of the instructions it used.
+        Central role definitions. Agents reference a template; editing it changes future discussions
+        only, because each discussion stores a snapshot of the instructions it used.
       </p>
 
       <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)]">

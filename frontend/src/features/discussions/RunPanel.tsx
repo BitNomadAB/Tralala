@@ -114,11 +114,7 @@ export function RunPanel({
       onChanged();
       toast.push({
         title:
-          action === "pause"
-            ? "Run paused"
-            : action === "resume"
-              ? "Run resumed"
-              : "Run stopped",
+          action === "pause" ? "Run paused" : action === "resume" ? "Run resumed" : "Run stopped",
         description: result.stop_reason ?? undefined,
         variant: action === "stop" ? "error" : "success",
       });
@@ -139,7 +135,9 @@ export function RunPanel({
         <Badge tone={RUN_TONES[runState] ?? "neutral"}>{runState}</Badge>
         <span data-testid="round-counter">
           Rounds {discussion.round_count}
-          {latestRun ? ` · this run ${latestRun.rounds_completed}/${latestRun.rounds_requested}` : ""}
+          {latestRun
+            ? ` · this run ${latestRun.rounds_completed}/${latestRun.rounds_requested}`
+            : ""}
         </span>
         <span className="inline-flex items-center gap-1">
           <Gauge size={12} /> {discussion.tokens_used} tokens
@@ -231,7 +229,11 @@ export function RunPanel({
               });
             }}
           >
-            <Field label="Rounds" htmlFor="run-rounds" hint={`Thread allows ${discussion.max_rounds}.`}>
+            <Field
+              label="Rounds"
+              htmlFor="run-rounds"
+              hint={`Thread allows ${discussion.max_rounds}.`}
+            >
               <Input
                 id="run-rounds"
                 type="number"

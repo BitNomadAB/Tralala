@@ -1,4 +1,12 @@
-import { MessagesSquare, LayoutGrid, LogOut, Settings, Sun, Moon, MonitorSmartphone } from "lucide-react";
+import {
+  MessagesSquare,
+  LayoutGrid,
+  LogOut,
+  Settings,
+  Sun,
+  Moon,
+  MonitorSmartphone,
+} from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/useAuth";

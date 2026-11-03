@@ -8,8 +8,7 @@ export const keys = {
   loops: (boardId: string, includeCompleted = false) =>
     ["loops", boardId, includeCompleted] as const,
   loop: (boardId: string, loopId: string) => ["loop", boardId, loopId] as const,
-  loopDocuments: (boardId: string, loopId: string) =>
-    ["loop-documents", boardId, loopId] as const,
+  loopDocuments: (boardId: string, loopId: string) => ["loop-documents", boardId, loopId] as const,
   loopPlan: (boardId: string, loopId: string) => ["loop-plan", boardId, loopId] as const,
   readiness: (boardId: string, loopId: string) => ["readiness", boardId, loopId] as const,
   qa: (boardId: string, loopId: string) => ["qa", boardId, loopId] as const,
@@ -22,8 +21,7 @@ export const keys = {
   lists: (boardId: string, loopId: string) => ["lists", boardId, loopId] as const,
   listCards: (boardId: string, loopId: string, listId: string, limit: number) =>
     ["cards", boardId, loopId, listId, limit] as const,
-  loopCardsPrefix: (boardId: string, loopId: string) =>
-    ["cards", boardId, loopId] as const,
+  loopCardsPrefix: (boardId: string, loopId: string) => ["cards", boardId, loopId] as const,
   boardCardsPrefix: (boardId: string) => ["cards", boardId] as const,
   card: (boardId: string, loopId: string, cardId: string) =>
     ["card", boardId, loopId, cardId] as const,

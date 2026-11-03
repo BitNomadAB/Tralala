@@ -6,10 +6,7 @@ test.describe("settings", () => {
     await login(page);
     await page.getByRole("link", { name: "Settings" }).click();
 
-    await expect(page.getByRole("radio", { name: /Dark/ })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    await expect(page.getByRole("radio", { name: /Dark/ })).toHaveAttribute("aria-checked", "true");
     await page.getByRole("radio", { name: /Light/ }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
