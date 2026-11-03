@@ -1,7 +1,8 @@
 """Code repositories (the ``repositories`` table) and the boards that link them.
 
 The registry keeps one list of repositories; a board links the ones it is about through a row per
-repository in ``board_repositories``. A repository's access token is stored sealed.
+repository in ``board_repositories``, which also holds the link's focus and exclude globs as JSON
+text. A repository's access token is stored sealed.
 """
 
 from __future__ import annotations
@@ -110,12 +111,13 @@ class RepositoryLinkRepository(Protocol):
         """Every link with its board, by board name (case-insensitive)."""
         ...
 
-    def repository_ids(self, board_id: str) -> list[str]:
-        """The board's repositories in the order they were linked (then by id)."""
+    def links(self, board_id: str) -> list[BoardRepositoriesRow]:
+        """The board's links in the order they were made (then by repository id), each with the
+        globs that steer its snapshot."""
         ...
 
-    def by_board(self) -> dict[str, list[str]]:
-        """Every board's repositories, each in the order of ``repository_ids``."""
+    def by_board(self) -> dict[str, list[BoardRepositoriesRow]]:
+        """Every board's links, each board's in the order of ``links``."""
         ...
 
     def clear(self, board_id: str) -> None: ...

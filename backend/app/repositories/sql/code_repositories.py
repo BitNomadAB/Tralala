@@ -73,17 +73,17 @@ _LINKED_BOARDS = text(
     " FROM board_repositories l JOIN boards b ON b.id = l.board_id"
     " ORDER BY b.name COLLATE NOCASE"
 )
-_BOARD_REPOSITORY_IDS = text(
-    "SELECT repository_id FROM board_repositories WHERE board_id = :id"
-    " ORDER BY created_at, repository_id"
+_LINK = (
+    f"SELECT {sql.column_list(BOARD_REPOSITORIES_COLUMNS)}"  # noqa: S608 - from generated columns
+    " FROM board_repositories"
 )
-_ALL_BOARD_REPOSITORIES = text(
-    "SELECT board_id, repository_id FROM board_repositories ORDER BY created_at, repository_id"
-)
+_BOARD_LINKS = text(f"{_LINK} WHERE board_id = :id ORDER BY created_at, repository_id")
+_ALL_BOARD_LINKS = text(f"{_LINK} ORDER BY created_at, repository_id")
 _CLEAR_LINKS = text("DELETE FROM board_repositories WHERE board_id = :id")
 _ADD_LINK = text(
-    "INSERT INTO board_repositories (board_id, repository_id, created_at)"
-    " VALUES (:board_id, :repository_id, :created_at)"
+    "INSERT INTO board_repositories"
+    " (board_id, repository_id, created_at, focus_paths, exclude_paths)"
+    " VALUES (:board_id, :repository_id, :created_at, :focus_paths, :exclude_paths)"
 )
 
 
@@ -191,16 +191,15 @@ class SqlRepositoryLinkRepository:
             for row in self._connection.execute(_LINKED_BOARDS).mappings()
         ]
 
-    def repository_ids(self, board_id: str) -> list[str]:
-        result = self._connection.execute(_BOARD_REPOSITORY_IDS, {"id": board_id}).mappings()
-        return [values.text(row, "repository_id") for row in result]
+    def links(self, board_id: str) -> list[BoardRepositoriesRow]:
+        result = self._connection.execute(_BOARD_LINKS, {"id": board_id}).mappings()
+        return [BoardRepositoriesRow.from_mapping(row) for row in result]
 
-    def by_board(self) -> dict[str, list[str]]:
-        grouped: dict[str, list[str]] = {}
-        for row in self._connection.execute(_ALL_BOARD_REPOSITORIES).mappings():
-            grouped.setdefault(values.text(row, "board_id"), []).append(
-                values.text(row, "repository_id")
-            )
+    def by_board(self) -> dict[str, list[BoardRepositoriesRow]]:
+        grouped: dict[str, list[BoardRepositoriesRow]] = {}
+        for row in self._connection.execute(_ALL_BOARD_LINKS).mappings():
+            link = BoardRepositoriesRow.from_mapping(row)
+            grouped.setdefault(link.board_id, []).append(link)
         return grouped
 
     def clear(self, board_id: str) -> None:
@@ -213,5 +212,7 @@ class SqlRepositoryLinkRepository:
                 "board_id": row.board_id,
                 "repository_id": row.repository_id,
                 "created_at": row.created_at,
+                "focus_paths": row.focus_paths,
+                "exclude_paths": row.exclude_paths,
             },
         )

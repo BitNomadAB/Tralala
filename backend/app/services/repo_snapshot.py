@@ -7,7 +7,7 @@ prompt as data. Nothing is written back to a repository.
 A repository comes as a tarball of one commit, from one of two providers: ``github`` downloads it
 through the GitHub API, ``git_https`` fetches the latest main branch into the Tralala-managed
 mirror and archives it there (``repo_mirror.py``). Everything after the tarball is shared, so
-filters, caps, order and budget are the same for both.
+filters, the board link's focus and exclude globs, caps, order and budget are the same for both.
 
 Two rules shape the code below.
 
@@ -26,6 +26,8 @@ import json
 import logging
 import tarfile
 import time
+from collections.abc import Sequence
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Protocol, TypedDict
 from urllib.parse import urlsplit
 
@@ -280,10 +282,31 @@ def _priority(relative: str, depth: int) -> tuple[int, int, str]:
     return (SOURCE_PRIORITY, depth, relative)
 
 
+def path_selected(relative: str, focus: Sequence[str], exclude: Sequence[str]) -> bool:
+    """Whether a board link's globs keep a file: one an exclude glob matches is dropped, and when
+    there are focus globs only a file one of them matches is kept.
+
+    ``relative`` is the POSIX path below the repository root. The match is ``fnmatchcase``: case
+    sensitive on every platform, and its ``*`` matches ``/`` too, so ``docs/*`` covers every file
+    below ``docs/`` and ``*.md`` every Markdown file at any depth.
+    """
+    if any(fnmatchcase(relative, glob) for glob in exclude):
+        return False
+    return not focus or any(fnmatchcase(relative, glob) for glob in focus)
+
+
 def select_members(
     archive: tarfile.TarFile,
+    *,
+    focus: Sequence[str] = (),
+    exclude: Sequence[str] = (),
 ) -> list[tuple[tuple[int, int, str], tarfile.TarInfo, str]]:
-    """Everything worth reading, ordered so the same SHA always yields the same prompt."""
+    """Everything worth reading, ordered so the same SHA always yields the same prompt.
+
+    Noise (build output, dependencies, lock files, binaries) is skipped first, then the link's
+    globs choose among the rest (``path_selected``), and only then is the result put in priority
+    order, so the caps fall on the files the globs kept.
+    """
     selected: list[tuple[tuple[int, int, str], tarfile.TarInfo, str]] = []
     for member in archive.getmembers():
         if not member.isfile() or member.size <= 0:
@@ -299,14 +322,23 @@ def select_members(
         if name in SKIPPED_NAMES or name.lower().endswith(tuple(SKIPPED_SUFFIXES)):
             continue
         relative = "/".join(relative_parts)
+        if not path_selected(relative, focus, exclude):
+            continue
         selected.append((_priority(relative, len(relative_parts)), member, relative))
     selected.sort(key=lambda entry: entry[0])
     return selected
 
 
-def read_snapshot(archive_bytes: bytes, *, budget_chars: int | None = None) -> Snapshot:
+def read_snapshot(
+    archive_bytes: bytes,
+    *,
+    budget_chars: int | None = None,
+    focus: Sequence[str] = (),
+    exclude: Sequence[str] = (),
+) -> Snapshot:
     """Extract the bounded, ordered file set from one tarball; with ``budget_chars``, the files
-    also stop where the next one would not fit in that many characters of context."""
+    also stop where the next one would not fit in that many characters of context. ``focus`` and
+    ``exclude`` are the board link's globs (``select_members``)."""
     files: list[SnapshotFile] = []
     used_bytes = 0
     used_chars = 0
@@ -317,7 +349,9 @@ def read_snapshot(archive_bytes: bytes, *, budget_chars: int | None = None) -> S
     except (tarfile.TarError, OSError) as exc:
         raise SnapshotError("malformed_archive") from exc
     with archive:
-        for _priority_key, member, relative in select_members(archive):
+        for _priority_key, member, relative in select_members(
+            archive, focus=focus, exclude=exclude
+        ):
             if len(files) >= MAX_FILES:
                 truncated = True
                 break
@@ -382,6 +416,29 @@ def _contents(snapshot: Snapshot, budget: int | None) -> JsonObject:
     }
 
 
+def _read_steered(archive: bytes, row: RepositoryEntry, budget: int | None) -> Snapshot:
+    """``read_snapshot`` through the globs of the repository's link to the board."""
+    return read_snapshot(
+        archive,
+        budget_chars=budget,
+        focus=row.get("focus_paths", []),
+        exclude=row.get("exclude_paths", []),
+    )
+
+
+def _named_globs(row: RepositoryEntry) -> JsonObject:
+    """The link's globs for the entry, only when it has some: the run should know that the board
+    narrowed what it reads."""
+    named: JsonObject = {}
+    focus = row.get("focus_paths", [])
+    exclude = row.get("exclude_paths", [])
+    if focus:
+        named["focus_paths"] = [*focus]
+    if exclude:
+        named["exclude_paths"] = [*exclude]
+    return named
+
+
 class RepositorySource(Protocol):
     """What a snapshot needs of ``RepositoryService``: the board's enabled repositories in link
     order, a repository's token, and where a mirror's outcome is recorded."""
@@ -437,6 +494,7 @@ class RepositorySnapshotService:
             "name": row["name"],
             "url": row["url"],
             "branch": row.get("branch"),
+            **_named_globs(row),
         }
         if row["provider"] == "git_https":
             return self._from_mirror(row, entry, budget)
@@ -449,7 +507,7 @@ class RepositorySnapshotService:
         try:
             sha = resolve_commit(owner, name, row.get("branch"), token)
             archive = fetch_archive(owner, name, sha, token)
-            snapshot = read_snapshot(archive, budget_chars=budget)
+            snapshot = _read_steered(archive, row, budget)
         except SnapshotError as exc:
             logger.warning(
                 "repository_snapshot_failed",
@@ -473,7 +531,7 @@ class RepositorySnapshotService:
         request = MirrorRequest(repository_id=row["id"], url=row["url"], branch=row["branch"])
         try:
             latest = self._read_latest(request)
-            snapshot = read_snapshot(latest.archive, budget_chars=budget)
+            snapshot = _read_steered(latest.archive, row, budget)
         except (MirrorError, SnapshotError) as exc:
             self.repositories.record_mirror_error(row["id"], exc.code)
             logger.warning(

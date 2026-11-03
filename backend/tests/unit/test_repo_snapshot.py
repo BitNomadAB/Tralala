@@ -21,8 +21,10 @@ from app.services.repo_snapshot import (
     SnapshotError,
     fetch_archive,
     file_chars,
+    path_selected,
     read_snapshot,
     resolve_commit,
+    select_members,
 )
 from app.services.repositories import RepositoryEntry
 
@@ -117,6 +119,110 @@ def test_a_broken_archive_is_a_named_failure() -> None:
     with pytest.raises(SnapshotError) as failure:
         read_snapshot(b"not a tarball")
     assert failure.value.code == "malformed_archive"
+
+
+# --- a board link's globs choose the files --------------------------------------------------------
+
+STEERED = {
+    "README.md": b"# App\n",
+    "AGENTS.md": b"# Rules\n",
+    "package.json": b'{"name":"app"}\n',
+    "docs/guide.md": b"# Guide\n",
+    "docs/api/endpoints.md": b"# Endpoints\n",
+    "Docs/upper.md": b"# Upper\n",
+    "src/app.py": b"x = 1\n",
+    "src/generated/client.py": b"y = 2\n",
+    "node_modules/docs/index.md": b"skipped\n",
+}
+
+
+def _paths(*, focus: tuple[str, ...] = (), exclude: tuple[str, ...] = ()) -> list[str]:
+    snapshot = read_snapshot(_tarball(STEERED), focus=focus, exclude=exclude)
+    return [file["path"] for file in snapshot["files"]]
+
+
+def test_without_globs_the_whole_repository_is_read_as_before() -> None:
+    archive = _tarball(STEERED)
+    assert read_snapshot(archive, focus=(), exclude=()) == read_snapshot(archive)
+    assert _paths() == [
+        "AGENTS.md",
+        "README.md",
+        "docs/guide.md",
+        "docs/api/endpoints.md",
+        "package.json",
+        "Docs/upper.md",
+        "src/app.py",
+        "src/generated/client.py",
+    ]
+
+
+def test_focus_globs_keep_only_the_files_they_match_in_the_priority_order() -> None:
+    # ``*`` matches ``/`` too, so ``docs/**`` and ``docs/*`` both reach every depth; the match is
+    # case sensitive on every platform, so ``Docs/`` is another folder.
+    assert _paths(focus=("docs/**",)) == ["docs/guide.md", "docs/api/endpoints.md"]
+    assert _paths(focus=("docs/*",)) == ["docs/guide.md", "docs/api/endpoints.md"]
+    assert _paths(focus=("src/*.py", "README.md")) == [
+        "README.md",
+        "src/app.py",
+        "src/generated/client.py",
+    ]
+    assert _paths(focus=("nothing/**",)) == []
+
+
+def test_exclude_globs_drop_the_files_they_match() -> None:
+    assert _paths(exclude=("docs/**", "*.json", "Docs/*")) == [
+        "AGENTS.md",
+        "README.md",
+        "src/app.py",
+        "src/generated/client.py",
+    ]
+
+
+def test_exclude_wins_over_focus() -> None:
+    assert _paths(focus=("src/**",), exclude=("src/generated/*",)) == ["src/app.py"]
+    assert _paths(focus=("*.md",), exclude=("*.md",)) == []
+
+
+def test_a_focus_glob_cannot_bring_back_what_is_never_read() -> None:
+    assert _paths(focus=("node_modules/**",)) == []
+
+
+def test_with_focus_globs_the_cap_falls_on_the_files_they_keep() -> None:
+    files = {f"docs/page_{index:03d}.md": b"page\n" for index in range(250)}
+    files.update({"README.md": b"# App\n", "src/app.py": b"x = 1\n"})
+    snapshot = read_snapshot(_tarball(files), focus=("docs/**",))
+    paths = [file["path"] for file in snapshot["files"]]
+    assert len(paths) == repo_snapshot.MAX_FILES
+    assert snapshot["truncated"] is True
+    assert paths == [f"docs/page_{index:03d}.md" for index in range(repo_snapshot.MAX_FILES)]
+
+
+def test_select_members_applies_the_globs_before_the_order() -> None:
+    with tarfile.open(fileobj=io.BytesIO(_tarball(STEERED)), mode="r:gz") as archive:
+        chosen = select_members(archive, focus=("*.md",), exclude=("docs/api/*",))
+    assert [relative for _key, _member, relative in chosen] == [
+        "AGENTS.md",
+        "README.md",
+        "docs/guide.md",
+        "Docs/upper.md",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("path", "focus", "exclude", "kept"),
+    [
+        ("docs/a.md", (), (), True),
+        ("docs/a.md", ("docs/*",), (), True),
+        ("src/a.py", ("docs/*",), (), False),
+        ("docs/a.md", (), ("docs/*",), False),
+        ("docs/a.md", ("docs/*",), ("*.md",), False),
+        ("README.md", ("readme.md",), (), False),
+    ],
+)
+def test_path_selected(
+    path: str, focus: tuple[str, ...], exclude: tuple[str, ...], kept: bool
+) -> None:
+    assert path_selected(path, focus, exclude) is kept
 
 
 def test_the_prompt_states_the_caps() -> None:
@@ -318,6 +424,29 @@ def test_a_repository_without_room_for_its_first_file_says_its_content_is_omitte
         True,
         True,
     )
+
+
+def test_the_snapshot_reads_each_repository_through_its_links_globs(github: GitHub) -> None:
+    github(_github_serving({"docs": _tarball(STEERED), "app": _tarball(STEERED)}))
+    repositories = Repositories("docs", "app")
+    docs = repositories.rows[0]
+    docs["focus_paths"] = ["docs/**"]
+    docs["exclude_paths"] = ["docs/api/*"]
+    steered, whole = RepositorySnapshotService(repositories).for_board("board-1")
+    assert [file["path"] for file in _files(steered)] == ["docs/guide.md"]
+    assert (steered.get("focus_paths"), steered.get("exclude_paths")) == (
+        ["docs/**"],
+        ["docs/api/*"],
+    )
+    # A link without globs reads the whole repository, and its entry says nothing about globs.
+    assert len(_files(whole)) == 8
+    assert "focus_paths" not in whole and "exclude_paths" not in whole
+
+
+def _files(entry: dict[str, JsonValue]) -> list[dict[str, JsonValue]]:
+    files = entry.get("files")
+    assert isinstance(files, list)
+    return [file for file in files if isinstance(file, dict)]
 
 
 def test_an_archive_over_the_limit_is_refused(github: GitHub) -> None:

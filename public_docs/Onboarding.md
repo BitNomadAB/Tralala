@@ -98,6 +98,10 @@ changes code.
 4. Assign it to the board: open the board → **Edit board → Repositories**. A board may have several;
    the analysis agents read only what is assigned, and the repository page shows which board uses
    which repository.
+5. Optional: point the analysis at the part that matters. A selected repository shows **Focus
+   paths** and **Exclude paths**, one glob per line relative to the repository root: `docs/**` reads
+   only the documentation, `docs/archive/**` under exclude leaves old pages out. Both empty reads the
+   whole repository. At most 20 globs of 200 characters each; no absolute paths and no `..`.
 
 Without a repository the analysis still works from the Info you write; with one it cites files and
 revisions, which is what makes the RoadMap reviewable.

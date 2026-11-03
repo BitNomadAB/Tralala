@@ -28,12 +28,12 @@ from ..core.errors import Conflict, NotFound, ServiceUnavailable, ValidationFail
 from ..core.identifiers import canonical_board_id
 from ..core.platform import remove_tree
 from ..db.generated.board import BoardLoopDefaultsRow, LabelsRow
-from ..db.generated.registry import BoardsRow
+from ..db.generated.registry import BoardRepositoriesRow, BoardsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.board_files import BoardFiles, BoardMigrator
 from ..repositories.board_rows import BOARD_SORTS, BoardChanges
 from ..repositories.registry import RegistryUnitOfWork
-from ..schemas.boards import BoardCreate, BoardUpdate
+from ..schemas.boards import BoardCreate, BoardUpdate, RepositoryPaths
 from . import boards_archive, boards_idempotency, boards_registry
 from .boards_archive import (
     EXPORT_FORMAT_VERSION,
@@ -44,6 +44,7 @@ from .boards_archive import (
 )
 from .boards_registry import BoardEntry, BoardSchema, Counts, JsonObject
 from .idempotency import request_fingerprint
+from .repository_links import paths_by_repository
 from .templates import TemplateEntry
 
 logger = logging.getLogger("tralala")
@@ -72,12 +73,19 @@ class AgentSelection(Protocol):
 
 
 class RepositorySelection(Protocol):
-    """What BoardService needs from RepositoryService: a board's repositories, checked and
-    replaced."""
+    """What BoardService needs from RepositoryService: a board's repositories and their globs,
+    checked and replaced."""
 
-    def validate_ids(self, repository_ids: list[str]) -> None: ...
+    def validate_ids(
+        self, repository_ids: list[str], paths: Mapping[str, RepositoryPaths] | None = None
+    ) -> None: ...
 
-    def set_board_links(self, board_id: str, repository_ids: list[str]) -> None: ...
+    def set_board_links(
+        self,
+        board_id: str,
+        repository_ids: list[str],
+        paths: Mapping[str, RepositoryPaths] | None = None,
+    ) -> None: ...
 
 
 class TemplateResolver(Protocol):
@@ -153,7 +161,7 @@ class BoardService:
         *,
         with_counts: bool = True,
         count_map: Mapping[str, Counts] | None = None,
-        repository_map: Mapping[str, list[str]] | None = None,
+        repository_map: Mapping[str, list[BoardRepositoriesRow]] | None = None,
         agent_map: Mapping[str, list[str]] | None = None,
     ) -> BoardEntry:
         if with_counts:
@@ -161,10 +169,10 @@ class BoardService:
         else:
             counts = (0, 0, 0)
         loops, lists, cards = counts
-        repository_ids = (
+        links = (
             repository_map.get(row.id, [])
             if repository_map is not None
-            else self._repository_ids(row.id)
+            else self._repository_links(row.id)
         )
         agent_ids = (
             agent_map.get(row.id, []) if agent_map is not None else self.agents.agent_ids(row.id)
@@ -182,13 +190,14 @@ class BoardService:
             "loop_count": loops,
             "list_count": lists,
             "card_count": cards,
-            "repository_ids": repository_ids,
+            "repository_ids": [link.repository_id for link in links],
             "agent_ids": agent_ids,
+            "repository_paths": paths_by_repository(links),
         }
 
-    def _repository_ids(self, board_id: str) -> list[str]:
+    def _repository_links(self, board_id: str) -> list[BoardRepositoriesRow]:
         with self.store.reader() as repos:
-            return repos.repository_links.repository_ids(board_id)
+            return repos.repository_links.links(board_id)
 
     def _add_row(self, board_id: str, name: str, description: str) -> None:
         """A new board's registry row, in maintenance until its database is ready."""
@@ -273,8 +282,8 @@ class BoardService:
         """The new board and False, or the answer stored for a replayed key and True."""
         actor.require("boards:write")
         template = self._resolve_template(payload.template_id)
-        if payload.repository_ids:
-            self.repositories.validate_ids(list(payload.repository_ids))
+        if payload.repository_ids or payload.repository_paths:
+            self.repositories.validate_ids(list(payload.repository_ids), payload.repository_paths)
         if payload.agent_ids:
             self.agents.validate_ids(list(payload.agent_ids))
         fingerprint = request_fingerprint({"op": "board.create", "payload": payload.model_dump()})
@@ -311,7 +320,9 @@ class BoardService:
             # Links first: a crash before the board turns active leaves it in "maintenance", which
             # the dashboard shows, instead of an active board that silently analyses nothing.
             if payload.repository_ids:
-                self.repositories.set_board_links(board_id, payload.repository_ids)
+                self.repositories.set_board_links(
+                    board_id, payload.repository_ids, payload.repository_paths
+                )
             if payload.agent_ids:
                 self.agents.set_board_agents(board_id, payload.agent_ids)
             self._activate(board_id)
@@ -361,13 +372,17 @@ class BoardService:
             changes["description"] = payload.description
             before["description"] = row.description
         repository_ids = payload.repository_ids
+        paths = payload.repository_paths
+        if repository_ids is None and paths is not None:
+            # Globs alone keep the selection and replace the globs of the links the board has.
+            repository_ids = [link.repository_id for link in self._repository_links(board_id)]
         if repository_ids is not None:
-            self.repositories.validate_ids(list(repository_ids))
+            self.repositories.validate_ids(list(repository_ids), paths)
         agent_ids = payload.agent_ids
         if agent_ids is not None:
             self.agents.validate_ids(list(agent_ids))
         if not changes:
-            self._relink(board_id, repository_ids, agent_ids)
+            self._relink(board_id, repository_ids, agent_ids, paths)
             if repository_ids is not None or agent_ids is not None:
                 return self.get(board_id)
             return self.serialize(row)
@@ -375,14 +390,18 @@ class BoardService:
         with self.boards.writer(board_id) as board:
             after = dict(changes)
             self._log(board, actor, "board.updated", board_id, {"before": before, "after": after})
-        self._relink(board_id, repository_ids, agent_ids)
+        self._relink(board_id, repository_ids, agent_ids, paths)
         return self.get(board_id)
 
     def _relink(
-        self, board_id: str, repository_ids: list[str] | None, agent_ids: list[str] | None
+        self,
+        board_id: str,
+        repository_ids: list[str] | None,
+        agent_ids: list[str] | None,
+        paths: Mapping[str, RepositoryPaths] | None,
     ) -> None:
         if repository_ids is not None:
-            self.repositories.set_board_links(board_id, list(repository_ids))
+            self.repositories.set_board_links(board_id, list(repository_ids), paths)
         if agent_ids is not None:
             self.agents.set_board_agents(board_id, list(agent_ids))
 

@@ -17,6 +17,16 @@ export interface Board {
   card_count: number;
   repository_ids: string[];
   agent_ids: string[];
+  /** The globs of each linked repository that has any; a repository without an entry is read whole. */
+  repository_paths: Record<string, RepositoryPaths>;
+}
+
+/** Which files of one linked repository a Loop's analysis reads; both empty reads all of them. */
+export interface RepositoryPaths {
+  /** When not empty, only files one of these globs matches are read. */
+  focus_paths: string[];
+  /** Files one of these globs matches are never read. */
+  exclude_paths: string[];
 }
 
 export interface BoardList {

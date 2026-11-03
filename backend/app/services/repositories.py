@@ -22,7 +22,7 @@ mirror is passed in too; without one, a ``git_https`` check reports ``git_missin
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import NotRequired, Protocol, TypedDict, TypeIs
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -40,12 +40,14 @@ from ..core.secrets import (
     seal_secret,
     secret_hint,
 )
-from ..db.generated.registry import BoardRepositoriesRow, RepositoriesRow
+from ..db.generated.registry import RepositoriesRow
 from ..repositories.code_repositories import MirrorRecord, RepositoryChanges
 from ..repositories.registry import RegistryUnitOfWork
+from ..schemas.boards import RepositoryPaths
 from ..schemas.repositories import RepositoryCreate, RepositoryUpdate
 from .repo_mirror import RemoteHead
 from .repo_mirror_git import ERROR_TEXT, MirrorError, git_url_problem, valid_branch
+from .repository_links import link_paths, replace_links, require_selected
 
 logger = logging.getLogger("tralala.repositories")
 
@@ -86,6 +88,9 @@ class RepositoryEntry(TypedDict):
     updated_at: str
     has_token: bool
     boards: list[BoardReference]
+    focus_paths: NotRequired[list[str]]
+    """With ``exclude_paths``, only in ``for_board``: the board link's globs."""
+    exclude_paths: NotRequired[list[str]]
 
 
 class CheckOutcome(TypedDict):
@@ -334,30 +339,41 @@ class RepositoryService:
         )
 
     def for_board(self, board_id: str) -> list[RepositoryEntry]:
-        """Enabled repositories the board selected, for the analysis context."""
-        return [record for record in self.list(board_id=board_id) if record["enabled"]]
+        """Enabled repositories the board selected, for the analysis context, each with the globs
+        its link reads the snapshot through."""
+        with self.store.reader() as repos:
+            links = {link.repository_id: link for link in repos.repository_links.links(board_id)}
+        entries = [record for record in self.list(board_id=board_id) if record["enabled"]]
+        for entry in entries:
+            link = links.get(entry["id"])
+            if link is not None:
+                paths = link_paths(link)
+                entry["focus_paths"] = paths["focus_paths"]
+                entry["exclude_paths"] = paths["exclude_paths"]
+        return entries
 
     # --- board links -----------------------------------------------------------------------------
 
-    def validate_ids(self, repository_ids: list[str]) -> None:
-        """Every id must exist before it is written to a board."""
+    def validate_ids(
+        self, repository_ids: list[str], paths: Mapping[str, RepositoryPaths] | None = None
+    ) -> None:
+        """Every id must exist before it is written to a board, and globs only go with one."""
+        require_selected(repository_ids, paths)
         with self.store.reader() as repos:
             for repository_id in repository_ids:
                 if repos.code_repositories.get(repository_id) is None:
                     raise NotFound("Repository not found", code="repository_not_found")
 
-    def set_board_links(self, board_id: str, repository_ids: list[str]) -> None:
-        """Replace a board's selection; called after the board row exists."""
-        self.validate_ids(repository_ids)
-        now = self._clock()
-        with self.store.writer() as repos:
-            repos.repository_links.clear(board_id)
-            for repository_id in dict.fromkeys(repository_ids):
-                repos.repository_links.add(
-                    BoardRepositoriesRow(
-                        board_id=board_id, repository_id=repository_id, created_at=now
-                    )
-                )
+    def set_board_links(
+        self,
+        board_id: str,
+        repository_ids: list[str],
+        paths: Mapping[str, RepositoryPaths] | None = None,
+    ) -> None:
+        """Replace a board's selection; called after the board row exists. Without ``paths`` a
+        repository that stays linked keeps its globs (``repository_links.replace_links``)."""
+        self.validate_ids(repository_ids, paths)
+        replace_links(self.store, board_id, repository_ids, paths, now=self._clock())
 
     # --- commands --------------------------------------------------------------------------------
 

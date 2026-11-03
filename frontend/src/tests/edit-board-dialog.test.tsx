@@ -10,6 +10,7 @@ const DRAFT: BoardEditDraft = {
   name: "Platform",
   description: "",
   repositoryIds: [],
+  repositoryPaths: {},
   agentIds: [],
 };
 

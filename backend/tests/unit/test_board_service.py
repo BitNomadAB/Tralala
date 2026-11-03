@@ -32,7 +32,7 @@ from app.core.errors import (
 from app.db.generated.board import BoardLoopDefaultsRow, LabelsRow
 from app.db.generated.registry import BoardRepositoriesRow, IdempotencyRecordsRow
 from app.repositories.board_files import DatabaseProblem, ProblemReason
-from app.schemas.boards import BoardCreate, BoardUpdate
+from app.schemas.boards import BoardCreate, BoardUpdate, RepositoryPaths
 from app.services.agents import AgentService
 from app.services.board_stats import BoardStatsCache
 from app.services.boards import (
@@ -58,6 +58,7 @@ from tests.unit.fakes.registry import (
     FakeRegistryUnitOfWork,
     RegistryState,
     agent_row,
+    board_repository_row,
     board_row,
     board_template_row,
     repository_row,
@@ -84,6 +85,7 @@ KEYS = [
     "card_count",
     "repository_ids",
     "agent_ids",
+    "repository_paths",
 ]
 ADMIN = ActorContext(
     actor_id="admin-1",
@@ -222,9 +224,7 @@ def boards(settings: Settings, tmp_path: Path) -> Boards:
 
 
 def link(board_id: str, repository_id: str, created_at: str = CREATED) -> BoardRepositoriesRow:
-    return BoardRepositoriesRow(
-        board_id=board_id, repository_id=repository_id, created_at=created_at
-    )
+    return board_repository_row(board_id, repository_id, created_at=created_at)
 
 
 # --- the registry row ----------------------------------------------------------------------------
@@ -265,6 +265,7 @@ def test_an_entry_is_the_row_its_counters_and_its_selections_in_the_former_key_o
         "repository_ids": ["repo-b", "repo-a"],
         # Chosen at the same moment, so by id.
         "agent_ids": ["agent-a", "agent-b"],
+        "repository_paths": {},
     }
     assert boards.counters.singles == [SOURCE]
 
@@ -387,6 +388,7 @@ def test_a_new_board_gets_its_database_columns_labels_and_links_and_then_turns_a
         "card_count": 0,
         "repository_ids": ["repo-a"],
         "agent_ids": ["agent-a"],
+        "repository_paths": {},
     }
     state = boards.databases.states[board_id]
     assert state.metadata is not None and state.metadata.description == "Sprint work"
@@ -649,6 +651,58 @@ def test_an_edit_without_changes_writes_nothing_and_selections_alone_are_relinke
     assert boards.databases.states[SOURCE].activity == []
     entry = boards.service.update(ADMIN, SOURCE, BoardUpdate(repository_ids=[], agent_ids=[]))
     assert (entry["repository_ids"], entry["agent_ids"]) == ([], [])
+
+
+DOCS_ONLY = RepositoryPaths(focus_paths=["docs/**"], exclude_paths=["docs/old/*"])
+DOCS_ONLY_OUT = {"focus_paths": ["docs/**"], "exclude_paths": ["docs/old/*"]}
+
+
+def test_a_new_board_stores_and_names_the_globs_of_its_links(boards: Boards) -> None:
+    payload = BoardCreate(
+        name="Fresh", repository_ids=["repo-a", "repo-b"], repository_paths={"repo-b": DOCS_ONLY}
+    )
+    entry, _ = boards.service.create(ADMIN, payload)
+    assert (entry["repository_ids"], entry["repository_paths"]) == (
+        ["repo-a", "repo-b"],
+        {"repo-b": DOCS_ONLY_OUT},
+    )
+    listed, _ = boards.service.list(sort="name", order="asc")
+    assert [item["repository_paths"] for item in listed] == [{"repo-b": DOCS_ONLY_OUT}, {}]
+
+
+def test_a_new_board_with_globs_for_a_repository_it_does_not_link_is_refused_first(
+    boards: Boards,
+) -> None:
+    payload = BoardCreate(
+        name="Fresh", repository_ids=["repo-a"], repository_paths={"repo-b": DOCS_ONLY}
+    )
+    with pytest.raises(ValidationFailure) as raised:
+        boards.service.create(ADMIN, payload)
+    assert raised.value.details == {"field": "repository_paths", "repository_ids": ["repo-b"]}
+    assert list(boards.registry.boards) == [SOURCE]
+
+
+def test_an_edit_with_globs_alone_keeps_the_selection_and_replaces_the_globs(
+    boards: Boards,
+) -> None:
+    boards.service.update(ADMIN, SOURCE, BoardUpdate(repository_ids=["repo-a", "repo-b"]))
+    entry = boards.service.update(
+        ADMIN, SOURCE, BoardUpdate(repository_paths={"repo-a": DOCS_ONLY})
+    )
+    assert (entry["repository_ids"], entry["repository_paths"]) == (
+        ["repo-a", "repo-b"],
+        {"repo-a": DOCS_ONLY_OUT},
+    )
+    # A client that only knows repository_ids keeps the globs of what stays linked.
+    entry = boards.service.update(
+        ADMIN, SOURCE, BoardUpdate(name="Renamed", repository_ids=["repo-a"])
+    )
+    assert entry["repository_paths"] == {"repo-a": DOCS_ONLY_OUT}
+    with pytest.raises(ValidationFailure) as raised:
+        boards.service.update(ADMIN, SOURCE, BoardUpdate(repository_paths={"repo-b": DOCS_ONLY}))
+    assert raised.value.details == {"field": "repository_paths", "repository_ids": ["repo-b"]}
+    entry = boards.service.update(ADMIN, SOURCE, BoardUpdate(repository_paths={}))
+    assert (entry["repository_ids"], entry["repository_paths"]) == (["repo-a"], {})
 
 
 def test_an_edit_checks_its_selections_before_it_writes(boards: Boards) -> None:

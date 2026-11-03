@@ -208,6 +208,25 @@ is about. The list replaces the board's previous selection (an empty list detach
 repository); an unknown id is rejected with `404 repository_not_found` before anything is written.
 Every `BoardOut` carries `repository_ids`, which is what the create/edit dialogs show as checkboxes.
 
+Beside it, `repository_paths` steers what a run's snapshot reads of each linked repository:
+`{"<repository_id>": {"focus_paths": ["docs/**"], "exclude_paths": ["docs/archive/**"]}}`. With focus
+paths only the files one of them matches are read; a file an exclude path matches is never read, even
+when a focus path matches it too; a repository without an entry (or with both lists empty) is read
+whole. The globs choose among the files the snapshot would read anyway (build output, dependencies,
+lock files, binaries and images stay skipped) before the usual order and caps apply, so the 200 files
+and the context budget go to what the board asked for. They are matched with Python's `fnmatchcase`
+against the path below the repository root (`docs/guide.md`): case sensitive, and `*` also matches
+`/`, so `docs/*` covers every file below `docs/` and `*.md` every Markdown file at any depth. Each list
+holds at most 20 globs of at most 200 characters; an empty glob, an absolute path (a leading `/` or a
+drive letter), a `..` segment or a backslash is refused with `422 validation_failed` and the `loc` of
+the offending glob (`repository_paths.<repository_id>.focus_paths.<index>`). A key that is not among
+the board's repositories answers `422 validation_failed` with `details.field: "repository_paths"`.
+On `PATCH`, `repository_paths` replaces the globs of every linked repository; leaving it out keeps the
+globs of each repository that stays linked, so a client that only sends `repository_ids` loses
+nothing, and sending it without `repository_ids` keeps the selection. `BoardOut.repository_paths`
+lists the repositories that have globs. A run's snapshot entry repeats the `focus_paths` and
+`exclude_paths` it was read with, so the analysis knows it saw part of the repository.
+
 The same pair applies to `agent_ids`: the agents that work on that board. An empty list means "any
 enabled agent", a non-empty list is enforced at generation time — a run may only use an agent the
 board lists (`422 agent_not_on_board`), and the default pick prefers a board agent. An unknown id is

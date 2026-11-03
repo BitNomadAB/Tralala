@@ -148,6 +148,18 @@ def test_a_mirrored_repository_goes_through_the_same_reader_and_budget() -> None
     assert board.git.commands == ["ls-remote", "clone", "archive"]
 
 
+def test_a_mirrored_repository_is_read_through_its_links_globs() -> None:
+    entry = _entry("app", APP_URL)
+    entry["focus_paths"] = ["docs/*", "src/*"]
+    entry["exclude_paths"] = ["src/*"]
+    board = Board(entry)
+    (steered,) = board.service.for_board("board-1")
+    expected = read_snapshot(_github_shaped(FILES), focus=["docs/*", "src/*"], exclude=["src/*"])
+    assert steered["files"] == [dict(file) for file in expected["files"]]
+    assert [file["path"] for file in expected["files"]] == ["docs/guide.md"]
+    assert (steered["focus_paths"], steered["exclude_paths"]) == (["docs/*", "src/*"], ["src/*"])
+
+
 def test_a_second_run_fetches_and_sees_the_new_commit() -> None:
     board = Board(_entry("app", APP_URL))
     board.service.for_board("board-1")

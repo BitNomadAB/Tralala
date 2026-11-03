@@ -20,6 +20,7 @@ from ..repositories.board import BoardRepositories
 from ..repositories.board_rows import BoardChanges
 from ..repositories.registry import RegistryUnitOfWork
 from .activity import activity_entry
+from .repository_links import LinkPaths
 
 type Counts = tuple[int, int, int]
 """Open Loops, unarchived lists and unarchived cards, in that order."""
@@ -44,6 +45,8 @@ class BoardEntry(TypedDict):
     card_count: int
     repository_ids: list[str]
     agent_ids: list[str]
+    repository_paths: dict[str, LinkPaths]
+    """The focus and exclude globs of each linked repository that has any."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

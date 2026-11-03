@@ -6,6 +6,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { AgentPicker } from "@/features/boards/AgentPicker";
+import { pathsPayload, type RepositoryPathsDrafts } from "@/features/boards/repositoryPaths";
 import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
@@ -30,6 +31,7 @@ export function NewBoardDialog({
   const [description, setDescription] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
+  const [repositoryPaths, setRepositoryPaths] = useState<RepositoryPathsDrafts>({});
   const [agentIds, setAgentIds] = useState<string[]>([]);
   const { data: templates = [] } = useTemplates();
   const selectedTemplate = templates.find((template) => template.id === templateId) ?? null;
@@ -41,6 +43,7 @@ export function NewBoardDialog({
         description: description.trim(),
         template_id: templateId || null,
         repository_ids: repositoryIds,
+        repository_paths: pathsPayload(repositoryPaths, repositoryIds),
         agent_ids: agentIds,
       }),
     onSuccess: (board) => {
@@ -50,6 +53,7 @@ export function NewBoardDialog({
       setDescription("");
       setTemplateId("");
       setRepositoryIds([]);
+      setRepositoryPaths({});
       setAgentIds([]);
       toast.push({ title: "Board created", variant: "success" });
       void navigate(`/boards/${board.id}`);
@@ -71,6 +75,7 @@ export function NewBoardDialog({
         if (!next) {
           setTemplateId("");
           setRepositoryIds([]);
+          setRepositoryPaths({});
           setAgentIds([]);
         }
       }}
@@ -126,7 +131,12 @@ export function NewBoardDialog({
               ) : null}
             </div>
           ) : null}
-          <RepositoryPicker selected={repositoryIds} onChange={setRepositoryIds} />
+          <RepositoryPicker
+            selected={repositoryIds}
+            onChange={setRepositoryIds}
+            paths={repositoryPaths}
+            onPathsChange={setRepositoryPaths}
+          />
           <AgentPicker selected={agentIds} onChange={setAgentIds} />
           <Field label="Description" htmlFor="board-description">
             <Textarea

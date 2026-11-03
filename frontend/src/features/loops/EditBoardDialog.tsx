@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { AgentPicker } from "@/features/boards/AgentPicker";
+import type { RepositoryPathsDrafts } from "@/features/boards/repositoryPaths";
 import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
 
 /** The board's editable settings while the edit dialog is open. */
@@ -9,6 +10,8 @@ export interface BoardEditDraft {
   name: string;
   description: string;
   repositoryIds: string[];
+  /** The focus and exclude globs typed for each repository, by repository id. */
+  repositoryPaths: RepositoryPathsDrafts;
   agentIds: string[];
 }
 
@@ -60,6 +63,8 @@ export function EditBoardDialog({
           <RepositoryPicker
             selected={draft.repositoryIds}
             onChange={(repositoryIds) => onDraftChange({ ...draft, repositoryIds })}
+            paths={draft.repositoryPaths}
+            onPathsChange={(repositoryPaths) => onDraftChange({ ...draft, repositoryPaths })}
             disabled={saving}
           />
           <AgentPicker

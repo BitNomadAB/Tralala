@@ -4,6 +4,7 @@ import type {
   HistorySummary,
   Label,
   Repository,
+  RepositoryPaths,
   RepositoryCheck,
   PageMeta,
 } from "../types";
@@ -36,6 +37,7 @@ export const boardsApi = {
     description?: string;
     template_id?: string | null;
     repository_ids?: string[];
+    repository_paths?: Record<string, RepositoryPaths>;
     agent_ids?: string[];
   }): Promise<Board> {
     return json(await request<Board>("/boards", { method: "POST", body: payload }));
@@ -47,6 +49,7 @@ export const boardsApi = {
       name?: string;
       description?: string;
       repository_ids?: string[];
+      repository_paths?: Record<string, RepositoryPaths>;
       agent_ids?: string[];
     },
   ): Promise<Board> {

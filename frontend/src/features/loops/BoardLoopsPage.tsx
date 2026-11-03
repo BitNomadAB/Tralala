@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
+import { pathsDrafts, pathsPayload } from "@/features/boards/repositoryPaths";
 import { api, api as apiClient } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys, useAgents, useBoard, useLoops } from "@/lib/queries";
@@ -36,6 +37,7 @@ export function BoardLoopsPage() {
     name: "",
     description: "",
     repositoryIds: [],
+    repositoryPaths: {},
     agentIds: [],
   });
 
@@ -81,6 +83,7 @@ export function BoardLoopsPage() {
         name: editDraft.name.trim(),
         description: editDraft.description,
         repository_ids: editDraft.repositoryIds,
+        repository_paths: pathsPayload(editDraft.repositoryPaths, editDraft.repositoryIds),
         agent_ids: editDraft.agentIds,
       }),
     onSuccess: () => {
@@ -154,6 +157,7 @@ export function BoardLoopsPage() {
                 name: board.name,
                 description: board.description,
                 repositoryIds: board.repository_ids,
+                repositoryPaths: pathsDrafts(board.repository_paths),
                 agentIds: board.agent_ids,
               });
               setEditing(true);

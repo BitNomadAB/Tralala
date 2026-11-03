@@ -95,7 +95,13 @@ export function planningDialogHandlers(runs: GenerationRun[] = []) {
       state.requests.push(`${request.method} ${requestPath(request)}`);
     }),
     http.get(apiPath(`/boards/${BOARD_ID}`), () =>
-      ok({ id: BOARD_ID, name: "Platform", agent_ids: [], repository_ids: [] }),
+      ok({
+        id: BOARD_ID,
+        name: "Platform",
+        agent_ids: [],
+        repository_ids: [],
+        repository_paths: {},
+      }),
     ),
     http.get(apiPath("/agents"), () => ok([])),
     http.get(apiPath(`${LOOP_PATH}/documents`), () =>

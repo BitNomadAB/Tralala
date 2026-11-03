@@ -357,6 +357,24 @@ def board_agent_row(board_id: str, agent_id: str, *, created_at: str = CREATED) 
     return BoardAgentsRow(board_id=board_id, agent_id=agent_id, created_at=created_at)
 
 
+def board_repository_row(
+    board_id: str,
+    repository_id: str,
+    *,
+    created_at: str = CREATED,
+    focus_paths: str = "[]",
+    exclude_paths: str = "[]",
+) -> BoardRepositoriesRow:
+    """The link that puts a repository on a board, with its globs as the column stores them."""
+    return BoardRepositoriesRow(
+        board_id=board_id,
+        repository_id=repository_id,
+        created_at=created_at,
+        focus_paths=focus_paths,
+        exclude_paths=exclude_paths,
+    )
+
+
 def repository_row(
     repository_id: str,
     *,
@@ -1131,16 +1149,16 @@ class FakeRepositoryLinkRepository:
         ]
         return sorted(linked, key=lambda entry: nocase(entry.board.name))
 
-    def repository_ids(self, board_id: str) -> list[str]:
+    def links(self, board_id: str) -> list[BoardRepositoriesRow]:
         links = [
             link for link in self._state.repository_links.values() if link.board_id == board_id
         ]
-        return [link.repository_id for link in sorted(links, key=_selection_order)]
+        return sorted(links, key=_selection_order)
 
-    def by_board(self) -> dict[str, list[str]]:
-        grouped: dict[str, list[str]] = {}
+    def by_board(self) -> dict[str, list[BoardRepositoriesRow]]:
+        grouped: dict[str, list[BoardRepositoriesRow]] = {}
         for link in sorted(self._state.repository_links.values(), key=_selection_order):
-            grouped.setdefault(link.board_id, []).append(link.repository_id)
+            grouped.setdefault(link.board_id, []).append(link)
         return grouped
 
     def clear(self, board_id: str) -> None:
