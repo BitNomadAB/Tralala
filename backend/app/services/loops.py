@@ -17,6 +17,7 @@ from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
 from ..schemas.loops import DOCUMENT_KINDS, LOOP_STAGES, LoopCancel, LoopCreate, LoopUpdate
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -44,9 +45,9 @@ def _decode(raw: Any, fallback: Any) -> Any:
 
 
 class LoopService:
-    def __init__(self, board_service: BoardService) -> None:
+    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.settings = board_service.settings
         self.plans: Any = None
         self.cards: Any = None

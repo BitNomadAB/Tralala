@@ -24,6 +24,8 @@ from sqlalchemy import bindparam, text
 
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound
+from ..storage.board_db import BoardDatabaseManager
+from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
 from . import runtime
 from .activity import log_activity
@@ -108,11 +110,14 @@ class MentionService:
         board_service: BoardService,
         agents: AgentService,
         events: EventService | None = None,
+        *,
+        boards: BoardDatabaseManager,
+        registry: Registry,
     ) -> None:
         self.settings = settings
         self.board_service = board_service
-        self.boards = board_service.boards
-        self.registry = board_service.registry
+        self.boards = boards
+        self.registry = registry
         self.agents = agents
         self.events = events
         self._executor = ThreadPoolExecutor(

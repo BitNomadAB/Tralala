@@ -263,11 +263,9 @@ def test_the_card_filters_keep_the_order_the_query_always_had() -> None:
 def test_thread_and_activity_filters_match_the_former_literals() -> None:
     # The list queries became fixed statements in app/repositories/sql/lists.py (GCS-T00c).
     assert sql.where(discussions._THREAD_FILTERS, ["status"]) == " WHERE status = :status"
-    assert sql.where(search._ACTIVITY_FILTERS, {"action": "x", "entity_type": "y"}) == (
-        " WHERE entity_type = :entity_type AND action = :action"
-    )
-    # The agent list's filters moved into app/repositories/sql/agents.py (GCS-T00d), which the
-    # build compiles against the schema; a unit test does not import the SQL repositories.
+    # The agent list's filters moved into app/repositories/sql/agents.py (GCS-T00d), the board
+    # list's and the activity feed's into sql/board_rows.py and sql/activity.py (GCS-T00e); the
+    # build compiles them against the schema, and a unit test does not import the SQL repositories.
 
 
 def test_event_and_approval_identifiers_are_the_fixed_names() -> None:

@@ -12,6 +12,9 @@ from typing import Protocol, TypedDict
 
 from ..db.generated.registry import BoardsRow, BoardStatsRow
 
+# The columns a board list may be sorted by, as the page formats them into its SQL text.
+BOARD_SORTS = ("name", "status", "created_at", "updated_at")
+
 # The columns of ``BoardChanges``, as the update formats them into its SQL text (core/sql.py).
 BOARD_EDITABLE = (
     "name",
@@ -36,6 +39,29 @@ class BoardChanges(TypedDict, total=False):
 
 class BoardRowRepository(Protocol):
     def get(self, board_id: str) -> BoardsRow | None: ...
+
+    def count(self, *, status: str | None, contains: str | None) -> int:
+        """Boards with that status (any when None) whose name or description contains the text
+        (SQLite ``LIKE``: ASCII letters ignore case, ``%`` and ``_`` are wildcards)."""
+        ...
+
+    def page(
+        self,
+        *,
+        status: str | None,
+        contains: str | None,
+        sort: str,
+        descending: bool,
+        limit: int,
+        offset: int,
+    ) -> list[BoardsRow]:
+        """The boards ``count`` counts, ordered by ``sort`` (one of ``BOARD_SORTS``) and then by
+        name, ``limit`` of them from ``offset``."""
+        ...
+
+    def with_status(self, status: str) -> list[BoardsRow]:
+        """Every board in that status, in the table's own order."""
+        ...
 
     def add(self, row: BoardsRow) -> None: ...
 

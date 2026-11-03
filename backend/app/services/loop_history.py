@@ -18,6 +18,7 @@ from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound
 from ..schemas.loops import LegacyImportRequest
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -82,9 +83,9 @@ def _fts_query(value: str) -> str:
 
 
 class LoopHistoryService:
-    def __init__(self, board_service: BoardService) -> None:
+    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
 
     # --- snapshot --------------------------------------------------------------
 
@@ -499,7 +500,7 @@ class LoopHistoryService:
         )
         if not attachments:
             return
-        service = AttachmentService(self.board_service)
+        service = AttachmentService(self.board_service, boards=self.boards)
         total = 0
         for attachment in attachments:
             included = False

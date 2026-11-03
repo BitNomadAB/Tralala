@@ -23,6 +23,7 @@ from sqlalchemy import text
 from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import NotFound
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .boards import BoardService
 
@@ -66,9 +67,9 @@ CARD = "card"
 class EventService:
     """Records discussion and ticket events durably and streams them to live subscribers."""
 
-    def __init__(self, board_service: BoardService) -> None:
+    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self._subscribers: dict[tuple[str, str, str], set[queue.Queue]] = {}
         self._lock = Lock()
 

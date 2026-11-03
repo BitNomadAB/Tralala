@@ -8,13 +8,22 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
 
 from ...core import sql
+from ...db import values
 from ...db.generated.registry import BOARD_STATS_COLUMNS, BOARDS_COLUMNS, BoardsRow, BoardStatsRow
-from ..board_rows import BOARD_EDITABLE, BoardChanges
+from ..board_rows import BOARD_EDITABLE, BOARD_SORTS, BoardChanges
 
-_BOARD = text(
-    f"SELECT {sql.column_list(BOARDS_COLUMNS)}"  # noqa: S608 - from BOARDS_COLUMNS
-    " FROM boards WHERE id = :id"
+# What the board list formats into its SQL text (see core/sql.py).
+_BOARD_FILTERS: sql.Filters = (
+    ("status", "status = :status"),
+    ("contains", "(name LIKE :contains OR description LIKE :contains)"),
 )
+
+_SELECT_BOARDS = (
+    f"SELECT {sql.column_list(BOARDS_COLUMNS)}"  # noqa: S608 - from BOARDS_COLUMNS
+    " FROM boards"
+)
+_BOARD = text(f"{_SELECT_BOARDS} WHERE id = :id")
+_WITH_STATUS = text(f"{_SELECT_BOARDS} WHERE status = :status")
 _ADD_BOARD = text(
     "INSERT INTO boards"
     " (id, name, description, status, created_at, updated_at, archived_at, schema_version,"
@@ -47,6 +56,51 @@ class SqlBoardRowRepository:
     def get(self, board_id: str) -> BoardsRow | None:
         row = self._connection.execute(_BOARD, {"id": board_id}).mappings().first()
         return None if row is None else BoardsRow.from_mapping(row)
+
+    @staticmethod
+    def _filters(status: str | None, contains: str | None) -> dict[str, str]:
+        parameters: dict[str, str] = {}
+        if status is not None:
+            parameters["status"] = status
+        if contains is not None:
+            parameters["contains"] = f"%{contains}%"
+        return parameters
+
+    def count(self, *, status: str | None, contains: str | None) -> int:
+        parameters = self._filters(status, contains)
+        where = sql.where(_BOARD_FILTERS, parameters)
+        statement = text(
+            f"SELECT COUNT(*) AS total FROM boards{where}"  # noqa: S608 - from _BOARD_FILTERS
+        )
+        row = self._connection.execute(statement, parameters).mappings().one()
+        return values.integer(row, "total")
+
+    def page(
+        self,
+        *,
+        status: str | None,
+        contains: str | None,
+        sort: str,
+        descending: bool,
+        limit: int,
+        offset: int,
+    ) -> list[BoardsRow]:
+        parameters = self._filters(status, contains)
+        where = sql.where(_BOARD_FILTERS, parameters)
+        column = sql.identifier(sort, BOARD_SORTS)
+        direction = "DESC" if descending else "ASC"
+        statement = text(
+            f"{_SELECT_BOARDS}{where}"
+            f" ORDER BY {column} {direction}, name LIMIT :limit OFFSET :offset"
+        )
+        result = self._connection.execute(
+            statement, {**parameters, "limit": limit, "offset": offset}
+        ).mappings()
+        return [BoardsRow.from_mapping(row) for row in result]
+
+    def with_status(self, status: str) -> list[BoardsRow]:
+        result = self._connection.execute(_WITH_STATUS, {"status": status}).mappings()
+        return [BoardsRow.from_mapping(row) for row in result]
 
     def add(self, row: BoardsRow) -> None:
         self._connection.execute(

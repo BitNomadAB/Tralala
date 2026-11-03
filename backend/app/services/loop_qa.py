@@ -22,6 +22,7 @@ from ..schemas.loops import (
     QaResultSubmission,
     QaScenario,
 )
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -93,9 +94,11 @@ class LoopQaService:
         loop_service: LoopService,
         history_service: LoopHistoryService,
         links: LoopWorkflowLinks,
+        *,
+        boards: BoardDatabaseManager,
     ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.loops = loop_service
         self.history = history_service
         self.links = links

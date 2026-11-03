@@ -26,6 +26,7 @@ from ..schemas.loops import (
     QaInstructions,
     ScopeResetRequest,
 )
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -175,9 +176,11 @@ class LoopDocumentService:
         board_service: BoardService,
         loop_service: LoopService,
         plan_service: LoopPlanService,
+        *,
+        boards: BoardDatabaseManager,
     ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.loops = loop_service
         self.plans = plan_service
 

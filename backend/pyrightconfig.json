@@ -2,9 +2,11 @@
   "include": [
     "app/db",
     "app/repositories",
+    "app/services/activity.py",
     "app/services/agents.py",
     "app/services/auth.py",
     "app/services/board_stats.py",
+    "app/services/boards.py",
     "app/services/lists.py",
     "app/services/ordering.py",
     "app/services/repositories.py",
@@ -15,9 +17,11 @@
   "strict": [
     "app/db",
     "app/repositories",
+    "app/services/activity.py",
     "app/services/agents.py",
     "app/services/auth.py",
     "app/services/board_stats.py",
+    "app/services/boards.py",
     "app/services/lists.py",
     "app/services/ordering.py",
     "app/services/repositories.py",

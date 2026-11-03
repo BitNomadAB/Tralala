@@ -16,6 +16,7 @@ from sqlalchemy import text
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure
 from ..schemas.loops import PlanPayload, PlanTicket
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -33,9 +34,15 @@ def _is_uuid(value: str) -> bool:
 
 
 class LoopPlanService:
-    def __init__(self, board_service: BoardService, loop_service: LoopService) -> None:
+    def __init__(
+        self,
+        board_service: BoardService,
+        loop_service: LoopService,
+        *,
+        boards: BoardDatabaseManager,
+    ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.loops = loop_service
 
     # --- validation ------------------------------------------------------------

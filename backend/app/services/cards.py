@@ -19,6 +19,8 @@ from ..core.context import ActorContext
 from ..core.dates import parse_due_filter
 from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
 from ..schemas.cards import BulkCardCreate, CardCreate, CardMove, CardUpdate
+from ..storage.board_db import BoardDatabaseManager
+from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -83,9 +85,13 @@ class CardService:
         board_service: BoardService,
         loop_service: Any | None = None,
         plan_service: Any | None = None,
+        *,
+        boards: BoardDatabaseManager,
+        registry: Registry,
     ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
+        self.registry = registry
         self.settings = board_service.settings
         self.loops = loop_service
         self.plans = plan_service
@@ -298,7 +304,9 @@ class CardService:
         from .subresources import ChecklistService
 
         card = self.get(board_id, loop_id, card_id)
-        card["checklists"] = ChecklistService(self.board_service).list(board_id, card_id)
+        card["checklists"] = ChecklistService(self.board_service, boards=self.boards).list(
+            board_id, card_id
+        )
         return card
 
     # --- mutations -------------------------------------------------------------
@@ -372,7 +380,7 @@ class CardService:
 
     def _resolve_assignee(self, assignee_id: str) -> dict[str, Any]:
         """Validate a human actor or an enabled registry agent as the primary assignee."""
-        registry = self.board_service.registry
+        registry = self.registry
         person = registry.read_one(
             "SELECT id, type, name FROM actors WHERE id = :id AND disabled_at IS NULL",
             {"id": assignee_id},

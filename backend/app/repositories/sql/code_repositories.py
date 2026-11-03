@@ -58,6 +58,13 @@ _LINKED_BOARDS = text(
     " FROM board_repositories l JOIN boards b ON b.id = l.board_id"
     " ORDER BY b.name COLLATE NOCASE"
 )
+_BOARD_REPOSITORY_IDS = text(
+    "SELECT repository_id FROM board_repositories WHERE board_id = :id"
+    " ORDER BY created_at, repository_id"
+)
+_ALL_BOARD_REPOSITORIES = text(
+    "SELECT board_id, repository_id FROM board_repositories ORDER BY created_at, repository_id"
+)
 _CLEAR_LINKS = text("DELETE FROM board_repositories WHERE board_id = :id")
 _ADD_LINK = text(
     "INSERT INTO board_repositories (board_id, repository_id, created_at)"
@@ -144,6 +151,18 @@ class SqlRepositoryLinkRepository:
             )
             for row in self._connection.execute(_LINKED_BOARDS).mappings()
         ]
+
+    def repository_ids(self, board_id: str) -> list[str]:
+        result = self._connection.execute(_BOARD_REPOSITORY_IDS, {"id": board_id}).mappings()
+        return [values.text(row, "repository_id") for row in result]
+
+    def by_board(self) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for row in self._connection.execute(_ALL_BOARD_REPOSITORIES).mappings():
+            grouped.setdefault(values.text(row, "board_id"), []).append(
+                values.text(row, "repository_id")
+            )
+        return grouped
 
     def clear(self, board_id: str) -> None:
         self._connection.execute(_CLEAR_LINKS, {"id": board_id})

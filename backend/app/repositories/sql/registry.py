@@ -18,6 +18,7 @@ from ..accounts import (
 from ..agents import AgentLinkRepository, AgentRepository, RoleTemplateRepository
 from ..board_rows import BoardRowRepository, BoardStatsRepository
 from ..code_repositories import CodeRepositoryRepository, RepositoryLinkRepository
+from ..idempotency import RegistryIdempotencyRepository
 from ..registry import RegistryUnitOfWork
 from ..templates import BoardTemplateRepository
 from .accounts import (
@@ -30,6 +31,7 @@ from .accounts import (
 from .agents import SqlAgentLinkRepository, SqlAgentRepository, SqlRoleTemplateRepository
 from .board_rows import SqlBoardRowRepository, SqlBoardStatsRepository
 from .code_repositories import SqlCodeRepositoryRepository, SqlRepositoryLinkRepository
+from .idempotency import SqlRegistryIdempotencyRepository
 from .templates import SqlBoardTemplateRepository
 
 
@@ -52,6 +54,9 @@ class SqlRegistryRepositories:
         self.agent_links: AgentLinkRepository = SqlAgentLinkRepository(connection)
         self.code_repositories: CodeRepositoryRepository = SqlCodeRepositoryRepository(connection)
         self.repository_links: RepositoryLinkRepository = SqlRepositoryLinkRepository(connection)
+        self.idempotency: RegistryIdempotencyRepository = SqlRegistryIdempotencyRepository(
+            connection
+        )
 
 
 class SqlRegistryUnitOfWork(RegistryUnitOfWork):

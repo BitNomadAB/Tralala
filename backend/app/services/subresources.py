@@ -19,6 +19,8 @@ from ..schemas.subresources import (
     LabelCreate,
     LabelUpdate,
 )
+from ..storage.board_db import BoardDatabaseManager
+from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -44,9 +46,9 @@ _AGENT_NAMES = text("SELECT id, name FROM agents WHERE id IN :ids").bindparams(
 
 
 class LabelService:
-    def __init__(self, board_service: BoardService) -> None:
+    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
 
     def list(self, board_id: str) -> list[dict[str, Any]]:
         self.board_service.require_row(board_id)
@@ -124,9 +126,9 @@ class LabelService:
 
 
 class ChecklistService:
-    def __init__(self, board_service: BoardService) -> None:
+    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
 
     def _card(self, conn: Any, card_id: str) -> dict[str, Any]:
         card = one(conn, "SELECT * FROM cards WHERE id = :id", {"id": card_id})
@@ -368,10 +370,12 @@ class ChecklistService:
 
 
 class CommentService:
-    def __init__(self, board_service: BoardService) -> None:
+    def __init__(
+        self, board_service: BoardService, *, boards: BoardDatabaseManager, registry: Registry
+    ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
-        self.registry = board_service.registry
+        self.boards = boards
+        self.registry = registry
         self.mentions: Any = None
 
     def _decorate(self, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:

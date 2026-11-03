@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from sqlalchemy import text
 
 from ..core import sql
 from ..core.errors import NotFound
+from ..storage.board_db import BoardDatabaseManager
+from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
+from .activity import activity_feed
 from .boards import BoardService
 from .cards import CardService
 from .common import LABEL_JOIN, decorate_cards, rows
@@ -28,12 +30,6 @@ _CARD_SEARCH_FILTERS: sql.Filters = (
     ("overdue", "c.due_at IS NOT NULL AND c.due_at < :now AND c.completed_at IS NULL"),
     ("list", "c.list_id = :list_id"),
 )
-_ACTIVITY_FILTERS: sql.Filters = (
-    ("entity_type", "entity_type = :entity_type"),
-    ("entity_id", "entity_id = :entity_id"),
-    ("actor_type", "actor_type = :actor_type"),
-    ("action", "action = :action"),
-)
 
 
 def _fts_query(value: str) -> str:
@@ -43,10 +39,18 @@ def _fts_query(value: str) -> str:
 
 
 class SearchService:
-    def __init__(self, board_service: BoardService, card_service: CardService) -> None:
+    def __init__(
+        self,
+        board_service: BoardService,
+        card_service: CardService,
+        *,
+        boards: BoardDatabaseManager,
+        registry: Registry,
+    ) -> None:
         self.board_service = board_service
         self.card_service = card_service
-        self.boards = board_service.boards
+        self.boards = boards
+        self.registry = registry
 
     def board(
         self,
@@ -149,7 +153,7 @@ class SearchService:
     def global_search(
         self, *, q: str, limit_per_loop: int = 10, max_boards: int = 25
     ) -> dict[str, Any]:
-        boards = self.board_service.registry.read(
+        boards = self.registry.read(
             "SELECT id, name FROM boards WHERE status = 'active' ORDER BY updated_at DESC"
             " LIMIT :limit",
             {"limit": max_boards},
@@ -185,49 +189,5 @@ class SearchService:
         }
 
 
-def activity_feed(
-    board_id: str,
-    board_service: BoardService,
-    *,
-    entity_type: str | None = None,
-    entity_id: str | None = None,
-    actor_type: str | None = None,
-    action: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> tuple[list[dict[str, Any]], int]:
-    board_service.require_row(board_id)
-    params: dict[str, Any] = {}
-    if entity_type:
-        params["entity_type"] = entity_type
-    if entity_id:
-        params["entity_id"] = entity_id
-    if actor_type:
-        params["actor_type"] = actor_type
-    if action:
-        params["action"] = action
-    where = sql.where(_ACTIVITY_FILTERS, params)
-    with board_service.boards.reader(board_id) as conn:
-        total = conn.execute(
-            text(
-                "SELECT COUNT(*) FROM activity_log"  # noqa: S608 - from _ACTIVITY_FILTERS
-                f"{where}"
-            ),
-            params,
-        ).scalar_one()
-        records = rows(
-            conn,
-            f"SELECT * FROM activity_log{where}"  # noqa: S608 - from _ACTIVITY_FILTERS
-            " ORDER BY timestamp DESC, id LIMIT :limit OFFSET :offset",
-            {**params, "limit": limit, "offset": offset},
-        )
-    items = []
-    for record in records:
-        entry = dict(record)
-        raw = entry.pop("changes_json", "{}")
-        try:
-            entry["changes"] = json.loads(raw)
-        except (TypeError, ValueError):
-            entry["changes"] = {}
-        items.append(entry)
-    return items, int(total)
+# The activity route imports the feed from here.
+__all__ = ["SearchService", "activity_feed"]

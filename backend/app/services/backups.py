@@ -11,6 +11,7 @@ from typing import Any
 from ..core.context import ActorContext
 from ..core.errors import NotFound, ValidationFailure
 from ..core.platform import remove_file, retry_io
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import snapshot_database, utcnow
 from .boards import BoardService
 from .common import archive_file_name
@@ -31,9 +32,9 @@ def is_backup_name(name: str) -> bool:
 
 
 class BackupService:
-    def __init__(self, board_service: BoardService) -> None:
+    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.settings = board_service.settings
 
     def _directory(self, board_id: str) -> Path:

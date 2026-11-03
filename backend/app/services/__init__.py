@@ -5,19 +5,20 @@ import logging
 
 from ..core.config import Settings
 from ..core.errors import NotFound, ServiceUnavailable
-from ..repositories.sql.board import SqlBoardUnitOfWork
+from ..repositories.sql.board import SqlBoardUnitOfWork, board_files, board_migrator
 from ..repositories.sql.registry import SqlRegistryUnitOfWork
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.migration_manager import MigrationManager, MigrationReport
 from ..storage.process_lock import DataDirectoryLock
 from ..storage.registry import Registry
+from ..storage.schema import runner
 from .agents import AgentService, RoleTemplateService
 from .attachments import AttachmentService
 from .auth import AuthService
 from .backup_scheduler import BackupScheduler
 from .backups import BackupService
 from .board_stats import BoardStatsCache
-from .boards import BoardService
+from .boards import BoardSchema, BoardService
 from .cards import CardService
 from .discussions import DiscussionService
 from .events import EventService
@@ -59,23 +60,36 @@ class Services:
         # asking every service to remember to invalidate.
         self.boards.on_write = self.board_stats.invalidate
         self.migrations = MigrationManager(settings, self.registry, self.boards)
-        self.board = BoardService(
-            settings, self.registry, self.boards, self.migrations, stats=self.board_stats
-        )
-        self.template = TemplateService(self.registry_store, self.board_store, self.board)
-        self.board.templates = self.template
         self.role_templates = RoleTemplateService(self.registry_store)
         self.agent = AgentService(settings, self.registry_store)
         self.repository = RepositoryService(settings, self.registry_store)
         self.repo_snapshot = RepositorySnapshotService(self.repository)
-        self.board.repositories = self.repository
-        self.board.agents = self.agent
-        self.loop = LoopService(self.board)
-        self.loop_plan = LoopPlanService(self.board, self.loop)
-        self.loop_document = LoopDocumentService(self.board, self.loop, self.loop_plan)
+        self.board = BoardService(
+            settings,
+            self.registry_store,
+            self.board_store,
+            board_files(self.boards),
+            migrations=board_migrator(self.migrations),
+            schema=BoardSchema(
+                head_revision=runner.head_revision("board"),
+                version=runner.revision_count("board"),
+            ),
+            stats=self.board_stats,
+            agents=self.agent,
+            repositories=self.repository,
+        )
+        self.template = TemplateService(self.registry_store, self.board_store, self.board)
+        self.board.templates = self.template
+        # The services below that take ``boards`` (and ``registry``) are not converted to the
+        # repositories yet (GCS-T00e..g) and still open connections themselves.
+        self.loop = LoopService(self.board, boards=self.boards)
+        self.loop_plan = LoopPlanService(self.board, self.loop, boards=self.boards)
+        self.loop_document = LoopDocumentService(
+            self.board, self.loop, self.loop_plan, boards=self.boards
+        )
         self.loop_links = LoopWorkflowLinks()
         self.loop_agents = LoopAgentService(self.boards, self.agent)
-        self.loop_history = LoopHistoryService(self.board)
+        self.loop_history = LoopHistoryService(self.board, boards=self.boards)
         self.loop_generation = LoopGenerationService(
             self.board,
             self.loop,
@@ -84,9 +98,11 @@ class Services:
             self.agent,
             self.loop_agents,
             snapshots=self.repo_snapshot,
+            boards=self.boards,
+            registry=self.registry,
         )
         self.loop_qa = LoopQaService(
-            self.board, self.loop, self.loop_history, self.loop_links
+            self.board, self.loop, self.loop_history, self.loop_links, boards=self.boards
         )
         self.loop_links.bind(
             start_generation=self.loop_generation.start,
@@ -94,27 +110,40 @@ class Services:
         )
         self.loop.plans = self.loop_plan
         self.list = ListService(self.board, self.board_store)
-        self.card = CardService(self.board, self.loop, self.loop_plan)
+        self.card = CardService(
+            self.board, self.loop, self.loop_plan, boards=self.boards, registry=self.registry
+        )
         self.loop.cards = self.card
-        self.label = LabelService(self.board)
-        self.checklist = ChecklistService(self.board)
-        self.comment = CommentService(self.board)
-        self.search = SearchService(self.board, self.card)
-        self.backup = BackupService(self.board)
+        self.label = LabelService(self.board, boards=self.boards)
+        self.checklist = ChecklistService(self.board, boards=self.boards)
+        self.comment = CommentService(self.board, boards=self.boards, registry=self.registry)
+        self.search = SearchService(
+            self.board, self.card, boards=self.boards, registry=self.registry
+        )
+        self.backup = BackupService(self.board, boards=self.boards)
         self.backup_scheduler = BackupScheduler(
             self.backup,
+            registry=self.registry,
             interval_hours=settings.backup_interval_hours,
             keep=settings.backup_keep,
         )
-        self.attachment = AttachmentService(self.board)
+        self.attachment = AttachmentService(self.board, boards=self.boards)
         self.auth = AuthService(settings, self.registry_store)
-        self.discussion = DiscussionService(self.board, self.agent)
-        self.event = EventService(self.board)
-        self.orchestrator = Orchestrator(settings, self.board, self.event)
-        self.run = RunService(settings, self.board, self.orchestrator, self.event)
+        self.discussion = DiscussionService(
+            self.board, self.agent, boards=self.boards, registry=self.registry
+        )
+        self.event = EventService(self.board, boards=self.boards)
+        self.orchestrator = Orchestrator(
+            settings, self.board, self.event, boards=self.boards, registry=self.registry
+        )
+        self.run = RunService(
+            settings, self.board, self.orchestrator, self.event, boards=self.boards
+        )
         self.discussion.runs = self.run
         self.discussion.events = self.event
-        self.mention = MentionService(settings, self.board, self.agent, self.event)
+        self.mention = MentionService(
+            settings, self.board, self.agent, self.event, boards=self.boards, registry=self.registry
+        )
         self.comment.mentions = self.mention
         self.data_lock = DataDirectoryLock(settings.data_dir)
         self.migration_reports: list[MigrationReport] = []

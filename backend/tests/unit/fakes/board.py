@@ -8,13 +8,23 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from app.core.errors import Conflict, NotFound, ServiceUnavailable
-from app.db.generated.board import ActivityLogRow, CardsRow, LabelsRow, ListsRow, LoopsRow
-from app.repositories.activity import ActivityRepository
+from app.db.generated.board import (
+    ActivityLogRow,
+    BoardLoopDefaultsRow,
+    BoardMetadataRow,
+    CardsRow,
+    LabelsRow,
+    ListsRow,
+    LoopsRow,
+)
+from app.repositories.activity import ActivityQuery, ActivityRepository
 from app.repositories.board import BoardUnitOfWork
+from app.repositories.board_metadata import BoardMetadataRepository, LoopDefaultsRepository
 from app.repositories.counters import BoardCounts, CounterRepository
 from app.repositories.labels import LabelRepository
 from app.repositories.lists import ListRepository
 from app.repositories.loops import LoopRepository
+from tests.unit.fakes.registry import ConstraintError
 
 BOARD_ID = "0b6f3c1e-7a52-4d8e-9c41-2f5a6b7c8d9e"
 CREATED = "2026-11-01T09:00:00Z"
@@ -29,14 +39,21 @@ class BoardState:
     cards: dict[str, CardsRow] = field(default_factory=dict[str, CardsRow])
     activity: list[ActivityLogRow] = field(default_factory=list[ActivityLogRow])
     labels: dict[str, LabelsRow] = field(default_factory=dict[str, LabelsRow])
+    metadata: BoardMetadataRow | None = None
+    loop_defaults: BoardLoopDefaultsRow | None = None
+    # What PRAGMA quick_check answers for this database.
+    integrity: str = "ok"
 
     def snapshot(self) -> BoardState:
         return BoardState(
-            dict(self.lists),
-            dict(self.loops),
-            dict(self.cards),
-            list(self.activity),
-            dict(self.labels),
+            lists=dict(self.lists),
+            loops=dict(self.loops),
+            cards=dict(self.cards),
+            activity=list(self.activity),
+            labels=dict(self.labels),
+            metadata=self.metadata,
+            loop_defaults=self.loop_defaults,
+            integrity=self.integrity,
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -45,6 +62,9 @@ class BoardState:
         self.cards = snapshot.cards
         self.activity = snapshot.activity
         self.labels = snapshot.labels
+        self.metadata = snapshot.metadata
+        self.loop_defaults = snapshot.loop_defaults
+        self.integrity = snapshot.integrity
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -237,12 +257,33 @@ class FakeLoopRepository:
         return self._state.loops.get(loop_id)
 
 
+def _matches(entry: ActivityLogRow, query: ActivityQuery) -> bool:
+    return (
+        query.get("entity_type", entry.entity_type) == entry.entity_type
+        and query.get("entity_id", entry.entity_id) == entry.entity_id
+        and query.get("actor_type", entry.actor_type) == entry.actor_type
+        and query.get("action", entry.action) == entry.action
+    )
+
+
 class FakeActivityRepository:
     def __init__(self, state: BoardState) -> None:
         self._state = state
 
     def add(self, entry: ActivityLogRow) -> None:
+        if any(row.id == entry.id for row in self._state.activity):
+            raise ConstraintError(f"activity_log.id {entry.id} exists")
         self._state.activity.append(entry)
+
+    def count(self, query: ActivityQuery) -> int:
+        return sum(1 for entry in self._state.activity if _matches(entry, query))
+
+    def page(self, query: ActivityQuery, *, limit: int, offset: int) -> list[ActivityLogRow]:
+        found = [entry for entry in self._state.activity if _matches(entry, query)]
+        # ORDER BY timestamp DESC, id: the tie-break first, then the stable descending sort.
+        found.sort(key=lambda entry: entry.id)
+        found.sort(key=lambda entry: entry.timestamp, reverse=True)
+        return found[offset : offset + limit]
 
 
 class FakeLabelRepository:
@@ -251,6 +292,37 @@ class FakeLabelRepository:
 
     def all(self) -> list[LabelsRow]:
         return sorted(self._state.labels.values(), key=lambda row: row.name)
+
+    def add(self, row: LabelsRow) -> None:
+        if row.id in self._state.labels:
+            raise ConstraintError(f"labels.id {row.id} exists")
+        if any(label.name == row.name for label in self._state.labels.values()):
+            raise ConstraintError(f"labels.name {row.name} exists")
+        self._state.labels[row.id] = row
+
+
+class FakeBoardMetadataRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def claim(self, board_id: str, *, now: str) -> None:
+        if self._state.metadata is not None:
+            self._state.metadata = self._state.metadata.__replace__(id=board_id, updated_at=now)
+
+    def quick_check(self) -> str:
+        return self._state.integrity
+
+
+class FakeLoopDefaultsRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def add(self, row: BoardLoopDefaultsRow) -> None:
+        if row.id != 1:
+            raise ConstraintError("board_loop_defaults holds one row, id 1")
+        if self._state.loop_defaults is not None:
+            raise ConstraintError("board_loop_defaults.id 1 exists")
+        self._state.loop_defaults = row
 
 
 class FakeCounterRepository:
@@ -277,6 +349,8 @@ class FakeBoardRepositories:
         self.activity: ActivityRepository = FakeActivityRepository(state)
         self.labels: LabelRepository = FakeLabelRepository(state)
         self.counters: CounterRepository = FakeCounterRepository(state)
+        self.metadata: BoardMetadataRepository = FakeBoardMetadataRepository(state)
+        self.loop_defaults: LoopDefaultsRepository = FakeLoopDefaultsRepository(state)
 
 
 class FakeBoardUnitOfWork:

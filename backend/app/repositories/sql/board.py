@@ -8,13 +8,17 @@ from contextlib import contextmanager
 from sqlalchemy.engine import Connection
 
 from ...storage.board_db import BoardDatabaseManager
+from ...storage.migration_manager import MigrationManager
 from ..activity import ActivityRepository
 from ..board import BoardUnitOfWork
+from ..board_files import BoardFiles, BoardMigrator
+from ..board_metadata import BoardMetadataRepository, LoopDefaultsRepository
 from ..counters import CounterRepository
 from ..labels import LabelRepository
 from ..lists import ListRepository
 from ..loops import LoopRepository
 from .activity import SqlActivityRepository
+from .board_metadata import SqlBoardMetadataRepository, SqlLoopDefaultsRepository
 from .counters import SqlCounterRepository
 from .labels import SqlLabelRepository
 from .lists import SqlListRepository
@@ -32,6 +36,8 @@ class SqlBoardRepositories:
         self.activity: ActivityRepository = SqlActivityRepository(connection)
         self.labels: LabelRepository = SqlLabelRepository(connection)
         self.counters: CounterRepository = SqlCounterRepository(connection)
+        self.metadata: BoardMetadataRepository = SqlBoardMetadataRepository(connection)
+        self.loop_defaults: LoopDefaultsRepository = SqlLoopDefaultsRepository(connection)
 
 
 class SqlBoardUnitOfWork(BoardUnitOfWork):
@@ -52,3 +58,13 @@ class SqlBoardUnitOfWork(BoardUnitOfWork):
     def writer(self, board_id: str) -> Generator[SqlBoardRepositories]:
         with self._boards.session(board_id) as connection:
             yield SqlBoardRepositories(connection)
+
+
+def board_files(boards: BoardDatabaseManager) -> BoardFiles:
+    """The manager is the board's files; pyright proves the Protocol here."""
+    return boards
+
+
+def board_migrator(migrations: MigrationManager) -> BoardMigrator:
+    """The Migration Manager migrates a board; pyright proves the Protocol here."""
+    return migrations

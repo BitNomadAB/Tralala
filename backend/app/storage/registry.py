@@ -9,7 +9,6 @@ from sqlalchemy import TextClause, text
 from sqlalchemy.engine import Connection
 
 from ..core.config import Settings
-from ..db.generated.registry import BoardsRow
 from ..repositories.board_rows import BOARD_EDITABLE
 from ..repositories.sql.board_rows import SqlBoardRowRepository
 from .sqlite import create_sqlite_engine, utcnow
@@ -56,31 +55,13 @@ class Registry:
         return rows[0] if rows else None
 
     # --- boards ---------------------------------------------------------------------------------
-    # BoardService and the Migration Manager read and write board rows through these until their
-    # own conversion; the SQL is the board-row repository's, so it exists once.
+    # The Migration Manager reads and writes board rows through these; the SQL is the board-row
+    # repository's, so it exists once.
 
     def board(self, board_id: str) -> dict[str, Any] | None:
         with self.reader() as conn:
             row = SqlBoardRowRepository(conn).get(board_id)
         return None if row is None else asdict(row)
-
-    def insert_board(
-        self, board_id: str, name: str, description: str, status: str, schema_version: int
-    ) -> None:
-        now = utcnow()
-        row = BoardsRow(
-            id=board_id,
-            name=name,
-            description=description,
-            status=status,
-            created_at=now,
-            updated_at=now,
-            archived_at=None,
-            schema_version=schema_version,
-            schema_revision=None,
-        )
-        with self.connect() as conn:
-            SqlBoardRowRepository(conn).add(row)
 
     def update_board(self, board_id: str, **fields: Any) -> None:
         """Write the editable fields among ``fields``; any other name is ignored."""
@@ -89,10 +70,6 @@ class Registry:
             return
         with self.connect() as conn:
             SqlBoardRowRepository(conn).update(board_id, changes, now=utcnow())
-
-    def delete_board_row(self, board_id: str) -> None:
-        with self.connect() as conn:
-            SqlBoardRowRepository(conn).delete(board_id)
 
     def dispose(self) -> None:
         self.engine.dispose()

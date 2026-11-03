@@ -17,6 +17,7 @@ from app.db.generated.registry import (
     BoardsRow,
     BoardStatsRow,
     BoardTemplatesRow,
+    IdempotencyRecordsRow,
     RepositoriesRow,
     RoleTemplatesRow,
     SessionsRow,
@@ -42,7 +43,12 @@ from app.repositories.agents import (
     RoleTemplateChanges,
     RoleTemplateRepository,
 )
-from app.repositories.board_rows import BoardChanges, BoardRowRepository, BoardStatsRepository
+from app.repositories.board_rows import (
+    BOARD_SORTS,
+    BoardChanges,
+    BoardRowRepository,
+    BoardStatsRepository,
+)
 from app.repositories.code_repositories import (
     CodeRepositoryRepository,
     LinkedBoard,
@@ -50,6 +56,7 @@ from app.repositories.code_repositories import (
     RepositoryLinkRepository,
 )
 from app.repositories.errors import ConstraintViolationError
+from app.repositories.idempotency import RegistryIdempotencyRepository
 from app.repositories.registry import RegistryUnitOfWork
 from app.repositories.templates import BoardTemplateRepository
 
@@ -86,7 +93,8 @@ class RegistryState:
     """The rows of the registry, as a test sets them up and the services change them.
 
     Dictionaries keep insertion order, which stands in for SQLite's row order where a statement has
-    no ``ORDER BY``. A board link is keyed by ``(board_id, agent_id | repository_id)``.
+    no ``ORDER BY``. A board link is keyed by ``(board_id, agent_id | repository_id)``, an
+    idempotency record by ``(actor_id, idempotency_key)``.
     """
 
     actors: dict[str, ActorsRow] = field(default_factory=dict[str, ActorsRow])
@@ -114,6 +122,9 @@ class RegistryState:
     repository_links: dict[LinkKey, BoardRepositoriesRow] = field(
         default_factory=dict[LinkKey, BoardRepositoriesRow]
     )
+    idempotency: dict[LinkKey, IdempotencyRecordsRow] = field(
+        default_factory=dict[LinkKey, IdempotencyRecordsRow]
+    )
 
     def snapshot(self) -> RegistryState:
         return RegistryState(
@@ -130,6 +141,7 @@ class RegistryState:
             dict(self.agent_links),
             dict(self.code_repositories),
             dict(self.repository_links),
+            dict(self.idempotency),
         )
 
     def restore(self, snapshot: RegistryState) -> None:
@@ -146,6 +158,7 @@ class RegistryState:
         self.agent_links = snapshot.agent_links
         self.code_repositories = snapshot.code_repositories
         self.repository_links = snapshot.repository_links
+        self.idempotency = snapshot.idempotency
 
 
 def _require_actor(state: RegistryState, actor_id: str) -> None:
@@ -641,12 +654,58 @@ class FakeCredentialRepository:
             self.revoke(credential_id, now=now)
 
 
+def _board_sort_value(row: BoardsRow, column: str) -> str:
+    match column:
+        case "name":
+            return row.name
+        case "status":
+            return row.status
+        case "created_at":
+            return row.created_at
+        case _:
+            return row.updated_at
+
+
 class FakeBoardRowRepository:
     def __init__(self, state: RegistryState) -> None:
         self._state = state
 
     def get(self, board_id: str) -> BoardsRow | None:
         return self._state.boards.get(board_id)
+
+    def _matching(self, status: str | None, contains: str | None) -> list[BoardsRow]:
+        pattern = None if contains is None else f"%{contains}%"
+        return [
+            row
+            for row in self._state.boards.values()
+            if (status is None or row.status == status)
+            and (pattern is None or like(row.name, pattern) or like(row.description, pattern))
+        ]
+
+    def count(self, *, status: str | None, contains: str | None) -> int:
+        return len(self._matching(status, contains))
+
+    def page(
+        self,
+        *,
+        status: str | None,
+        contains: str | None,
+        sort: str,
+        descending: bool,
+        limit: int,
+        offset: int,
+    ) -> list[BoardsRow]:
+        if sort not in BOARD_SORTS:
+            raise ValueError(f"{sort!r} is not an allowed SQL identifier")
+        rows = self._matching(status, contains)
+        # ORDER BY <sort> <direction>, name: two stable sorts, the tie-break first. Every sort
+        # column is NOT NULL text compared by code point, as SQLite's BINARY collation does.
+        rows.sort(key=lambda row: row.name)
+        rows.sort(key=lambda row: _board_sort_value(row, sort), reverse=descending)
+        return rows[offset : offset + limit]
+
+    def with_status(self, status: str) -> list[BoardsRow]:
+        return [row for row in self._state.boards.values() if row.status == status]
 
     def add(self, row: BoardsRow) -> None:
         if row.id in self._state.boards:
@@ -970,6 +1029,18 @@ class FakeRepositoryLinkRepository:
         ]
         return sorted(linked, key=lambda entry: nocase(entry.board.name))
 
+    def repository_ids(self, board_id: str) -> list[str]:
+        links = [
+            link for link in self._state.repository_links.values() if link.board_id == board_id
+        ]
+        return [link.repository_id for link in sorted(links, key=_selection_order)]
+
+    def by_board(self) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for link in sorted(self._state.repository_links.values(), key=_selection_order):
+            grouped.setdefault(link.board_id, []).append(link.repository_id)
+        return grouped
+
     def clear(self, board_id: str) -> None:
         self._state.repository_links = {
             key: link for key, link in self._state.repository_links.items() if key[0] != board_id
@@ -990,6 +1061,18 @@ class FakeRepositoryLinkRepository:
         self._state.repository_links[key] = row
 
 
+class FakeRegistryIdempotencyRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    def get(self, actor_id: str, key: str) -> IdempotencyRecordsRow | None:
+        return self._state.idempotency.get((actor_id, key))
+
+    def put(self, row: IdempotencyRecordsRow) -> None:
+        # INSERT OR REPLACE: the record held for the same actor and key is replaced.
+        self._state.idempotency[(row.actor_id, row.idempotency_key)] = row
+
+
 class FakeRegistryRepositories:
     def __init__(self, state: RegistryState) -> None:
         # Typed as the Protocols: pyright proves each fake implements its repository here.
@@ -1006,6 +1089,9 @@ class FakeRegistryRepositories:
         self.agent_links: AgentLinkRepository = FakeAgentLinkRepository(state)
         self.code_repositories: CodeRepositoryRepository = FakeCodeRepositoryRepository(state)
         self.repository_links: RepositoryLinkRepository = FakeRepositoryLinkRepository(state)
+        self.idempotency: RegistryIdempotencyRepository = FakeRegistryIdempotencyRepository(
+            state
+        )
 
 
 class FakeRegistryUnitOfWork:

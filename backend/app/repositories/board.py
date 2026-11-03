@@ -12,6 +12,7 @@ from contextlib import AbstractContextManager
 from typing import Protocol
 
 from .activity import ActivityRepository
+from .board_metadata import BoardMetadataRepository, LoopDefaultsRepository
 from .counters import CounterRepository
 from .labels import LabelRepository
 from .lists import ListRepository
@@ -35,6 +36,12 @@ class BoardRepositories(Protocol):
 
     @property
     def counters(self) -> CounterRepository: ...
+
+    @property
+    def metadata(self) -> BoardMetadataRepository: ...
+
+    @property
+    def loop_defaults(self) -> LoopDefaultsRepository: ...
 
 
 class BoardUnitOfWork(Protocol):

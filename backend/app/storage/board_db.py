@@ -16,7 +16,7 @@ from ..core.errors import NotFound, ServiceUnavailable
 from ..core.identifiers import canonical_board_id
 from ..core.platform import remove_tree
 from .schema import ensure_fts, runner
-from .sqlite import create_sqlite_engine, utcnow
+from .sqlite import create_sqlite_engine, snapshot_database, utcnow
 
 MAX_CACHED_BOARDS = 64
 
@@ -57,6 +57,10 @@ class BoardDatabaseManager:
     def attachments_dir(self, board_id: str) -> Path:
         """Where one board's uploaded files live; the database and its files are one unit."""
         return self.settings.boards_dir / self.validate_board_id(board_id) / "attachments"
+
+    def snapshot(self, board_id: str, target: Path) -> None:
+        """A consistent copy of the board's database at ``target`` (SQLite's online backup)."""
+        snapshot_database(self.path(board_id), target)
 
     def exists(self, board_id: str) -> bool:
         try:

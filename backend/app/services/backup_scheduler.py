@@ -17,6 +17,7 @@ from threading import Event, Thread
 from typing import Any
 
 from ..core.context import SCOPES, ActorContext
+from ..storage.registry import Registry
 from .backups import BackupService
 
 logger = logging.getLogger("tralala.backups")
@@ -38,8 +39,11 @@ def system_actor() -> ActorContext:
 
 
 class BackupScheduler:
-    def __init__(self, backups: BackupService, *, interval_hours: int, keep: int) -> None:
+    def __init__(
+        self, backups: BackupService, *, registry: Registry, interval_hours: int, keep: int
+    ) -> None:
         self.backups = backups
+        self.registry = registry
         self.interval_hours = int(interval_hours)
         self.keep = int(keep)
         self._stop = Event()
@@ -83,7 +87,7 @@ class BackupScheduler:
         if not self.enabled:
             return report
         actor = system_actor()
-        for row in self.backups.board_service.registry.read(
+        for row in self.registry.read(
             "SELECT id, name FROM boards WHERE status = 'active' ORDER BY name"
         ):
             board_id = str(row["id"])

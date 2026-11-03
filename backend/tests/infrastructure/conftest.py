@@ -20,7 +20,9 @@ from pydantic_settings import SettingsConfigDict
 from sqlalchemy import text
 
 from app.core.config import Settings
+from app.core.dates import utcnow
 from app.db import freshness
+from app.db.generated.registry import BoardsRow
 from app.repositories.sql.board import SqlBoardUnitOfWork
 from app.repositories.sql.registry import SqlRegistryUnitOfWork
 from app.storage.board_db import BoardDatabaseManager
@@ -83,7 +85,21 @@ def first_migration(
 ) -> MigrationReport:
     """The registry migrated from nothing, and one board created at the head of its chain."""
     report = migrations.migrate_registry()
-    registry.insert_board(BOARD_ID, "Infrastructure", "", "active", runner.revision_count("board"))
+    now = utcnow()
+    with SqlRegistryUnitOfWork(registry).writer() as repos:
+        repos.boards.add(
+            BoardsRow(
+                id=BOARD_ID,
+                name="Infrastructure",
+                description="",
+                status="active",
+                created_at=now,
+                updated_at=now,
+                archived_at=None,
+                schema_version=runner.revision_count("board"),
+                schema_revision=None,
+            )
+        )
     boards.create_database(BOARD_ID)
     return report
 

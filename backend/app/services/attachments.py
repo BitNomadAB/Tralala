@@ -18,6 +18,7 @@ from sqlalchemy import text
 from ..core.context import ActorContext
 from ..core.errors import NotFound, ValidationFailure
 from ..core.platform import remove_file, replace_file
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -78,9 +79,9 @@ def _rows(conn: Any, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 class AttachmentService:
-    def __init__(self, board_service: BoardService) -> None:
+    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.settings = board_service.settings
 
     # --- storage -------------------------------------------------------------

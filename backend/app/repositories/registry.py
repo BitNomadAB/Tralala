@@ -21,6 +21,7 @@ from .accounts import (
 from .agents import AgentLinkRepository, AgentRepository, RoleTemplateRepository
 from .board_rows import BoardRowRepository, BoardStatsRepository
 from .code_repositories import CodeRepositoryRepository, RepositoryLinkRepository
+from .idempotency import RegistryIdempotencyRepository
 from .templates import BoardTemplateRepository
 
 
@@ -65,6 +66,9 @@ class RegistryRepositories(Protocol):
 
     @property
     def repository_links(self) -> RepositoryLinkRepository: ...
+
+    @property
+    def idempotency(self) -> RegistryIdempotencyRepository: ...
 
 
 class RegistryUnitOfWork(Protocol):

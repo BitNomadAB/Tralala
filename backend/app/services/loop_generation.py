@@ -21,6 +21,8 @@ from sqlalchemy.exc import IntegrityError
 from ..core.context import ActorContext
 from ..core.errors import ApiError, Conflict, NotFound, ServiceUnavailable, ValidationFailure
 from ..schemas.loops import AnalysisPayload, GenerationRequest, PlanPayload, QaInstructions
+from ..storage.board_db import BoardDatabaseManager
+from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
 from . import runtime
 from .agents import AgentService
@@ -129,10 +131,13 @@ class LoopGenerationService:
         agent_service: AgentService,
         loop_agents: Any | None = None,
         snapshots: Any | None = None,
+        *,
+        boards: BoardDatabaseManager,
+        registry: Registry,
     ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
-        self.registry = board_service.registry
+        self.boards = boards
+        self.registry = registry
         self.settings = board_service.settings
         self.loops = loop_service
         self.documents = document_service
@@ -370,7 +375,7 @@ class LoopGenerationService:
             captured = {
                 "purpose": request.purpose,
                 "instructions": request.instructions,
-                "board_name": self.board_service.require_row(board_id)["name"],
+                "board_name": self.board_service.require_row(board_id).name,
                 "context": context,
                 "context_hash": request_fingerprint(context),
                 "source_revisions": {
