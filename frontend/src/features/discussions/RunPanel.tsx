@@ -1,11 +1,11 @@
-import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Gauge, Pause, Play, Square, Timer } from "lucide-react";
+import { useState } from "react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import type { Discussion, DiscussionRunSummary } from "@/lib/types";
 
@@ -59,7 +59,7 @@ export function RunPanel({
 
   const activeRun = discussion.active_run ?? null;
   const latestRun = discussion.runs?.[0] ?? activeRun;
-  const runState = discussion.run_state ?? "idle";
+  const runState = discussion.run_state;
   const closed = ["approved", "vetoed", "cancelled"].includes(discussion.status);
   const busy = runState === "running";
   const paused = runState === "paused";
@@ -89,21 +89,22 @@ export function RunPanel({
 
   const startMutation = useMutation({
     mutationFn: (input: {
-      rounds?: number;
+      rounds?: number | undefined;
       autonomous: boolean;
-      token_budget?: number;
-      time_budget_seconds?: number;
+      token_budget?: number | undefined;
+      time_budget_seconds?: number | undefined;
     }) => api.startDiscussion(boardId, discussion.id, input),
     onSuccess: (result) => {
       setPlanning(false);
       report(result);
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not start the run",
         description: failureMessage(error),
         variant: "error",
-      }),
+      });
+    },
   });
 
   const controlMutation = useMutation({
@@ -113,21 +114,18 @@ export function RunPanel({
       onChanged();
       toast.push({
         title:
-          action === "pause"
-            ? "Run paused"
-            : action === "resume"
-              ? "Run resumed"
-              : "Run stopped",
+          action === "pause" ? "Run paused" : action === "resume" ? "Run resumed" : "Run stopped",
         description: result.stop_reason ?? undefined,
         variant: action === "stop" ? "error" : "success",
       });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not update the run",
         description: failureMessage(error),
         variant: "error",
-      }),
+      });
+    },
   });
 
   return (
@@ -137,7 +135,9 @@ export function RunPanel({
         <Badge tone={RUN_TONES[runState] ?? "neutral"}>{runState}</Badge>
         <span data-testid="round-counter">
           Rounds {discussion.round_count}
-          {latestRun ? ` · this run ${latestRun.rounds_completed}/${latestRun.rounds_requested}` : ""}
+          {latestRun
+            ? ` · this run ${latestRun.rounds_completed}/${latestRun.rounds_requested}`
+            : ""}
         </span>
         <span className="inline-flex items-center gap-1">
           <Gauge size={12} /> {discussion.tokens_used} tokens
@@ -229,7 +229,11 @@ export function RunPanel({
               });
             }}
           >
-            <Field label="Rounds" htmlFor="run-rounds" hint={`Thread allows ${discussion.max_rounds}.`}>
+            <Field
+              label="Rounds"
+              htmlFor="run-rounds"
+              hint={`Thread allows ${discussion.max_rounds}.`}
+            >
               <Input
                 id="run-rounds"
                 type="number"

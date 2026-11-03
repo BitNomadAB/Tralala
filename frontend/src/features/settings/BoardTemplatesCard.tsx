@@ -1,14 +1,14 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LayoutTemplate, Pencil, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { useTemplates } from "@/lib/queries";
-import { formatDateTime } from "@/lib/utils";
 import type { BoardTemplate } from "@/lib/types";
+import { formatDateTime } from "@/lib/utils";
 
 export function BoardTemplatesCard() {
   const navigate = useNavigate();
@@ -20,23 +20,30 @@ export function BoardTemplatesCard() {
   const deleteMutation = useMutation({
     mutationFn: (template: BoardTemplate) => api.deleteTemplate(template.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["templates"] });
+      void queryClient.invalidateQueries({ queryKey: ["templates"] });
       setDeleting(null);
       toast.push({ title: "Template deleted", variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not delete template",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   return (
     <div className="card-surface p-5">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold">Board templates</h2>
-        <Button size="sm" className="ml-auto" onClick={() => navigate("/settings/templates/new")}>
+        <Button
+          size="sm"
+          className="ml-auto"
+          onClick={() => {
+            void navigate("/settings/templates/new");
+          }}
+        >
           <Plus size={14} /> New template
         </Button>
       </div>
@@ -77,7 +84,9 @@ export function BoardTemplatesCard() {
                     size="sm"
                     variant="secondary"
                     aria-label={`Edit ${template.name}`}
-                    onClick={() => navigate(`/settings/templates/${template.id}`)}
+                    onClick={() => {
+                      void navigate(`/settings/templates/${template.id}`);
+                    }}
                   >
                     <Pencil size={14} /> Edit
                   </Button>

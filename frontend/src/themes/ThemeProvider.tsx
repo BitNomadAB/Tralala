@@ -1,63 +1,17 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/features/auth/AuthProvider";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/features/auth/useAuth";
 import { api } from "@/lib/api";
-
-export type ThemeMode = "dark" | "light" | "system";
-export type ThemeKit = "carenomad" | "matchmap" | "classic";
-
-export const THEME_KITS: { value: ThemeKit; label: string; description: string }[] = [
-  {
-    value: "carenomad",
-    label: "CareNomad",
-    description: "Midnight navy with periwinkle light",
-  },
-  {
-    value: "matchmap",
-    label: "MatchMap",
-    description: "Ink-blue night with ember orange",
-  },
-  {
-    value: "classic",
-    label: "Classic",
-    description: "The original flat palette, no ambient motion",
-  },
-];
-
-const STORAGE_KEY = "tralala-theme";
-const KIT_KEY = "tralala-theme-kit";
-
-interface ThemeContextValue {
-  mode: ThemeMode;
-  kit: ThemeKit;
-  resolved: "dark" | "light";
-  setMode: (mode: ThemeMode) => void;
-  setKit: (kit: ThemeKit) => void;
-}
-
-const ThemeContext = createContext<ThemeContextValue | null>(null);
-
-export function readStoredTheme(): ThemeMode {
-  const stored = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
-  return stored === "light" || stored === "dark" || stored === "system" ? stored : "dark";
-}
-
-export function readStoredKit(): ThemeKit {
-  const stored = typeof localStorage !== "undefined" ? localStorage.getItem(KIT_KEY) : null;
-  return stored === "matchmap" || stored === "carenomad" || stored === "classic"
-    ? stored
-    : "carenomad";
-}
-
-export function resolveTheme(mode: ThemeMode, prefersDark: boolean): "dark" | "light" {
-  if (mode === "system") return prefersDark ? "dark" : "light";
-  return mode;
-}
-
-export function applyTheme(theme: "dark" | "light", kit: ThemeKit = "carenomad"): void {
-  document.documentElement.dataset.theme = theme;
-  document.documentElement.dataset.themeKit = kit;
-}
+import {
+  applyTheme,
+  readStoredKit,
+  readStoredTheme,
+  resolveTheme,
+  storeTheme,
+  type ThemeKit,
+  type ThemeMode,
+} from "./theme";
+import { ThemeContext } from "./useTheme";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const { actor } = useAuth();
@@ -74,7 +28,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const listener = (event: MediaQueryListEvent) => setPrefersDark(event.matches);
+    const listener = (event: MediaQueryListEvent) => {
+      setPrefersDark(event.matches);
+    };
     media.addEventListener("change", listener);
     return () => media.removeEventListener("change", listener);
   }, []);
@@ -83,8 +39,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     applyTheme(resolved, kit);
-    localStorage.setItem(STORAGE_KEY, mode);
-    localStorage.setItem(KIT_KEY, kit);
+    storeTheme(mode, kit);
   }, [mode, kit, resolved]);
 
   // The account's stored preference wins over this browser's cache once it loads.
@@ -135,10 +90,4 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
-}
-
-export function useTheme(): ThemeContextValue {
-  const context = useContext(ThemeContext);
-  if (!context) throw new Error("useTheme must be used within ThemeProvider");
-  return context;
 }

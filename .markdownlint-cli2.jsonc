@@ -1,0 +1,7 @@
+// What `pnpm lint:md` (run from frontend/) checks. The rules themselves live in .markdownlint.jsonc.
+{
+  "globs": ["README.md", "AGENTS.md", "docs/**/*.md", "public_docs/**/*.md"],
+  // Local working documents (the decision log, review reports, loop state) are git-ignored and
+  // never shipped, so they are not linted either.
+  "gitignore": ".gitignore"
+}

@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  failedStepKey,
-  repositoryOutcome,
-  runFailureJson,
-  runSteps,
-} from "@/lib/runPhases";
+import { failedStepKey, repositoryOutcome, runFailureJson, runSteps } from "@/lib/runPhases";
 
 describe("run steps", () => {
   it("shows the first step as active before the server recorded a phase", () => {
@@ -15,8 +10,8 @@ describe("run steps", () => {
   it("marks earlier steps done and the reached step active", () => {
     const steps = runSteps("analysis", { status: "running", phase: "generating" });
     expect(steps.map((step) => step.state)).toEqual(["done", "done", "active"]);
-    expect(steps[2].label).toBe("Generating analysis");
-    expect(runSteps("roadmap", { status: "running", phase: "generating" })[2].label).toBe(
+    expect(steps[2]?.label).toBe("Generating analysis");
+    expect(runSteps("roadmap", { status: "running", phase: "generating" })[2]?.label).toBe(
       "Generating RoadMap",
     );
   });
@@ -61,7 +56,7 @@ describe("run steps", () => {
         ],
       },
     });
-    expect(steps[1].state).toBe("warning");
+    expect(steps[1]?.state).toBe("warning");
   });
 
   it("keeps the tick when the snapshot really was captured", () => {
@@ -81,10 +76,18 @@ describe("run steps", () => {
         ],
       },
     });
-    expect(steps[1].state).toBe("done");
+    expect(steps[1]?.state).toBe("done");
   });
 
-  it("has no failure json unless the run failed", () => {    expect(runFailureJson({ status: "running", phase: "generating", error_code: null, error_message: null })).toBeNull();
+  it("has no failure json unless the run failed", () => {
+    expect(
+      runFailureJson({
+        status: "running",
+        phase: "generating",
+        error_code: null,
+        error_message: null,
+      }),
+    ).toBeNull();
     const json = runFailureJson({
       status: "failed",
       phase: "generating",
@@ -101,7 +104,7 @@ describe("run steps", () => {
 
   it("points at the first step when a run failed before recording one", () => {
     const steps = runSteps("analysis", { status: "failed", phase: null });
-    expect(steps[0].state).toBe("failed");
+    expect(steps[0]?.state).toBe("failed");
     expect(failedStepKey({ status: "failed", phase: null })).toBe("reading_info");
   });
 

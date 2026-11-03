@@ -65,9 +65,7 @@ test.describe("repositories", () => {
     await expect(page.getByRole("heading", { name: "Boards", level: 1 })).toBeVisible();
 
     await page.goto("/settings/repositories");
-    await expect(
-      page.getByText("Only an administrator manages repository access."),
-    ).toBeVisible();
+    await expect(page.getByText("Only an administrator manages repository access.")).toBeVisible();
     await expect(page.getByRole("button", { name: "New repository" })).toHaveCount(0);
   });
 });

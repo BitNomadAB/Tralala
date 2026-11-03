@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { PROVIDER_PRESETS, presetById, presetRequirements } from "@/lib/providers";
+import {
+  PROVIDER_PRESETS,
+  presetById,
+  presetRequirements,
+  type ProviderPreset,
+} from "@/lib/providers";
+
+/** The preset with this id; a missing one fails the test by name instead of as a null error. */
+function preset(id: string): ProviderPreset {
+  const found = presetById(id);
+  if (!found) throw new Error(`no provider preset "${id}"`);
+  return found;
+}
 
 describe("provider presets", () => {
   it("gives every preset a distinct id", () => {
@@ -17,24 +29,24 @@ describe("provider presets", () => {
   });
 
   it("asks for a key only where the provider needs one", () => {
-    expect(presetRequirements(presetById("openai")!).apiKey).toBe("required");
-    expect(presetRequirements(presetById("deepseek")!).apiKey).toBe("required");
-    expect(presetRequirements(presetById("openrouter")!).apiKey).toBe("required");
-    expect(presetRequirements(presetById("ollama")!).apiKey).toBe("not-needed");
-    expect(presetRequirements(presetById("llamacpp")!).apiKey).toBe("not-needed");
-    expect(presetRequirements(presetById("custom")!).apiKey).toBe("not-needed");
+    expect(presetRequirements(preset("openai")).apiKey).toBe("required");
+    expect(presetRequirements(preset("deepseek")).apiKey).toBe("required");
+    expect(presetRequirements(preset("openrouter")).apiKey).toBe("required");
+    expect(presetRequirements(preset("ollama")).apiKey).toBe("not-needed");
+    expect(presetRequirements(preset("llamacpp")).apiKey).toBe("not-needed");
+    expect(presetRequirements(preset("custom")).apiKey).toBe("not-needed");
   });
 
   it("says which providers need a model name at all", () => {
-    expect(presetRequirements(presetById("deepseek")!).model).toBe("required");
-    expect(presetRequirements(presetById("ollama")!).model).toBe("required");
+    expect(presetRequirements(preset("deepseek")).model).toBe("required");
+    expect(presetRequirements(preset("ollama")).model).toBe("required");
     // llama.cpp serves one model and ignores the name; custom is unknown.
-    expect(presetRequirements(presetById("llamacpp")!).model).toBe("optional");
-    expect(presetRequirements(presetById("custom")!).model).toBe("optional");
+    expect(presetRequirements(preset("llamacpp")).model).toBe("optional");
+    expect(presetRequirements(preset("custom")).model).toBe("optional");
   });
 
   it("locks the endpoint only for hosted providers", () => {
-    expect(presetRequirements(presetById("openai")!).endpointLocked).toBe(true);
-    expect(presetRequirements(presetById("ollama")!).endpointLocked).toBe(false);
+    expect(presetRequirements(preset("openai")).endpointLocked).toBe(true);
+    expect(presetRequirements(preset("ollama")).endpointLocked).toBe(false);
   });
 });

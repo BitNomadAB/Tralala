@@ -32,7 +32,7 @@ export function RunPhases({
 }: {
   purpose: "analysis" | "roadmap";
   run: GenerationRun;
-  onDismiss?: () => void;
+  onDismiss?: (() => void) | undefined;
   compact?: boolean;
 }) {
   const steps = runSteps(purpose, run);
@@ -66,7 +66,11 @@ export function RunPhases({
           </button>
         ) : null}
       </div>
-      <ol className={compact ? "flex flex-row flex-wrap gap-2 text-[11px]" : "flex flex-col gap-2 text-xs"}>
+      <ol
+        className={
+          compact ? "flex flex-row flex-wrap gap-2 text-[11px]" : "flex flex-col gap-2 text-xs"
+        }
+      >
         {steps.map((step, index) => {
           const tone =
             step.state === "failed"

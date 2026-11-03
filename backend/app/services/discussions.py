@@ -1,29 +1,63 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict
+from typing import Protocol, TypedDict
 from uuid import uuid4
 
-from sqlalchemy import text
-
 from ..core.context import ActorContext
+from ..core.dates import utcnow
 from ..core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, ValidationFailure
+from ..db.generated.board import (
+    DiscussionMessagesRow,
+    DiscussionOutcomesRow,
+    DiscussionParticipantsRow,
+    DiscussionThreadsRow,
+)
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..repositories.discussions import DiscussionCounts
+from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
-from ..storage.sqlite import utcnow
-from .activity import log_activity
-from .boards import BoardService
-from .common import require_mutable_card
-from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED
+from .activity import activity_entry
+from .agents import RoleSnapshot
+from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED, Event, EventService
+from .loops import ensure_ticket_writable
 from .mentions import extract_mentions
+from .runs import RunEntry, RunService, recent_runs
 
 REVIEW_DECISIONS = {"approve": "approved", "veto": "vetoed", "rework": "rework_requested"}
 # A human message starts one round in these modes; manual threads wait for an explicit run.
 AUTO_RUN_MODES = frozenset({"roundtable", "autonomous"})
 AGENT_TRIGGER = re.compile(r"(?<![\w.-])@agents?\b", re.IGNORECASE)
 
+DiscussionEntry = dict[str, object]
+"""A thread as the API answers it: its columns plus counts, its ticket and, in detail, its
+participants, messages, votes and runs."""
 
-def requests_agent_reply(content: str, participants: list[dict[str, Any]]) -> bool:
+
+class BoardChecks(Protocol):
+    def require_row(self, board_id: str) -> object: ...
+
+    def ensure_active(self, board_id: str) -> object: ...
+
+
+class RoleSnapshots(Protocol):
+    def role_snapshot(self, agent_id: str) -> RoleSnapshot: ...
+
+
+class BoardOverview(TypedDict):
+    board_id: str
+    board_name: str
+    status: str
+    discussion_count: int
+    open_count: int
+    last_activity_at: str | None
+    ticket_count: int
+
+
+def requests_agent_reply(content: str, participants: Sequence[Mapping[str, object]]) -> bool:
     """`@agents` or a participant's name asks the thread to answer, whatever the mode."""
     if AGENT_TRIGGER.search(content):
         return True
@@ -34,125 +68,111 @@ def requests_agent_reply(content: str, participants: list[dict[str, Any]]) -> bo
     return bool(extract_mentions(content, names))
 
 
-def _rows(conn: Any, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
-    return [dict(row) for row in conn.execute(text(sql), params).mappings()]
+def _new_id() -> str:
+    return str(uuid4())
+
+
+def _thread(repos: BoardRepositories, discussion_id: str) -> DiscussionThreadsRow:
+    thread = repos.threads.get(discussion_id)
+    if thread is None:
+        raise NotFound("Discussion not found")
+    return thread
+
+
+def serialize(
+    repos: BoardRepositories, thread: DiscussionThreadsRow, *, with_detail: bool = False
+) -> DiscussionEntry:
+    entry: DiscussionEntry = dict(asdict(thread))
+    entry["participant_count"] = repos.participants.count(thread.id)
+    entry["message_count"] = repos.messages.count(thread.id)
+    card = repos.cards.get(thread.card_id) if thread.card_id is not None else None
+    loop = repos.loops.get(card.loop_id) if card is not None and card.loop_id else None
+    # The ticket is read with its Loop joined, so a card without a Loop reads as no ticket.
+    joined = card is not None and loop is not None
+    entry["card_title"] = card.title if joined and card else None
+    entry["ticket_key"] = card.ticket_key if joined and card else None
+    entry["loop_id"] = card.loop_id if joined and card else None
+    entry["loop_key"] = loop.key if joined and loop else None
+    entry["loop_name"] = loop.name if joined and loop else None
+    entry["round_count"] = thread.round_count
+    entry["tokens_used"] = thread.tokens_used
+    entry["elapsed_ms"] = thread.elapsed_ms
+    entry["run_state"] = thread.run_state or "idle"
+    if with_detail:
+        entry["participants"] = [asdict(row) for row in repos.participants.for_thread(thread.id)]
+        entry["messages"] = [asdict(row) for row in repos.messages.for_thread(thread.id)]
+        entry["votes"] = repos.votes.with_names(thread.id)
+        runs: list[RunEntry] = recent_runs(repos, thread.id)
+        entry["runs"] = runs
+        entry["active_run"] = next(
+            (run for run in runs if run["status"] in {"running", "paused"}), None
+        )
+    return entry
 
 
 class DiscussionService:
     """Ticket-bound discussions. Participants keep an immutable role snapshot."""
 
-    def __init__(self, board_service: BoardService, agent_service: Any) -> None:
+    def __init__(
+        self,
+        board_service: BoardChecks,
+        agent_service: RoleSnapshots,
+        store: BoardUnitOfWork,
+        registry: RegistryUnitOfWork,
+        *,
+        clock: Callable[[], str] = utcnow,
+        new_id: Callable[[], str] = _new_id,
+    ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
         self.agent = agent_service
-        self.runs: Any = None
-        self.events: Any = None
+        self.store = store
+        self.registry = registry
+        self._clock = clock
+        self._new_id = new_id
+        self.runs: RunService | None = None
+        self.events: EventService | None = None
 
     def _record(
         self,
-        conn: Any,
+        repos: BoardRepositories,
         discussion_id: str,
         type: str,
-        payload: dict[str, Any],
+        payload: Mapping[str, object],
         actor: ActorContext | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> Event | None:
         if self.events is None:
             return None
         return self.events.record(
-            conn, discussion_id=discussion_id, type=type, payload=payload, actor=actor
+            repos, discussion_id=discussion_id, type=type, payload=payload, actor=actor
         )
 
-    def _publish(self, board_id: str, *events: dict[str, Any] | None) -> None:
+    def _publish(self, board_id: str, *events: Event | None) -> None:
         if self.events is None:
             return
         for event in events:
             if event is not None:
                 self.events.publish(board_id, event)
 
-    # --- helpers -------------------------------------------------------------
-
-    def _thread(self, conn: Any, discussion_id: str) -> dict[str, Any]:
-        row = conn.execute(
-            text("SELECT * FROM discussion_threads WHERE id = :id"), {"id": discussion_id}
-        ).mappings().first()
-        if row is None:
-            raise NotFound("Discussion not found")
-        return dict(row)
-
-    def serialize(
+    def _log(
         self,
-        conn: Any,
-        thread: dict[str, Any],
-        *,
-        with_detail: bool = False,
-    ) -> dict[str, Any]:
-        entry = dict(thread)
-        entry["participant_count"] = int(
-            conn.execute(
-                text(
-                    "SELECT COUNT(*) FROM discussion_participants WHERE discussion_id = :id"
-                ),
-                {"id": thread["id"]},
-            ).scalar_one()
+        repos: BoardRepositories,
+        actor: ActorContext,
+        action: str,
+        card_id: str | None,
+        changes: Mapping[str, object],
+        now: str,
+    ) -> None:
+        repos.activity.add(
+            activity_entry(
+                actor,
+                action=action,
+                entity_type="card",
+                entity_id=card_id or "",
+                changes=changes,
+                entry_id=self._new_id(),
+                timestamp=now,
+            )
         )
-        entry["message_count"] = int(
-            conn.execute(
-                text(
-                    "SELECT COUNT(*) FROM discussion_messages"
-                    " WHERE discussion_id = :id AND deleted_at IS NULL"
-                ),
-                {"id": thread["id"]},
-            ).scalar_one()
-        )
-        card = conn.execute(
-            text(
-                "SELECT c.title, c.ticket_key, c.loop_id, l.key, l.name"
-                " FROM cards c JOIN loops l ON l.id = c.loop_id WHERE c.id = :id"
-            ),
-            {"id": thread["card_id"]},
-        ).first()
-        entry["card_title"] = card[0] if card else None
-        entry["ticket_key"] = card[1] if card else None
-        entry["loop_id"] = card[2] if card else None
-        entry["loop_key"] = card[3] if card else None
-        entry["loop_name"] = card[4] if card else None
-        entry["round_count"] = int(entry.get("round_count") or 0)
-        entry["tokens_used"] = int(entry.get("tokens_used") or 0)
-        entry["elapsed_ms"] = int(entry.get("elapsed_ms") or 0)
-        entry["run_state"] = entry.get("run_state") or "idle"
-        if with_detail:
-            entry["participants"] = _rows(
-                conn,
-                "SELECT * FROM discussion_participants WHERE discussion_id = :id"
-                " ORDER BY joined_at",
-                {"id": thread["id"]},
-            )
-            entry["messages"] = _rows(
-                conn,
-                "SELECT * FROM discussion_messages WHERE discussion_id = :id"
-                " AND deleted_at IS NULL ORDER BY created_at",
-                {"id": thread["id"]},
-            )
-            entry["votes"] = _rows(
-                conn,
-                "SELECT v.participant_id, p.display_name, v.position, v.justification,"
-                " v.round_number, v.created_at FROM discussion_votes v"
-                " LEFT JOIN discussion_participants p ON p.participant_id = v.participant_id"
-                " WHERE v.discussion_id = :id ORDER BY v.created_at, v.rowid",
-                {"id": thread["id"]},
-            )
-            entry["runs"] = (
-                self.runs.recent(conn, thread["id"]) if self.runs is not None else []
-            )
-            entry["active_run"] = next(
-                (
-                    run
-                    for run in entry["runs"]
-                    if run["status"] in {"running", "paused"}
-                ),
-                None,
-            )
-        return entry
 
     def review(
         self,
@@ -162,7 +182,7 @@ class DiscussionService:
         *,
         decision: str,
         reason: str = "",
-    ) -> dict[str, Any]:
+    ) -> DiscussionEntry:
         """Human-only final decision. Approving never executes ticket changes."""
         actor.require("discussions:admin")
         if not actor.is_user:
@@ -175,65 +195,47 @@ class DiscussionService:
                 "An explanation is required for this decision", details={"field": "reason"}
             )
         self.board_service.ensure_active(board_id)
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            thread = self._thread(conn, discussion_id)
-            if thread["status"] in {"approved", "vetoed", "cancelled"}:
-                raise Conflict(
-                    "Discussion is already closed", details={"status": thread["status"]}
-                )
-            if self.runs is not None and self.runs.active_run(conn, discussion_id) is not None:
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            thread = _thread(repos, discussion_id)
+            if thread.status in {"approved", "vetoed", "cancelled"}:
+                raise Conflict("Discussion is already closed", details={"status": thread.status})
+            if repos.runs.active(discussion_id) is not None:
                 raise Conflict("A run is still active; stop it before reviewing")
-            if thread["status"] not in {"consensus_proposed", "human_review", "discussing"}:
+            if thread.status not in {"consensus_proposed", "human_review", "discussing"}:
                 raise Conflict(
-                    "Discussion is not ready for review",
-                    details={"status": thread["status"]},
+                    "Discussion is not ready for review", details={"status": thread.status}
                 )
-            conn.execute(
-                text(
-                    "UPDATE discussion_threads SET status = :status, updated_at = :now,"
-                    " last_activity_at = :now WHERE id = :id"
-                ),
-                {"status": target, "now": now, "id": discussion_id},
-            )
-            conn.execute(
-                text(
-                    "INSERT INTO discussion_outcomes"
-                    " (id, discussion_id, summary, payload_json, created_at)"
-                    " VALUES (:id, :discussion_id, :summary, :payload, :now)"
-                ),
-                {
-                    "id": str(uuid4()),
-                    "discussion_id": discussion_id,
-                    "summary": f"{decision} by {actor.actor_name}"
-                    + (f": {reason.strip()}" if reason.strip() else ""),
-                    "payload": json.dumps(
-                        {"decision": decision, "reason": reason.strip(), "actor_id": actor.actor_id}
+            repos.threads.decide(discussion_id, target, now=now)
+            stated = reason.strip()
+            repos.outcomes.add(
+                DiscussionOutcomesRow(
+                    id=self._new_id(),
+                    discussion_id=discussion_id,
+                    summary=f"{decision} by {actor.actor_name}" + (f": {stated}" if stated else ""),
+                    payload_json=json.dumps(
+                        {"decision": decision, "reason": stated, "actor_id": actor.actor_id}
                     ),
-                    "now": now,
-                },
+                    created_at=now,
+                )
             )
-            log_activity(
-                conn,
+            self._log(
+                repos,
                 actor,
-                action="discussion.reviewed",
-                entity_type="card",
-                entity_id=thread["card_id"],
-                changes={"discussion_id": discussion_id, "decision": decision},
+                "discussion.reviewed",
+                thread.card_id,
+                {"discussion_id": discussion_id, "decision": decision},
+                now,
             )
             review_event = self._record(
-                conn,
+                repos,
                 discussion_id,
                 HUMAN_REVIEW_COMPLETED,
-                {"decision": decision, "reason": reason.strip(), "status": target},
+                {"decision": decision, "reason": stated, "status": target},
                 actor,
             )
             status_event = self._record(
-                conn,
-                discussion_id,
-                STATUS_CHANGED,
-                {"status": target, "run_state": "idle"},
-                actor,
+                repos, discussion_id, STATUS_CHANGED, {"status": target, "run_state": "idle"}, actor
             )
         self._publish(board_id, review_event, status_event)
         return self.get(board_id, discussion_id)
@@ -242,81 +244,58 @@ class DiscussionService:
 
     def list(
         self, board_id: str, *, status: str | None = None, limit: int = 50
-    ) -> list[dict[str, Any]]:
+    ) -> list[DiscussionEntry]:
         self.board_service.require_row(board_id)
-        clause = " WHERE status = :status" if status else ""
-        params: dict[str, Any] = {"limit": limit}
-        if status:
-            params["status"] = status
-        with self.boards.reader(board_id) as conn:
-            threads = _rows(
-                conn,
-                f"SELECT * FROM discussion_threads{clause}"
-                " ORDER BY last_activity_at DESC LIMIT :limit",
-                params,
-            )
-            return [self.serialize(conn, thread) for thread in threads]
+        with self.store.reader(board_id) as repos:
+            threads = repos.threads.newest(status=status or None, limit=limit)
+            return [serialize(repos, thread) for thread in threads]
 
-    def get(self, board_id: str, discussion_id: str) -> dict[str, Any]:
+    def get(self, board_id: str, discussion_id: str) -> DiscussionEntry:
         self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            return self.serialize(conn, self._thread(conn, discussion_id), with_detail=True)
+        with self.store.reader(board_id) as repos:
+            return serialize(repos, _thread(repos, discussion_id), with_detail=True)
 
-    def _board_counts(self, board_id: str) -> dict[str, Any]:
+    def _board_counts(self, board_id: str) -> DiscussionCounts:
         """Threads and Tickets for one board, in a single read.
 
         The discussion dialog offers a board first and then its Tickets, so a board with no Tickets
         has to be visible as such without opening it. One statement covers both counts.
         """
-        empty = {
-            "discussion_count": 0,
-            "open_count": 0,
-            "last_activity_at": None,
-            "ticket_count": 0,
-        }
         try:
-            with self.boards.reader(board_id) as conn:
-                row = conn.execute(
-                    text(
-                        "SELECT"
-                        " (SELECT COUNT(*) FROM cards WHERE archived_at IS NULL) AS ticket_count,"
-                        " MAX(last_activity_at) AS last_activity_at,"
-                        " COUNT(*) AS discussion_count,"
-                        " COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0)"
-                        " AS open_count"
-                        " FROM discussion_threads"
-                    )
-                ).mappings().first()
+            with self.store.reader(board_id) as repos:
+                return repos.threads.counts()
         except (NotFound, ServiceUnavailable):
             # A board whose schema is mid-repair must still appear in the overview.
-            return empty
-        if row is None:
-            return empty
-        return {
-            "discussion_count": int(row["discussion_count"] or 0),
-            "open_count": int(row["open_count"] or 0),
-            "last_activity_at": row["last_activity_at"],
-            "ticket_count": int(row["ticket_count"] or 0),
-        }
+            return {
+                "ticket_count": 0,
+                "last_activity_at": None,
+                "discussion_count": 0,
+                "open_count": 0,
+            }
 
-    def board_overview(self) -> list[dict[str, Any]]:
+    def board_overview(self) -> list[BoardOverview]:
         """One entrance per board, newest discussion activity first.
 
         The browser only needs this summary to pick a board; threads are fetched for the selected
         board alone. Boards without threads sort last, alphabetically, so an empty board is still
         reachable.
         """
-        entries = [
-            {
-                "board_id": board["id"],
-                "board_name": board["name"],
-                "status": board["status"],
-                **self._board_counts(board["id"]),
-            }
-            for board in self.board_service.registry.read(
-                "SELECT id, name, status FROM boards"
+        with self.registry.reader() as registry:
+            boards = registry.boards.all()
+        entries: list[BoardOverview] = []
+        for board in boards:
+            counts = self._board_counts(board.id)
+            entries.append(
+                {
+                    "board_id": board.id,
+                    "board_name": board.name,
+                    "status": board.status,
+                    "discussion_count": counts["discussion_count"],
+                    "open_count": counts["open_count"],
+                    "last_activity_at": counts["last_activity_at"],
+                    "ticket_count": counts["ticket_count"],
+                }
             )
-        ]
         entries.sort(key=lambda entry: entry["board_name"].casefold())
         entries.sort(key=lambda entry: entry["last_activity_at"] or "", reverse=True)
         return entries
@@ -325,112 +304,104 @@ class DiscussionService:
 
     def create(
         self, actor: ActorContext, board_id: str, payload: DiscussionCreate
-    ) -> dict[str, Any]:
+    ) -> DiscussionEntry:
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
-        now = utcnow()
-        discussion_id = str(uuid4())
-        with self.boards.session(board_id) as conn:
-            card = conn.execute(
-                text("SELECT id, title FROM cards WHERE id = :id AND archived_at IS NULL"),
-                {"id": payload.card_id},
-            ).mappings().first()
-            if card is None:
+        now = self._clock()
+        discussion_id = self._new_id()
+        with self.store.writer(board_id) as repos:
+            card = repos.cards.get(payload.card_id)
+            if card is None or card.archived_at is not None:
                 raise ValidationFailure(
                     "Discussion must reference an existing ticket",
                     details={"card_id": payload.card_id},
                 )
-            require_mutable_card(conn, payload.card_id)
-            title = (payload.title or f"{card['title']} — discussion").strip()
-            conn.execute(
-                text(
-                    "INSERT INTO discussion_threads"
-                    " (id, card_id, title, goal, mode, status, created_by_actor_id,"
-                    "  created_by_type, created_by_name, max_rounds, origin_comment_id,"
-                    "  escalation_depth, created_at, updated_at, last_activity_at)"
-                    " VALUES (:id, :card_id, :title, :goal, :mode, 'open', :actor_id,"
-                    "         :actor_type, :actor_name, :max_rounds, NULL, 0, :now, :now, :now)"
-                ),
-                {
-                    "id": discussion_id,
-                    "card_id": payload.card_id,
-                    "title": title,
-                    "goal": payload.goal,
-                    "mode": payload.mode,
-                    "actor_id": actor.actor_id,
-                    "actor_type": actor.actor_type,
-                    "actor_name": actor.actor_name,
-                    "max_rounds": payload.max_rounds,
-                    "now": now,
-                },
+            ensure_ticket_writable(repos, payload.card_id)
+            title = (payload.title or f"{card.title} — discussion").strip()
+            snapshots = self._snapshots(payload.participant_ids)
+            repos.threads.add(
+                DiscussionThreadsRow(
+                    id=discussion_id,
+                    card_id=payload.card_id,
+                    title=title,
+                    goal=payload.goal,
+                    mode=payload.mode,
+                    status="open",
+                    created_by_actor_id=actor.actor_id,
+                    created_by_type=actor.actor_type,
+                    created_by_name=actor.actor_name,
+                    max_rounds=payload.max_rounds,
+                    origin_comment_id=None,
+                    escalation_depth=0,
+                    created_at=now,
+                    updated_at=now,
+                    last_activity_at=now,
+                    round_count=0,
+                    run_state="idle",
+                    tokens_used=0,
+                    elapsed_ms=0,
+                )
             )
-            self._add_participants(conn, discussion_id, payload.participant_ids, now)
-            conn.execute(
-                text(
-                    "INSERT INTO discussion_messages"
-                    " (id, discussion_id, parent_message_id, author_actor_id, author_type,"
-                    "  author_name, author_role, content, status, model, created_at, deleted_at)"
-                    " VALUES (:id, :discussion_id, NULL, :actor_id, :actor_type, :actor_name,"
-                    "         NULL, :content, 'posted', NULL, :now, NULL)"
-                ),
-                {
-                    "id": str(uuid4()),
-                    "discussion_id": discussion_id,
-                    "actor_id": actor.actor_id,
-                    "actor_type": actor.actor_type,
-                    "actor_name": actor.actor_name,
-                    "content": payload.goal,
-                    "now": now,
-                },
+            for snapshot in snapshots:
+                repos.participants.add(
+                    DiscussionParticipantsRow(
+                        id=self._new_id(),
+                        discussion_id=discussion_id,
+                        participant_id=snapshot["agent_id"],
+                        participant_type="agent",
+                        display_name=snapshot["agent_name"],
+                        role_template_id=snapshot["role_template_id"],
+                        role_template_name=snapshot["role_template_name"],
+                        role_template_updated_at=snapshot["role_template_updated_at"],
+                        role_source=snapshot["role_source"],
+                        system_prompt=snapshot["system_prompt"],
+                        system_prompt_sha256=snapshot["system_prompt_sha256"],
+                        snapshot_at=now,
+                        joined_at=now,
+                    )
+                )
+            repos.messages.add(
+                DiscussionMessagesRow(
+                    id=self._new_id(),
+                    discussion_id=discussion_id,
+                    parent_message_id=None,
+                    author_actor_id=actor.actor_id,
+                    author_type=actor.actor_type,
+                    author_name=actor.actor_name,
+                    author_role=None,
+                    content=payload.goal,
+                    status="posted",
+                    model=None,
+                    created_at=now,
+                    deleted_at=None,
+                    round_number=0,
+                    content_sha256=None,
+                )
             )
-            log_activity(
-                conn,
+            self._log(
+                repos,
                 actor,
-                action="discussion.created",
-                entity_type="card",
-                entity_id=payload.card_id,
-                changes={"discussion_id": discussion_id, "title": title},
+                "discussion.created",
+                payload.card_id,
+                {"discussion_id": discussion_id, "title": title},
+                now,
             )
         return self.get(board_id, discussion_id)
 
-    def _add_participants(
-        self, conn: Any, discussion_id: str, participant_ids: list[str], now: str
-    ) -> None:
-        agents = self.board_service.registry
+    def _snapshots(self, participant_ids: list[str]) -> list[RoleSnapshot]:
+        """Each participant's role as it is now; only an enabled agent may take part."""
+        snapshots: list[RoleSnapshot] = []
         for participant_id in participant_ids:
-            row = agents.read_one(
-                "SELECT id, name, enabled FROM agents WHERE id = :id", {"id": participant_id}
-            )
-            if row is None or not row["enabled"]:
+            with self.registry.reader() as registry:
+                agent = registry.agents.get(participant_id)
+            if agent is None or not agent.enabled:
                 raise ValidationFailure(
                     "Participant must be an enabled agent",
                     details={"participant_id": participant_id},
                 )
-            snapshot = self.agent.role_snapshot(row["id"])
-            conn.execute(
-                text(
-                    "INSERT INTO discussion_participants"
-                    " (id, discussion_id, participant_id, participant_type, display_name,"
-                    "  role_template_id, role_template_name, role_template_updated_at,"
-                    "  role_source, system_prompt, system_prompt_sha256, snapshot_at, joined_at)"
-                    " VALUES (:id, :discussion_id, :participant_id, 'agent', :name, :template_id,"
-                    "         :template_name, :template_updated, :source, :prompt, :prompt_hash,"
-                    "         :now, :now)"
-                ),
-                {
-                    "id": str(uuid4()),
-                    "discussion_id": discussion_id,
-                    "participant_id": row["id"],
-                    "name": row["name"],
-                    "template_id": snapshot["role_template_id"],
-                    "template_name": snapshot["role_template_name"],
-                    "template_updated": snapshot["role_template_updated_at"],
-                    "source": snapshot["role_source"],
-                    "prompt": snapshot["system_prompt"],
-                    "prompt_hash": snapshot["system_prompt_sha256"],
-                    "now": now,
-                },
-            )
+            snapshot = self.agent.role_snapshot(agent.id)
+            snapshots.append({**snapshot, "agent_id": agent.id, "agent_name": agent.name})
+        return snapshots
 
     def add_message(
         self,
@@ -438,66 +409,50 @@ class DiscussionService:
         board_id: str,
         discussion_id: str,
         payload: DiscussionMessageCreate,
-    ) -> dict[str, Any]:
+    ) -> DiscussionEntry:
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            thread = self._thread(conn, discussion_id)
-            if payload.parent_message_id:
-                parent = conn.execute(
-                    text(
-                        "SELECT id FROM discussion_messages"
-                        " WHERE id = :id AND discussion_id = :discussion_id"
-                    ),
-                    {"id": payload.parent_message_id, "discussion_id": discussion_id},
-                ).first()
-                if parent is None:
-                    raise ValidationFailure("Parent message does not belong to this discussion")
-            message_id = str(uuid4())
-            conn.execute(
-                text(
-                    "INSERT INTO discussion_messages"
-                    " (id, discussion_id, parent_message_id, author_actor_id, author_type,"
-                    "  author_name, author_role, content, status, model, created_at, deleted_at)"
-                    " VALUES (:id, :discussion_id, :parent, :actor_id, :actor_type, :actor_name,"
-                    "         NULL, :content, 'posted', NULL, :now, NULL)"
-                ),
-                {
-                    "id": message_id,
-                    "discussion_id": discussion_id,
-                    "parent": payload.parent_message_id,
-                    "actor_id": actor.actor_id,
-                    "actor_type": actor.actor_type,
-                    "actor_name": actor.actor_name,
-                    "content": payload.content,
-                    "now": now,
-                },
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            thread = _thread(repos, discussion_id)
+            if payload.parent_message_id and not repos.messages.belongs(
+                payload.parent_message_id, discussion_id
+            ):
+                raise ValidationFailure("Parent message does not belong to this discussion")
+            message_id = self._new_id()
+            repos.messages.add(
+                DiscussionMessagesRow(
+                    id=message_id,
+                    discussion_id=discussion_id,
+                    parent_message_id=payload.parent_message_id,
+                    author_actor_id=actor.actor_id,
+                    author_type=actor.actor_type,
+                    author_name=actor.actor_name,
+                    author_role=None,
+                    content=payload.content,
+                    status="posted",
+                    model=None,
+                    created_at=now,
+                    deleted_at=None,
+                    round_number=0,
+                    content_sha256=None,
+                )
             )
-            conn.execute(
-                text(
-                    "UPDATE discussion_threads SET updated_at = :now, last_activity_at = :now,"
-                    " status = CASE WHEN status = 'open' THEN 'discussing' ELSE status END"
-                    " WHERE id = :id"
-                ),
-                {"now": now, "id": discussion_id},
-            )
-            log_activity(
-                conn,
+            repos.threads.note_message(discussion_id, now=now)
+            self._log(
+                repos,
                 actor,
-                action="discussion.message_posted",
-                entity_type="card",
-                entity_id=thread["card_id"],
-                changes={"discussion_id": discussion_id, "message_id": message_id},
+                "discussion.message_posted",
+                thread.card_id,
+                {"discussion_id": discussion_id, "message_id": message_id},
+                now,
             )
-            participants = _rows(
-                conn,
-                "SELECT participant_id, display_name FROM discussion_participants"
-                " WHERE discussion_id = :id ORDER BY joined_at",
-                {"id": discussion_id},
-            )
+            participants: list[Mapping[str, object]] = [
+                {"participant_id": row.participant_id, "display_name": row.display_name}
+                for row in repos.participants.for_thread(discussion_id)
+            ]
             message_event = self._record(
-                conn,
+                repos,
                 discussion_id,
                 MESSAGE_CREATED,
                 {
@@ -512,7 +467,7 @@ class DiscussionService:
             )
         self._publish(board_id, message_event)
         auto_run = self._auto_run(
-            actor, board_id, discussion_id, thread["mode"], payload.content, participants
+            actor, board_id, discussion_id, thread.mode, payload.content, participants
         )
         detail = self.get(board_id, discussion_id)
         detail["auto_run"] = auto_run
@@ -525,7 +480,7 @@ class DiscussionService:
         discussion_id: str,
         mode: str,
         content: str,
-        participants: list[dict[str, Any]],
+        participants: Sequence[Mapping[str, object]],
     ) -> str | None:
         """Answer a human message automatically when the thread asks for it.
 
@@ -544,9 +499,8 @@ class DiscussionService:
                 actor, board_id, discussion_id, rounds=1, autonomous=False, background=True
             )
         except Conflict as exc:
-            details = exc.details if isinstance(exc.details, dict) else {}
+            details: Mapping[str, object] = exc.details or {}
             return "already_running" if details.get("run_id") else "thread_closed"
         except ValidationFailure:
             return "no_participants"
         return "started"
-

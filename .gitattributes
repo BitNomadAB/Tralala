@@ -1,0 +1,31 @@
+# Every text file is stored and checked out with LF on every platform, whatever a contributor's
+# core.autocrlf says. Git detects text versus binary itself; the rules below only name exceptions.
+* text=auto eol=lf
+
+# cmd.exe misreads labels and line continuations in LF batch files. None are tracked today.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary formats: never converted, diffed or merged as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.bmp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.tar binary
+*.7z binary
+*.sqlite binary
+*.sqlite3 binary
+*.db binary

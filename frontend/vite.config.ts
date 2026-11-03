@@ -1,7 +1,7 @@
-import { defineConfig } from "vitest/config";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vitest/config";
 
 const apiProxyTarget = process.env.VITE_API_PROXY ?? "http://127.0.0.1:8000";
 
@@ -59,5 +59,15 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/tests/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // `pnpm test:coverage` (CI): every source file counts, tested or not, and the floors are the
+    // measured values, so coverage can only go up. Raise them when it does.
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/*.test.{ts,tsx}", "src/tests/**", "src/**/*.d.ts"],
+      reporter: ["text-summary", "html"],
+      reportsDirectory: "coverage",
+      thresholds: { statements: 23.5, branches: 15.3, functions: 15, lines: 23.5 },
+    },
   },
 });

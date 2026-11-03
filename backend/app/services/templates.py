@@ -1,41 +1,87 @@
+"""Board templates: list names and labels kept in the registry and reused by new boards.
+
+The service reaches the registry through the registry unit of work and a board through the board
+unit of work (``app/repositories``), and asks ``BoardLookup`` (BoardService) whether a board is
+registered; the clock and the id source are passed in, so every rule here runs in a unit test
+without a database.
+"""
+
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Callable
+from typing import Protocol, TypedDict, TypeIs
 from uuid import uuid4
 
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
-
 from ..core.context import ActorContext
+from ..core.dates import utcnow
 from ..core.errors import Conflict, NotFound, ValidationFailure
+from ..db.generated.registry import BoardTemplatesRow
+from ..repositories.board import BoardUnitOfWork
+from ..repositories.errors import ConstraintViolationError
+from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.templates import TemplateCreate, TemplateFromBoard, TemplateUpdate
-from ..storage.board_db import BoardDatabaseManager
-from ..storage.registry import Registry
-from ..storage.sqlite import utcnow
+
+DEFAULT_LABEL_COLOR = "#64748b"
 
 
-def _parse_list(raw: Any) -> list[str]:
+class BoardLookup(Protocol):
+    """What TemplateService needs from BoardService: the board is registered."""
+
+    def require_row(self, board_id: str) -> object: ...
+
+
+class TemplateLabel(TypedDict):
+    name: str
+    color: str
+
+
+class TemplateEntry(TypedDict):
+    """A template as the API returns it: its lists and labels parsed, never the stored JSON."""
+
+    id: str
+    name: str
+    description: str
+    created_at: str
+    updated_at: str
+    lists: list[str]
+    labels: list[TemplateLabel]
+    list_count: int
+
+
+def _new_id() -> str:
+    return str(uuid4())
+
+
+def _is_list(value: object) -> TypeIs[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object(value: object) -> TypeIs[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _json_list(raw: str) -> list[object]:
+    """The stored JSON as a list; anything that is not a JSON list is an empty one."""
     try:
-        value = json.loads(raw or "[]")
+        value: object = json.loads(raw or "[]")
     except (TypeError, ValueError):
         return []
-    if not isinstance(value, list):
-        return []
-    return [entry for entry in value if isinstance(entry, str)]
+    return value if _is_list(value) else []
 
 
-def _parse_labels(raw: Any) -> list[dict[str, str]]:
-    try:
-        value = json.loads(raw or "[]")
-    except (TypeError, ValueError):
-        return []
-    if not isinstance(value, list):
-        return []
-    labels: list[dict[str, str]] = []
-    for entry in value:
-        if isinstance(entry, dict) and isinstance(entry.get("name"), str):
-            labels.append({"name": entry["name"], "color": str(entry.get("color") or "#64748b")})
+def _parse_list(raw: str) -> list[str]:
+    return [entry for entry in _json_list(raw) if isinstance(entry, str)]
+
+
+def _parse_labels(raw: str) -> list[TemplateLabel]:
+    labels: list[TemplateLabel] = []
+    for entry in _json_list(raw):
+        if not _is_object(entry):
+            continue
+        name = entry.get("name")
+        if isinstance(name, str):
+            labels.append({"name": name, "color": str(entry.get("color") or DEFAULT_LABEL_COLOR)})
     return labels
 
 
@@ -65,45 +111,52 @@ def _dedupe_names(names: list[str]) -> list[str]:
     return result
 
 
+def _entry(row: BoardTemplatesRow) -> TemplateEntry:
+    lists = _parse_list(row.lists_json)
+    return {
+        "id": row.id,
+        "name": row.name,
+        "description": row.description,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "lists": lists,
+        "labels": _parse_labels(row.labels_json),
+        "list_count": len(lists),
+    }
+
+
 class TemplateService:
     """Board templates stored in the registry database and reusable across new boards."""
 
     def __init__(
         self,
-        registry: Registry,
-        boards: BoardDatabaseManager,
-        board_service: Any,
+        store: RegistryUnitOfWork,
+        boards: BoardUnitOfWork,
+        board_service: BoardLookup,
+        *,
+        clock: Callable[[], str] = utcnow,
+        new_id: Callable[[], str] = _new_id,
     ) -> None:
-        self.registry = registry
+        self.store = store
         self.boards = boards
         self.board_service = board_service
+        self._clock = clock
+        self._new_id = new_id
 
-    # --- helpers ---------------------------------------------------------------
+    # --- helpers ---------------------------------------------------------------------------------
 
-    def serialize(self, row: dict[str, Any]) -> dict[str, Any]:
-        lists = _parse_list(row.get("lists_json"))
-        labels = _parse_labels(row.get("labels_json"))
-        entry = dict(row)
-        entry.pop("lists_json", None)
-        entry.pop("labels_json", None)
-        entry["lists"] = lists
-        entry["labels"] = labels
-        entry["list_count"] = len(lists)
-        return entry
+    def find(self, template_id: str) -> TemplateEntry | None:
+        with self.store.reader() as repos:
+            row = repos.board_templates.get(template_id)
+        return None if row is None else _entry(row)
 
-    def find(self, template_id: str) -> dict[str, Any] | None:
-        row = self.registry.read_one(
-            "SELECT * FROM board_templates WHERE id = :id", {"id": template_id}
-        )
-        return self.serialize(row) if row else None
-
-    def get(self, template_id: str) -> dict[str, Any]:
+    def get(self, template_id: str) -> TemplateEntry:
         template = self.find(template_id)
         if template is None:
             raise NotFound("Template not found")
         return template
 
-    def resolve(self, template_id: str) -> dict[str, Any]:
+    def resolve(self, template_id: str) -> TemplateEntry:
         """Resolve a template for board creation; raises when it no longer exists."""
         template = self.find(template_id)
         if template is None:
@@ -115,73 +168,52 @@ class TemplateService:
 
     def _write(
         self,
-        actor: ActorContext,
         *,
         name: str,
         description: str,
         lists: list[str],
-        labels: list[dict[str, str]],
+        labels: list[TemplateLabel],
         template_id: str | None = None,
-    ) -> dict[str, Any]:
-        now = utcnow()
-        row_id = template_id or str(uuid4())
+    ) -> TemplateEntry:
+        now = self._clock()
+        row = BoardTemplatesRow(
+            id=template_id or self._new_id(),
+            name=name,
+            description=description,
+            lists_json=json.dumps(lists),
+            labels_json=json.dumps(labels),
+            created_at=now,
+            updated_at=now,
+        )
         try:
-            with self.registry.connect() as conn:
+            with self.store.writer() as repos:
                 if template_id is None:
-                    conn.execute(
-                        text(
-                            "INSERT INTO board_templates"
-                            " (id, name, description, lists_json, labels_json, created_at,"
-                            "  updated_at)"
-                            " VALUES (:id, :name, :description, :lists, :labels, :now, :now)"
-                        ),
-                        {
-                            "id": row_id,
-                            "name": name,
-                            "description": description,
-                            "lists": json.dumps(lists),
-                            "labels": json.dumps(labels),
-                            "now": now,
-                        },
-                    )
+                    repos.board_templates.add(row)
                 else:
-                    conn.execute(
-                        text(
-                            "UPDATE board_templates SET name = :name,"
-                            " description = :description, lists_json = :lists,"
-                            " labels_json = :labels, updated_at = :now"
-                            " WHERE id = :id"
-                        ),
-                        {
-                            "id": row_id,
-                            "name": name,
-                            "description": description,
-                            "lists": json.dumps(lists),
-                            "labels": json.dumps(labels),
-                            "now": now,
-                        },
-                    )
-        except IntegrityError as exc:
+                    repos.board_templates.update(row)
+        except ConstraintViolationError as exc:
             raise Conflict(
                 "A template with this name already exists",
                 code="template_name_taken",
                 details={"name": name},
             ) from exc
-        return self.get(row_id)
+        return self.get(row.id)
 
-    # --- commands --------------------------------------------------------------
+    # --- commands --------------------------------------------------------------------------------
 
-    def list(self) -> list[dict[str, Any]]:
-        rows = self.registry.read("SELECT * FROM board_templates ORDER BY name")
-        return [self.serialize(row) for row in rows]
+    def list(self) -> list[TemplateEntry]:
+        with self.store.reader() as repos:
+            rows = repos.board_templates.all()
+        return [_entry(row) for row in rows]
 
-    def create(self, actor: ActorContext, payload: TemplateCreate) -> dict[str, Any]:
+    def create(self, actor: ActorContext, payload: TemplateCreate) -> TemplateEntry:
         actor.require("boards:write")
         lists = _unique_names(list(payload.lists), field="list")
-        labels = [label.model_dump() for label in payload.labels]
+        labels: list[TemplateLabel] = [
+            {"name": label.name, "color": label.color} for label in payload.labels
+        ]
         _unique_names([label["name"] for label in labels], field="label")
         return self._write(
-            actor,
             name=payload.name,
             description=payload.description,
             lists=lists,
@@ -190,25 +222,34 @@ class TemplateService:
 
     def update(
         self, actor: ActorContext, template_id: str, payload: TemplateUpdate
-    ) -> dict[str, Any]:
+    ) -> TemplateEntry:
         actor.require("boards:write")
         current = self.get(template_id)
-        updates = payload.model_dump(exclude_none=True)
-        if not updates:
+        if (
+            payload.name is None
+            and payload.description is None
+            and payload.lists is None
+            and payload.labels is None
+        ):
             return current
         lists = (
-            _unique_names(list(updates["lists"]), field="list")
-            if "lists" in updates
+            _unique_names(list(payload.lists), field="list")
+            if payload.lists is not None
             else current["lists"]
         )
-        labels = updates["labels"] if "labels" in updates else current["labels"]
-        if "labels" in updates:
+        labels: list[TemplateLabel] = (
+            [{"name": label.name, "color": label.color} for label in payload.labels]
+            if payload.labels is not None
+            else current["labels"]
+        )
+        if payload.labels is not None:
             _unique_names([label["name"] for label in labels], field="label")
         return self._write(
-            actor,
             template_id=template_id,
-            name=updates.get("name", current["name"]),
-            description=updates.get("description", current["description"]),
+            name=payload.name if payload.name is not None else current["name"],
+            description=(
+                payload.description if payload.description is not None else current["description"]
+            ),
             lists=lists,
             labels=labels,
         )
@@ -216,39 +257,23 @@ class TemplateService:
     def delete(self, actor: ActorContext, template_id: str) -> None:
         actor.require("boards:admin")
         self.get(template_id)
-        with self.registry.connect() as conn:
-            conn.execute(text("DELETE FROM board_templates WHERE id = :id"), {"id": template_id})
+        with self.store.writer() as repos:
+            repos.board_templates.delete(template_id)
 
     def create_from_loop(
         self, actor: ActorContext, board_id: str, loop_id: str, payload: TemplateFromBoard
-    ) -> dict[str, Any]:
+    ) -> TemplateEntry:
         """A layout snapshot comes from one Loop, never from merged Board-wide columns."""
         actor.require("boards:write")
         self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            loop = conn.execute(
-                text("SELECT id FROM loops WHERE id = :id"), {"id": loop_id}
-            ).first()
-            if loop is None:
+        with self.boards.reader(board_id) as repos:
+            if repos.loops.get(loop_id) is None:
                 raise NotFound("Loop not found", code="loop_not_found")
-            lists = [
-                row["name"]
-                for row in conn.execute(
-                    text(
-                        "SELECT name FROM lists WHERE loop_id = :loop_id"
-                        " AND archived_at IS NULL ORDER BY position, created_at"
-                    ),
-                    {"loop_id": loop_id},
-                ).mappings()
-            ]
-            labels = [
-                {"name": row["name"], "color": row["color"]}
-                for row in conn.execute(
-                    text("SELECT name, color FROM labels ORDER BY name")
-                ).mappings()
+            lists = repos.lists.active_names(loop_id)
+            labels: list[TemplateLabel] = [
+                {"name": label.name, "color": label.color} for label in repos.labels.all()
             ]
         return self._write(
-            actor,
             name=payload.name,
             description=payload.description,
             lists=_dedupe_names(lists),

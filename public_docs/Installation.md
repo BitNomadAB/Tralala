@@ -31,6 +31,10 @@ example with `uv python install 3.13` or the deadsnakes PPA, and create the venv
 interpreter. The shortest route to the pinned pnpm is `corepack enable`; on Windows that may need
 an elevated shell.
 
+The interpreter's SQLite must be 3.37.0 or newer, because new tables are created `STRICT`; check it
+with `python -c "import sqlite3; print(sqlite3.sqlite_version)"`. The backend build stops with a
+message on an older one. On Linux this is the system library, which Ubuntu 22.04 and newer provide.
+
 ## Docker (recommended)
 
 ```bash
@@ -155,7 +159,23 @@ TRALALA_BOOTSTRAP_PASSWORD=
   `<data>/.session-secret`.
 - Every setting is listed in [`.env.example`](../.env.example).
 
-### 4. Run both processes
+### 4. Generate the database rows
+
+The backend's typed database rows are generated from the schema migrations, not stored in the
+repository. Generate them once, and again whenever an update brings a new migration:
+
+```bash
+cd backend
+../.venv/bin/python -m tools.dbgen
+cd ..
+```
+
+It checks the migrations, writes `backend/app/db/generated/` and checks every SQL statement against
+the schema; a second run with nothing changed finishes at once. Without it the backend stops at
+start with "The generated database rows are missing: run python -m tools.dbgen". The container
+image runs it during `docker compose up --build`.
+
+### 5. Run both processes
 
 ```bash
 # terminal 1
@@ -201,6 +221,7 @@ keys: [Security defaults](Security_defaults.md).
 ```bash
 git pull
 pip install -r backend/requirements-dev.txt    # backend dependencies
+(cd backend && ../.venv/bin/python -m tools.dbgen)  # rows for any new migration
 cd frontend && pnpm install && cd ..           # frontend dependencies
 docker compose up -d --build                   # Docker installs only
 ```
@@ -231,13 +252,18 @@ Run what CI runs:
 
 ```bash
 cd backend
-../.venv/bin/python -m pytest
-../.venv/bin/python -m ruff check app tests migrations
+../.venv/bin/python -m tools.dbgen                       # migrations, rows, SQL (always first)
+../.venv/bin/python -m ruff check app tests migrations tools
+../.venv/bin/python -m pyright                           # types
+../.venv/bin/python -m pytest                            # unit tests
+../.venv/bin/python -m pytest tests/infrastructure       # the small SQLite suite
 cd ../frontend
 pnpm typecheck
+pnpm lint           # Prettier check, then ESLint with zero warnings (`pnpm format` fixes layout)
 pnpm test
-pnpm build          # also runs the client build guard
-pnpm test:e2e       # 30 browser journeys against an isolated stack
+pnpm build          # also runs typecheck, ESLint and the client build guard
+pnpm lint:md        # Markdown lint on the documentation
+pnpm test:e2e       # the browser journeys against an isolated stack
 ```
 
 `pnpm test:e2e` starts its own backend on `:8077` with `frontend/e2e/.data` and Vite on `:5273`, from

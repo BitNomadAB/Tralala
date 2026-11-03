@@ -72,6 +72,15 @@ facts that explain most surprises:
 - **Board shows `migration_failed`** — read the backend log event `migration_failed`, fix the cause,
   then use the retry button or `POST /api/v1/boards/<id>/migrate`. The pre-migration snapshot is
   kept.
+- **`422 board_import_invalid` on an import** — the archive's `board.sqlite` is not a board this
+  installation can take; `details.reason` says why and `details.detail` carries SQLite's answer.
+  Nothing was created. `unknown_schema_revision` means the archive comes from a newer release: import
+  it there, or upgrade this installation first.
+- **`503 board_database_unreadable`, or the log event `board_database_unreadable`** — SQLite cannot
+  read that board's `board.sqlite` (`details.sqlite_error`: `SQLITE_NOTADB` or `SQLITE_CORRUPT`). The
+  board list and startup step past it, and the next start marks it `migration_failed`. Stop the
+  backend, copy a snapshot from `data/backups/<board id>/` over `data/boards/<board id>/board.sqlite`
+  and start again; or archive the board and delete it.
 - **`409 board_files_busy` when deleting a board** — a file in the board directory is held by
   another process (on Windows a scanner or an indexer; elsewhere a permission, a read-only volume or a
   network share). The board was **not** deleted and still has its data; the response names the
@@ -80,6 +89,16 @@ facts that explain most surprises:
   to be retryable, `posix` does not, `network` adds the transient retries an NFS/SMB share needs.
   It changes retry policy only, never the locking mechanism. Do not put a live board on a share:
   SQLite's WAL mode needs shared memory and will answer `disk I/O error`.
+- **`422 board_backup_invalid` on a restore** — the snapshot failed SQLite's checks and was not
+  restored; the board kept its database. `details.reason` says which check (`not_a_database`,
+  `integrity_check_failed`, `foreign_key_check_failed`) and `details.detail` what SQLite found.
+  Restore an older snapshot from the same list instead.
+- **`board.sqlite-wal` and `board.sqlite-shm` next to `board.sqlite`** — normal. SQLite's WAL mode
+  writes changes to the `-wal` file first and coordinates readers through the `-shm` file; both are
+  part of the database while it is open, and SQLite removes them when the last connection closes.
+  The backend empties the `-wal` file when a board goes idle, is restored or the backend stops, so it
+  stays small. Never delete or copy them by hand while the backend runs: committed changes can still
+  be in the `-wal` file. To copy a board, use a backup or an export.
 - **Restore said `attachments.skipped: true`** — the snapshot predates the file archive. The database
   was restored and the current files were kept; the response carries a `warning` saying so.
 - **A restored board misses recent uploads** — expected for a snapshot older than the uploads. Check
@@ -87,6 +106,12 @@ facts that explain most surprises:
 
 ## Processes, ports and startup
 
+- **"The generated database rows are missing: run python -m tools.dbgen"** — a backend run from
+  source imports typed rows generated from the schema migrations (the unit tests say "... are
+  stale" when a migration is newer than the rows). From `backend/`, run the tool with the venv's
+  interpreter, `../.venv/bin/python -m tools.dbgen` (Windows: `..\.venv\Scripts\python.exe`), after
+  cloning and after every pull that brings a migration. The container image generates them while it
+  is built.
 - **"This data directory is already in use by another Tralala process"** — a second backend is
   running against the same directory, or a container and a local process share a bind mount. Stop
   one. The lock is an OS file lock and is released when the process exits, so there is no stale lock
@@ -99,6 +124,27 @@ facts that explain most surprises:
 - **`503 generation_unavailable`** — no usable generation agent: configure an OpenAI-compatible or
   A2A agent in **Settings → Agents**, enable it, and make it a member of the board.
 
+## Reading the backend log
+
+Every line the backend writes is one JSON object: `ts` (UTC), `level`, `event` (what happened, such
+as `http_request` or `backup_failed`), `logger`, `request_id`, then the event's own fields. A logged
+exception adds its traceback as `exc_info`.
+
+- **Everything one request did** — every line written while a request is served carries its id, so
+  the `X-Request-ID` of a response finds the `http_request` line and whatever else that request
+  logged: `docker compose logs backend | grep <id>`. Work a request queued (a generation run, a
+  mention job, a discussion run) logs under the id of that request; work outside a request
+  (startup, scheduled backups, recovery) has `"request_id": null`.
+- **More or less detail** — `TRALALA_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING` or `ERROR`; default
+  `INFO`) is the lowest level written. `WARNING` drops the per-request lines.
+- **`[redacted]` in a line** — the value of a field named `token`, `api_key`, `authorization` or
+  `password`, at any depth, is never written.
+- **`backup_created` has no `name`** — the snapshot's file name is `backup_name`: a log field cannot
+  be called `name`.
+- **A line that is not JSON** — it is uvicorn's, in uvicorn's format: the startup banner, the access
+  log unless it is off (the container runs with `--no-access-log`), and the traceback of an
+  exception the backend did not handle, after the backend's own `unhandled_exception` line.
+
 ## Tests
 
 - **`pnpm test:e2e` cannot find a browser** — the runner reuses a local Playwright install and only
@@ -109,6 +155,6 @@ facts that explain most surprises:
 - **The backend suite fails on a fresh clone** — it needs `backend/requirements-dev.txt`, not
   `requirements.txt`, and it writes into a temporary directory, so it needs nothing pre-configured.
 
-If none of this fits, capture the failing request's `X-Request-ID` from the response and the matching
-`{"event": "http_request", ...}` line from the backend log: that pair is what makes a report
-actionable. Security issues go to <tralala@bitnomad.se>, privately.
+If none of this fits, capture the failing request's `X-Request-ID` from the response and the backend
+log lines whose `request_id` matches it: that pair is what makes a report actionable. Security issues
+go to <tralala@bitnomad.se>, privately.

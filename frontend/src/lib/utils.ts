@@ -5,6 +5,14 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * The Clipboard API, or undefined where the browser withholds it: it exists only in a secure
+ * context, so a server reached over plain HTTP on a private network has none.
+ */
+export function clipboard(): Clipboard | undefined {
+  return "clipboard" in navigator ? navigator.clipboard : undefined;
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
@@ -44,9 +52,8 @@ export function fromDateInputValue(value: string): string | null {
   return date.toISOString().replace(".000Z", "Z");
 }
 
-export function moveItem<T>(items: T[], from: number, to: number): T[] {
+export function moveItem<T>(items: readonly T[], from: number, to: number): T[] {
   const next = [...items];
-  const [item] = next.splice(from, 1);
-  next.splice(to, 0, item);
+  next.splice(to, 0, ...next.splice(from, 1));
   return next;
 }

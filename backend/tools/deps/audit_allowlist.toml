@@ -1,0 +1,13 @@
+# Advisories `python -m tools.deps audit` accepts for now, because no fixed version can be used yet.
+# Fix by a bump whenever a fixed version exists; an entry is the exception, never the routine.
+#
+# Every entry expires at most 90 days ahead. An expired entry fails the audit and no longer hides
+# its advisory, so the advisory is looked at again: fix it, or decide again with a new reason and
+# date. The format:
+#
+# [[advisory]]
+# id = "GHSA-xxxx-xxxx-xxxx"   # npm: the GHSA id pnpm audit prints; pypi: a GHSA, PYSEC or CVE id
+# ecosystem = "npm"            # or "pypi"; the id is matched within its ecosystem
+# package = "example-package"  # the package the advisory names, for the reader
+# expires = 2026-12-31         # a TOML date, at most 90 days after the day it is written
+# reason = "Why it cannot be fixed yet and why the risk is acceptable until then."

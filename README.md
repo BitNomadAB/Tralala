@@ -1,11 +1,11 @@
-﻿# Tralala (Work in progress, if you care about your data dont use this just yet.)
+# Tralala (Work in progress, if you care about your data dont use this just yet.)
 
 Tralala is a self-hosted, AI-native planning and delivery application. Humans work with Loops inside
 Boards; agents get the same capabilities through a documented REST API and a curated MCP surface.
 Every board is its own SQLite database. No cloud services, no external AI provider, no Redis or
 Postgres.
 
-```
+```text
 App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / RoadMap + Phases
 ```
 
@@ -42,6 +42,7 @@ From source:
 ```bash
 python -m venv .venv && .venv/bin/activate
 pip install -r backend/requirements-dev.txt
+(cd backend && ../.venv/bin/python -m tools.dbgen)   # typed rows from the migrations; again after a pull
 (cd frontend && pnpm install)
 
 # terminal 1
@@ -85,7 +86,7 @@ is no shared password. See [the first sign-in](public_docs/Installation.md#first
 
 ## Layout
 
-```
+```text
 backend/app/{api,core,schemas,services,storage}   FastAPI service layer and SQLite storage
 frontend/src/{app,features,lib,webmcp,themes}     React UI, typed API client, WebMCP adapter
 frontend/Caddyfile                                web tier: SPA, API proxy, TLS

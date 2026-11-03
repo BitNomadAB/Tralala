@@ -1,0 +1,12 @@
+# Prettier formats this package's TypeScript, JavaScript, JSON, CSS and HTML (`pnpm format`), and
+# `pnpm lint` fails on any file it would change. Listed here: what a tool writes, not a person.
+# node_modules/ is always skipped.
+pnpm-lock.yaml
+dist/
+coverage/
+playwright-report/
+test-results/
+e2e/.data/
+
+# Markdown belongs to markdownlint (`pnpm lint:md`, configured at the repository root).
+*.md

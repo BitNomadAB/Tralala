@@ -1,22 +1,42 @@
-﻿import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ToastProvider } from "@/components/ui/toast";
+import { AuthProvider } from "@/features/auth/AuthProvider";
+import { useAuth } from "@/features/auth/useAuth";
 import { ThemeProvider } from "@/themes/ThemeProvider";
 import { AmbientBackground } from "./AmbientBackground";
-import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
-import { EnrolPage } from "@/features/auth/EnrolPage";
-import { LoginPage } from "@/features/auth/LoginPage";
 import { AppLayout } from "./AppLayout";
-import { DashboardPage } from "@/features/boards/DashboardPage";
-import { BoardLoopsPage } from "@/features/loops/BoardLoopsPage";
-import { LoopPage } from "@/features/loops/LoopPage";
-import { HistoryPage } from "@/features/history/HistoryPage";
-import { DiscussionsPage } from "@/features/discussions/DiscussionsPage";
-import { SettingsPage } from "@/features/settings/SettingsPage";
-import { RepositoriesPage } from "@/features/settings/RepositoriesPage";
-import { TemplateEditorPage } from "@/features/settings/TemplateEditorPage";
-import { RoleTemplateEditorPage } from "@/features/settings/RoleTemplateEditorPage";
-import { AgentEditorPage } from "@/features/settings/AgentEditorPage";
+import { lazyPage } from "./chunkLoading";
+import { RouteErrorBoundary } from "./RouteErrorBoundary";
+
+// One chunk per page, loaded when its route first renders; the layouts stay in the main chunk.
+const LoginPage = lazyPage(() => import("@/features/auth/LoginPage"), "LoginPage");
+const EnrolPage = lazyPage(() => import("@/features/auth/EnrolPage"), "EnrolPage");
+const DashboardPage = lazyPage(() => import("@/features/boards/DashboardPage"), "DashboardPage");
+const BoardLoopsPage = lazyPage(() => import("@/features/loops/BoardLoopsPage"), "BoardLoopsPage");
+const LoopPage = lazyPage(() => import("@/features/loops/LoopPage"), "LoopPage");
+const HistoryPage = lazyPage(() => import("@/features/history/HistoryPage"), "HistoryPage");
+const DiscussionsPage = lazyPage(
+  () => import("@/features/discussions/DiscussionsPage"),
+  "DiscussionsPage",
+);
+const SettingsPage = lazyPage(() => import("@/features/settings/SettingsPage"), "SettingsPage");
+const RepositoriesPage = lazyPage(
+  () => import("@/features/settings/RepositoriesPage"),
+  "RepositoriesPage",
+);
+const TemplateEditorPage = lazyPage(
+  () => import("@/features/settings/TemplateEditorPage"),
+  "TemplateEditorPage",
+);
+const RoleTemplateEditorPage = lazyPage(
+  () => import("@/features/settings/RoleTemplateEditorPage"),
+  "RoleTemplateEditorPage",
+);
+const AgentEditorPage = lazyPage(
+  () => import("@/features/settings/AgentEditorPage"),
+  "AgentEditorPage",
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,33 +81,37 @@ export function App() {
           <ToastProvider>
             <BrowserRouter>
               <Routes>
-                <Route path="/login" element={<LoginRoute />} />
-                <Route path="/enrol" element={<EnrolPage />} />
-                <Route
-                  element={
-                    <RequireAuth>
-                      <AppLayout />
-                    </RequireAuth>
-                  }
-                >
-                  <Route path="/" element={<DashboardPage />} />
-                  <Route path="/boards/:boardId" element={<BoardLoopsPage />} />
+                {/* Each level of routes renders inside an error boundary, so a page that throws
+                    shows a fallback inside the layout and a new route cannot be left outside. The
+                    boundary also holds the Suspense a lazy page shows while its chunk loads. */}
+                <Route element={<RouteErrorBoundary />}>
+                  <Route path="/login" element={<LoginRoute />} />
+                  <Route path="/enrol" element={<EnrolPage />} />
                   <Route
-                    path="/boards/:boardId/loops/:loopId"
-                    element={<LoopPage />}
-                  />
-                  <Route path="/boards/:boardId/history" element={<HistoryPage />} />
-                  <Route path="/discussions" element={<DiscussionsPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="/settings/repositories" element={<RepositoriesPage />} />
-                  <Route path="/settings/templates/:templateId" element={<TemplateEditorPage />} />
-                  <Route
-                    path="/settings/roles/:roleId"
-                    element={<RoleTemplateEditorPage />}
-                  />
-                  <Route path="/settings/agents/:agentId" element={<AgentEditorPage />} />
+                    element={
+                      <RequireAuth>
+                        <AppLayout />
+                      </RequireAuth>
+                    }
+                  >
+                    <Route element={<RouteErrorBoundary />}>
+                      <Route path="/" element={<DashboardPage />} />
+                      <Route path="/boards/:boardId" element={<BoardLoopsPage />} />
+                      <Route path="/boards/:boardId/loops/:loopId" element={<LoopPage />} />
+                      <Route path="/boards/:boardId/history" element={<HistoryPage />} />
+                      <Route path="/discussions" element={<DiscussionsPage />} />
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/settings/repositories" element={<RepositoriesPage />} />
+                      <Route
+                        path="/settings/templates/:templateId"
+                        element={<TemplateEditorPage />}
+                      />
+                      <Route path="/settings/roles/:roleId" element={<RoleTemplateEditorPage />} />
+                      <Route path="/settings/agents/:agentId" element={<AgentEditorPage />} />
+                    </Route>
+                  </Route>
+                  <Route path="*" element={<Navigate to="/" replace />} />
                 </Route>
-                <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </BrowserRouter>
           </ToastProvider>
@@ -96,4 +120,3 @@ export function App() {
     </QueryClientProvider>
   );
 }
-

@@ -1,10 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/features/auth/AuthProvider";
+import { useAuth } from "@/features/auth/useAuth";
 import type { BoardList, Card } from "@/lib/types";
 import { getModelContext } from "./capability";
 import { createRegistry } from "./registry";
-import { cardTools, dashboardTools, loopTools, type McpTool } from "./tools";
+import { cardTools, dashboardTools, loopTools, type LoopColumn, type McpTool } from "./tools";
 
 function useContextualTools(tools: McpTool[] | null): void {
   const { actor } = useAuth();
@@ -27,9 +27,32 @@ function useContextualTools(tools: McpTool[] | null): void {
   }, [tools, actorType, actorScopes]);
 }
 
+/**
+ * The same array for as long as its content is the same, so it can be a memo dependency. The
+ * previous value is kept in state and replaced while rendering (React: "storing information from
+ * previous renders").
+ */
+function useStableValue(value: LoopColumn[]): LoopColumn[] {
+  const key = JSON.stringify(value);
+  const [stable, setStable] = useState({ key, value });
+  if (stable.key !== key) {
+    setStable({ key, value });
+    return value;
+  }
+  return stable.value;
+}
+
 export function useDashboardTools(): void {
   const navigate = useNavigate();
-  const tools = useMemo(() => dashboardTools({ onOpenBoard: (id) => navigate(`/boards/${id}`) }), [navigate]);
+  const tools = useMemo(
+    () =>
+      dashboardTools({
+        onOpenBoard: (id) => {
+          void navigate(`/boards/${id}`);
+        },
+      }),
+    [navigate],
+  );
   useContextualTools(tools);
 }
 
@@ -42,13 +65,18 @@ export function useLoopTools(options: {
   onOpenCard: (cardId: string) => void;
 }): void {
   const { boardId, loopId, loopName, lists, cardsByList, onOpenCard } = options;
-  // Only counts feed the overview tool, so re-registering on a transport-level change is
-  // avoided by keying on the loop shape instead of object identity.
-  const shape = `${lists.map((list) => `${list.id}:${list.name}:${cardsByList[list.id]?.length ?? 0}`).join("|")}`;
+  // Only the column summary feeds the overview tool, so the tools are rebuilt (and re-registered)
+  // when that summary changes, not whenever the card queries hand back new arrays.
+  const columns = useStableValue(
+    lists.map((list) => ({
+      id: list.id,
+      name: list.name,
+      card_count: (cardsByList[list.id] ?? []).length,
+    })),
+  );
   const tools = useMemo(
-    () => loopTools({ boardId, loopId, loopName, lists, cardsByList, onOpenCard }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [boardId, loopId, loopName, shape, onOpenCard],
+    () => loopTools({ boardId, loopId, loopName, columns, onOpenCard }),
+    [boardId, loopId, loopName, columns, onOpenCard],
   );
   useContextualTools(tools);
 }

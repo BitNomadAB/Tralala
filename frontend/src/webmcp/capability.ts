@@ -8,7 +8,8 @@ export interface ModelContextToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  execute: (input: Record<string, unknown>) => unknown | Promise<unknown>;
+  /** Returns the result, or a promise of it. */
+  execute: (input: Record<string, unknown>) => unknown;
 }
 
 export interface ModelContextApi {

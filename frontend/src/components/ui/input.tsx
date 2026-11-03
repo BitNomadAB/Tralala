@@ -25,10 +25,19 @@ export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectE
   return <select className={cn(base, "h-9 py-0", className)} {...props} />;
 }
 
-export function Label({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
+/** A label always names its control: `htmlFor` is required so the association cannot be left out. */
+export function Label({
+  className,
+  htmlFor,
+  ...props
+}: LabelHTMLAttributes<HTMLLabelElement> & { htmlFor: string }) {
   return (
     <label
-      className={cn("text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]", className)}
+      htmlFor={htmlFor}
+      className={cn(
+        "text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]",
+        className,
+      )}
       {...props}
     />
   );
@@ -41,9 +50,9 @@ export function Field({
   hint,
 }: {
   label: string;
-  htmlFor?: string;
+  htmlFor: string;
   children: React.ReactNode;
-  hint?: string;
+  hint?: string | undefined;
 }) {
   return (
     <div className="flex flex-col gap-1.5">

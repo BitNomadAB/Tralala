@@ -11,13 +11,13 @@ one backend per data directory, and a second process taking snapshots would figh
 
 from __future__ import annotations
 
-import json
 import logging
 from threading import Event, Thread
-from typing import Any
+from typing import Protocol, TypedDict
 
 from ..core.context import SCOPES, ActorContext
-from .backups import BackupService
+from ..repositories.registry import RegistryUnitOfWork
+from .backups import BackupCreated
 
 logger = logging.getLogger("tralala.backups")
 
@@ -37,9 +37,43 @@ def system_actor() -> ActorContext:
     )
 
 
+class Backups(Protocol):
+    """What the scheduler asks of ``BackupService``."""
+
+    def newest_age_hours(self, board_id: str) -> float | None: ...
+
+    def create(self, actor: ActorContext, board_id: str) -> BackupCreated: ...
+
+    def prune(self, board_id: str, keep: int) -> list[str]: ...
+
+
+class CreatedEntry(TypedDict):
+    board_id: str
+    name: str
+
+
+class PrunedEntry(TypedDict):
+    board_id: str
+    names: list[str]
+
+
+class FailedEntry(TypedDict):
+    board_id: str
+    error: str
+
+
+class CycleReport(TypedDict):
+    created: list[CreatedEntry]
+    pruned: list[PrunedEntry]
+    failed: list[FailedEntry]
+
+
 class BackupScheduler:
-    def __init__(self, backups: BackupService, *, interval_hours: int, keep: int) -> None:
+    def __init__(
+        self, backups: Backups, *, store: RegistryUnitOfWork, interval_hours: int, keep: int
+    ) -> None:
         self.backups = backups
+        self.store = store
         self.interval_hours = int(interval_hours)
         self.keep = int(keep)
         self._stop = Event()
@@ -70,23 +104,19 @@ class BackupScheduler:
             try:
                 self.run_once()
             except Exception as exc:  # noqa: BLE001 - a failed cycle must not kill the thread
-                logger.error(
-                    json.dumps(
-                        {"event": "backup_cycle_failed", "error_type": type(exc).__name__}
-                    )
-                )
+                logger.error("backup_cycle_failed", extra={"error_type": type(exc).__name__})
             delay = min(self.interval_hours * 3600.0, MAX_CHECK_SECONDS)
 
-    def run_once(self) -> dict[str, Any]:
+    def run_once(self) -> CycleReport:
         """Snapshot every board that is due, then prune; returns a small report."""
-        report: dict[str, Any] = {"created": [], "pruned": [], "failed": []}
+        report: CycleReport = {"created": [], "pruned": [], "failed": []}
         if not self.enabled:
             return report
         actor = system_actor()
-        for row in self.backups.board_service.registry.read(
-            "SELECT id, name FROM boards WHERE status = 'active' ORDER BY name"
-        ):
-            board_id = str(row["id"])
+        with self.store.reader() as repos:
+            active = sorted(repos.boards.with_status("active"), key=lambda row: row.name)
+        for row in active:
+            board_id = row.id
             try:
                 age = self.backups.newest_age_hours(board_id)
                 if age is not None and age < self.interval_hours:
@@ -95,28 +125,22 @@ class BackupScheduler:
                 removed = self.backups.prune(board_id, self.keep)
                 report["created"].append({"board_id": board_id, "name": created["name"]})
                 report["pruned"].append({"board_id": board_id, "names": removed})
+                # "name" is a LogRecord attribute, so the backup's file name is "backup_name".
                 logger.info(
-                    json.dumps(
-                        {
-                            "event": "backup_created",
-                            "board_id": board_id,
-                            "name": created["name"],
-                            "size_bytes": created["size_bytes"],
-                            "integrity": created["verification"]["integrity"],
-                            "pruned": len(removed),
-                        }
-                    )
+                    "backup_created",
+                    extra={
+                        "board_id": board_id,
+                        "backup_name": created["name"],
+                        "size_bytes": created["size_bytes"],
+                        "integrity": created["verification"]["integrity"],
+                        "pruned": len(removed),
+                    },
                 )
             except Exception as exc:  # noqa: BLE001 - one broken board must not stop the rest
                 report["failed"].append({"board_id": board_id, "error": type(exc).__name__})
                 logger.error(
-                    json.dumps(
-                        {
-                            "event": "backup_failed",
-                            "board_id": board_id,
-                            "error_type": type(exc).__name__,
-                        }
-                    )
+                    "backup_failed",
+                    extra={"board_id": board_id, "error_type": type(exc).__name__},
                 )
         return report
 

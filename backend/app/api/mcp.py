@@ -13,17 +13,19 @@ agent to start working, without inventing endpoints.
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Mapping
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
 from ..core.config import Settings
+from ..core.context import ActorContext
 from ..core.errors import ApiError
 from ..services.agent_tools import missing_scopes, tool_catalog
 from .body import read_limited_json
-from .deps import RequestContext, get_context
+from .deps import get_context
 
 router = APIRouter(tags=["mcp"])
 
@@ -39,15 +41,26 @@ INSTRUCTIONS = (
 )
 
 
-def _result(message_id: Any, result: dict[str, Any]) -> dict[str, Any]:
+def _result(message_id: JsonValue, result: Mapping[str, object]) -> dict[str, object]:
     return {"jsonrpc": "2.0", "id": message_id, "result": result}
 
 
-def _error(message_id: Any, code: int, message: str) -> dict[str, Any]:
+def _error(message_id: JsonValue, code: int, message: str) -> dict[str, object]:
     return {"jsonrpc": "2.0", "id": message_id, "error": {"code": code, "message": message}}
 
 
-def _tool_payload(ctx: RequestContext) -> list[dict[str, Any]]:
+def tool_call(params: JsonValue) -> tuple[str, dict[str, JsonValue]] | str:
+    """A ``tools/call``'s tool name and arguments, or why they are invalid params (-32602)."""
+    if not isinstance(params, dict):
+        return "params must be an object"
+    arguments = params.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        return "arguments must be an object"
+    return str(params.get("name") or ""), arguments
+
+
+def tool_list(actor: ActorContext) -> list[dict[str, object]]:
+    """The ``tools/list`` payload: each catalogue entry the actor holds the scopes for, in order."""
     return [
         {
             "name": tool.name,
@@ -55,11 +68,11 @@ def _tool_payload(ctx: RequestContext) -> list[dict[str, Any]]:
             "inputSchema": tool.input_schema,
         }
         for tool in tool_catalog().values()
-        if not missing_scopes(tool, ctx.actor)
+        if not missing_scopes(tool, actor)
     ]
 
 
-def _tool_result(payload: dict[str, Any]) -> dict[str, Any]:
+def _tool_result(payload: Mapping[str, object]) -> dict[str, object]:
     encoded = json.dumps(payload, ensure_ascii=False)
     return {
         "content": [{"type": "text", "text": encoded}],
@@ -68,7 +81,7 @@ def _tool_result(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _tool_failure(error: ApiError) -> dict[str, Any]:
+def _tool_failure(error: ApiError) -> dict[str, object]:
     encoded = json.dumps(
         {
             "error": {
@@ -88,7 +101,8 @@ async def mcp_endpoint(request: Request) -> Response:
     # Every method is authenticated, including initialize: an unauthenticated MCP surface would be
     # a second, undocumented entry point into the installation. The actor is resolved before the
     # body is read, so an unauthenticated caller cannot make the process parse or buffer anything.
-    ctx = get_context(request)
+    # Resolving it reads the registry, so it runs in the thread pool like every other blocking call.
+    ctx = await run_in_threadpool(get_context, request)
     try:
         message = await read_limited_json(request)
     except ValueError:
@@ -98,7 +112,7 @@ async def mcp_endpoint(request: Request) -> Response:
 
     method = message.get("method")
     message_id = message.get("id")
-    params = message.get("params") or {}
+    params: JsonValue = message.get("params") or {}
 
     if "id" not in message:  # notifications/initialized and friends
         return Response(status_code=202)
@@ -120,13 +134,13 @@ async def mcp_endpoint(request: Request) -> Response:
         return JSONResponse(_result(message_id, {}))
 
     if method == "tools/list":
-        return JSONResponse(_result(message_id, {"tools": _tool_payload(ctx)}))
+        return JSONResponse(_result(message_id, {"tools": tool_list(ctx.actor)}))
 
     if method == "tools/call":
-        name = str(params.get("name") or "")
-        arguments = params.get("arguments") or {}
-        if not isinstance(arguments, dict):
-            return JSONResponse(_error(message_id, -32602, "arguments must be an object"))
+        call = tool_call(params)
+        if isinstance(call, str):
+            return JSONResponse(_error(message_id, -32602, call))
+        name, arguments = call
         tool = tool_catalog().get(name)
         if tool is None:
             return JSONResponse(_error(message_id, -32602, f"Unknown tool: {name}"))
@@ -147,7 +161,7 @@ async def mcp_endpoint(request: Request) -> Response:
 
 
 @router.get("/mcp")
-async def mcp_get() -> Response:
+def mcp_get() -> Response:
     """No server-initiated messages, so the SSE stream is not offered."""
     return JSONResponse(
         _error(None, -32000, "Method not allowed; POST JSON-RPC messages to this endpoint"),
@@ -265,7 +279,7 @@ def render_bootstrap(settings: Settings) -> str:
 
 
 @router.get("/llms.txt", response_class=PlainTextResponse)
-async def llms_txt(request: Request) -> Response:
+def llms_txt(request: Request) -> Response:
     settings = request.app.state.settings
     return PlainTextResponse(
         render_bootstrap(settings),
@@ -273,4 +287,4 @@ async def llms_txt(request: Request) -> Response:
     )
 
 
-__all__ = ["router", "render_bootstrap", "PROTOCOL_VERSION"]
+__all__ = ["PROTOCOL_VERSION", "render_bootstrap", "router", "tool_list"]

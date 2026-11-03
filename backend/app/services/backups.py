@@ -1,105 +1,184 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import re
 import zipfile
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, Protocol, TypedDict
 
 from ..core.context import ActorContext
+from ..core.dates import iso_utc
 from ..core.errors import NotFound, ValidationFailure
+from ..core.identifiers import canonical_board_id
+from ..core.integrity import SNAPSHOT_REFUSALS
 from ..core.platform import remove_file, retry_io
-from ..storage.sqlite import snapshot_database, utcnow
-from .boards import BoardService
+from ..repositories.backups import BoardSnapshots, FileVerification
+from ..repositories.board_files import BoardFiles
 from .common import archive_file_name
 
-BACKUP_PATTERN = re.compile(r"^backup-\d{8}T\d{6}Z(?:-[a-z0-9-]+)?\.sqlite$")
+BACKUP_PATTERN = re.compile(r"backup-[0-9]{8}T[0-9]{6}Z(?:-[a-z0-9-]+)?\.sqlite")
+
+
+def is_backup_name(name: str) -> bool:
+    """Whether ``name`` is a snapshot this service wrote, and so may be restored or pruned.
+
+    The whole name must match: ``match`` with ``$`` would also accept a trailing newline. The digits
+    are ``[0-9]`` because Python's digit class also matches other scripts' digits.
+    """
+    return BACKUP_PATTERN.fullmatch(name) is not None
+
+
+class BoardChecks(Protocol):
+    def require_row(self, board_id: str) -> object: ...
+
+    def ensure_active(self, board_id: str) -> object: ...
+
+
+class BackupEntry(TypedDict):
+    name: str
+    size_bytes: int
+    has_attachments: bool
+    attachments_size_bytes: int
+    created_at: str
+
+
+class ArchivedFiles(TypedDict):
+    files: int
+    size_bytes: int
+
+
+class BackupCreated(TypedDict):
+    name: str
+    size_bytes: int
+    attachments: ArchivedFiles
+    created_at: str
+    verification: FileVerification
+
+
+class RestoredFiles(TypedDict):
+    restored: int
+    skipped: bool
+    reason: NotRequired[str]
+
+
+class BoardValidation(TypedDict):
+    board_id: str
+    integrity: str
+    foreign_key_violations: list[dict[str, object]]
+    schema_version: int
+    schema_revision: str | None
+    counts: dict[str, int]
+    ok: bool
+
+
+class BackupRestored(TypedDict):
+    restored_from: str
+    board_id: str
+    attachments: RestoredFiles
+    verification: BoardValidation
+    warning: NotRequired[str]
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
 class BackupService:
-    def __init__(self, board_service: BoardService) -> None:
-        self.board_service = board_service
-        self.boards = board_service.boards
-        self.settings = board_service.settings
+    def __init__(
+        self,
+        boards: BoardChecks,
+        files: BoardFiles,
+        snapshots: BoardSnapshots,
+        *,
+        backups_dir: Path,
+        file_profile: str,
+        now: Callable[[], datetime] = _now,
+    ) -> None:
+        self.boards = boards
+        self.files = files
+        self.snapshots = snapshots
+        self.backups_dir = backups_dir
+        self.file_profile = file_profile
+        self._now = now
 
     def _directory(self, board_id: str) -> Path:
-        return self.settings.backups_dir / self.boards.validate_board_id(board_id)
+        return self.backups_dir / canonical_board_id(board_id)
 
-    def list(self, board_id: str) -> list[dict[str, Any]]:
-        self.board_service.require_row(board_id)
+    def list(self, board_id: str) -> list[BackupEntry]:
+        self.boards.require_row(board_id)
         directory = self._directory(board_id)
         if not directory.exists():
             return []
-        items = []
+        items: list[BackupEntry] = []
         for file in sorted(directory.glob("*.sqlite"), reverse=True):
             stat = file.stat()
-            sidecar = self._attachments_sidecar(board_id, file)
+            sidecar = self._attachments_sidecar(file)
             items.append(
                 {
                     "name": file.name,
                     "size_bytes": stat.st_size,
                     "has_attachments": sidecar.exists(),
                     "attachments_size_bytes": sidecar.stat().st_size if sidecar.exists() else 0,
-                    "created_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC)
-                    .replace(microsecond=0)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
+                    "created_at": iso_utc(datetime.fromtimestamp(stat.st_mtime, tz=UTC)),
                 }
             )
         return items
 
-    def create(self, actor: ActorContext, board_id: str) -> dict[str, Any]:
+    def create(self, actor: ActorContext, board_id: str) -> BackupCreated:
         actor.require("boards:write")
-        self.board_service.ensure_active(board_id)
-        name = f"backup-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.sqlite"
+        self.boards.ensure_active(board_id)
+        moment = self._now()
+        name = f"backup-{moment.astimezone(UTC).strftime('%Y%m%dT%H%M%SZ')}.sqlite"
         directory = self._directory(board_id)
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / name
-        snapshot_database(self.boards.path(board_id), target)
+        self.files.snapshot(board_id, target)
         attachments = self._archive_attachments(board_id, target)
         return {
             "name": name,
             "size_bytes": target.stat().st_size,
             "attachments": attachments,
-            "created_at": utcnow(),
-            "verification": self._check_file(target),
+            "created_at": iso_utc(moment),
+            "verification": self.snapshots.verify_file(target),
         }
 
-    def _attachments_sidecar(self, board_id: str, snapshot: Path) -> Path:
+    @staticmethod
+    def _attachments_sidecar(snapshot: Path) -> Path:
         """The files that belong to a snapshot, as one zip next to it."""
         return snapshot.with_name(f"{snapshot.stem}-attachments.zip")
 
-    def _archive_attachments(self, board_id: str, snapshot: Path) -> dict[str, Any]:
-        directory = self.boards.attachments_dir(board_id)
+    def _archive_attachments(self, board_id: str, snapshot: Path) -> ArchivedFiles:
+        directory = self.files.attachments_dir(board_id)
         files = (
             sorted(file for file in directory.glob("*") if file.is_file())
             if directory.exists()
             else []
         )
-        sidecar = self._attachments_sidecar(board_id, snapshot)
+        sidecar = self._attachments_sidecar(snapshot)
         if not files:
             if sidecar.exists():
                 sidecar.unlink()
             return {"files": 0, "size_bytes": 0}
         buffer = io.BytesIO()
-        profile = self.settings.file_profile
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for file in files:
                 retry_io(
                     "backup_attachment",
-                    profile,
+                    self.file_profile,
                     lambda file=file: archive.write(file, f"attachments/{file.name}"),
                 )
         sidecar.write_bytes(buffer.getvalue())
         return {"files": len(files), "size_bytes": sidecar.stat().st_size}
 
-    def _restore_attachments(self, board_id: str, snapshot_name: str) -> dict[str, Any]:
-        sidecar = self._attachments_sidecar(board_id, self._directory(board_id) / snapshot_name)
+    def _restore_attachments(self, board_id: str, snapshot_name: str) -> RestoredFiles:
+        sidecar = self._attachments_sidecar(self._directory(board_id) / snapshot_name)
         if not sidecar.exists():
             # Older snapshots carry no files; existing ones are left alone rather than deleted.
             return {"restored": 0, "skipped": True, "reason": "snapshot_has_no_file_archive"}
-        directory = self.boards.attachments_dir(board_id)
+        directory = self.files.attachments_dir(board_id)
         directory.mkdir(parents=True, exist_ok=True)
         restored = 0
         with zipfile.ZipFile(sidecar) as archive:
@@ -114,39 +193,34 @@ class BackupService:
     def prune(self, board_id: str, keep: int) -> list[str]:
         """Delete the oldest snapshots beyond ``keep``.
 
-        Only files matching ``BACKUP_PATTERN`` are candidates: an operator may keep a hand-made copy
+        Only files ``is_backup_name`` accepts are candidates: an operator may keep a hand-made copy
         in the same directory, and this must never delete it.
         """
-        self.board_service.require_row(board_id)
+        self.boards.require_row(board_id)
         if keep <= 0:
             return []
         directory = self._directory(board_id)
         if not directory.exists():
             return []
         snapshots = sorted(
-            file
-            for file in directory.iterdir()
-            if file.is_file() and BACKUP_PATTERN.match(file.name)
+            file for file in directory.iterdir() if file.is_file() and is_backup_name(file.name)
         )
         # Names carry the UTC timestamp, so lexical order is chronological order.
         stale = snapshots[:-keep] if len(snapshots) > keep else []
         # Pruning is best effort: one busy snapshot must not stop the others from being removed, and
         # a failure is reported by the next listing rather than by an exception here.
-        profile = self.settings.file_profile
-        removed = []
+        removed: list[str] = []
         for file in stale:
             try:
-                if not remove_file(file, profile=profile):
+                if not remove_file(file, profile=self.file_profile):
                     continue
             except OSError:
                 continue
             removed.append(file.name)
-            sidecar = self._attachments_sidecar(board_id, file)
+            sidecar = self._attachments_sidecar(file)
             if sidecar.exists():
-                try:
-                    remove_file(sidecar, profile=profile)
-                except OSError:
-                    pass
+                with contextlib.suppress(OSError):
+                    remove_file(sidecar, profile=self.file_profile)
         return removed
 
     def newest_age_hours(self, board_id: str) -> float | None:
@@ -155,52 +229,37 @@ class BackupService:
         if not items:
             return None
         newest = datetime.fromisoformat(items[0]["created_at"].replace("Z", "+00:00"))
-        return (datetime.now(UTC) - newest).total_seconds() / 3600
+        return (self._now() - newest).total_seconds() / 3600
 
-    @staticmethod
-    def _check_file(path: Path) -> dict[str, Any]:
-        import sqlite3
-
-        from ..storage.sqlite import connect_sqlite
-
-        try:
-            connection = connect_sqlite(path)
-            try:
-                integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
-            finally:
-                connection.close()
-        except sqlite3.Error as exc:
-            return {"integrity": f"unreadable: {exc}", "ok": False}
-        return {"integrity": integrity, "ok": integrity == "ok"}
-
-    def restore(self, actor: ActorContext, board_id: str, name: str) -> dict[str, Any]:
+    def restore(self, actor: ActorContext, board_id: str, name: str) -> BackupRestored:
         actor.require("boards:admin")
-        self.board_service.require_row(board_id)
-        if not BACKUP_PATTERN.match(name):
+        self.boards.require_row(board_id)
+        if not is_backup_name(name):
             raise ValidationFailure("Invalid backup name")
         source = self._directory(board_id) / name
         if not source.exists():
             raise NotFound("Backup not found")
-        verification = self._check_file(source)
-        if not verification["ok"]:
+        # Before the board is touched, so a refused snapshot leaves its database as it was.
+        problem = self.snapshots.check_snapshot(source)
+        if problem is not None:
             raise ValidationFailure(
-                "Backup failed its integrity check and was not restored",
-                details={"name": name, **verification},
+                SNAPSHOT_REFUSALS[problem.reason],
+                code="board_backup_invalid",
+                details={"name": name, "reason": problem.reason, "detail": problem.detail},
             )
-        destination = self.boards.path(board_id)
-        with self.boards.locked(board_id):
-            self.boards.close(board_id)
-            snapshot_database(source, destination)
-            self.boards.close(board_id)
+        with self.files.locked(board_id):
+            self.snapshots.close(board_id)
+            self.snapshots.restore_snapshot(source, board_id)
+            self.snapshots.close(board_id)
             attachments = self._restore_attachments(board_id, name)
         report = self.validate(board_id)
-        result: dict[str, Any] = {
+        result: BackupRestored = {
             "restored_from": name,
             "board_id": board_id,
             "attachments": attachments,
             "verification": report,
         }
-        if attachments.get("skipped"):
+        if attachments["skipped"]:
             # Saying nothing here would let an operator believe the files came back with the
             # database. The snapshot predates the file archive, so the board keeps its files.
             result["warning"] = (
@@ -208,37 +267,17 @@ class BackupService:
             )
         return result
 
-    def validate(self, board_id: str) -> dict[str, Any]:
-        self.board_service.require_row(board_id)
-        if not self.boards.exists(board_id):
+    def validate(self, board_id: str) -> BoardValidation:
+        self.boards.require_row(board_id)
+        if not self.snapshots.exists(board_id):
             raise NotFound("Board database not found")
-        with self.boards.reader(board_id) as conn:
-            integrity = conn.exec_driver_sql("PRAGMA integrity_check").scalar_one()
-            foreign_keys = [
-                dict(row)
-                for row in conn.exec_driver_sql("PRAGMA foreign_key_check").mappings().all()
-            ]
-            from ..storage.schema import runner
-
-            revision = runner.current_revision("board", conn)
-            version = runner.revision_count("board")
-            counts = {
-                table: conn.exec_driver_sql(f"SELECT COUNT(*) FROM {table}").scalar_one()
-                for table in (
-                    "lists",
-                    "cards",
-                    "labels",
-                    "checklists",
-                    "comments",
-                    "activity_log",
-                )
-            }
+        health = self.snapshots.health(board_id)
         return {
             "board_id": board_id,
-            "integrity": integrity,
-            "foreign_key_violations": foreign_keys,
-            "schema_version": version,
-            "schema_revision": revision,
-            "counts": counts,
-            "ok": integrity == "ok" and not foreign_keys,
+            "integrity": health["integrity"],
+            "foreign_key_violations": health["foreign_key_violations"],
+            "schema_version": health["schema_version"],
+            "schema_revision": health["schema_revision"],
+            "counts": health["counts"],
+            "ok": health["integrity"] == "ok" and not health["foreign_key_violations"],
         }

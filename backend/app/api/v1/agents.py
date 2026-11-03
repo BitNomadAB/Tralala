@@ -17,47 +17,47 @@ from ...schemas.agents import (
     RoleTemplateOut,
     RoleTemplateUpdate,
 )
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ..deps import RequestContext, get_context, ok
 
 router = APIRouter(tags=["agents"])
 
 
 @router.get("/role-templates", response_model=Envelope[list[RoleTemplateOut]])
-async def list_role_templates(
+def list_role_templates(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.role_templates.list())
 
 
 @router.post("/role-templates", response_model=Envelope[RoleTemplateOut], status_code=201)
-async def create_role_template(
+def create_role_template(
     payload: RoleTemplateCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.role_templates.create(ctx.actor, payload))
 
 
 @router.get("/role-templates/{role_id}", response_model=Envelope[RoleTemplateOut])
-async def get_role_template(
+def get_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.role_templates.get(role_id))
 
 
 @router.patch("/role-templates/{role_id}", response_model=Envelope[RoleTemplateOut])
-async def update_role_template(
+def update_role_template(
     role_id: str,
     payload: RoleTemplateUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.role_templates.update(ctx.actor, role_id, payload))
 
 
@@ -66,12 +66,12 @@ async def update_role_template(
     response_model=Envelope[RoleTemplateOut],
     status_code=201,
 )
-async def duplicate_role_template(
+def duplicate_role_template(
     role_id: str,
     payload: RoleTemplateDuplicate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.role_templates.duplicate(ctx.actor, role_id, payload))
 
 
@@ -79,110 +79,110 @@ async def duplicate_role_template(
     "/role-templates/{role_id}/restore-defaults",
     response_model=Envelope[RoleTemplateOut],
 )
-async def restore_role_template(
+def restore_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.role_templates.restore_defaults(ctx.actor, role_id))
 
 
-@router.delete("/role-templates/{role_id}", response_model=Envelope[dict])
-async def delete_role_template(
+@router.delete("/role-templates/{role_id}", response_model=Envelope[OpenObject])
+def delete_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.role_templates.delete(ctx.actor, role_id)
     return ok(request, {"id": role_id, "deleted": True})
 
 
 @router.get("/agents", response_model=Envelope[list[AgentOut]])
-async def list_agents(
+def list_agents(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     q: Annotated[str | None, Query(max_length=200)] = None,
     enabled: Annotated[bool | None, Query()] = None,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.agent.list(q=q, enabled=enabled))
 
 
 @router.get("/agents/directory", response_model=Envelope[list[AgentDirectoryEntry]])
-async def agent_directory(
+def agent_directory(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     """Enabled agents with only id, name and role; used by mention autocomplete."""
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.agent.directory())
 
 
 @router.post("/agents", response_model=Envelope[AgentOut], status_code=201)
-async def create_agent(
+def create_agent(
     payload: AgentCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.agent.create(ctx.actor, payload))
 
 
 @router.get("/agents/{agent_id}", response_model=Envelope[AgentOut])
-async def get_agent(
+def get_agent(
     agent_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.agent.get(agent_id))
 
 
 @router.patch("/agents/{agent_id}", response_model=Envelope[AgentOut])
-async def update_agent(
+def update_agent(
     agent_id: str,
     payload: AgentUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.agent.update(ctx.actor, agent_id, payload))
 
 
 @router.post("/agents/{agent_id}/duplicate", response_model=Envelope[AgentOut], status_code=201)
-async def duplicate_agent(
+def duplicate_agent(
     agent_id: str,
     payload: AgentDuplicate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.agent.duplicate(ctx.actor, agent_id, payload))
 
 
 @router.post("/agents/test", response_model=Envelope[AgentTestResult])
-async def probe_agent(
+def probe_agent(
     payload: AgentTestRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     """Test a connection before the agent is saved; nothing is written."""
     return ok(request, ctx.services.agent.probe(ctx.actor, payload))
 
 
 @router.post("/agents/{agent_id}/test", response_model=Envelope[AgentTestResult])
-async def test_agent(
+def test_agent(
     agent_id: str,
     payload: AgentTestRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.agent.test(ctx.actor, agent_id, payload))
 
 
-@router.delete("/agents/{agent_id}", response_model=Envelope[dict])
-async def delete_agent(
+@router.delete("/agents/{agent_id}", response_model=Envelope[OpenObject])
+def delete_agent(
     agent_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.agent.delete(ctx.actor, agent_id)
     return ok(request, {"id": agent_id, "deleted": True})
 

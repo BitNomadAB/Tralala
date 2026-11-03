@@ -1,11 +1,11 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, ShieldHalf, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { useRoleTemplates } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
@@ -20,29 +20,36 @@ export function RoleTemplatesCard() {
   const deleteMutation = useMutation({
     mutationFn: (role: RoleTemplate) => api.deleteRoleTemplate(role.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["role-templates"] });
+      void queryClient.invalidateQueries({ queryKey: ["role-templates"] });
       setDeleting(null);
       toast.push({ title: "Role template deleted", variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not delete role template",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   return (
     <div className="card-surface p-5">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold">Role templates</h2>
-        <Button size="sm" className="ml-auto" onClick={() => navigate("/settings/roles/new")}>
+        <Button
+          size="sm"
+          className="ml-auto"
+          onClick={() => {
+            void navigate("/settings/roles/new");
+          }}
+        >
           <Plus size={14} /> New role
         </Button>
       </div>
       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-        Central role definitions. Agents reference a template; editing it changes future
-        discussions only, because each discussion stores a snapshot of the instructions it used.
+        Central role definitions. Agents reference a template; editing it changes future discussions
+        only, because each discussion stores a snapshot of the instructions it used.
       </p>
 
       <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)]">
@@ -80,7 +87,9 @@ export function RoleTemplatesCard() {
                     size="sm"
                     variant="secondary"
                     aria-label={`Edit ${role.name}`}
-                    onClick={() => navigate(`/settings/roles/${role.id}`)}
+                    onClick={() => {
+                      void navigate(`/settings/roles/${role.id}`);
+                    }}
                   >
                     Edit
                   </Button>

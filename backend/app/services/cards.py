@@ -4,157 +4,206 @@ A Ticket is the existing card resource, extended with Loop ownership, a stable k
 its approved work definition. Completion stays explicit through ``completed_at``; a column name
 never marks work done, and every completion transition runs through the same readiness rules an
 agent's start request would face.
+
+The service reaches the board database only through the board unit of work, the registry (to
+check an assignee) only through the registry unit of work, the board's registry row through
+``BoardChecks`` and the plan through ``PlanViews``; the clock and the id source are passed in, so
+every rule here runs in a unit test without a database.
+
+The JSON shapes live in ``cards_views`` and the inserting and editing writes in ``cards_writes``;
+this module keeps the service, its checks and guards, and re-exports what callers import from it.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import text
-
+from ..core.config import Settings
 from ..core.context import ActorContext
-from ..core.dates import parse_due_filter
+from ..core.dates import iso_utc, parse_due_filter
 from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
+from ..db.generated.board import CardsRow, LoopsRow
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..repositories.cards import CardQuery
+from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.cards import BulkCardCreate, CardCreate, CardMove, CardUpdate
-from ..storage.sqlite import utcnow
-from .activity import log_activity
-from .boards import BoardService
-from .common import (
-    card_counts,
-    decorate_cards,
-    one,
-    position_for_index,
-    request_fingerprint,
-    resolve_label_ids,
-    rows,
-    run_idempotent,
-    set_card_labels,
+from . import idempotency
+from .cards_views import (
+    BoardTicketEntry,
+    BulkFailure,
+    BulkResult,
+    CardEntry,
+    CardRecord,
+    card_entry,
+    card_record,
+    card_sort,
 )
+from .cards_writes import (
+    NEW_LABEL_COLOR,
+    apply_update,
+    card_position,
+    insert_card,
+    log_card,
+    ticket_in_loop,
+)
+from .lists import BoardChecks
+from .loops import ensure_execution_allowed, readiness_item, require_loop
+from .plan_views import PlanViews, ReadinessItem
+from .subresources import label_entries
+
+__all__ = [
+    "NEW_LABEL_COLOR",
+    "PLAN_CHANGE_CODE",
+    "BoardTicketEntry",
+    "BulkFailure",
+    "BulkResult",
+    "CardEntry",
+    "CardRecord",
+    "CardService",
+    "card_entry",
+    "card_record",
+    "card_sort",
+]
 
 logger = logging.getLogger("tralala.cards")
 
 PLAN_CHANGE_CODE = "plan_change_required"
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _new_id() -> str:
+    return str(uuid4())
+
+
 class CardService:
     def __init__(
         self,
-        board_service: BoardService,
-        loop_service: Any | None = None,
-        plan_service: Any | None = None,
+        settings: Settings,
+        boards: BoardChecks,
+        store: BoardUnitOfWork,
+        accounts: RegistryUnitOfWork,
+        *,
+        plans: PlanViews,
+        clock: Callable[[], datetime] = _now,
+        new_id: Callable[[], str] = _new_id,
     ) -> None:
-        self.board_service = board_service
-        self.boards = board_service.boards
-        self.settings = board_service.settings
-        self.loops = loop_service
-        self.plans = plan_service
+        self.settings = settings
+        self.boards = boards
+        self.store = store
+        self.accounts = accounts
+        self.plans = plans
+        self._clock = clock
+        self._new_id = new_id
 
-    # --- helpers ---------------------------------------------------------------
+    def _now(self) -> str:
+        return iso_utc(self._clock())
 
-    def _loop_row(self, conn: Any, board_id: str, loop_id: str) -> dict[str, Any]:
-        if self.loops is None:
-            raise NotFound("Loop not found", code="loop_not_found")
-        return self.loops.require_loop_row(conn, board_id, loop_id)
+    # --- rules -----------------------------------------------------------------------------------
 
-    def _card_row(self, conn: Any, board_id: str, loop_id: str, card_id: str) -> dict[str, Any]:
-        row = one(conn, "SELECT * FROM cards WHERE id = :id", {"id": card_id})
-        if row is None:
-            raise NotFound("Card not found")
-        if row["loop_id"] != loop_id:
-            raise Conflict(
-                "The Ticket belongs to another Loop",
-                code="loop_mismatch",
-                details={"loop_id": loop_id, "ticket_loop_id": row["loop_id"]},
-            )
-        del board_id
-        return row
+    @staticmethod
+    def _card(repos: BoardRepositories, loop_id: str, card_id: str) -> CardsRow:
+        return ticket_in_loop(repos, loop_id, card_id)
 
-    def require_membership(self, board_id: str, loop_id: str, card_id: str) -> None:
-        """Cheap ownership check for routes that address a Ticket through its Loop."""
-        self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            self._card_row(conn, board_id, loop_id, card_id)
-
-    def _require_writable(self, loop: dict[str, Any]) -> None:
-        if loop["completed_at"] is not None or loop["stage"] == "completed":
+    @staticmethod
+    def _require_writable(loop: LoopsRow) -> None:
+        if loop.completed_at is not None or loop.stage == "completed":
             raise Conflict(
                 "This Loop is completed and read-only",
                 code="loop_read_only",
-                details={"loop_id": loop["id"]},
+                details={"loop_id": loop.id},
             )
-        if loop["archived_at"] is not None or loop["cancelled_at"] is not None:
+        if loop.archived_at is not None or loop.cancelled_at is not None:
             raise Conflict(
                 "This Loop is not editable",
                 code="loop_read_only",
-                details={"loop_id": loop["id"]},
+                details={"loop_id": loop.id},
             )
+
+    @staticmethod
+    def _check_version(card: CardsRow, expected: int) -> None:
+        if card.version != expected:
+            raise VersionConflict(
+                "Card was modified by another actor",
+                details={"expected_version": expected, "current_version": card.version},
+            )
+
+    def _readiness_for(
+        self, repos: BoardRepositories, loop: LoopsRow, card_id: str
+    ) -> ReadinessItem | None:
+        if not loop.current_plan_id:
+            return None
+        return readiness_item(self.plans.readiness(repos, loop), card_id)
 
     def _decorate(
-        self, conn: Any, board_id: str, loop: dict[str, Any], cards: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        decorated = decorate_cards(conn, board_id, cards)
-        readiness: dict[str, dict[str, Any]] = {}
-        if loop.get("current_plan_id") and self.plans is not None:
-            evaluation = self.plans.readiness(conn, loop)
-            for item in evaluation["items"]:
-                if item.get("card_id"):
+        self, repos: BoardRepositories, board_id: str, loop: LoopsRow, rows: Sequence[CardsRow]
+    ) -> list[CardEntry]:
+        ids = [row.id for row in rows]
+        labels = repos.cards.labels(ids)
+        counts = repos.cards.counts(ids)
+        readiness: dict[str, ReadinessItem] = {}
+        if loop.current_plan_id:
+            for item in self.plans.readiness(repos, loop)["items"]:
+                if item["card_id"]:
                     readiness[item["card_id"]] = item
-        for card in decorated:
-            card["loop_id"] = loop["id"]
-            item = readiness.get(card["id"])
-            if item is not None:
-                card["human_action_required"] = bool(item["human_action_required"])
-            else:
-                card["human_action_required"] = (
-                    card.get("required_actor") == "human" and card.get("completed_at") is None
-                )
-            card["ready"] = bool(item["ready"]) if item else True
-            card["blockers"] = item["blockers"] if item else []
-            card["downstream_phase_numbers"] = (
-                item["downstream_phase_numbers"] if item else []
-            )
-            card["acceptance_criteria"] = item["acceptance_criteria"] if item else []
-            card["expected_evidence"] = item["expected_evidence"] if item else []
-            card["phase_number"] = item["phase_number"] if item else None
-        return decorated
+        return [
+            card_entry(board_id, row, labels[row.id], counts[row.id], readiness.get(row.id))
+            for row in rows
+        ]
 
-    def _readiness_for(self, conn: Any, loop: dict[str, Any], card_id: str) -> dict[str,
-    Any] | None:
-        if not loop.get("current_plan_id") or self.plans is None:
-            return None
-        evaluation = self.plans.readiness(conn, loop)
-        for item in evaluation["items"]:
-            if item.get("card_id") == card_id:
-                return item
-        return None
+    def _position(
+        self,
+        repos: BoardRepositories,
+        list_id: str,
+        index: int | None,
+        *,
+        exclude: str | None = None,
+    ) -> int:
+        return card_position(repos, list_id, index, exclude=exclude)
 
-    # --- queries ---------------------------------------------------------------
+    def _log(
+        self,
+        repos: BoardRepositories,
+        actor: ActorContext,
+        action: str,
+        card_id: str,
+        changes: Mapping[str, object] | None = None,
+    ) -> None:
+        log_card(repos, actor, action, card_id, changes, new_id=self._new_id, now=self._now)
 
-    def locate(self, board_id: str, card_id: str) -> tuple[str, dict[str, Any]]:
+    # --- reads -----------------------------------------------------------------------------------
+
+    def require_membership(self, board_id: str, loop_id: str, card_id: str) -> None:
+        """Cheap ownership check for routes that address a Ticket through its Loop."""
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            self._card(repos, loop_id, card_id)
+
+    def locate(self, board_id: str, card_id: str) -> tuple[str, CardRecord]:
         """Which Loop owns a Ticket.
 
         Board-level callers (the worker tools) are handed a Ticket id and nothing else, so the
         owning Loop is resolved here instead of being guessed. The row is returned so a caller can
         use its version without a second read.
         """
-        self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            row = one(conn, "SELECT * FROM cards WHERE id = :id", {"id": card_id})
-            if row is None:
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            row = repos.cards.get(card_id)
+            if row is None or repos.loops.get(row.loop_id) is None:
                 raise NotFound("Ticket not found")
-            loop = one(conn, "SELECT id FROM loops WHERE id = :id", {"id": row["loop_id"]})
-            if loop is None:
-                raise NotFound("Ticket not found")
-            return str(row["loop_id"]), dict(row)
+        return row.loop_id, card_record(row)
 
-    def get(self, board_id: str, loop_id: str, card_id: str) -> dict[str, Any]:
-        self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            loop = self._loop_row(conn, board_id, loop_id)
-            row = self._card_row(conn, board_id, loop_id, card_id)
-            return self._decorate(conn, board_id, loop, [row])[0]
+    def get(self, board_id: str, loop_id: str, card_id: str) -> CardEntry:
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            loop = require_loop(repos, loop_id)
+            row = self._card(repos, loop_id, card_id)
+            return self._decorate(repos, board_id, loop, [row])[0]
 
     def list(
         self,
@@ -174,193 +223,83 @@ class CardService:
         order: str = "asc",
         limit: int = 50,
         offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
-        self.board_service.require_row(board_id)
-        clauses: list[str] = ["c.loop_id = :loop_id"]
-        params: dict[str, Any] = {"loop_id": loop_id}
-        joins = ""
-        if not include_archived:
-            clauses.append("c.archived_at IS NULL")
-        if list_id:
-            clauses.append("c.list_id = :list_id")
-            params["list_id"] = list_id
-        if q:
-            clauses.append("(c.title LIKE :q OR c.description LIKE :q)")
-            params["q"] = f"%{q}%"
-        if label:
-            joins += " JOIN card_labels cl ON cl.card_id = c.id JOIN labels l ON l.id = cl.label_id"
-            clauses.append("(l.id = :label OR l.name = :label)")
-            params["label"] = label
-        if priority:
-            clauses.append("c.priority = :priority")
-            params["priority"] = priority
-        if due_before:
-            clauses.append("c.due_at IS NOT NULL AND c.due_at <= :due_before")
-            params["due_before"] = parse_due_filter(due_before)
-        if overdue:
-            clauses.append("c.due_at IS NOT NULL AND c.due_at < :now AND c.completed_at IS NULL")
-            params["now"] = utcnow()
-        if completed is not None:
-            clauses.append("c.completed_at IS NOT NULL" if completed else "c.completed_at IS NULL")
-        if assignee:
-            if assignee == "unassigned":
-                clauses.append("c.assignee_actor_id IS NULL")
-            else:
-                clauses.append("c.assignee_actor_id = :assignee")
-                params["assignee"] = assignee
-        where = f" WHERE {' AND '.join(clauses)}"
-        sort_column = (
-            "c.position"
-            if sort not in {"created_at", "updated_at", "due_at", "title"}
-            else f"c.{sort}"
+    ) -> tuple[list[CardEntry], int]:
+        self.boards.require_row(board_id)
+        due = parse_due_filter(due_before) if due_before else None
+        query = CardQuery(
+            loop_id=loop_id,
+            include_archived=include_archived,
+            list_id=list_id or None,
+            contains=q or None,
+            label=label or None,
+            priority=priority or None,
+            due_before=due,
+            overdue_at=self._now() if overdue else None,
+            completed=completed,
+            unassigned=assignee == "unassigned",
+            assignee=assignee or None,
         )
-        direction = "DESC" if order.lower() == "desc" else "ASC"
-        base = f"FROM cards c{joins}{where}"
-        with self.boards.reader(board_id) as conn:
-            loop = self._loop_row(conn, board_id, loop_id)
-            total = conn.execute(text(f"SELECT COUNT(DISTINCT c.id) {base}"), params).scalar_one()
-            records = rows(
-                conn,
-                f"SELECT DISTINCT c.* {base}"
-                f" ORDER BY {sort_column} {direction}, c.id"
-                " LIMIT :limit OFFSET :offset",
-                {**params, "limit": limit, "offset": offset},
+        with self.store.reader(board_id) as repos:
+            loop = require_loop(repos, loop_id)
+            if due_before and due is None:
+                # A blank due filter compares with NULL, which matches no card (it always did).
+                return [], 0
+            total = repos.cards.count(query)
+            rows = repos.cards.page(
+                query,
+                sort=card_sort(sort),
+                descending=order.lower() == "desc",
+                limit=limit,
+                offset=offset,
             )
-            return self._decorate(conn, board_id, loop, records), int(total)
+            return self._decorate(repos, board_id, loop, rows), total
 
     def list_board_tickets(
         self, board_id: str, *, q: str | None = None, limit: int = 200
-    ) -> list[dict[str, Any]]:
+    ) -> list[BoardTicketEntry]:
         """Explicit Board-level aggregate read; every row identifies its owning Loop."""
-        self.board_service.require_row(board_id)
-        clauses = ["c.archived_at IS NULL", "l.completed_at IS NULL", "l.archived_at IS NULL"]
-        params: dict[str, Any] = {"limit": limit}
-        if q:
-            clauses.append("(c.title LIKE :q OR c.ticket_key LIKE :q)")
-            params["q"] = f"%{q}%"
-        with self.boards.reader(board_id) as conn:
-            records = rows(
-                conn,
-                "SELECT c.*, l.key AS loop_key, l.name AS loop_name, l.stage AS loop_stage"
-                " FROM cards c JOIN loops l ON l.id = c.loop_id"
-                f" WHERE {' AND '.join(clauses)}"
-                " ORDER BY l.sequence, c.position, c.id LIMIT :limit",
-                params,
-            )
-            decorated = decorate_cards(conn, board_id, records)
-            for record in decorated:
-                record["board_id"] = board_id
-        return decorated
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            tickets = repos.cards.board_tickets(contains=q or None, limit=limit)
+            ids = [ticket.card.id for ticket in tickets]
+            labels = repos.cards.labels(ids)
+            counts = repos.cards.counts(ids)
+        return [
+            {
+                **card_record(ticket.card),
+                "loop_key": ticket.loop_key,
+                "loop_name": ticket.loop_name,
+                "loop_stage": ticket.loop_stage,
+                "board_id": board_id,
+                "labels": label_entries(labels[ticket.card.id]),
+                "checklist_total": counts[ticket.card.id].checklist_total,
+                "checklist_completed": counts[ticket.card.id].checklist_completed,
+                "comment_count": counts[ticket.card.id].comment_count,
+            }
+            for ticket in tickets
+        ]
 
-    def list_with_checklists(self, board_id: str, loop_id: str, card_id: str) -> dict[str, Any]:
-        from .subresources import ChecklistService
-
-        card = self.get(board_id, loop_id, card_id)
-        card["checklists"] = ChecklistService(self.board_service).list(board_id, card_id)
-        return card
-
-    # --- mutations -------------------------------------------------------------
-
-    def _active_list_ids(self, conn: Any, loop_id: str) -> set[str]:
-        return {
-            row["id"]
-            for row in rows(
-                conn,
-                "SELECT id FROM lists WHERE loop_id = :loop_id AND archived_at IS NULL",
-                {"loop_id": loop_id},
-            )
-        }
+    # --- writes ----------------------------------------------------------------------------------
 
     def _insert_card(
         self,
-        conn: Any,
-        *,
-        board_id: str,
-        loop: dict[str, Any],
-        list_id: str,
-        payload: CardCreate,
+        repos: BoardRepositories,
         actor: ActorContext,
-    ) -> dict[str, Any]:
-        list_ids = self._active_list_ids(conn, loop["id"])
-        if list_id not in list_ids:
-            other = one(conn, "SELECT loop_id FROM lists WHERE id = :id", {"id": list_id})
-            if other is not None and other["loop_id"] != loop["id"]:
-                raise Conflict(
-                    "The column belongs to another Loop",
-                    code="loop_mismatch",
-                    details={"list_id": list_id},
-                )
-            raise ValidationFailure(
-                "List does not exist or is archived", details={"list_id": list_id}
-            )
-        card_id = str(uuid4())
-        now = utcnow()
-        position = position_for_index(
-            conn, "cards", "list_id = :list_id AND archived_at IS NULL", {"list_id": list_id}, None
-        )
-        conn.execute(
-            text(
-                "INSERT INTO cards (id, loop_id, list_id, title, description, position, priority,"
-                " due_at, completed_at, created_at, updated_at, archived_at, version, kind)"
-                " VALUES (:id, :loop_id, :list_id, :title, :description, :position, :priority,"
-                " :due_at, NULL, :now, :now, NULL, 1, 'manual')"
-            ),
-            {
-                "id": card_id,
-                "loop_id": loop["id"],
-                "list_id": list_id,
-                "title": payload.title,
-                "description": payload.description,
-                "position": position,
-                "priority": payload.priority,
-                "due_at": payload.due_at,
-                "now": now,
-            },
-        )
-        if payload.labels:
-            set_card_labels(conn, card_id, resolve_label_ids(conn, payload.labels))
-        row = self._card_row(conn, board_id, loop["id"], card_id)
-        log_activity(
-            conn,
-            actor,
-            action="card.created",
-            entity_type="card",
-            entity_id=card_id,
-            changes={"title": payload.title, "list_id": list_id, "loop_id": loop["id"]},
-        )
-        return row
+        loop: LoopsRow,
+        payload: CardCreate,
+    ) -> CardsRow:
+        return insert_card(repos, actor, loop, payload, new_id=self._new_id, now=self._now)
 
-    def _resolve_assignee(self, assignee_id: str) -> dict[str, Any]:
-        """Validate a human actor or an enabled registry agent as the primary assignee."""
-        registry = self.board_service.registry
-        person = registry.read_one(
-            "SELECT id, type, name FROM actors WHERE id = :id AND disabled_at IS NULL",
-            {"id": assignee_id},
-        )
-        if person is not None:
-            return {
-                "assignee_actor_id": person["id"],
-                "assignee_type": person["type"],
-                "assignee_name": person["name"],
-            }
-        agent = registry.read_one(
-            "SELECT id, name, enabled FROM agents WHERE id = :id", {"id": assignee_id}
-        )
-        if agent is None:
-            raise ValidationFailure(
-                "Assignee must be a human user or a registered agent",
-                details={"assignee_actor_id": assignee_id},
+    def _loop_taking_new_work(self, repos: BoardRepositories, loop_id: str) -> LoopsRow:
+        loop = require_loop(repos, loop_id)
+        self._require_writable(loop)
+        if loop.current_plan_id:
+            raise Conflict(
+                "This Loop executes an approved plan; amend the plan to add work",
+                code=PLAN_CHANGE_CODE,
+                details={"loop_id": loop_id},
             )
-        if not agent["enabled"]:
-            raise ValidationFailure(
-                "Agent is disabled and cannot be assigned",
-                details={"assignee_actor_id": assignee_id},
-            )
-        return {
-            "assignee_actor_id": agent["id"],
-            "assignee_type": "agent",
-            "assignee_name": agent["name"],
-        }
+        return loop
 
     def create(
         self,
@@ -370,10 +309,11 @@ class CardService:
         payload: CardCreate,
         *,
         idempotency_key: str | None = None,
-    ) -> tuple[dict[str, Any], bool]:
+    ) -> tuple[CardEntry | idempotency.JsonObject, bool]:
+        """The new Ticket and False, or the answer stored for a replayed key and True."""
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        fingerprint = request_fingerprint(
+        self.boards.ensure_active(board_id)
+        fingerprint = idempotency.request_fingerprint(
             {
                 "op": "card.create",
                 "board_id": board_id,
@@ -381,37 +321,17 @@ class CardService:
                 "payload": payload.model_dump(),
             }
         )
-
-        with self.boards.session(board_id) as conn:
-            loop = self._loop_row(conn, board_id, loop_id)
-            self._require_writable(loop)
-            if loop.get("current_plan_id"):
-                raise Conflict(
-                    "This Loop executes an approved plan; amend the plan to add work",
-                    code=PLAN_CHANGE_CODE,
-                    details={"loop_id": loop_id},
-                )
-
-            def action() -> dict[str, Any]:
-                row = self._insert_card(
-                    conn,
-                    board_id=board_id,
-                    loop=loop,
-                    list_id=payload.list_id,
-                    payload=payload,
-                    actor=actor,
-                )
-                return self._decorate(conn, board_id, loop, [row])[0]
-
-            result, replayed = run_idempotent(
-                conn,
-                actor_id=actor.actor_id,
-                key=idempotency_key,
-                fingerprint=fingerprint,
-                ttl_seconds=self.settings.idempotency_ttl_seconds,
-                action=action,
-            )
-        return result, replayed
+        with self.store.writer(board_id) as repos:
+            loop = self._loop_taking_new_work(repos, loop_id)
+            if idempotency_key:
+                stored = self._stored(repos, actor, idempotency_key, fingerprint)
+                if stored is not None:
+                    return stored, True
+            row = self._insert_card(repos, actor, loop, payload)
+            entry = self._decorate(repos, board_id, loop, [row])[0]
+            if idempotency_key:
+                self._remember(repos, actor, idempotency_key, fingerprint, entry)
+        return entry, False
 
     def bulk_create(
         self,
@@ -421,15 +341,16 @@ class CardService:
         payload: BulkCardCreate,
         *,
         idempotency_key: str | None = None,
-    ) -> tuple[dict[str, Any], bool]:
+    ) -> tuple[BulkResult | idempotency.JsonObject, bool]:
+        """Each card in its own savepoint: one that fails is reported and leaves the others."""
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
+        self.boards.ensure_active(board_id)
         if len(payload.cards) > self.settings.bulk_limit:
             raise ValidationFailure(
                 "Bulk request exceeds the configured limit",
                 details={"limit": self.settings.bulk_limit},
             )
-        fingerprint = request_fingerprint(
+        fingerprint = idempotency.request_fingerprint(
             {
                 "op": "card.bulk_create",
                 "board_id": board_id,
@@ -437,63 +358,63 @@ class CardService:
                 "payload": payload.model_dump(),
             }
         )
+        with self.store.writer(board_id) as repos:
+            loop = self._loop_taking_new_work(repos, loop_id)
+            if idempotency_key:
+                stored = self._stored(repos, actor, idempotency_key, fingerprint)
+                if stored is not None:
+                    return stored, True
+            result: BulkResult = {"created": [], "failed": []}
+            for index, card_payload in enumerate(payload.cards):
+                try:
+                    with repos.savepoint():
+                        row = self._insert_card(repos, actor, loop, card_payload)
+                        result["created"].append(self._decorate(repos, board_id, loop, [row])[0])
+                except (ValidationFailure, Conflict) as exc:
+                    result["failed"].append(
+                        {"index": index, "code": "card_create_failed", "message": exc.message}
+                    )
+                except Exception:  # partial failure is the contract here
+                    logger.exception("bulk card creation failed", extra={"index": index})
+                    result["failed"].append(
+                        {
+                            "index": index,
+                            "code": "card_create_failed",
+                            "message": "Card could not be created",
+                        }
+                    )
+            if idempotency_key:
+                self._remember(repos, actor, idempotency_key, fingerprint, result)
+        return result, False
 
-        with self.boards.session(board_id) as conn:
-            loop = self._loop_row(conn, board_id, loop_id)
-            self._require_writable(loop)
-            if loop.get("current_plan_id"):
-                raise Conflict(
-                    "This Loop executes an approved plan; amend the plan to add work",
-                    code=PLAN_CHANGE_CODE,
-                    details={"loop_id": loop_id},
-                )
+    def _stored(
+        self, repos: BoardRepositories, actor: ActorContext, key: str, fingerprint: str
+    ) -> idempotency.JsonObject | None:
+        return idempotency.stored_answer(
+            repos.idempotency,
+            actor_id=actor.actor_id,
+            key=key,
+            fingerprint=fingerprint,
+            now=self._clock(),
+        )
 
-            def action() -> dict[str, Any]:
-                created: list[dict[str, Any]] = []
-                failed: list[dict[str, Any]] = []
-                for index, card_payload in enumerate(payload.cards):
-                    savepoint = conn.begin_nested()
-                    try:
-                        row = self._insert_card(
-                            conn,
-                            board_id=board_id,
-                            loop=loop,
-                            list_id=card_payload.list_id,
-                            payload=card_payload,
-                            actor=actor,
-                        )
-                        created.append(self._decorate(conn, board_id, loop, [row])[0])
-                        savepoint.commit()
-                    except (ValidationFailure, Conflict) as exc:
-                        savepoint.rollback()
-                        failed.append(
-                            {
-                                "index": index,
-                                "code": "card_create_failed",
-                                "message": exc.message,
-                            }
-                        )
-                    except Exception:  # noqa: BLE001 - partial failure is the contract here
-                        savepoint.rollback()
-                        logger.exception("bulk card creation failed", extra={"index": index})
-                        failed.append(
-                            {
-                                "index": index,
-                                "code": "card_create_failed",
-                                "message": "Card could not be created",
-                            }
-                        )
-                return {"created": created, "failed": failed}
-
-            result, replayed = run_idempotent(
-                conn,
-                actor_id=actor.actor_id,
-                key=idempotency_key,
-                fingerprint=fingerprint,
-                ttl_seconds=self.settings.idempotency_ttl_seconds,
-                action=action,
-            )
-        return result, replayed
+    def _remember(
+        self,
+        repos: BoardRepositories,
+        actor: ActorContext,
+        key: str,
+        fingerprint: str,
+        answer: Mapping[str, object],
+    ) -> None:
+        idempotency.remember(
+            repos.idempotency,
+            actor_id=actor.actor_id,
+            key=key,
+            fingerprint=fingerprint,
+            answer=answer,
+            now=self._clock(),
+            ttl_seconds=self.settings.idempotency_ttl_seconds,
+        )
 
     def update(
         self,
@@ -502,194 +423,80 @@ class CardService:
         loop_id: str,
         card_id: str,
         payload: CardUpdate,
-    ) -> dict[str, Any]:
+    ) -> CardEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            loop = self._loop_row(conn, board_id, loop_id)
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            loop = require_loop(repos, loop_id)
             self._require_writable(loop)
-            existing = self._card_row(conn, board_id, loop_id, card_id)
-            if existing["version"] != payload.version:
-                raise VersionConflict(
-                    "Card was modified by another actor",
-                    details={
-                        "expected_version": payload.version,
-                        "current_version": existing["version"],
-                    },
-                )
+            existing = self._card(repos, loop_id, card_id)
+            self._check_version(existing, payload.version)
             self._guard_plan_scope(existing, payload)
-            self._guard_completion(conn, loop, existing, payload, actor)
-            changes: dict[str, Any] = {}
-            assignments: dict[str, Any] = {}
-            if payload.title is not None and payload.title != existing["title"]:
-                assignments["title"] = payload.title
-                changes["title"] = {"before": existing["title"], "after": payload.title}
-            if payload.description is not None and payload.description != existing["description"]:
-                assignments["description"] = payload.description
-                changes["description"] = {"changed": True}
-            if payload.priority is not None and payload.priority != existing["priority"]:
-                assignments["priority"] = payload.priority
-                changes["priority"] = {
-                    "before": existing["priority"],
-                    "after": payload.priority,
-                }
-            if payload.clear_due_at:
-                assignments["due_at"] = None
-                changes["due_at"] = {"before": existing["due_at"], "after": None}
-            elif payload.due_at is not None and payload.due_at != existing["due_at"]:
-                assignments["due_at"] = payload.due_at
-                changes["due_at"] = {"before": existing["due_at"], "after": payload.due_at}
-            if payload.completed is not None:
-                already = existing["completed_at"] is not None
-                if payload.completed and not already:
-                    assignments["completed_at"] = utcnow()
-                    changes["completed"] = {"before": False, "after": True}
-                    if existing["required_actor"] == "human":
-                        assignments["human_confirmed_at"] = utcnow()
-                        assignments["human_confirmed_by_actor_id"] = actor.actor_id
-                        changes["human_confirmation"] = {"actor_id": actor.actor_id}
-                elif not payload.completed and already:
-                    assignments["completed_at"] = None
-                    assignments["human_confirmed_at"] = None
-                    assignments["human_confirmed_by_actor_id"] = None
-                    changes["completed"] = {"before": True, "after": False}
-                    self._invalidate_after_reopen(conn, loop, existing)
-            if payload.labels is not None:
-                label_ids = resolve_label_ids(conn, payload.labels)
-                set_card_labels(conn, card_id, label_ids)
-                changes["labels"] = {"after": payload.labels}
-            if payload.clear_assignee:
-                assignments["assignee_actor_id"] = None
-                assignments["assignee_type"] = None
-                assignments["assignee_name"] = None
-                assignments["assigned_at"] = None
-                assignments["assigned_by_actor_id"] = None
-                changes["assignee"] = {
-                    "before": existing.get("assignee_actor_id"),
-                    "after": None,
-                }
-            elif payload.assignee_actor_id is not None:
-                assignee = self._resolve_assignee(payload.assignee_actor_id)
-                if assignee["assignee_actor_id"] != existing.get("assignee_actor_id"):
-                    assignments.update(assignee)
-                    assignments["assigned_at"] = utcnow()
-                    assignments["assigned_by_actor_id"] = actor.actor_id
-                    changes["assignee"] = {
-                        "before": existing.get("assignee_actor_id"),
-                        "after": assignee["assignee_actor_id"],
-                        "name": assignee["assignee_name"],
-                        "type": assignee["assignee_type"],
-                    }
-            if assignments:
-                assignments["version"] = existing["version"] + 1
-                assignments["updated_at"] = utcnow()
-                columns = ", ".join(f"{column} = :{column}" for column in assignments)
-                conn.execute(
-                    text(f"UPDATE cards SET {columns} WHERE id = :id"),
-                    {**assignments, "id": card_id},
-                )
-            if changes:
-                log_activity(
-                    conn,
-                    actor,
-                    action="card.updated",
-                    entity_type="card",
-                    entity_id=card_id,
-                    changes=changes,
-                )
-            if "completed" in changes:
-                self._refresh_loop(conn, loop_id)
-            row = self._card_row(conn, board_id, loop_id, card_id)
-            return self._decorate(conn, board_id, loop, [row])[0]
+            self._guard_completion(repos, loop, existing, payload, actor)
+            apply_update(
+                repos,
+                actor,
+                loop,
+                existing,
+                payload,
+                accounts=self.accounts,
+                new_id=self._new_id,
+                now=self._now,
+            )
+            row = self._card(repos, loop_id, card_id)
+            return self._decorate(repos, board_id, loop, [row])[0]
 
     @staticmethod
-    def _guard_plan_scope(existing: dict[str, Any], payload: CardUpdate) -> None:
+    def _guard_plan_scope(existing: CardsRow, payload: CardUpdate) -> None:
         """The approved work definition is not editable through a card endpoint."""
-        if not existing.get("plan_item_id"):
+        if not existing.plan_item_id:
             return
-        if payload.title is not None and payload.title != existing["title"]:
+        if payload.title is not None and payload.title != existing.title:
             raise Conflict(
                 "Changing an approved Ticket title needs a reviewed plan amendment",
                 code=PLAN_CHANGE_CODE,
-                details={"field": "title", "ticket_key": existing.get("ticket_key")},
+                details={"field": "title", "ticket_key": existing.ticket_key},
             )
-        if payload.description is not None and payload.description != existing["description"]:
+        if payload.description is not None and payload.description != existing.description:
             raise Conflict(
                 "Changing approved instructions needs a reviewed plan amendment",
                 code=PLAN_CHANGE_CODE,
-                details={"field": "description", "ticket_key": existing.get("ticket_key")},
+                details={"field": "description", "ticket_key": existing.ticket_key},
             )
 
     def _guard_completion(
         self,
-        conn: Any,
-        loop: dict[str, Any],
-        existing: dict[str, Any],
+        repos: BoardRepositories,
+        loop: LoopsRow,
+        existing: CardsRow,
         payload: CardUpdate,
         actor: ActorContext,
     ) -> None:
+        """Completing a Ticket faces the rules an agent's start would: stage, human, readiness.
+
+        The Loop is writable here (``update`` checked it), so it is neither archived nor done.
+        """
         if payload.completed is not True:
             return
-        if existing["completed_at"] is not None:
+        if existing.completed_at is not None:
             return
-        if self.loops is None:
-            raise Conflict(
-                "Tickets must belong to a Loop before they can be completed",
-                code="loop_required",
-            )
-        if loop["archived_at"] is not None:
-            raise Conflict(
-                "Archived Tickets cannot be completed", code="loop_read_only"
-            )
-        if existing["archived_at"] is not None:
+        if existing.archived_at is not None:
             raise Conflict(
                 "Archived Tickets cannot be completed; restore it first",
                 code="ticket_blocked",
-                details={"ticket_id": existing["id"]},
+                details={"ticket_id": existing.id},
             )
-        if existing.get("plan_item_id") or loop.get("current_plan_id"):
-            self.loops.ensure_execution_allowed(loop)
-        if existing["required_actor"] == "human":
-            actor.require_human(f"Confirming {existing.get('ticket_key') or 'this Ticket'}")
-        item = self._readiness_for(conn, loop, existing["id"])
+        if existing.plan_item_id or loop.current_plan_id:
+            ensure_execution_allowed(loop)
+        if existing.required_actor == "human":
+            actor.require_human(f"Confirming {existing.ticket_key or 'this Ticket'}")
+        item = self._readiness_for(repos, loop, existing.id)
         if item is not None and not item["ready"]:
             raise Conflict(
                 "This Ticket is blocked by unresolved prerequisites",
                 code="ticket_blocked",
-                details={"blockers": item["blockers"], "ticket_key": existing.get("ticket_key")},
+                details={"blockers": item["blockers"], "ticket_key": existing.ticket_key},
             )
-
-    def _invalidate_after_reopen(
-        self, conn: Any, loop: dict[str, Any], card: dict[str, Any]
-    ) -> None:
-        """Reopening a prerequisite invalidates QA evidence prepared against the old baseline."""
-        now = utcnow()
-        conn.execute(
-            text(
-                "UPDATE loop_qa_cycles SET status = 'superseded', updated_at = :now"
-                " WHERE loop_id = :id AND status IN ('pending','instructions_ready','in_progress')"
-            ),
-            {"now": now, "id": loop["id"]},
-        )
-        conn.execute(
-            text(
-                "UPDATE loops SET implementation_approval_id = NULL, qa_approval_id = NULL,"
-                " updated_at = :now WHERE id = :id"
-            ),
-            {"now": now, "id": loop["id"]},
-        )
-        log_activity(
-            conn,
-            ActorContext(actor_id="system", actor_type="system", actor_name="Tralala"),
-            action="loop.reopened_work",
-            entity_type="card",
-            entity_id=card["id"],
-            changes={"revalidation_required": True},
-        )
-
-    def _refresh_loop(self, conn: Any, loop_id: str) -> None:
-        if self.loops is not None:
-            self.loops.refresh_stage(conn, loop_id)
 
     def move(
         self,
@@ -698,150 +505,79 @@ class CardService:
         loop_id: str,
         card_id: str,
         payload: CardMove,
-    ) -> dict[str, Any]:
+    ) -> CardEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            loop = self._loop_row(conn, board_id, loop_id)
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            loop = require_loop(repos, loop_id)
             self._require_writable(loop)
-            existing = self._card_row(conn, board_id, loop_id, card_id)
-            if existing["version"] != payload.version:
-                raise VersionConflict(
-                    "Card was modified by another actor",
-                    details={
-                        "expected_version": payload.version,
-                        "current_version": existing["version"],
-                    },
-                )
-            target = one(conn, "SELECT * FROM lists WHERE id = :id", {"id": payload.list_id})
-            if target is None or target["archived_at"] is not None:
+            existing = self._card(repos, loop_id, card_id)
+            self._check_version(existing, payload.version)
+            target = repos.lists.get(payload.list_id)
+            if target is None or target.archived_at is not None:
                 raise ValidationFailure(
                     "Target list does not exist or is archived",
                     details={"list_id": payload.list_id},
                 )
-            if target["loop_id"] != loop_id:
+            if target.loop_id != loop_id:
                 raise Conflict(
                     "A Ticket cannot move to another Loop",
                     code="loop_mismatch",
-                    details={"target_loop_id": target["loop_id"]},
+                    details={"target_loop_id": target.loop_id},
                 )
-            position = position_for_index(
-                conn,
-                "cards",
-                "list_id = :list_id AND archived_at IS NULL AND id != :id",
-                {"list_id": payload.list_id, "id": card_id},
-                payload.position,
-            )
-            conn.execute(
-                text(
-                    "UPDATE cards SET list_id = :list_id, position = :position,"
-                    " version = version + 1, updated_at = :now WHERE id = :id"
-                ),
-                {
-                    "list_id": payload.list_id,
-                    "position": position,
-                    "now": utcnow(),
-                    "id": card_id,
-                },
-            )
-            log_activity(
-                conn,
+            position = self._position(repos, payload.list_id, payload.position, exclude=card_id)
+            repos.cards.move(card_id, payload.list_id, position, now=self._now())
+            self._log(
+                repos,
                 actor,
-                action="card.moved",
-                entity_type="card",
-                entity_id=card_id,
-                changes={
-                    "from_list_id": existing["list_id"],
+                "card.moved",
+                card_id,
+                {
+                    "from_list_id": existing.list_id,
                     "to_list_id": payload.list_id,
                     "position": payload.position,
                 },
             )
-            row = self._card_row(conn, board_id, loop_id, card_id)
-            return self._decorate(conn, board_id, loop, [row])[0]
+            row = self._card(repos, loop_id, card_id)
+            return self._decorate(repos, board_id, loop, [row])[0]
 
     def archive(
         self, actor: ActorContext, board_id: str, loop_id: str, card_id: str
-    ) -> dict[str, Any]:
+    ) -> CardEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            loop = self._loop_row(conn, board_id, loop_id)
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            loop = require_loop(repos, loop_id)
             self._require_writable(loop)
-            existing = self._card_row(conn, board_id, loop_id, card_id)
-            if existing["archived_at"] is None:
-                conn.execute(
-                    text(
-                        "UPDATE cards SET archived_at = :now, updated_at = :now,"
-                        " version = version + 1 WHERE id = :id"
-                    ),
-                    {"now": utcnow(), "id": card_id},
-                )
-                log_activity(
-                    conn,
+            existing = self._card(repos, loop_id, card_id)
+            if existing.archived_at is None:
+                repos.cards.archive(card_id, now=self._now())
+                self._log(
+                    repos,
                     actor,
-                    action="card.archived",
-                    entity_type="card",
-                    entity_id=card_id,
-                    changes={
-                        "completed": existing["completed_at"] is not None,
-                        "still_required": existing.get("plan_item_id") is not None,
+                    "card.archived",
+                    card_id,
+                    {
+                        "completed": existing.completed_at is not None,
+                        "still_required": existing.plan_item_id is not None,
                     },
                 )
-            row = self._card_row(conn, board_id, loop_id, card_id)
-            return self._decorate(conn, board_id, loop, [row])[0]
+            row = self._card(repos, loop_id, card_id)
+            return self._decorate(repos, board_id, loop, [row])[0]
 
     def restore(
         self, actor: ActorContext, board_id: str, loop_id: str, card_id: str
-    ) -> dict[str, Any]:
+    ) -> CardEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            loop = self._loop_row(conn, board_id, loop_id)
+        self.boards.ensure_active(board_id)
+        now = self._now()
+        with self.store.writer(board_id) as repos:
+            loop = require_loop(repos, loop_id)
             self._require_writable(loop)
-            existing = self._card_row(conn, board_id, loop_id, card_id)
-            if existing["archived_at"] is not None:
-                position = position_for_index(
-                    conn,
-                    "cards",
-                    "list_id = :list_id AND archived_at IS NULL",
-                    {"list_id": existing["list_id"]},
-                    None,
-                )
-                conn.execute(
-                    text(
-                        "UPDATE cards SET archived_at = NULL, position = :position,"
-                        " updated_at = :now, version = version + 1 WHERE id = :id"
-                    ),
-                    {"position": position, "now": now, "id": card_id},
-                )
-                log_activity(
-                    conn,
-                    actor,
-                    action="card.restored",
-                    entity_type="card",
-                    entity_id=card_id,
-                )
-            row = self._card_row(conn, board_id, loop_id, card_id)
-            return self._decorate(conn, board_id, loop, [row])[0]
-
-    def transfer(
-        self, actor: ActorContext, board_id: str, loop_id: str, card_id: str
-    ) -> dict[str, Any]:
-        """Cross-Loop and cross-Board moves bypass the approved plan; they are not supported."""
-        actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.reader(board_id) as conn:
-            self._loop_row(conn, board_id, loop_id)
-            self._card_row(conn, board_id, loop_id, card_id)
-        raise Conflict(
-            "Tickets cannot be transferred between Loops or Boards; amend the destination plan",
-            code=PLAN_CHANGE_CODE,
-            details={"card_id": card_id, "loop_id": loop_id},
-        )
-
-    def stats(self, board_id: str, card_id: str) -> dict[str, int]:
-        with self.boards.reader(board_id) as conn:
-            return card_counts(conn, [card_id]).get(
-                card_id, {"checklist_total": 0, "checklist_completed": 0, "comment_count": 0}
-            )
+            existing = self._card(repos, loop_id, card_id)
+            if existing.archived_at is not None:
+                position = self._position(repos, existing.list_id, None)
+                repos.cards.restore(card_id, position, now=now)
+                self._log(repos, actor, "card.restored", card_id)
+            row = self._card(repos, loop_id, card_id)
+            return self._decorate(repos, board_id, loop, [row])[0]

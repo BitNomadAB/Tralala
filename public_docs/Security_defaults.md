@@ -38,8 +38,10 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
   and disabling an account all revoke them. Expired sessions are purged at startup.
 - The cookie is `HttpOnly` with `SameSite=Lax`; the CSRF token is a separate script-readable cookie
   and must be echoed in `X-CSRF-Token` on cookie-authenticated writes.
-- Sign-in is throttled per username and per client address with exponential backoff. Cookies are
-  signed with a per-install secret; a session value from another installation is invalid.
+- Sign-in is throttled per username and per client address with exponential backoff. An attempt
+  counts from the moment it starts, so parallel requests try no more passwords before the lock than
+  the same requests one after another. Cookies are signed with a per-install secret; a session value
+  from another installation is invalid.
 
 ## Agent access keys
 
@@ -71,9 +73,20 @@ tools. Approvals bind to exact document revision ids, so a changed input invalid
 - After rotating `TRALALA_SECRET_KEY`, set `TRALALA_PREVIOUS_SECRET_KEY` for one start: stored
   credentials are re-sealed with the new secret, then the old value can be removed.
 - Agent endpoints are validated when saved: `http`/`https` only, no embedded credentials, no
-  redirects, and never link-local, multicast or reserved addresses. Private and loopback addresses
-  are allowed on purpose (`TRALALA_AGENTS_ALLOW_PRIVATE_ENDPOINTS`, default `true`) because a
-  self-hosted install points at a model on its own network.
+  redirects, and never a cloud metadata, link-local, multicast, unspecified or reserved address.
+  A host name is resolved and every address it returns is judged like a literal address; one
+  refused address refuses the endpoint. Private and loopback addresses (`127.0.0.1` and `::1`
+  alike) are allowed on purpose (`TRALALA_AGENTS_ALLOW_PRIVATE_ENDPOINTS`, default `true`) because a
+  self-hosted install points at a model on its own network; with `false`, only globally routable
+  addresses are accepted.
+- The same rule is applied again on every provider call, at the moment of connecting: the host
+  name is resolved, every address is checked, and the connection is made to a checked address
+  only. The `Host` header and the TLS name stay the host name, so certificates are verified as
+  usual. A name that resolves differently after it was saved (DNS rebinding), or an A2A agent card
+  that names another endpoint, cannot reach a refused address; the call fails with
+  `ForbiddenAddressError` and the backend logs `endpoint_address_refused`. Provider calls connect
+  directly: `HTTP_PROXY`/`HTTPS_PROXY` do not apply to them, because through a proxy the proxy would
+  choose the address.
 
 ## Requests, responses and errors
 
@@ -128,11 +141,6 @@ These are known and deliberately left as they are. Read them before you decide y
 - **Discussion budgets are per run, not per token.** There is no per-token rate limit, because the
   deployment is a private network with known agents. A run is capped at four rounds and by
   `TRALALA_DISCUSSION_TOKEN_BUDGET` and `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`.
-- **An agent endpoint is checked when it is saved, not on every call.** A hostname that passed
-  validation could later resolve to a link-local address. Re-resolving before each provider call is
-  only worth doing where a metadata service is reachable, such as a cloud instance; Tralala is built
-  for a private network or a private Tailscale, so it was declined (FMEA action A6). Do not run it on
-  a cloud host without adding that check.
 - **The board counters are cached in the registry.** They are measured from each board and dropped
   when that board is written to, so the dashboard does not open every board file. The numbers can be
   at most `TRALALA_BOARD_COUNTS_CACHE_SECONDS` stale if a board file is changed behind the app's

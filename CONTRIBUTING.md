@@ -52,9 +52,12 @@ We keep signed agreements on file and never publish them.
 ## What a good pull request looks like
 
 - One concern per pull request, with a test that fails before the change and passes after it.
-- Behavioural changes need an API-level test; user-journey changes extend `frontend/e2e/*.spec.ts`.
-- Schema changes need an Alembic revision under `backend/migrations/{registry,board}` plus tests for
-  fresh install, upgrade from the previous revision, data preservation and failure recovery.
+- Behavioural changes need unit tests of the functions that carry them (a service runs against the
+  in-memory repository fakes in `backend/tests/unit/fakes`); user-journey changes extend
+  `frontend/e2e/*.spec.ts`.
+- Schema changes need an Alembic revision under `backend/migrations/{registry,board}`, and
+  `python -m tools.dbgen` (run first, before ruff, pyright and pytest) must pass on it: it migrates
+  both chains, regenerates the typed rows and compiles every SQL statement against the new schema.
 - Update the relevant file in `public_docs/` when you change behaviour: installation,
   troubleshooting, security defaults, agent usage, the API and the Loop workflow all live there,
   and they must never link into the working documents under `docs/`, `analysis/` or `.ralph/`.
@@ -62,20 +65,29 @@ We keep signed agreements on file and never publish them.
 ## Validation
 
 Set up the environment once with [public_docs/Installation.md](public_docs/Installation.md), then run
-the smallest relevant command before pushing. CI runs the full set.
+the checks below before pushing. CI runs the same steps in the same order.
 
 ```powershell
-# backend, from backend/
-..\.venv\Scripts\python.exe -m pytest
-..\.venv\Scripts\python.exe -m ruff check app tests migrations
+# backend, from backend/, in this order
+..\.venv\Scripts\python.exe -m tools.dbgen                  # migrations, typed rows, every SQL statement
+..\.venv\Scripts\python.exe -m ruff check app tests migrations tools
+..\.venv\Scripts\python.exe -m pyright                      # fails when code and schema disagree
+..\.venv\Scripts\python.exe -m pytest                       # unit tests on in-memory fakes, seconds
+..\.venv\Scripts\python.exe -m pytest tests/infrastructure  # the real database: connect, migrate, commit
 
 # frontend, from frontend/
-pnpm test
 pnpm typecheck
+pnpm lint
+pnpm test
 pnpm build          # includes the client build guard
+pnpm test:e2e       # Playwright journeys, when a change touches what a user does
 ```
 
-Please do not open a pull request with a failing backend test, a ruff finding or a type error.
+`tools.dbgen` comes first because the other steps read what it generates. Unit tests never open a
+database, start the app, use the network or sleep; anything that needs a real database belongs in
+the small infrastructure suite.
+
+Please do not open a pull request with a failing step above.
 
 ## Reporting security issues
 

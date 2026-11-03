@@ -10,7 +10,8 @@ const buttonVariants = cva(
         primary: "bg-[var(--primary)] text-[var(--primary-foreground)] hover:brightness-110",
         secondary:
           "bg-[var(--surface-raised)] text-[var(--foreground)] border border-[var(--border)] hover:brightness-110",
-        ghost: "text-[var(--muted-foreground)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)]",
+        ghost:
+          "text-[var(--muted-foreground)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)]",
         danger: "bg-[var(--destructive)] text-white hover:brightness-110",
         outline:
           "border border-[var(--border)] bg-transparent text-[var(--foreground)] hover:bg-[var(--surface-raised)]",
@@ -26,9 +27,10 @@ const buttonVariants = cva(
 );
 
 export interface ButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+  extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {}
 
 export function Button({ className, variant, size, type = "button", ...props }: ButtonProps) {
-  return <button type={type} className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+  return (
+    <button type={type} className={cn(buttonVariants({ variant, size }), className)} {...props} />
+  );
 }

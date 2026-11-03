@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from sqlalchemy.engine import Connection, Engine
 
+from ..sqlite import write_transaction
+
 FTS_STATEMENTS = [
     """
     CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts
@@ -68,30 +70,42 @@ def _history_index_matches(conn: Connection) -> bool:
     )
 
 
+# Each index with the triggers that keep it in step with its table.
+_INDEXES = {
+    "cards_fts": ("cards_fts_ai", "cards_fts_ad", "cards_fts_au"),
+    "loop_history_fts": ("loop_history_fts_ai", "loop_history_fts_ad", "loop_history_fts_au"),
+}
+
+
 def ensure_fts(engine: Engine) -> bool:
-    """Create the FTS tables/triggers when supported; rebuild only when first created."""
+    """Create the FTS tables/triggers when supported; rebuild an index that was not kept in step.
+
+    An index is rebuilt when it is new, or when one of its triggers was missing: a revision that
+    rebuilds ``cards`` or ``loop_history`` (``batch_alter_table``) drops the old table with its
+    triggers and copies the rows under new rowids, so the index no longer matches its table.
+    """
     try:
-        with engine.begin() as conn:
-            existed = conn.exec_driver_sql(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cards_fts'"
-            ).first()
-            history_existed = conn.exec_driver_sql(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'loop_history_fts'"
-            ).first()
+        with write_transaction(engine) as conn:
+            present = {
+                str(name)
+                for (name,) in conn.exec_driver_sql(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table', 'trigger')"
+                )
+            }
             for statement in FTS_STATEMENTS:
                 conn.exec_driver_sql(statement)
-            if not existed:
+            kept = {
+                index: index in present and set(triggers) <= present
+                for index, triggers in _INDEXES.items()
+            }
+            if not kept["cards_fts"]:
                 conn.exec_driver_sql("INSERT INTO cards_fts(cards_fts) VALUES('rebuild')")
-            if not history_existed:
+            if not kept["loop_history_fts"] or not _history_index_matches(conn):
+                # A restore or a copy can also leave the history index behind the table;
+                # rebuilding is cheap and turns a silently empty history search into a correct one.
                 conn.exec_driver_sql(
                     "INSERT INTO loop_history_fts(loop_history_fts) VALUES('rebuild')"
                 )
-            elif not _history_index_matches(conn):
-                # A restore or a copy can leave the index behind the table; rebuilding is cheap
-                # and turns a silently empty history search into a correct one.
-                conn.exec_driver_sql(
-                    "INSERT INTO loop_history_fts(loop_history_fts) VALUES('rebuild')"
-                )
-        return True
     except Exception:  # noqa: BLE001 - optional capability, must never break startup
         return False
+    return True

@@ -21,11 +21,16 @@ import io
 import logging
 import tarfile
 import time
-from typing import Any
+from typing import TYPE_CHECKING, TypedDict
 from urllib.parse import urlsplit
 
+from pydantic import JsonValue
+
 from ..core.errors import ValidationFailure
-from .repositories import API_BASE, RepositoryService
+from .repositories import API_BASE, RepositoryEntry, RepositoryService
+
+if TYPE_CHECKING:  # httpx is imported where a client is built
+    import httpx
 
 logger = logging.getLogger("tralala.repo_snapshot")
 
@@ -109,17 +114,33 @@ CONFIG_NAMES = frozenset(
     }
 )
 
+type JsonObject = dict[str, JsonValue]
+
 # Set by tests to run the whole path against httpx.MockTransport instead of the network.
-TRANSPORT: Any | None = None
+TRANSPORT: httpx.BaseTransport | None = None
 
 
-def _client() -> Any:
+class SnapshotFile(TypedDict):
+    """One file of the snapshot: its path below the repository root, its size and its text."""
+
+    path: str
+    bytes: int
+    content: str
+
+
+class Snapshot(TypedDict):
+    """The bounded file set read from one archive."""
+
+    files: list[SnapshotFile]
+    truncated: bool
+    text_bytes: int
+
+
+def _client() -> httpx.Client:
     import httpx
 
-    kwargs: dict[str, Any] = {"timeout": TIMEOUT_SECONDS, "follow_redirects": False}
-    if TRANSPORT is not None:
-        kwargs["transport"] = TRANSPORT
-    return httpx.Client(**kwargs)
+    # No transport is httpx's own default, exactly as if none were passed.
+    return httpx.Client(timeout=TIMEOUT_SECONDS, follow_redirects=False, transport=TRANSPORT)
 
 
 def _headers(token: str | None) -> dict[str, str]:
@@ -133,7 +154,7 @@ def _headers(token: str | None) -> dict[str, str]:
     return headers
 
 
-def _classify(status: int, headers: Any | None = None) -> str:
+def _classify(status: int, headers: httpx.Headers | None = None) -> str:
     """Name the failure the way an operator reads it, never with GitHub's body."""
     if status == 401:
         return "unauthorized"
@@ -147,6 +168,14 @@ def _classify(status: int, headers: Any | None = None) -> str:
     return "unreachable"
 
 
+def _json_object(value: JsonValue) -> JsonObject:
+    """``value`` as a JSON object. Anything else raises the ``AttributeError`` that reading a key
+    from it (``.get``) always raised, so a malformed answer fails exactly as before."""
+    if isinstance(value, dict):
+        return value
+    raise AttributeError(f"'{type(value).__name__}' object has no attribute 'get'")
+
+
 def resolve_commit(owner: str, name: str, branch: str | None, token: str | None) -> str:
     """Return the commit SHA at the branch head, so two runs can be compared exactly."""
     ref = branch or "HEAD"
@@ -155,16 +184,17 @@ def resolve_commit(owner: str, name: str, branch: str | None, token: str | None)
             response = client.get(
                 f"{API_BASE}/repos/{owner}/{name}/commits/{ref}", headers=_headers(token)
             )
-    except Exception as exc:  # noqa: BLE001 - reported, never raised past this module
+    except Exception as exc:  # reported, never raised past this module
         code = "timeout" if "timeout" in type(exc).__name__.lower() else "unreachable"
         raise SnapshotError(code) from exc
     if response.status_code >= 400:
         raise SnapshotError(_classify(response.status_code, response.headers))
+    payload: JsonValue
     try:
         payload = response.json()
     except ValueError as exc:
         raise SnapshotError("malformed_response") from exc
-    sha = str((payload or {}).get("sha") or "")
+    sha = str(_json_object(payload or {}).get("sha") or "")
     if not sha:
         raise SnapshotError("malformed_response")
     return sha
@@ -188,31 +218,36 @@ def fetch_archive(owner: str, name: str, sha: str, token: str | None) -> bytes:
     url = f"{API_BASE}/repos/{owner}/{name}/tarball/{sha}"
     try:
         with _client() as client:
-            response = client.get(url, headers=_headers(token))
-            if response.status_code in (301, 302, 303, 307, 308):
-                location = response.headers.get("location") or ""
-                host = (urlsplit(location).hostname or "").lower()
-                if host not in CODELOAD_HOSTS:
-                    raise SnapshotError("redirect_refused")
-                buffer = bytearray()
-                with client.stream("GET", location, headers={"User-Agent": "tralala"}) as stream:
-                    if stream.status_code >= 400:
-                        raise SnapshotError(_classify(stream.status_code, stream.headers))
-                    for chunk in stream.iter_bytes():
-                        buffer.extend(chunk)
-                        if len(buffer) > ARCHIVE_MAX_BYTES:
-                            raise SnapshotError("too_large")
-                return bytes(buffer)
-            if response.status_code >= 400:
-                raise SnapshotError(_classify(response.status_code, response.headers))
-            if len(response.content) > ARCHIVE_MAX_BYTES:
-                raise SnapshotError("too_large")
-            return response.content
+            return _download(client, url, token)
     except SnapshotError:
         raise
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # reported, never raised past this module
         code = "timeout" if "timeout" in type(exc).__name__.lower() else "unreachable"
         raise SnapshotError(code) from exc
+
+
+def _download(client: httpx.Client, url: str, token: str | None) -> bytes:
+    """The archive request itself; every refusal is a SnapshotError with its code."""
+    response = client.get(url, headers=_headers(token))
+    if response.status_code in (301, 302, 303, 307, 308):
+        location = response.headers.get("location") or ""
+        host = (urlsplit(location).hostname or "").lower()
+        if host not in CODELOAD_HOSTS:
+            raise SnapshotError("redirect_refused")
+        buffer = bytearray()
+        with client.stream("GET", location, headers={"User-Agent": "tralala"}) as stream:
+            if stream.status_code >= 400:
+                raise SnapshotError(_classify(stream.status_code, stream.headers))
+            for chunk in stream.iter_bytes():
+                buffer.extend(chunk)
+                if len(buffer) > ARCHIVE_MAX_BYTES:
+                    raise SnapshotError("too_large")
+        return bytes(buffer)
+    if response.status_code >= 400:
+        raise SnapshotError(_classify(response.status_code, response.headers))
+    if len(response.content) > ARCHIVE_MAX_BYTES:
+        raise SnapshotError("too_large")
+    return response.content
 
 
 def _is_text(payload: bytes) -> bool:
@@ -254,13 +289,14 @@ def select_members(
     return selected
 
 
-def read_snapshot(archive_bytes: bytes) -> dict[str, Any]:
+def read_snapshot(archive_bytes: bytes) -> Snapshot:
     """Extract the bounded, ordered file set from one tarball."""
-    files: list[dict[str, Any]] = []
+    files: list[SnapshotFile] = []
     used_bytes = 0
     truncated = False
     try:
-        archive = tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz")
+        # Opened apart from the `with` below, so only a failed open is malformed_archive.
+        archive = tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz")  # noqa: SIM115 - see above
     except (tarfile.TarError, OSError) as exc:
         raise SnapshotError("malformed_archive") from exc
     with archive:
@@ -292,22 +328,17 @@ class RepositorySnapshotService:
     def __init__(self, repositories: RepositoryService) -> None:
         self.repositories = repositories
 
-    def for_board(self, board_id: str) -> list[dict[str, Any]]:
+    def for_board(self, board_id: str) -> list[JsonObject]:
         """One entry per enabled repository on the board; failures are entries, not exceptions."""
         rows = self.repositories.for_board(board_id)
         if not rows:
             # Silent here used to look like a successful fetch in the run panel: say so in the log.
-            logger.info(
-                '{"event": "repository_snapshot_none", "board_id": "%s"}', board_id
-            )
+            logger.info("repository_snapshot_none", extra={"board_id": board_id})
             return []
-        entries: list[dict[str, Any]] = []
-        for row in rows:
-            entries.append(self._one(row))
-        return entries
+        return [self._one(row) for row in rows]
 
-    def _one(self, row: dict[str, Any]) -> dict[str, Any]:
-        entry: dict[str, Any] = {
+    def _one(self, row: RepositoryEntry) -> JsonObject:
+        entry: JsonObject = {
             "id": row["id"],
             "name": row["name"],
             "url": row["url"],
@@ -325,29 +356,34 @@ class RepositorySnapshotService:
             snapshot = read_snapshot(archive)
         except SnapshotError as exc:
             logger.warning(
-                '{"event": "repository_snapshot_failed", "repository_id": "%s", "code": "%s",'
-                ' "duration_ms": %d}',
-                row["id"],
-                exc.code,
-                int((time.monotonic() - started) * 1000),
+                "repository_snapshot_failed",
+                extra={
+                    "repository_id": row["id"],
+                    "code": exc.code,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
             )
             return {**entry, "error": exc.code}
         logger.info(
-            '{"event": "repository_snapshot_captured", "repository_id": "%s", "commit_sha": "%s",'
-            ' "files": %d, "text_bytes": %d, "truncated": %s, "duration_ms": %d}',
-            row["id"],
-            sha,
-            len(snapshot["files"]),
-            snapshot["text_bytes"],
-            "true" if snapshot["truncated"] else "false",
-            int((time.monotonic() - started) * 1000),
+            "repository_snapshot_captured",
+            extra={
+                "repository_id": row["id"],
+                "commit_sha": sha,
+                "files": len(snapshot["files"]),
+                "text_bytes": snapshot["text_bytes"],
+                "truncated": snapshot["truncated"],
+                "duration_ms": int((time.monotonic() - started) * 1000),
+            },
         )
         return {
             **entry,
             "commit_sha": sha,
             "file_count": len(snapshot["files"]),
             "truncated": snapshot["truncated"],
-            "files": snapshot["files"],
+            "files": [
+                {"path": file["path"], "bytes": file["bytes"], "content": file["content"]}
+                for file in snapshot["files"]
+            ],
         }
 
     @staticmethod

@@ -1,23 +1,39 @@
+import {
+  MessagesSquare,
+  LayoutGrid,
+  LogOut,
+  Settings,
+  Sun,
+  Moon,
+  MonitorSmartphone,
+} from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { MessagesSquare, LayoutGrid, LogOut, Settings, Sun, Moon, MonitorSmartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/features/auth/AuthProvider";
-import { useTheme, type ThemeMode } from "@/themes/ThemeProvider";
+import { useAuth } from "@/features/auth/useAuth";
 import { cn } from "@/lib/utils";
+import type { ThemeMode } from "@/themes/theme";
+import { useTheme } from "@/themes/useTheme";
 
-const themeOptions: { value: ThemeMode; label: string; Icon: typeof Sun }[] = [
-  { value: "dark", label: "Dark theme", Icon: Moon },
-  { value: "light", label: "Light theme", Icon: Sun },
-  { value: "system", label: "System theme", Icon: MonitorSmartphone },
-];
+/** Each mode's label and icon, and the mode the toggle switches to next. */
+const themeOptions: Record<ThemeMode, { label: string; Icon: typeof Sun; next: ThemeMode }> = {
+  dark: { label: "Dark theme", Icon: Moon, next: "light" },
+  light: { label: "Light theme", Icon: Sun, next: "system" },
+  system: { label: "System theme", Icon: MonitorSmartphone, next: "dark" },
+};
 
 export function AppLayout() {
   const { actor, logout } = useAuth();
   const { mode, setMode } = useTheme();
   const navigate = useNavigate();
 
-  const nextTheme = themeOptions[(themeOptions.findIndex((item) => item.value === mode) + 1) % 3];
-  const ActiveIcon = themeOptions.find((item) => item.value === mode)?.Icon ?? Moon;
+  const nextMode = themeOptions[mode].next;
+  const nextTheme = themeOptions[nextMode];
+  const ActiveIcon = themeOptions[mode].Icon;
+
+  async function signOut() {
+    await logout();
+    void navigate("/login", { replace: true });
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -74,7 +90,7 @@ export function AppLayout() {
               size="icon"
               aria-label={`Switch to ${nextTheme.label.toLowerCase()}`}
               title={`Current: ${mode}. Switch to ${nextTheme.label.toLowerCase()}.`}
-              onClick={() => setMode(nextTheme.value)}
+              onClick={() => setMode(nextMode)}
               className="border border-[var(--border)]"
             >
               <ActiveIcon size={15} />
@@ -84,9 +100,8 @@ export function AppLayout() {
               size="icon"
               aria-label="Sign out"
               title="Sign out"
-              onClick={async () => {
-                await logout();
-                navigate("/login", { replace: true });
+              onClick={() => {
+                void signOut();
               }}
             >
               <LogOut size={15} />

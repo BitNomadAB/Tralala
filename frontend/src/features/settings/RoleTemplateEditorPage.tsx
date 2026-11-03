@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Copy, RotateCcw, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { useRoleTemplate } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
@@ -25,14 +25,14 @@ export function RoleTemplateEditorPage() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [confirming, setConfirming] = useState(false);
 
-  useEffect(() => {
-    const role: RoleTemplate | undefined = roleQuery.data;
-    if (!role || hydratedId === role.id) return;
-    setName(role.name);
-    setDescription(role.description);
-    setSystemPrompt(role.system_prompt);
-    setHydratedId(role.id);
-  }, [roleQuery.data, hydratedId]);
+  // Fill the form from the loaded role once per role, while rendering rather than in an effect.
+  const loaded: RoleTemplate | undefined = roleQuery.data;
+  if (loaded && hydratedId !== loaded.id) {
+    setName(loaded.name);
+    setDescription(loaded.description);
+    setSystemPrompt(loaded.system_prompt);
+    setHydratedId(loaded.id);
+  }
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["role-templates"] });
 
@@ -43,68 +43,70 @@ export function RoleTemplateEditorPage() {
         description,
         system_prompt: systemPrompt.trim(),
       };
-      return isNew
-        ? api.createRoleTemplate(payload)
-        : api.updateRoleTemplate(String(roleId), payload);
+      return isNew ? api.createRoleTemplate(payload) : api.updateRoleTemplate(roleId, payload);
     },
     onSuccess: (role) => {
-      invalidate();
+      void invalidate();
       queryClient.setQueryData(["role-template", role.id], role);
       toast.push({ title: "Role template saved", variant: "success" });
-      navigate("/settings");
+      void navigate("/settings");
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not save role template",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const duplicateMutation = useMutation({
     mutationFn: () => api.duplicateRoleTemplate(String(roleId)),
     onSuccess: (role) => {
-      invalidate();
+      void invalidate();
       toast.push({ title: "Role duplicated", variant: "success" });
-      navigate(`/settings/roles/${role.id}`);
+      void navigate(`/settings/roles/${role.id}`);
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not duplicate role",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const restoreMutation = useMutation({
     mutationFn: () => api.restoreRoleTemplate(String(roleId)),
     onSuccess: (role) => {
-      invalidate();
+      void invalidate();
       setSystemPrompt(role.system_prompt);
       toast.push({ title: "Factory prompt restored", variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not restore defaults",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteRoleTemplate(String(roleId)),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       setConfirming(false);
       toast.push({ title: "Role template deleted", variant: "success" });
-      navigate("/settings");
+      void navigate("/settings");
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not delete role template",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   if (!isNew && roleQuery.isLoading) {
@@ -125,7 +127,9 @@ export function RoleTemplateEditorPage() {
       <div>
         <button
           type="button"
-          onClick={() => navigate("/settings")}
+          onClick={() => {
+            void navigate("/settings");
+          }}
           className="inline-flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
         >
           <ArrowLeft size={14} /> Settings
@@ -215,10 +219,19 @@ export function RoleTemplateEditorPage() {
               <Copy size={14} /> Duplicate
             </Button>
           ) : null}
-          <Button type="button" variant="ghost" onClick={() => navigate("/settings")}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              void navigate("/settings");
+            }}
+          >
             Cancel
           </Button>
-          <Button type="submit" disabled={!name.trim() || !systemPrompt.trim() || saveMutation.isPending}>
+          <Button
+            type="submit"
+            disabled={!name.trim() || !systemPrompt.trim() || saveMutation.isPending}
+          >
             {saveMutation.isPending ? "Saving…" : "Save role"}
           </Button>
         </div>

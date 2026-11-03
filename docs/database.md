@@ -1,8 +1,17 @@
 # Database design
 
-Two database kinds, both SQLite with `PRAGMA foreign_keys=ON`, WAL journaling, a 5 s busy timeout
-and `synchronous=NORMAL`. Each database tracks its own schema in Alembic's `alembic_version` table;
-the registry and board schemas are separate migration chains managed by the Migration Manager.
+Two database kinds, both SQLite with `PRAGMA foreign_keys=ON`, WAL journaling, a 5 s busy timeout,
+`synchronous=NORMAL` and a 64 MiB `journal_size_limit` (see "Maintenance PRAGMAs"). Each database
+tracks its own schema in Alembic's `alembic_version` table; the registry and board schemas are
+separate migration chains managed by the Migration Manager.
+
+SQLAlchemy sends every `BEGIN` itself, with Python's `sqlite3` transaction handling switched off
+(`isolation_level=None`, SQLAlchemy's documented recipe; `app/core/transactions.py`), so DDL is
+transactional and a reader's statements share one snapshot. A transaction that writes is opened
+with `write_transaction` (`app/storage/sqlite.py`) and starts with `BEGIN IMMEDIATE`: it takes the
+write lock before it reads, so a second writer waits at its `BEGIN` for up to the busy timeout and
+then sees what the first committed, instead of failing with `database is locked` halfway. A reader
+(`engine.connect()`) starts with a deferred `BEGIN`.
 
 ## registry.sqlite
 
@@ -17,7 +26,7 @@ the registry and board schemas are separate migration chains managed by the Migr
 | `idempotency_records` | Replay protection for board-level creation |
 | `board_templates` | Reusable board templates: id, name (unique, case-insensitive), description, `lists_json`, `labels_json`, timestamps |
 | `role_templates` | Central AI role definitions: name (unique), description, `system_prompt`, `default_system_prompt` (factory copy), `built_in`, `builtin_key`, timestamps |
-| `agents` | AI agent identities: name (unique), role reference, optional prompt override, connection type/URL/model, encrypted API key + hint, sampling limits, enabled flag, last test result |
+| `agents` | AI agent identities: name (unique), role reference, optional prompt override, connection type/URL/model, encrypted API key + hint, sampling limits, enabled flag, last test result, `supports_json_schema` (0/1, written by every connection test: the model answered a call that asked for a JSON schema as the answer's format, so generations send one) |
 
 Templates are global because they are chosen before a board (and therefore a board database)
 exists. A template stores column names in order plus optional `{name, color}` labels. Creating a
@@ -74,8 +83,8 @@ Two independent Alembic chains live under `backend/migrations`:
 
 | Chain | Database | Version table | Head (current) |
 | --- | --- | --- | --- |
-| `registry` | `data/registry.sqlite` | `alembic_version` | `0014_board_stats` |
-| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0009_loop_agent_preferences` |
+| `registry` | `data/registry.sqlite` | `alembic_version` | `0016_agent_role_template_key` |
+| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0012_referenced_table_keys` |
 
 - The baseline revisions (`0001_registry_initial`, `0001_board_initial`) reproduce the schema that
   shipped before Alembic. A database that predates version tracking (no `alembic_version`) is
@@ -95,18 +104,28 @@ Two independent Alembic chains live under `backend/migrations`:
 - `registry` revision `0002` rebuilds the `boards` table with `batch_alter_table` to extend the
   status `CHECK` with `migration_failed` and to add `schema_revision` — SQLite cannot alter a
   `CHECK` constraint in place.
-- After upgrading, the manager runs `PRAGMA integrity_check` and `PRAGMA foreign_key_check`; any
-  failure (or any exception) rolls back the schema transaction and marks the board
-  `migration_failed`, which blocks mutations (`409 board_migration_failed`) and leaves reads
-  unavailable until it is repaired. The retry endpoint is `POST /boards/{id}/migrate`.
+- After upgrading, and before the upgrade's transaction commits, the manager runs
+  `PRAGMA integrity_check` and `PRAGMA foreign_key_check`; any failure (or any exception) rolls the
+  whole upgrade back, so the database keeps its previous revision, schema and data, and marks the
+  board `migration_failed`, which blocks mutations (`409 board_migration_failed`) and leaves reads
+  unavailable until it is repaired. A failed `foreign_key_check` names the offending rows (table,
+  rowid, parent). The retry endpoint is `POST /boards/{id}/migrate`.
 - No downgrades exist: every revision's `downgrade()` raises. Rollback means restoring a
   pre-migration backup.
 - Orchestration is idempotent: a database already at head is skipped and only its registry row is
   reconciled; a failed migration can be re-run after the cause is fixed; an interrupted run leaves
   the schema at its previous revision and resumes on the next start.
-- Writes to schemas are only allowed through revisions. `tests/test_migrations.py` scans the
+- Writes to schemas are only allowed through revisions. `tests/unit/test_migrations.py` scans the
   application package and fails if DDL appears outside the migration chain (the optional FTS5
   index bootstrap in `storage/schema/fts.py` is the single documented exception).
+- The migrations are also the build's source of truth. `python -m tools.dbgen` (run from
+  `backend/`, first in every build) refuses a chain with more than one head, a merge or a branch,
+  migrates both chains into an in-memory database one revision at a time, applies the schema
+  rules in `tools/dbgen/rules.py`, writes one frozen dataclass per table to `app/db/generated/`
+  (git-ignored; Alembic's table and the FTS5 tables are excluded by name) and compiles every SQL
+  statement in `app/` against that schema with SQLite's `EXPLAIN`. A table name the two chains share
+  (`idempotency_records`) must have the same columns in both, because a statement passes when
+  either database accepts it.
 
 Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestration:
 `app/storage/migration_manager.py`. Structured events: `migration_completed`,
@@ -116,10 +135,77 @@ Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestr
 
 - Foreign keys are enabled on every connection; deleting a card cascades to labels links,
   checklists, items and comments.
+- Every column named `*_id` or `*_by` has a foreign key, unless `tools/dbgen/rules.py` lists it
+  with its reason: `CROSS_DATABASE` (board columns that name an actor, agent, role template or
+  board in the registry, which no constraint can reach), `NOT_REFERENCES` (polymorphic ids and
+  correlation ids) or `UNENFORCED` (same-database references still without a key, each with the
+  change in the application it waits for). Every foreign key starts an index and declares `ON DELETE`: RESTRICT by default;
+  CASCADE or SET NULL only with a comment in the revision. Between two rows a Loop deletes
+  together, RESTRICT would make deleting the Loop depend on the order SQLite visits the tables, so
+  those keys CASCADE (the row is part of what it names) or SET NULL (an optional link).
+  `python -m tools.dbgen` enforces all of this and keeps the lists exact.
+- A revision adds a foreign key by rebuilding the table with `batch_alter_table`. The runner
+  applies revisions as SQLite's table-rebuild procedure says (`runner.migration_transaction`;
+  "Making Other Kinds Of Table Schema Changes" in SQLite's ALTER TABLE documentation):
+  `PRAGMA foreign_keys=OFF` on the connection before the transaction starts (the pragma does nothing
+  inside one), the revisions, then `PRAGMA foreign_key_check` before the COMMIT, and the pragma back
+  on afterwards. With foreign keys off, dropping the old copy of a table fires no `ON DELETE`
+  action, so a revision may rebuild a table others reference, or give a table a key to itself, and
+  the children and links survive; a row left naming a missing one refuses the upgrade instead. The
+  whole upgrade, DDL included, runs in one `BEGIN IMMEDIATE` transaction, so a refused or failed
+  revision leaves the schema and the data as they were.
+- Before a key is added, a reference whose row is gone is settled by meaning: an optional one
+  becomes NULL, a NOT NULL one that the application cannot orphan stops the upgrade and names the
+  rows. Nothing a person wrote is deleted.
+- A key whose column is filled in later in the same transaction is `DEFERRABLE INITIALLY DEFERRED`,
+  so SQLite checks it at the COMMIT: a plan revision is stored with `''` for its two roadmap
+  revisions and linked to them before its transaction ends (`loop_plans.roadmap_ai_revision_id`,
+  `roadmap_revision_id`).
+- A rebuild copies what SQLAlchemy reflects, and SQLite reflection does not carry a column's
+  `COLLATE`: a revision that rebuilds a table with a collated column passes that column through
+  `batch_alter_table(..., reflect_args=[...])` (`agents.name` keeps `NOCASE` that way). The rebuild
+  also drops the table's triggers and renumbers its rowids, so for `cards` and `loop_history`
+  `ensure_fts` recreates the FTS triggers and rebuilds the index once the upgrade is committed.
 - Lists require archiving before deletion and must be empty of active cards.
 - Boards require archiving and a name confirmation before physical deletion.
 - All timestamps are ISO 8601 UTC strings with second precision (`2026-10-30T12:00:00Z`).
 - `version` increments on every card mutation and is the optimistic-concurrency token.
+
+### STRICT tables
+
+- Every table a revision creates is `STRICT`: `op.create_table(..., sqlite_strict=True)`.
+  SQLAlchemy renders the option itself, so no helper is needed. SQLite then refuses a value that
+  does not fit the column's declared type instead of storing it under the looser type affinity, so
+  a generated row's checked converter never meets a stray value.
+- A STRICT column takes only the type names `INT`, `INTEGER`, `REAL`, `TEXT`, `BLOB` and `ANY`.
+  In a revision that means `sa.Text()` for text, ids and timestamps, `sa.Integer()` for integers
+  and flags, `sa.REAL()` for floating point and `sa.LargeBinary()` for bytes. `sa.String()`
+  (VARCHAR), `sa.Boolean()`, `sa.DateTime()`, `sa.Float()` (FLOAT), `sa.BigInteger()`,
+  `sa.Numeric()`, `sa.JSON()` and `sa.Uuid()` render names STRICT refuses, and the build stops at
+  that revision with SQLite's message. `ANY` keeps whatever it is given, so it has no single
+  Python type and the rows refuse it.
+- A flag is `sa.Integer()` with `server_default="0"` or `"1"` and a named
+  `CHECK (<column> IN (0, 1))`, as the flags of the older tables are stored (`enabled`,
+  `is_current`); its generated field is `int`. A timestamp is `sa.Text()` holding an ISO 8601 UTC
+  string, validated at the schema boundary; its field is `str`. A length limit that matters is a
+  `CHECK (length(<column>) <= n)`: SQLite never enforced the `n` of `VARCHAR(n)`.
+- `python -m tools.dbgen` applies each chain one revision at a time and takes the revision after
+  which a table's name first appears as the one that created it; a rename counts as a creation. A
+  table that is not STRICT stops the build with its chain, name and revision, unless that revision
+  is on `NON_STRICT_REVISIONS` in `tools/dbgen/rules.py`: the revisions up to
+  `0015_registry_foreign_keys` and `0011_board_foreign_keys`, from before the rule. The list stays
+  exact: an entry with no table left without STRICT stops the build too.
+- The older tables stay as they are. A `batch_alter_table` rebuild keeps a table's name and its
+  mode (Alembic copies the reflected `STRICT` option, which SQLAlchemy 2.0.53 and later read back),
+  so a rebuild neither converts an older table nor loses STRICT on a newer one. Converting an older
+  table is not required and would be a revision of its own: every column needs a STRICT type name,
+  and copying the rows into the STRICT table fails on any stored value that does not fit (a
+  non-STRICT `INTEGER` column can hold text), so the upgrade of a real database would depend on its
+  data.
+- STRICT tables need SQLite 3.37.0 or newer, and an older SQLite cannot read the schema of a
+  database that has one. The build refuses an older SQLite and names the version it migrated with.
+  It runs on the interpreter that later runs the application (the container image runs it while it
+  is built), so an older runtime never gets as far as a migration.
 
 ### FTS5
 
@@ -127,23 +213,60 @@ Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestr
 CREATE VIRTUAL TABLE cards_fts USING fts5(title, description, content='cards', content_rowid='rowid');
 ```
 
-Insert/update/delete triggers keep the index in sync. If the runtime lacks FTS5 the migration
-layer skips the index and search falls back to `LIKE`; `/search` reports `meta.engine`.
+Insert/update/delete triggers keep the index in sync. `ensure_fts` runs after every board
+migration: it creates what is missing and rebuilds an index that is new or whose triggers were
+missing (a revision that rebuilds `cards` or `loop_history` drops their triggers and renumbers the
+rows the index points at). If the runtime lacks FTS5 the migration layer skips the index and search
+falls back to `LIKE`; `/search` reports `meta.engine`.
 
 ### Backups and restore
 
-Backups use SQLite's online backup API (`sqlite3.Connection.backup`) so WAL state is captured
-consistently. Backups live in `data/backups/{board_uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite`, are
-integrity-checked on creation, and can be restored by name (validated against
-`^backup-\d{8}T\d{6}Z\.sqlite$`). Restore disposes the board engine, snapshots the backup into the
-live file, then re-runs `integrity_check` and `foreign_key_check`.
+Backups use SQLite's online backup API (`sqlite3.Connection.backup`), which copies every committed
+page, the ones still in the `-wal` file included, in one read transaction, so no checkpoint is
+needed first. Backups live in `data/backups/{board_uuid}/backup-YYYYMMDDTHHMMSSZ.sqlite`, are
+integrity-checked on creation, and can be restored by name (the whole name must match
+`backup-[0-9]{8}T[0-9]{6}Z(-[a-z0-9-]+)?\.sqlite`).
 
-### Export format (v1)
+A restore first checks the snapshot (`storage/sqlite.check_snapshot`): it is opened like an imported
+file (read only, `immutable=1`, nothing written beside it), `PRAGMA integrity_check` runs, and on a
+file that passes, `PRAGMA foreign_key_check`. The pure `app/core/integrity.snapshot_problem` and
+`unreadable_problem` turn the rows, or the error SQLite raised, into a refusal
+(`422 board_backup_invalid`, `details.reason` `not_a_database`, `integrity_check_failed` or
+`foreign_key_check_failed`) before the board is touched. An accepted snapshot is copied over the
+live file under the board's lock (`restore_snapshot`): read through the same kind of connection, so
+the pages copied are the pages checked, in one transaction on the target, followed by a `TRUNCATE`
+checkpoint. The restored board is checked once more and reported.
+
+### Maintenance PRAGMAs
+
+`app/core/pragmas.py` holds every list as a constant (unit-tested against SQLite's documentation);
+`app/storage/sqlite.py` sends them.
+
+| When | PRAGMAs | Why |
+| --- | --- | --- |
+| Every connection (`create_sqlite_engine`) | `foreign_keys=ON`, `journal_mode=WAL`, `busy_timeout=5000`, `synchronous=NORMAL`, `journal_size_limit=67108864` | Per-connection settings. SQLite reuses a WAL file after a checkpoint instead of shrinking it; the 64 MiB limit is far above the ~4 MiB a WAL reaches between automatic checkpoints, so it only cuts back what an outsized transaction (a table rebuild, a restore) left behind. |
+| A board goes out of use: idle sweep, eviction over the cache cap, shutdown (`BoardDatabaseManager._maintain`) | `optimize=0x1fffe`, then `wal_checkpoint(TRUNCATE)` | SQLite's pattern for long-lived handles (a board's cached engine is one). `0x1fffe` is the default mask plus `0x10000`, "check all tables", because the connection that runs it has queried none. Not before every connection closes: before SQLite 3.46.0 a connection that queried an empty indexed table re-runs ANALYZE on it at each close, taking the write lock. The upkeep connection never creates the file and never waits (no busy timeout); a busy or unreadable board is skipped and logged (`board_maintenance_skipped`). `close()` does not maintain: it runs right before a restore, migration or delete changes the file. |
+| After a restore wrote a snapshot into the live file | `wal_checkpoint(TRUNCATE)` | The backup API writes the whole snapshot into the board's `-wal` file in one transaction; the checkpoint moves it into the database file at once. |
+| Before a backup | none | The backup API reads committed `-wal` pages itself; a checkpoint would not change the copy, and a RESTART or TRUNCATE one would make writers wait. |
+
+Every board connection is short-lived (`NullPool`), and the last connection to close checkpoints the
+database and deletes the `-wal` and `-shm` files itself. The explicit checkpoints matter when another
+connection still has the file open at that moment (a backup being taken, an export): the `-wal` is
+emptied then instead of keeping its size until that connection closes.
+
+### Export format (v2)
 
 ZIP containing:
 
-- `manifest.json` — `format_version: 1`, `exported_at`, board metadata;
-- `board.sqlite` — consistent snapshot.
+- `manifest.json` — `format_version: 2`, `exported_at`, board metadata, attachment count and bytes;
+- `board.sqlite` — consistent snapshot;
+- `attachments/` — the board's uploaded files.
 
-Import validates the manifest version, runs `PRAGMA quick_check`, rewrites `board_metadata.id` to
-the new board UUID and registers the board as `active`.
+Import validates the manifest version and the member sizes, writes `board.sqlite` into the new
+board's directory and has `MigrationManager.check_imported` judge it before a registry row exists:
+a read-only, untrusted connection (`mode=ro&immutable=1`, triggers, views and the trusted schema
+off, defensive mode, `cell_size_check` on, no memory mapping) runs `PRAGMA integrity_check` first,
+then requires the board tables and a board-chain revision (or none: a legacy board is adopted). Only
+then is the row added; the board is migrated, `board_metadata.id` is rewritten to the new board UUID
+and the board turns `active`. A refusal (`422 board_import_invalid`) or any later failure removes
+the directory, the pre-migration snapshot and the row.

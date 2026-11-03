@@ -13,6 +13,15 @@ data/
 frontend/src/*.tsbuildinfo
 *.tsbuildinfo
 .devdata/
+# Written by `python -m tools.dbgen` from the migrations; only the package marker is tracked.
+backend/app/db/generated/*
+!backend/app/db/generated/__init__.py
+# Coverage reports (`pytest --cov`, `pnpm test:coverage`); CI keeps them as artefacts.
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+frontend/coverage/
 frontend/test-results/
 frontend/playwright-report/
 frontend/e2e/.data/

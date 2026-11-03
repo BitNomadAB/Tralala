@@ -77,11 +77,11 @@ class LoopOut(OutModel):
     cancelled_at: str | None = None
     completed_at: str | None = None
     history_id: str | None = None
-    documents: dict = Field(default_factory=dict)
-    plan: dict | None = None
-    qa: dict | None = None
-    progress: dict = Field(default_factory=dict)
-    warnings: list[dict] = Field(default_factory=list)
+    documents: dict[str, object] = Field(default_factory=dict)
+    plan: dict[str, object] | None = None
+    qa: dict[str, object] | None = None
+    progress: dict[str, object] = Field(default_factory=dict)
+    warnings: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
 
 # --- Documents --------------------------------------------------------------------
@@ -112,7 +112,7 @@ class AnalysisPayload(StrictModel):
     outcome: ShortText
     scope: list[ShortText] = Field(default_factory=list, max_length=30)
     non_goals: list[ShortText] = Field(default_factory=list, max_length=30)
-    findings: list[AnalysisFinding] = Field(default_factory=list, max_length=100)
+    findings: list[AnalysisFinding] = Field(default_factory=list[AnalysisFinding], max_length=100)
     assumptions: list[ShortText] = Field(default_factory=list, max_length=50)
     open_questions: list[ShortText] = Field(default_factory=list, max_length=50)
     options: list[ShortText] = Field(default_factory=list, max_length=20)
@@ -164,7 +164,7 @@ class PlanPhase(StrictModel):
     prerequisite_phase_ids: list[Id] = Field(default_factory=list, max_length=50)
     prerequisite_ticket_ids: list[Id] = Field(default_factory=list, max_length=50)
     narrative: LongText = ""
-    tickets: list[PlanTicket] = Field(default_factory=list, max_length=100)
+    tickets: list[PlanTicket] = Field(default_factory=list[PlanTicket], max_length=100)
 
 
 class PlanPayload(StrictModel):
@@ -182,11 +182,11 @@ class CandidateSubmission(StrictModel):
     source_info_revision_id: Id | None = None
     source_analysis_ai_revision_id: Id | None = None
     source_analysis_revision_id: Id | None = None
-    provenance: dict = Field(default_factory=dict)
+    provenance: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("provenance")
     @classmethod
-    def _bounded_provenance(cls, value: dict) -> dict:
+    def _bounded_provenance(cls, value: dict[str, object]) -> dict[str, object]:
         if len(value) > 20:
             raise ValueError("provenance accepts at most 20 entries")
         return value
@@ -199,15 +199,15 @@ class DocumentOut(OutModel):
     current_revision_id: str | None = None
     current_revision_number: int | None = None
     current_content: str | None = None
-    current_payload: dict | None = None
+    current_payload: dict[str, object] | None = None
     current_created_at: str | None = None
     approved_revision_id: str | None = None
     approved_revision_number: int | None = None
     approved_content: str | None = None
-    source_revisions: dict = Field(default_factory=dict)
+    source_revisions: dict[str, object] = Field(default_factory=dict)
     stale: bool = False
     stale_reasons: list[str] = Field(default_factory=list)
-    revisions: list[dict] = Field(default_factory=list)
+    revisions: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
     generation_available: bool = True
     render: list[str] = Field(default_factory=list)
 
@@ -216,7 +216,7 @@ class DocumentListOut(OutModel):
     loop_id: str
     loop_version: int
     documents: dict[str, DocumentOut]
-    approvals: dict[str, dict | None] = Field(default_factory=dict)
+    approvals: dict[str, dict[str, object] | None] = Field(default_factory=dict)
 
 
 class ApprovalRequest(StrictModel):
@@ -237,7 +237,7 @@ class ApprovalOut(OutModel):
     reviewer_actor_id: str
     reviewer_name: str
     feedback: str = ""
-    revisions: dict = Field(default_factory=dict)
+    revisions: dict[str, object] = Field(default_factory=dict)
     created_at: str
     superseded_at: str | None = None
 
@@ -274,7 +274,7 @@ class PlanItemOut(OutModel):
     card_id: str | None = None
     completed_at: str | None = None
     ready: bool = True
-    blockers: list[dict] = Field(default_factory=list)
+    blockers: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
     human_action_required: bool = False
 
 
@@ -288,8 +288,8 @@ class PhaseOut(OutModel):
     prerequisite_phase_ids: list[str] = Field(default_factory=list)
     prerequisite_ticket_ids: list[str] = Field(default_factory=list)
     seat: str = "pending"
-    blocked_by: list[dict] = Field(default_factory=list)
-    tickets: list[PlanItemOut] = Field(default_factory=list)
+    blocked_by: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    tickets: list[PlanItemOut] = Field(default_factory=list[PlanItemOut])
 
 
 class PlanOut(OutModel):
@@ -299,25 +299,25 @@ class PlanOut(OutModel):
     status: str = "none"
     activated_at: str | None = None
     approved_at: str | None = None
-    phases: list[PhaseOut] = Field(default_factory=list)
-    warnings: list[dict] = Field(default_factory=list)
+    phases: list[PhaseOut] = Field(default_factory=list[PhaseOut])
+    warnings: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
 
 class ReadinessOut(OutModel):
     loop_id: str
     stage: LoopStage
     execution_allowed: bool
-    blocked_reason: dict | None = None
-    items: list[PlanItemOut] = Field(default_factory=list)
-    phases: list[PhaseOut] = Field(default_factory=list)
+    blocked_reason: dict[str, object] | None = None
+    items: list[PlanItemOut] = Field(default_factory=list[PlanItemOut])
+    phases: list[PhaseOut] = Field(default_factory=list[PhaseOut])
 
 
 class ChangePreviewOut(OutModel):
-    added: list[dict] = Field(default_factory=list)
-    changed: list[dict] = Field(default_factory=list)
-    retained: list[dict] = Field(default_factory=list)
-    superseded: list[dict] = Field(default_factory=list)
-    revalidation_required: list[dict] = Field(default_factory=list)
+    added: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    changed: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    retained: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    superseded: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    revalidation_required: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
 
 class HumanConfirmation(StrictModel):
@@ -360,14 +360,14 @@ class GenerationRunOut(OutModel):
     error_code: str | None = None
     error_message: str | None = None
     attempts: int = 0
-    output: dict = Field(default_factory=dict)
-    source_revisions: dict = Field(default_factory=dict)
+    output: dict[str, object] = Field(default_factory=dict)
+    source_revisions: dict[str, object] = Field(default_factory=dict)
     created_at: str
     started_at: str | None = None
     finished_at: str | None = None
     model: str | None = None
     agent_name: str | None = None
-    usage: dict = Field(default_factory=dict)
+    usage: dict[str, object] = Field(default_factory=dict)
 
 
 class LoopContextOut(OutModel):
@@ -375,10 +375,10 @@ class LoopContextOut(OutModel):
     loop_key: str
     loop_name: str
     stage: str
-    documents: dict
-    plan: dict | None = None
-    tickets: list[dict] = Field(default_factory=list)
-    schemas: dict = Field(default_factory=dict)
+    documents: dict[str, object]
+    plan: dict[str, object] | None = None
+    tickets: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    schemas: dict[str, object] = Field(default_factory=dict)
 
 
 # --- QA ---------------------------------------------------------------------------
@@ -387,7 +387,7 @@ class ImplementationAcceptance(StrictModel):
     version: int = Field(ge=1)
     accepted: bool = True
     qa_status: Literal["not_tested", "tested_with_issues", "passed"] = "not_tested"
-    attestation: dict = Field(default_factory=dict)
+    attestation: dict[str, object] = Field(default_factory=dict)
     note: LongText = ""
 
 
@@ -463,10 +463,10 @@ class QaCycleOut(OutModel):
     card_id: str | None = None
     instruction_revision: int = 0
     delivery_baseline: str = ""
-    ai_instructions: dict = Field(default_factory=dict)
-    human_instructions: dict = Field(default_factory=dict)
-    results: list[dict] = Field(default_factory=list)
-    attestation: dict = Field(default_factory=dict)
+    ai_instructions: dict[str, object] = Field(default_factory=dict)
+    human_instructions: dict[str, object] = Field(default_factory=dict)
+    results: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    attestation: dict[str, object] = Field(default_factory=dict)
     created_at: str
     updated_at: str
     decided_at: str | None = None
@@ -496,8 +496,8 @@ class HistorySummary(OutModel):
 
 
 class HistoryDetail(HistorySummary):
-    envelope: dict = Field(default_factory=dict)
-    artifacts: list[dict] = Field(default_factory=list)
+    envelope: dict[str, object] = Field(default_factory=dict)
+    artifacts: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
 
 
 class LegacyImportRequest(StrictModel):
@@ -506,7 +506,7 @@ class LegacyImportRequest(StrictModel):
     source_reference: Annotated[str, Field(max_length=200)] | None = None
     source_format: Annotated[str, Field(max_length=60)] | None = None
     source_version: Annotated[str, Field(max_length=60)] | None = None
-    reported_metadata: dict = Field(default_factory=dict)
+    reported_metadata: dict[str, object] = Field(default_factory=dict)
     documents: dict[str, BodyText] = Field(default_factory=dict)
     reported_qa_status: Annotated[str, Field(max_length=60)] | None = None
     raw_text: BodyText = ""

@@ -34,13 +34,13 @@ PREFIX = "/boards/{board_id}/loops/{loop_id}/cards"
 
 
 @router.get("/boards/{board_id}/tickets", response_model=Envelope[list[BoardTicketOut]])
-async def list_board_tickets(
+def list_board_tickets(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     q: Annotated[str | None, Query(max_length=200)] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
-) -> dict:
+) -> dict[str, object]:
     """Aggregate read across every active Loop; each item names its owning Loop."""
     ctx.actor.require("cards:read")
     items = ctx.services.card.list_board_tickets(board_id, q=q, limit=limit)
@@ -48,7 +48,7 @@ async def list_board_tickets(
 
 
 @router.get(PREFIX, response_model=Envelope[list[CardOut]])
-async def list_cards(
+def list_cards(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
@@ -65,7 +65,7 @@ async def list_cards(
     include_archived: Annotated[bool, Query()] = False,
     sort: Annotated[str, Query()] = "position",
     order: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     items, total = ctx.services.card.list(
         board_id,
@@ -97,14 +97,14 @@ async def list_cards(
 
 
 @router.post(PREFIX, response_model=Envelope[CardOut], status_code=201)
-async def create_card(
+def create_card(
     board_id: str,
     loop_id: str,
     payload: CardCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     key: Annotated[str | None, Depends(idempotency_key)] = None,
-) -> dict:
+) -> dict[str, object]:
     card, replayed = ctx.services.card.create(
         ctx.actor, board_id, loop_id, payload, idempotency_key=key
     )
@@ -114,14 +114,14 @@ async def create_card(
 
 
 @router.post(f"{PREFIX}/bulk", response_model=Envelope[BulkCreateResult], status_code=201)
-async def bulk_create_cards(
+def bulk_create_cards(
     board_id: str,
     loop_id: str,
     payload: BulkCardCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     key: Annotated[str | None, Depends(idempotency_key)] = None,
-) -> dict:
+) -> dict[str, object]:
     result, replayed = ctx.services.card.bulk_create(
         ctx.actor, board_id, loop_id, payload, idempotency_key=key
     )
@@ -131,14 +131,14 @@ async def bulk_create_cards(
 
 
 @router.get(f"{PREFIX}/{{card_id}}", response_model=Envelope[CardOut])
-async def get_card(
+def get_card(
     board_id: str,
     loop_id: str,
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     include: Annotated[str | None, Query(description="Comma list: checklists,comments")] = None,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     card = ctx.services.card.get(board_id, loop_id, card_id)
     requested = {part.strip() for part in (include or "").split(",") if part.strip()}
@@ -150,61 +150,61 @@ async def get_card(
 
 
 @router.patch(f"{PREFIX}/{{card_id}}", response_model=Envelope[CardOut])
-async def update_card(
+def update_card(
     board_id: str,
     loop_id: str,
     card_id: str,
     payload: CardUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.card.update(ctx.actor, board_id, loop_id, card_id, payload)
     )
 
 
 @router.post(f"{PREFIX}/{{card_id}}/move", response_model=Envelope[CardOut])
-async def move_card(
+def move_card(
     board_id: str,
     loop_id: str,
     card_id: str,
     payload: CardMove,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.card.move(ctx.actor, board_id, loop_id, card_id, payload))
 
 
 @router.post(f"{PREFIX}/{{card_id}}/archive", response_model=Envelope[CardOut])
-async def archive_card(
+def archive_card(
     board_id: str,
     loop_id: str,
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.card.archive(ctx.actor, board_id, loop_id, card_id))
 
 
 @router.post(f"{PREFIX}/{{card_id}}/restore", response_model=Envelope[CardOut])
-async def restore_card(
+def restore_card(
     board_id: str,
     loop_id: str,
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.card.restore(ctx.actor, board_id, loop_id, card_id))
 
 
 @router.get(f"{PREFIX}/{{card_id}}/comments", response_model=Envelope[list[CommentOut]])
-async def list_comments(
+def list_comments(
     board_id: str,
     loop_id: str,
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.comment.list(board_id, card_id))
@@ -215,14 +215,14 @@ async def list_comments(
     response_model=Envelope[CommentOut],
     status_code=201,
 )
-async def add_comment(
+def add_comment(
     board_id: str,
     loop_id: str,
     card_id: str,
     payload: CommentCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.comment.create(ctx.actor, board_id, card_id, payload))
 
@@ -230,13 +230,13 @@ async def add_comment(
 @router.get(
     f"{PREFIX}/{{card_id}}/mentions", response_model=Envelope[list[CommentMentionOut]]
 )
-async def list_mentions(
+def list_mentions(
     board_id: str,
     loop_id: str,
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.mention.list(board_id, card_id))
@@ -247,14 +247,14 @@ async def list_mentions(
     response_model=Envelope[CommentMentionOut],
     status_code=202,
 )
-async def retry_mention(
+def retry_mention(
     board_id: str,
     loop_id: str,
     card_id: str,
     job_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.mention.retry(ctx.actor, board_id, card_id, job_id))
 
@@ -262,7 +262,7 @@ async def retry_mention(
 @router.get(
     f"{PREFIX}/{{card_id}}/events/history", response_model=Envelope[CardEventListOut]
 )
-async def card_event_history(
+def card_event_history(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -270,7 +270,7 @@ async def card_event_history(
     request: Request,
     after: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     items = ctx.services.event.replay_card(board_id, card_id, after=after, limit=limit)
@@ -287,7 +287,7 @@ async def card_event_history(
         }
     },
 )
-async def card_event_stream(
+def card_event_stream(
     board_id: str,
     loop_id: str,
     card_id: str,
@@ -317,13 +317,13 @@ async def card_event_stream(
 
 
 @router.get(f"{PREFIX}/{{card_id}}/checklists", response_model=Envelope[list[ChecklistOut]])
-async def list_checklists(
+def list_checklists(
     board_id: str,
     loop_id: str,
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.checklist.list(board_id, card_id))
@@ -334,14 +334,14 @@ async def list_checklists(
     response_model=Envelope[ChecklistOut],
     status_code=201,
 )
-async def create_checklist(
+def create_checklist(
     board_id: str,
     loop_id: str,
     card_id: str,
     payload: ChecklistCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.checklist.create(ctx.actor, board_id, card_id, payload))
 

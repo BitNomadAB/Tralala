@@ -51,9 +51,7 @@ for (const file of files.filter((entry) => /\.(js|mjs|css|html)$/.test(entry))) 
   const content = readFileSync(file, "utf8").toLowerCase();
   for (const rule of FORBIDDEN) {
     if (content.includes(rule.text.toLowerCase())) {
-      problems.push(
-        `${rule.reason} ("${rule.text}") in ${path.relative(distDir, file)}`,
-      );
+      problems.push(`${rule.reason} ("${rule.text}") in ${path.relative(distDir, file)}`);
     }
   }
 }
@@ -64,4 +62,6 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-console.log(`[client-build-guard] ok (${files.length} files scanned, no source maps or server-only strings)`);
+console.log(
+  `[client-build-guard] ok (${files.length} files scanned, no source maps or server-only strings)`,
+);

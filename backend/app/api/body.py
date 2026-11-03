@@ -8,9 +8,9 @@ bytes reads them here instead, where the limit is counted while the bytes arrive
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from fastapi import Request
+from pydantic import JsonValue
 
 from ..core.errors import PayloadTooLarge
 
@@ -38,7 +38,7 @@ async def read_limited_body(request: Request) -> bytes:
     return b"".join(chunks)
 
 
-async def read_limited_json(request: Request) -> Any:
+async def read_limited_json(request: Request) -> JsonValue:
     """The body as JSON, or a ``ValueError`` for the caller to turn into its own error."""
     body = await read_limited_body(request)
     return json.loads(body)

@@ -22,7 +22,7 @@ export function AgentAccessGuide({
   token,
   onCopy,
 }: {
-  token?: string;
+  token?: string | undefined;
   onCopy?: (snippet: string) => void;
 }) {
   const snippet = mcpConfigSnippet(PLACEHOLDER_ORIGIN, token ?? "<your-token>");
@@ -52,12 +52,13 @@ export function AgentAccessGuide({
             repository.
           </li>
           <li>
-            <strong className="text-[var(--foreground)]">Paste it into your agent&apos;s MCP
-            configuration</strong> — in VS Code that is the <em>mcp.json</em> file. The block below
-            is complete apart from the address and the token: replace{" "}
-            <span className="font-mono">{"<Your URL>"}</span> with the address you use to open
-            Tralala, which is normally <span className="font-mono">https://…</span> over a tailnet or
-            behind a proxy.
+            <strong className="text-[var(--foreground)]">
+              Paste it into your agent&apos;s MCP configuration
+            </strong>{" "}
+            — in VS Code that is the <em>mcp.json</em> file. The block below is complete apart from
+            the address and the token: replace <span className="font-mono">{"<Your URL>"}</span>{" "}
+            with the address you use to open Tralala, which is normally{" "}
+            <span className="font-mono">https://…</span> over a tailnet or behind a proxy.
             <Code>{snippet}</Code>
             <p className="mt-2 text-[11px]">
               <span className="font-mono">type</span> names the transport (Streamable HTTP), not the

@@ -3,10 +3,14 @@ uvicorn[standard]>=0.32,<1
 # Imported directly (run_in_threadpool, StarletteHTTPException), so pin it here rather than leave it
 # to whatever FastAPI resolves.
 starlette>=1.10,<2
-sqlalchemy>=2.0.36,<3
+# 2.0.53: op.create_table(..., sqlite_strict=True) renders STRICT (2.0.37) and a batch rebuild
+# keeps it, because the table option is reflected (2.0.53).
+sqlalchemy>=2.0.53,<3
 alembic>=1.14,<2
 pydantic-settings>=2.6,<3
-cryptography>=43,<47
+# 50.0 closes the advisories pip-audit found in 46.0.7: two certificate-verification flaws, a
+# PKCS#7 decryption oracle and the OpenSSL its wheels bundle. The app uses Fernet and HKDF only.
+cryptography>=50,<51
 # Provider and A2A calls (services/runtime.py) and endpoint checks use httpx at runtime.
 httpx>=0.28,<1
 # Used directly by the event-stream endpoint; starlette pulls it in, but the app imports it.

@@ -62,11 +62,15 @@ Run these from `frontend/`.
 | `pnpm install` | Install and update the lockfile if `package.json` changed. |
 | `pnpm dev` | Development server with hot reload on `:5173`. |
 | `pnpm typecheck` | `tsc --noEmit`: types only, no output. |
-| `pnpm test` | Vitest unit and component tests (37 of them), one run. |
+| `pnpm lint` | `prettier --check .` (`.prettierrc.json`; a file Prettier would reformat fails), then ESLint with type information (`eslint.config.js`); every rule is an error and any warning fails. |
+| `pnpm format` | Prettier rewrites the frontend's TypeScript, JavaScript, JSON, CSS and HTML; run it before a commit. Markdown is left to `pnpm lint:md`. |
+| `pnpm exec eslint . --fix` | Apply the fixes ESLint can make on its own (import order, braces), then re-run `pnpm lint`. |
+| `pnpm test` | Vitest unit and component tests, one run. |
 | `pnpm exec vitest` | The same tests in watch mode while you edit. |
 | `pnpm exec vitest run src/tests/theme.test.ts` | Only one test file. |
-| `pnpm build` | Typecheck, production build and the client build guard (no source maps, no server-only strings). |
+| `pnpm build` | Typecheck, ESLint, production build and the client build guard (no source maps, no server-only strings). |
 | `pnpm preview` | Serve the built bundle locally to check a production build. |
+| `pnpm lint:md` | markdownlint on `README.md`, `AGENTS.md`, `docs/` and `public_docs/`; what CI runs. |
 
 ### Playwright journeys
 
@@ -104,16 +108,23 @@ Run these from `backend/`.
 | `pip install --upgrade -r requirements-dev.txt` | Upgrade them to the newest allowed versions. |
 | `pip list --outdated` | Show what could be upgraded; read before upgrading a production install. |
 | `python --version` | Check the interpreter; `pyproject.toml` accepts 3.13 and 3.14, and 3.13 is the version of record. |
+| `python -m tools.dbgen` | First step of every backend build: checks that both migration chains are linear and apply, generates the typed rows in `app/db/generated/` and compiles every SQL statement in `app/` against the schema. Cached by hash, so a run with nothing changed takes about a second. Run it after every pull that brings a migration. |
+| `python -m tools.dbgen --check` | Only compare: exit 1 when the rows or the SQL check are out of date; writes nothing. |
 | `python -m uvicorn app.main:create_app --factory --port 8000 --reload` | Development server. |
 | `python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log --no-server-header` | What the container runs: no reload, no banner advertising the server. |
-| `python -m pytest` | The whole backend suite — the primary gate. |
-| `python -m pytest tests/test_boards.py` | One file. |
-| `python -m pytest tests/test_boards.py::test_delete_requires_archive_and_matching_name` | One test. |
-| `python -m pytest -k "backup or restore"` | Tests matching a keyword. |
+| `python -m pytest` | The unit suite (`tests/unit`) — the primary gate. No app, no database, no network: services run against in-memory repository fakes, so it finishes in seconds. It refuses to start when the generated rows are older than the migrations. |
+| `python -m pytest -n auto` | The same, spread over every core; what CI runs, and proof that no test depends on another. |
+| `python -m pytest tests/infrastructure` | The small SQLite suite: connection set-up, migrations, commit and rollback, a board releasing its file. Its own command and CI job. |
+| `python -m pytest tests/unit/test_hardening.py` | One file. |
+| `python -m pytest tests/unit/test_hardening.py::test_explicit_secret_wins` | One test. |
+| `python -m pytest -k "csrf or session"` | Tests matching a keyword. |
 | `python -m pytest -x --lf` | Stop at the first failure, starting with the last failing tests. |
 | `python -m pytest -q --tb=short` | Short output for a quick loop. |
-| `python -m ruff check app tests migrations` | Lint everything; what CI runs. |
+| `python -m ruff check app tests migrations tools` | Lint everything; what CI runs. |
+| `python -m pyright` | Type check of the scope in `pyrightconfig.json`, all of it strict: all of `app/` (the routes, `app/main.py`, `app/dev_reset.py`, `app/core`, `app/schemas`, the generated rows, repositories, `app/storage` and every service), unit tests and build tools. What CI runs after ruff. Needs Node.js on the `PATH`. |
 | `python -m ruff check app --fix` | Apply the mechanical fixes. |
+| `python -m tools.deps licences` | The licence of every dependency, backend and frontend, runtime and development, counted per licence; fails on a licence outside the list in `AGENTS.md` (kept as SPDX ids in `tools/deps/licences.toml`). Needs both installs; what CI runs. `--list` prints every package. |
+| `python -m tools.deps audit` | Known vulnerabilities: pip-audit over `requirements.txt` and `requirements-dev.txt` (any advisory fails) and pnpm audit over the frontend lockfile (high and critical fail). Needs the network and pnpm; what CI runs. |
 | `python -m app.dev_reset` | List what a development reset would erase — it changes nothing. |
 | `python -m app.dev_reset --confirm` | Erase boards, backups and the registry; the schema is recreated on next start. |
 
@@ -164,6 +175,7 @@ Notes worth knowing before you type any of these:
 | `git tag --sort=-v:refname \| head -5` | Show the newest release tags; an empty answer means this repository has none yet, so `master` is the version. |
 | `git checkout <tag>` | Pin your server to a release; `git checkout master` returns to the tip. |
 | `pip install -r backend/requirements-dev.txt` | Install any backend dependency the update added. |
+| `(cd backend && ../.venv/bin/python -m tools.dbgen)` | Regenerate the typed database rows for any migration the update added. |
 | `(cd frontend && pnpm install)` | Install any frontend dependency the update added. |
 | `docker compose up -d --build` | Apply it in Docker; migrations run during backend startup. |
 | `curl -s localhost:8080/api/v1/health` | Confirm the new version answers before you walk away. |
@@ -181,11 +193,15 @@ downgraded by that, so a rollback across a schema change needs a snapshot from b
 | `pnpm update` | Move within the declared ranges (patch and minor). |
 | `pnpm up react react-dom @types/react @types/react-dom` | The deliberate React upgrade; rewrites `package.json` ranges. |
 | `pnpm up vite vitest typescript` | The same for the build and test toolchain. |
-| `pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e` | The gate: types, unit tests, build and the journeys. |
+| `pnpm add -D -E prettier@<version>` then `pnpm format` | A Prettier upgrade: commit the reformatted files alone and add that commit to `.git-blame-ignore-revs`. |
+| `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | The gate: types, formatting and lint, unit tests, build and the journeys. |
 | `pnpm rebuild` | Re-run install scripts, e.g. if a native dependency broke after an upgrade. |
 
-React is pinned to `^19`, Vite to `^6`, TypeScript to `~5.7` in `frontend/package.json`. Update the
+React is pinned to `^19.2` (the code uses `useEffectEvent`), Vite to `^6`, TypeScript to `~5.7` in `frontend/package.json`. Update the
 range and the code together, never only the lockfile.
+
+Prettier is pinned to one exact version, because even a patch release may lay code out differently
+and would then fail `pnpm lint` on files nobody touched.
 
 ### Backend dependencies (FastAPI, SQLAlchemy, Alembic, httpx)
 
@@ -193,11 +209,36 @@ range and the code together, never only the lockfile.
 | --- | --- |
 | `pip install -r requirements.txt --upgrade` | Upgrade the runtime dependencies within their ranges. |
 | `pip install -r requirements-dev.txt --upgrade` | The same, plus the test tools. |
-| `python -m pytest && python -m ruff check app tests migrations` | The gate after an upgrade. |
+| `python -m tools.dbgen && python -m ruff check app tests migrations tools && python -m pyright && python -m pytest` | The gate after an upgrade, in pipeline order. |
 | `pip install "fastapi==<version>"` | Pin one package deliberately when a range is too wide for you. |
 
 `requirements.txt` holds what the app imports at runtime (`httpx` and `anyio` included, because the
-provider calls and the event stream need them). `requirements-dev.txt` adds pytest and ruff.
+provider calls and the event stream need them). `requirements-dev.txt` adds pytest, pytest-xdist,
+ruff, pyright and pip-audit.
+
+### Updates, advisories and licences
+
+Dependabot opens the update pull requests (`.github/dependabot.yml`): weekly, one grouped pull
+request for the minor and patch updates of the backend, one for the frontend and one for the CI
+actions, and a pull request of its own for each major update. CI checks every one like any other
+change, the dependency job included.
+
+| Command | What it does |
+| --- | --- |
+| `(cd backend && ../.venv/bin/python -m tools.deps audit)` | Both audits, as CI runs them. A finding names the advisory, the package and the version that fixes it. |
+| `(cd backend && ../.venv/bin/python -m tools.deps licences)` | The licence inventory, as CI runs it; run it after adding or upgrading a dependency. |
+| `(cd frontend && pnpm why <package>)` | Which dependency pulls in a flagged frontend package. |
+
+A finding is fixed by a bump: raise the floor in `requirements.txt`, or upgrade the frontend
+package that pulls the flagged one in. When a fixed version exists only outside the range a
+parent package declares, an entry under `pnpm.overrides` in `frontend/package.json` forces it;
+remove the entry once the parent itself requires the fixed version. Only an advisory without
+a usable fix goes into `backend/tools/deps/audit_allowlist.toml`, with the reason and an
+expiry date at most 90 days ahead; an expired entry fails the audit again.
+
+A licence outside the list stops the inventory. A new licence is an owner decision, never part of
+an upgrade: either pick another package, or record the decision and add the licence to
+`AGENTS.md` and `licences.toml` together.
 
 ### Python and SQLite
 

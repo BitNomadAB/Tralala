@@ -11,6 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY migrations ./migrations
+COPY tools ./tools
+# The typed rows the application imports are generated from the migrations here, and every SQL
+# statement is checked against them, so an image cannot be built from an inconsistent tree.
+RUN python -m tools.dbgen
 
 RUN useradd --create-home --uid 10001 tralala \
     && mkdir -p /data \

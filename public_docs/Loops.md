@@ -4,7 +4,7 @@ A Loop is one feature or coherent change initiative inside a Board. It owns its 
 columns, its Tickets and its planning documents. A Board is the container; the Board's SQLite
 database is the storage boundary.
 
-```
+```text
 Board
   Loop: Email verification
     Draft -> Analysis review -> Planning -> RoadMap review -> Ready -> In progress
@@ -65,6 +65,12 @@ Generation runs on a chosen agent, and the agent's role prompt is the first part
 (followed by the purpose contract and the JSON schema); the whole composed text is what the run
 snapshots. The built-in `analytics_agent` role is written for turning Info into a structured
 analysis and for investigating a codebase.
+
+The schema's field order is the order the model writes in, so it puts evidence before judgement:
+an analysis lists its findings before its recommendation. When the agent's connection test found
+that its provider takes a JSON schema as the answer's format (`supports_json_schema`), the run also
+sends the schema that way and the provider keeps the answer to it; other providers get the schema in
+the prompt only, and an answer that does not validate is sent back for repair as before.
 
 Which agents work on a Loop is decided one level up, on the **Board**: *New board* and *Edit board*
 list every agent as a checkbox (`agent_ids`), and the Loop's *Agent* dropdown offers those agents

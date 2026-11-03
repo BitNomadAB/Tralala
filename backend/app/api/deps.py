@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import hmac
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, TypedDict
 
 from fastapi import Header, Query, Request
 
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, Unauthorized
 from ..core.responses import envelope, page_meta
-from ..core.security import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE
+from ..core.security import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, csrf_satisfied
 from ..services import Services
-
-SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 @dataclass(slots=True)
@@ -40,15 +38,12 @@ def _resolve_actor(request: Request, services: Services) -> tuple[ActorContext, 
 def get_context(request: Request) -> RequestContext:
     services = get_services(request)
     actor, cookie_auth = _resolve_actor(request, services)
-    if cookie_auth and request.method not in SAFE_METHODS:
-        header_token = request.headers.get(CSRF_HEADER, "")
-        cookie_token = request.cookies.get(CSRF_COOKIE, "")
-        if (
-            not header_token
-            or not cookie_token
-            or not hmac.compare_digest(header_token, cookie_token)
-        ):
-            raise Forbidden("CSRF token missing or invalid", code="csrf_failed")
+    if cookie_auth and not csrf_satisfied(
+        request.method,
+        request.headers.get(CSRF_HEADER, ""),
+        request.cookies.get(CSRF_COOKIE, ""),
+    ):
+        raise Forbidden("CSRF token missing or invalid", code="csrf_failed")
     actor.request_id = getattr(request.state, "request_id", "")
     request.state.actor_id = actor.actor_id
     request.app.state.rate_limiter.check(actor.actor_id)
@@ -72,7 +67,7 @@ class Pagination:
     offset: int
 
     @property
-    def meta(self) -> dict:
+    def meta(self) -> dict[str, int | bool]:
         return page_meta(0, self.limit, self.offset)
 
 
@@ -83,11 +78,22 @@ def pagination(
     return Pagination(limit=limit, offset=offset)
 
 
-def ok(request: Request, data: object, meta: dict | None = None) -> dict:
+def ok(
+    request: Request, data: object, meta: Mapping[str, object] | None = None
+) -> dict[str, object]:
     return envelope(data, request, meta)
 
 
-def page(request: Request, result: dict) -> dict:
+class PageResult(TypedDict):
+    """One page of a listing: its items and where they sit in the whole."""
+
+    items: object
+    total: int
+    limit: int
+    offset: int
+
+
+def page(request: Request, result: PageResult) -> dict[str, object]:
     return envelope(
         result["items"],
         request,
@@ -96,6 +102,7 @@ def page(request: Request, result: dict) -> dict:
 
 
 __all__ = [
+    "PageResult",
     "Pagination",
     "RequestContext",
     "get_context",

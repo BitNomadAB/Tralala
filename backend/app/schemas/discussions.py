@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import Field
 
 from .common import Id, LongText, Name, OutModel, StrictModel
@@ -96,7 +94,7 @@ class DiscussionRunOut(OutModel):
     created_at: str
     started_at: str
     finished_at: str | None = None
-    rounds: list[DiscussionRoundOut] = Field(default_factory=list)
+    rounds: list[DiscussionRoundOut] = Field(default_factory=list[DiscussionRoundOut])
 
 
 class DiscussionRunListOut(OutModel):
@@ -109,7 +107,7 @@ class DiscussionEventOut(OutModel):
     id: str
     discussion_id: str
     type: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, object] = Field(default_factory=dict)
     actor_id: str | None = None
     actor_type: str | None = None
     actor_name: str | None = None
@@ -147,10 +145,12 @@ class DiscussionOut(OutModel):
     message_count: int = 0
     # Set on a message response: started, already_running, thread_closed or no_participants.
     auto_run: str | None = None
-    participants: list[DiscussionParticipantOut] = Field(default_factory=list)
-    messages: list[DiscussionMessageOut] = Field(default_factory=list)
+    participants: list[DiscussionParticipantOut] = Field(
+        default_factory=list[DiscussionParticipantOut]
+    )
+    messages: list[DiscussionMessageOut] = Field(default_factory=list[DiscussionMessageOut])
     active_run: DiscussionRunOut | None = None
-    runs: list[DiscussionRunOut] = Field(default_factory=list)
+    runs: list[DiscussionRunOut] = Field(default_factory=list[DiscussionRunOut])
 
 
 class DiscussionListOut(OutModel):

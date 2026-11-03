@@ -21,7 +21,7 @@ Give the key what the work needs, nothing more:
 | Scope | Allows |
 | --- | --- |
 | `boards:read` | read a board and its Loops |
-| `loops:read` | read a Loop's documents, plan and readiness |
+| `loops:read` | read a Loop's documents, plan, readiness and Tickets |
 | `cards:read` / `cards:write` | read a Ticket; assign it or move it |
 | `comments:write` | comment on a Ticket |
 | `discussions:read` / `discussions:write` | read a thread; ask the agents and reply |
@@ -73,7 +73,7 @@ certificate. `/llms.txt` is plain text at the same origin.
 | Tool | Scope | What it does |
 | --- | --- | --- |
 | `read_board` | `boards:read`, `loops:read` | boards and their Loops, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | a Loop's documents, plan, columns and readiness |
+| `read_loop` | `loops:read` | a Loop's documents, plan, columns, readiness and Tickets |
 | `read_ticket` | `cards:read` | one Ticket with its blockers and what you may do next |
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |

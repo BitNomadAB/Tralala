@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyTheme, readStoredKit, readStoredTheme, resolveTheme } from "@/themes/ThemeProvider";
+import { applyTheme, readStoredKit, readStoredTheme, resolveTheme } from "@/themes/theme";
 
 describe("theme resolution", () => {
   it("defaults to dark when nothing is stored", () => {

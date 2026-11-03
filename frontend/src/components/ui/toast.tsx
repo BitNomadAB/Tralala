@@ -1,21 +1,14 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { CheckCircle2, Info, TriangleAlert, XCircle } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
-
-type ToastVariant = "info" | "success" | "warning" | "error";
+import { ToastContext, type ToastInput, type ToastVariant } from "./useToast";
 
 interface Toast {
   id: number;
   title: string;
-  description?: string;
+  description: string | undefined;
   variant: ToastVariant;
 }
-
-interface ToastContextValue {
-  push: (toast: { title: string; description?: string; variant?: ToastVariant }) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
 
 const icons = {
   info: Info,
@@ -34,24 +27,13 @@ const tones: Record<ToastVariant, string> = {
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const push = useCallback(
-    ({
-      title,
-      description,
-      variant = "info",
-    }: {
-      title: string;
-      description?: string;
-      variant?: ToastVariant;
-    }) => {
-      const id = Date.now() + Math.random();
-      setToasts((current) => [...current, { id, title, description, variant }]);
-      window.setTimeout(() => {
-        setToasts((current) => current.filter((toast) => toast.id !== id));
-      }, 5000);
-    },
-    [],
-  );
+  const push = useCallback(({ title, description, variant = "info" }: ToastInput) => {
+    const id = Date.now() + Math.random();
+    setToasts((current) => [...current, { id, title, description, variant }]);
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+    }, 5000);
+  }, []);
 
   const value = useMemo(() => ({ push }), [push]);
 
@@ -86,10 +68,4 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       </div>
     </ToastContext.Provider>
   );
-}
-
-export function useToast(): ToastContextValue {
-  const context = useContext(ToastContext);
-  if (!context) throw new Error("useToast must be used within ToastProvider");
-  return context;
 }

@@ -14,7 +14,7 @@ live in [Loops.md](Loops.md) and the endpoint reference in [API.md](API.md).
 
 ## Overview
 
-```
+```text
 browser ── Caddy ──┬── React UI (built SPA)
                    │      │
                    │      ├── WebMCP adapter (in-page tools)
@@ -39,7 +39,7 @@ WebMCP adapter stays a separate, UI-contextual surface for a person's own sessio
 
 ### Authoritative hierarchy
 
-```
+```text
 App (Tralala shell, Board overview)
   Board (a project, application or defined part of one)
     Loop (one feature or coherent change initiative)
@@ -59,6 +59,8 @@ planning groups, not Kanban columns.
 | --- | --- | --- |
 | API | `backend/app/api` | HTTP routing, authentication dependency, envelopes, status codes |
 | Services | `backend/app/services` | Business rules, transactions, activity logging, ordering |
+| Repositories | `backend/app/repositories` | Typed interfaces a service reads and writes through, the units of work that open a reader or writer on a board or on the registry, a board's files (its database and attachments) as boards are created, copied, exported, imported and deleted and uploads are stored, and whether a board has its FTS5 card index; `repositories/sql` implements them over SQL |
+| Rows | `backend/app/db` | One typed row class per table, generated from the migrations by `python -m tools.dbgen` |
 | Storage | `backend/app/storage` | SQLite engines, migrations, registry and per-board databases |
 | Schemas | `backend/app/schemas` | Pydantic v2 request/response validation |
 | Core | `backend/app/core` | Settings, errors, security primitives, actor context, rate limiting, host filesystem profile |
@@ -71,7 +73,7 @@ planning groups, not Kanban columns.
 | --- | --- | --- |
 | App shell | `frontend/src/app` | Router, providers, layout |
 | Features | `frontend/src/features` | Boards, Loops, Loop Kanban and planning dialogs, history, discussions, settings, auth |
-| API client | `frontend/src/lib/api.ts` | Typed REST client, envelope unwrapping, CSRF header |
+| API client | `frontend/src/lib/api` | Typed REST client, one module per domain composed into `api`; `client.ts` unwraps the envelope and sends the CSRF header |
 | WebMCP | `frontend/src/webmcp` | Capability detection, registry adapter, contextual tools |
 | Theme | `frontend/src/themes` | Theme kits (`data-theme-kit`) x dark/light/system over semantic CSS variables |
 | Web tier | `frontend/Caddyfile` | Static SPA, one security header policy, reverse proxy, TLS |
@@ -99,9 +101,11 @@ planning groups, not Kanban columns.
   directory.
 
 Board ids are UUIDs validated before any path is constructed, so user input never reaches the
-filesystem. Each board engine is created with `NullPool`, `foreign_keys=ON`, WAL journaling and a
-5 s busy timeout; engines idle longer than `TRALALA_BOARD_IDLE_CLOSE_SECONDS` are disposed, and the
-cache is capped so a host with many boards cannot exhaust file handles.
+filesystem. Each board engine is created with `NullPool`, `foreign_keys=ON`, WAL journaling, a
+5 s busy timeout and a 64 MiB journal size limit; engines idle longer than
+`TRALALA_BOARD_IDLE_CLOSE_SECONDS` are disposed, and the cache is capped so a host with many boards
+cannot exhaust file handles. A board that goes out of use that way, or at shutdown, gets SQLite's
+`PRAGMA optimize` and a checkpoint that empties its `-wal` file.
 
 ## Request lifecycle
 
@@ -124,6 +128,20 @@ cache is capped so a host with many boards cannot exhaust file handles.
 Board access is guarded by a re-entrant per-board lock shared by `open`, `session`, `reader` and
 `restore`, so a restore is exclusive inside the process.
 
+Routes and their dependencies are plain functions, so FastAPI runs each request in a worker thread
+and the event loop keeps to connections, middleware, request bodies and event streams: a slow
+request does not hold up the others. The three endpoints that read raw bytes stay asynchronous and
+hand authentication and the service call to the same pool. It runs 40 requests at once
+(`THREADPOOL_TOKENS` in `app/main.py`); requests to one board still queue on that board's lock, and
+SQLite takes one writer per database. A transaction that writes starts with `BEGIN IMMEDIATE`, so
+it holds the write lock before it reads: a second writer waits up to the 5 s busy timeout at its
+start instead of failing halfway, and then reads what the first committed. A reader starts with a
+deferred `BEGIN` and blocks nobody. Alembic keeps the migration it is running in module globals,
+so the process runs one migration at a time: boards created, imported or migrated at once get
+their schema one after the other (`app/storage/schema/runner.py`). An open event stream waits for
+its next event on a limiter of its own (100 streams), so open streams cannot use up the threads
+that requests run in.
+
 ## Consistency across databases
 
 SQLite has no cross-file transactions, so:
@@ -132,6 +150,10 @@ SQLite has no cross-file transactions, so:
 - Board creation inserts a `maintenance` registry row, creates the database at the board chain
   head through Alembic, then flips the row to `active`. Failures set `error`;
   `BoardService.recover()` repairs rows left in `maintenance` during startup.
+- Board import writes the archive's database into the new board's directory and has the Migration
+  Manager judge it (read only, untrusted, `integrity_check` first) before a registry row exists, then
+  adds the row, migrates, and activates. A refusal or any later failure removes the files, the
+  pre-migration snapshot and the row, so a bad archive never becomes a board.
 - Schema upgrades are owned by `MigrationManager`: the registry chain runs first, then every board
   is migrated eagerly and sequentially before requests are served, with a verified pre-migration
   snapshot and post-migration integrity checks. A failed board is marked `migration_failed` and
@@ -180,8 +202,8 @@ through `services/loops.py`, `loop_documents.py`, `loop_plans.py`, `loop_generat
   the table at startup and rebuilt when a restore or copy left it behind.
 - **Reading a board's Loops.** `GET /boards/{id}/loops` serializes every Loop with a constant number
   of statements (documents, approvals, plans, QA cycles and progress are loaded per board rather
-  than per Loop), and a test holds that budget so the overview cannot drift back to one query set per
-  Loop. Legacy imports use the same envelope with `source_kind = imported_legacy` and never create
+  than per Loop); keep it that way, because one query set per Loop is what makes the overview slow.
+  Legacy imports use the same envelope with `source_kind = imported_legacy` and never create
   Tickets or approvals.
 
 The human-facing order of a Loop is in [Onboarding](Onboarding.md#the-order-of-work-inside-a-loop).
@@ -207,8 +229,10 @@ with no cache, 15 ms once the counters are known, 13 ms with the flag.
   `409 version_conflict` with the current version otherwise.
 - `Idempotency-Key` on board/card creation stores a SHA-256 fingerprint plus the response. A replay
   with the same payload returns the stored response; a different payload returns `409
-  idempotency_key_reused`. The worker tools reuse the same idea per tool (identical content within
-  five minutes is a retry, not a second write).
+  idempotency_key_reused`. Two board creations with one key at the same time take turns on the
+  registry's write lock: the second answers `409 creation_in_progress` while the first is still
+  creating the board, and a retry afterwards replays its response. The worker tools reuse the same
+  idea per tool (identical content within five minutes is a retry, not a second write).
 
 ## Discussion runs
 
@@ -341,7 +365,10 @@ tool may do.
   latency, how many models the endpoint reported and the provider's reason. The key and the request
   body never appear.
 
-- Structured JSON logs (request id, method, path, status, duration, actor, replay flag).
+- Structured JSON logs: one formatter (`backend/app/core/logging.py`) writes every line as `ts`,
+  `level`, `event`, `logger`, the `request_id` of the request being served, then the event's own
+  fields (the `http_request` line: method, path, status, duration, actor, replay flag). A call names
+  its event and passes its fields as `extra`; a guard test refuses a line built by hand.
 - `GET /api/v1/boards/{id}/validate` runs `PRAGMA integrity_check` and `foreign_key_check` and
   reports the board's `alembic_version` revision.
 - `POST /api/v1/boards/{id}/migrate` retries a failed board migration (admin only) and returns
@@ -379,4 +406,8 @@ tool may do.
   inserted, so a crash can leave an unreferenced file but never a row whose bytes are missing.
 - End-to-end tests (`frontend/e2e`) run through `scripts/run-playwright.mjs`, which reuses a local
   Playwright install and boots an isolated stack (backend `:8077`, Vite `:5273`). The commands are in
-  [practical_commands.md](practical_commands.md).
+  [practical_commands.md](practical_commands.md). One journey runs axe-core on the dashboard, a Loop
+  page and Settings and fails on a serious or critical accessibility violation.
+- Frontend unit and component tests (`frontend/src/tests`) never replace the API client: MSW answers
+  its requests with the same envelope the backend writes, so the request body, the CSRF header and
+  the handling of a 401 are part of every test that sends a request.

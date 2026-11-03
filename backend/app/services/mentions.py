@@ -7,6 +7,8 @@ on an in-process executor: no broker is introduced for this.
 
 Retry is safe because ``uq_comment_mentions_once`` allows one job per (comment, agent) and the
 answer insert is guarded by the job's ``response_comment_id``.
+
+The prompt a mentioned agent receives is built in ``mentions_prompt``.
 """
 
 from __future__ import annotations
@@ -14,40 +16,49 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from threading import Lock
-from typing import Any
+from typing import Protocol, TypeGuard
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
-from sqlalchemy import text
-
 from ..core.context import ActorContext
+from ..core.dates import utcnow
 from ..core.errors import Conflict, NotFound
-from ..storage.sqlite import utcnow
+from ..core.logging import carry_request_id
+from ..db.generated.board import CommentMentionJobsRow, CommentsRow
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..repositories.board_files import AttachmentFiles
+from ..repositories.registry import RegistryUnitOfWork
 from . import runtime
-from .activity import log_activity
-from .agents import AgentService
-from .boards import BoardService
-from .events import AGENT_COMPLETED, AGENT_FAILED, AGENT_STARTED, EventService
-from .orchestrator import usage_tokens
+from .activity import activity_entry
+from .agents import RoleSnapshot
+from .events import AGENT_COMPLETED, AGENT_FAILED, AGENT_STARTED, Event, EventService
+from .mentions_prompt import mention_messages
+from .orchestrator import AgentCall, usage_tokens
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tralala.mentions")
 
 WORKER_THREADS = 2
 MAX_MENTIONS_PER_COMMENT = 5
-RECENT_COMMENTS = 20
-CONTEXT_CHARS = 4000
-# A mentioned agent should be able to read the notes that were uploaded with the ticket, but not
-# swallow a whole file: only text-like attachments, and only a bounded head of each.
-TEXT_ATTACHMENT_TYPES = {"application/json", "application/xml", "application/x-yaml"}
-ATTACHMENT_EXCERPTS = 3
-ATTACHMENT_EXCERPT_BYTES = 200_000
-ATTACHMENT_EXCERPT_CHARS = 2_000
+
+MentionJobEntry = dict[str, object]
+"""A job as the API answers it: its columns without the snapshot, the role it ran with, and
+whether a person may retry it."""
 
 
-def _rows(conn: Any, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
-    return [dict(row) for row in conn.execute(text(sql), params).mappings()]
+class BoardChecks(Protocol):
+    def require_row(self, board_id: str) -> object: ...
+
+    def ensure_active(self, board_id: str) -> object: ...
+
+
+class MentionAgents(Protocol):
+    def list(self, *, enabled: bool | None = None) -> Sequence[Mapping[str, object]]: ...
+
+    def role_snapshot(self, agent_id: str) -> RoleSnapshot: ...
 
 
 def extract_mentions(content: str, agents: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -93,108 +104,119 @@ def extract_mentions(content: str, agents: list[dict[str, str]]) -> list[dict[st
     return found
 
 
+def _is_object(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def role_snapshot(job: CommentMentionJobsRow) -> dict[str, object]:
+    """The role the job was queued with; an unreadable snapshot reads as none."""
+    try:
+        snapshot: object = json.loads(job.role_snapshot_json or "{}")
+    except ValueError:
+        return {}
+    return snapshot if _is_object(snapshot) else {}
+
+
+def serialize_job(job: CommentMentionJobsRow) -> MentionJobEntry:
+    entry: MentionJobEntry = dict(asdict(job))
+    entry.pop("role_snapshot_json", None)
+    snapshot = role_snapshot(job)
+    entry["role_template_id"] = snapshot.get("role_template_id")
+    entry["role_template_name"] = snapshot.get("role_template_name")
+    entry["role_source"] = snapshot.get("role_source")
+    entry["system_prompt_sha256"] = snapshot.get("system_prompt_sha256")
+    entry["can_retry"] = job.status == "failed" and not job.response_comment_id
+    return entry
+
+
+def agent_actor(agent_id: str, agent_name: str) -> ActorContext:
+    return ActorContext(
+        actor_id=agent_id,
+        actor_type="agent",
+        actor_name=agent_name,
+        scopes=frozenset({"comments:write"}),
+    )
+
+
+def _new_id() -> str:
+    return str(uuid4())
+
+
 class MentionService:
     """Queues and executes agent replies for mentions in ticket comments."""
 
     def __init__(
         self,
-        settings: Any,
-        board_service: BoardService,
-        agents: AgentService,
+        settings: object,
+        board_service: BoardChecks,
+        agents: MentionAgents,
+        store: BoardUnitOfWork,
+        registry: RegistryUnitOfWork,
+        files: AttachmentFiles,
         events: EventService | None = None,
+        *,
+        call_agent: AgentCall = runtime.call_agent,
+        clock: Callable[[], str] = utcnow,
+        new_id: Callable[[], str] = _new_id,
+        monotonic: Callable[[], float] = time.monotonic,
+        background: bool = True,
     ) -> None:
         self.settings = settings
         self.board_service = board_service
-        self.boards = board_service.boards
-        self.registry = board_service.registry
         self.agents = agents
+        self.store = store
+        self.registry = registry
+        self.files = files
         self.events = events
-        self._executor = ThreadPoolExecutor(
-            max_workers=WORKER_THREADS, thread_name_prefix="comment-mention"
+        self._call_agent = call_agent
+        self._clock = clock
+        self._new_id = new_id
+        self._monotonic = monotonic
+        # A unit test runs the work inline; the application hands it to a small pool.
+        self._executor: ThreadPoolExecutor | None = (
+            ThreadPoolExecutor(max_workers=WORKER_THREADS, thread_name_prefix="comment-mention")
+            if background
+            else None
         )
+        self._background = background
         self._executor_lock = Lock()
         self._job_locks: WeakValueDictionary[str, Lock] = WeakValueDictionary()
         self._job_locks_guard = Lock()
 
     def shutdown(self) -> None:
         with self._executor_lock:
-            executor, self._executor = self._executor, None  # type: ignore[assignment]
+            executor, self._executor = self._executor, None
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
     def recover(self, board_id: str) -> int:
         """Resolve jobs interrupted by a process stop: fail the running ones, resume queued ones."""
-        if not self.boards.exists(board_id):
+        if not self.store.exists(board_id):
             return 0
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            failed = conn.execute(
-                text(
-                    "UPDATE comment_mention_jobs SET status = 'failed',"
-                    " error = 'process_restart', finished_at = :now"
-                    " WHERE status = 'running'"
-                ),
-                {"now": now},
-            ).rowcount
-            queued = [
-                str(row[0])
-                for row in conn.execute(
-                    text(
-                        "SELECT id FROM comment_mention_jobs WHERE status = 'queued'"
-                        " ORDER BY created_at, rowid"
-                    )
-                )
-            ]
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            failed = repos.mention_jobs.fail_running(now=now)
+            queued = repos.mention_jobs.queued_ids()
         for job_id in queued:
             self._submit(board_id, job_id)
-        return int(failed or 0) + len(queued)
+        return failed + len(queued)
 
-    # --- serialization -------------------------------------------------------
+    # --- reads ---------------------------------------------------------------
 
-    @staticmethod
-    def serialize(job: dict[str, Any]) -> dict[str, Any]:
-        entry = dict(job)
-        snapshot_raw = entry.pop("role_snapshot_json", "{}")
-        try:
-            snapshot = json.loads(snapshot_raw or "{}")
-        except (TypeError, ValueError):
-            snapshot = {}
-        entry["role_template_id"] = snapshot.get("role_template_id")
-        entry["role_template_name"] = snapshot.get("role_template_name")
-        entry["role_source"] = snapshot.get("role_source")
-        entry["system_prompt_sha256"] = snapshot.get("system_prompt_sha256")
-        entry["can_retry"] = entry.get("status") == "failed" and not entry.get(
-            "response_comment_id"
-        )
-        return entry
-
-    def list(self, board_id: str, card_id: str) -> list[dict[str, Any]]:
+    def list(self, board_id: str, card_id: str) -> list[MentionJobEntry]:
         self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            exists = conn.execute(
-                text("SELECT 1 FROM cards WHERE id = :id"), {"id": card_id}
-            ).first()
-            if exists is None:
+        with self.store.reader(board_id) as repos:
+            if repos.cards.get(card_id) is None:
                 raise NotFound("Card not found")
-            jobs = _rows(
-                conn,
-                "SELECT * FROM comment_mention_jobs WHERE card_id = :id"
-                " ORDER BY created_at, rowid",
-                {"id": card_id},
-            )
-        return [self.serialize(job) for job in jobs]
+            jobs = repos.mention_jobs.for_card(card_id)
+        return [serialize_job(job) for job in jobs]
 
-    def _read(self, board_id: str, card_id: str, job_id: str) -> dict[str, Any]:
-        with self.boards.reader(board_id) as conn:
-            row = conn.execute(
-                text(
-                    "SELECT * FROM comment_mention_jobs WHERE id = :id AND card_id = :card"
-                ),
-                {"id": job_id, "card": card_id},
-            ).mappings().first()
-        if row is None:
+    def _read(self, board_id: str, card_id: str, job_id: str) -> CommentMentionJobsRow:
+        with self.store.reader(board_id) as repos:
+            job = repos.mention_jobs.get(job_id)
+        if job is None or job.card_id != card_id:
             raise NotFound("Mention job not found")
-        return dict(row)
+        return job
 
     # --- queueing ------------------------------------------------------------
 
@@ -208,20 +230,17 @@ class MentionService:
     ) -> list[str]:
         """Create one job per mentioned enabled agent; returns the ids of new jobs."""
         candidates = [
-            {"id": row["id"], "name": row["name"]}
+            {"id": str(row["id"]), "name": str(row["name"])}
             for row in self.agents.list(enabled=True)
         ]
         mentioned = extract_mentions(content, candidates)[:MAX_MENTIONS_PER_COMMENT]
         if not mentioned:
             return []
         created: list[str] = []
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            exists = conn.execute(
-                text("SELECT 1 FROM comments WHERE id = :id AND card_id = :card"),
-                {"id": comment_id, "card": card_id},
-            ).first()
-            if exists is None:
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            comment = repos.comments.get(comment_id)
+            if comment is None or comment.card_id != card_id:
                 return []
             for agent in mentioned:
                 try:
@@ -231,41 +250,39 @@ class MentionService:
                         "Skipping mention of agent %s without a usable role", agent["id"]
                     )
                     continue
-                job_id = str(uuid4())
-                inserted = conn.execute(
-                    text(
-                        "INSERT OR IGNORE INTO comment_mention_jobs"
-                        " (id, card_id, comment_id, agent_id, agent_name, status, attempts,"
-                        "  error, response_comment_id, role_snapshot_json, tokens_used,"
-                        "  requested_by_actor_id, requested_by_type, requested_by_name,"
-                        "  created_at, started_at, finished_at)"
-                        " VALUES (:id, :card_id, :comment_id, :agent_id, :agent_name, 'queued',"
-                        "         0, NULL, NULL, :snapshot, 0, :actor_id, :actor_type,"
-                        "         :actor_name, :now, NULL, NULL)"
-                    ),
-                    {
-                        "id": job_id,
-                        "card_id": card_id,
-                        "comment_id": comment_id,
-                        "agent_id": agent["id"],
-                        "agent_name": agent["name"],
-                        "snapshot": json.dumps(snapshot),
-                        "actor_id": actor.actor_id,
-                        "actor_type": actor.actor_type,
-                        "actor_name": actor.actor_name,
-                        "now": now,
-                    },
+                job_id = self._new_id()
+                added = repos.mention_jobs.add_once(
+                    CommentMentionJobsRow(
+                        id=job_id,
+                        card_id=card_id,
+                        comment_id=comment_id,
+                        agent_id=agent["id"],
+                        agent_name=agent["name"],
+                        status="queued",
+                        attempts=0,
+                        error=None,
+                        response_comment_id=None,
+                        role_snapshot_json=json.dumps(snapshot),
+                        tokens_used=0,
+                        requested_by_actor_id=actor.actor_id,
+                        requested_by_type=actor.actor_type,
+                        requested_by_name=actor.actor_name,
+                        created_at=now,
+                        started_at=None,
+                        finished_at=None,
+                    )
                 )
-                if inserted.rowcount:
+                if added:
                     created.append(job_id)
             if created:
-                log_activity(
-                    conn,
+                self._log(
+                    repos,
                     actor,
-                    action="comment.agent_mentioned",
-                    entity_type="card",
-                    entity_id=card_id,
-                    changes={"agents": [agent["id"] for agent in mentioned], "jobs": created},
+                    "comment.agent_mentioned",
+                    "card",
+                    card_id,
+                    {"agents": [agent["id"] for agent in mentioned], "jobs": created},
+                    now,
                 )
         for job_id in created:
             self._submit(board_id, job_id)
@@ -273,51 +290,45 @@ class MentionService:
 
     def retry(
         self, actor: ActorContext, board_id: str, card_id: str, job_id: str
-    ) -> dict[str, Any]:
+    ) -> MentionJobEntry:
         actor.require("comments:write")
         self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            job = conn.execute(
-                text(
-                    "SELECT * FROM comment_mention_jobs WHERE id = :id AND card_id = :card"
-                ),
-                {"id": job_id, "card": card_id},
-            ).mappings().first()
-            if job is None:
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            job = repos.mention_jobs.get(job_id)
+            if job is None or job.card_id != card_id:
                 raise NotFound("Mention job not found")
-            if job["response_comment_id"]:
+            if job.response_comment_id:
                 raise Conflict(
                     "This mention already has an answer",
-                    details={"response_comment_id": job["response_comment_id"]},
+                    details={"response_comment_id": job.response_comment_id},
                 )
-            if job["status"] in ("queued", "running"):
-                raise Conflict("Mention job is already active", details={"status": job["status"]})
-            conn.execute(
-                text(
-                    "UPDATE comment_mention_jobs SET status = 'queued', error = NULL,"
-                    " started_at = NULL, finished_at = NULL WHERE id = :id"
-                ),
-                {"id": job_id},
-            )
-            log_activity(
-                conn,
+            if job.status in ("queued", "running"):
+                raise Conflict("Mention job is already active", details={"status": job.status})
+            repos.mention_jobs.requeue(job_id)
+            self._log(
+                repos,
                 actor,
-                action="comment.mention_retried",
-                entity_type="card",
-                entity_id=card_id,
-                changes={"job_id": job_id, "agent_id": job["agent_id"]},
+                "comment.mention_retried",
+                "card",
+                card_id,
+                {"job_id": job_id, "agent_id": job.agent_id},
+                now,
             )
         self._submit(board_id, job_id)
-        return self.serialize(self._read(board_id, card_id, job_id))
+        return serialize_job(self._read(board_id, card_id, job_id))
 
     # --- execution -----------------------------------------------------------
 
     def _submit(self, board_id: str, job_id: str) -> None:
+        if not self._background:
+            self._worker(board_id, job_id)
+            return
         with self._executor_lock:
             executor = self._executor
         if executor is None:
             return
-        executor.submit(self._worker, board_id, job_id)
+        executor.submit(carry_request_id(self._worker), board_id, job_id)
 
     def _worker(self, board_id: str, job_id: str) -> None:
         try:
@@ -339,382 +350,186 @@ class MentionService:
             job = self._claim(board_id, job_id)
             if job is None:
                 return
-            agent_row = self.registry.read_one(
-                "SELECT * FROM agents WHERE id = :id", {"id": job["agent_id"]}
-            )
-            if agent_row is None or not agent_row.get("enabled"):
+            with self.registry.reader() as registry:
+                agent = registry.agents.get(job.agent_id)
+            if agent is None or not agent.enabled:
                 self._fail(board_id, job_id, "agent_missing")
                 return
-            started = time.monotonic()
-            with self.boards.reader(board_id) as conn:
-                messages = self._messages(conn, job, board_id)
+            started = self._monotonic()
+            with self.store.reader(board_id) as repos:
+                messages = self._messages(repos, job, board_id)
             if messages is None:
                 self._fail(board_id, job_id, "comment_deleted")
                 return
-            snapshot = self._snapshot(job)
-            result = runtime.call_agent(
+            result = self._call_agent(
                 self.settings,
-                agent_row,
-                system_prompt=str(snapshot.get("system_prompt") or ""),
+                asdict(agent),
+                system_prompt=str(role_snapshot(job).get("system_prompt") or ""),
                 messages=messages,
             )
-            duration_ms = int((time.monotonic() - started) * 1000)
-            if not result["ok"]:
-                self._fail(
-                    board_id,
-                    job_id,
-                    str(result["error"]),
-                    duration_ms=duration_ms,
-                )
+            duration_ms = int((self._monotonic() - started) * 1000)
+            if not result.get("ok"):
+                self._fail(board_id, job_id, str(result.get("error")), duration_ms=duration_ms)
                 return
-            self._complete(
-                board_id, job, str(result["text"]).strip(), usage_tokens(result), duration_ms
-            )
+            answer = str(result.get("text")).strip()
+            self._complete(board_id, job, answer, usage_tokens(result), duration_ms)
 
-    def _claim(self, board_id: str, job_id: str) -> dict[str, Any] | None:
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            job = conn.execute(
-                text("SELECT * FROM comment_mention_jobs WHERE id = :id"), {"id": job_id}
-            ).mappings().first()
-            if job is None or job["status"] != "queued":
+    def _claim(self, board_id: str, job_id: str) -> CommentMentionJobsRow | None:
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            job = repos.mention_jobs.get(job_id)
+            if job is None or job.status != "queued":
                 return None
-            row = dict(job)
-            conn.execute(
-                text(
-                    "UPDATE comment_mention_jobs SET status = 'running', attempts = attempts + 1,"
-                    " error = NULL, started_at = :now WHERE id = :id"
-                ),
-                {"id": job_id, "now": now},
-            )
+            repos.mention_jobs.start(job_id, now=now)
             event = self._record(
-                conn,
-                row["card_id"],
+                repos,
+                job.card_id,
                 AGENT_STARTED,
                 {
                     "job_id": job_id,
-                    "comment_id": row["comment_id"],
-                    "agent_id": row["agent_id"],
-                    "agent_name": row["agent_name"],
+                    "comment_id": job.comment_id,
+                    "agent_id": job.agent_id,
+                    "agent_name": job.agent_name,
                 },
-                actor=self._actor(row["agent_id"], row["agent_name"]),
+                actor=agent_actor(job.agent_id, job.agent_name),
             )
         self._publish(board_id, event)
-        return row
+        return job
 
     def _complete(
-        self, board_id: str, job: dict[str, Any], answer: str, tokens: int, duration_ms: int
+        self,
+        board_id: str,
+        job: CommentMentionJobsRow,
+        answer: str,
+        tokens: int,
+        duration_ms: int,
     ) -> None:
-        comment_id = str(uuid4())
-        now = utcnow()
-        agent_actor = self._actor(job["agent_id"], job["agent_name"])
-        with self.boards.session(board_id) as conn:
-            updated = conn.execute(
-                text(
-                    "UPDATE comment_mention_jobs SET status = 'completed',"
-                    " tokens_used = :tokens, error = NULL, finished_at = :now"
-                    " WHERE id = :id AND status = 'running' AND response_comment_id IS NULL"
-                ),
-                {"id": job["id"], "tokens": tokens, "now": now},
-            ).rowcount
-            if updated != 1:
+        comment_id = self._new_id()
+        now = self._clock()
+        speaker = agent_actor(job.agent_id, job.agent_name)
+        with self.store.writer(board_id) as repos:
+            if not repos.mention_jobs.complete(job.id, tokens=tokens, now=now):
                 return
-            conn.execute(
-                text(
-                    "INSERT INTO comments (id, card_id, actor_id, content, created_at, updated_at)"
-                    " VALUES (:id, :card_id, :actor_id, :content, :now, :now)"
-                ),
-                {
-                    "id": comment_id,
-                    "card_id": job["card_id"],
-                    "actor_id": job["agent_id"],
-                    "content": answer,
-                    "now": now,
-                },
+            repos.comments.add(
+                CommentsRow(
+                    id=comment_id,
+                    card_id=job.card_id,
+                    actor_id=job.agent_id,
+                    content=answer,
+                    created_at=now,
+                    updated_at=now,
+                )
             )
-            conn.execute(
-                text(
-                    "UPDATE comment_mention_jobs SET response_comment_id = :comment_id"
-                    " WHERE id = :id"
-                ),
-                {"id": job["id"], "comment_id": comment_id},
-            )
-            log_activity(
-                conn,
-                agent_actor,
-                action="comment.agent_replied",
-                entity_type="comment",
-                entity_id=comment_id,
-                changes={"card_id": job["card_id"], "job_id": job["id"]},
+            repos.mention_jobs.set_response(job.id, comment_id)
+            self._log(
+                repos,
+                speaker,
+                "comment.agent_replied",
+                "comment",
+                comment_id,
+                {"card_id": job.card_id, "job_id": job.id},
+                now,
             )
             event = self._record(
-                conn,
-                job["card_id"],
+                repos,
+                job.card_id,
                 AGENT_COMPLETED,
                 {
-                    "job_id": job["id"],
-                    "comment_id": job["comment_id"],
-                    "agent_id": job["agent_id"],
-                    "agent_name": job["agent_name"],
+                    "job_id": job.id,
+                    "comment_id": job.comment_id,
+                    "agent_id": job.agent_id,
+                    "agent_name": job.agent_name,
                     "response_comment_id": comment_id,
                     "tokens_used": tokens,
                     "duration_ms": duration_ms,
                 },
-                actor=agent_actor,
+                actor=speaker,
             )
         self._publish(board_id, event)
 
-    def _fail(
-        self,
-        board_id: str,
-        job_id: str,
-        error: str,
-        *,
-        duration_ms: int = 0,
-    ) -> None:
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            job = conn.execute(
-                text("SELECT * FROM comment_mention_jobs WHERE id = :id"), {"id": job_id}
-            ).mappings().first()
+    def _fail(self, board_id: str, job_id: str, error: str, *, duration_ms: int = 0) -> None:
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            job = repos.mention_jobs.get(job_id)
             if job is None:
                 return
-            row = dict(job)
-            updated = conn.execute(
-                text(
-                    "UPDATE comment_mention_jobs SET status = 'failed', error = :error,"
-                    " finished_at = :now WHERE id = :id AND status = 'running'"
-                ),
-                {"id": job_id, "error": error, "now": now},
-            ).rowcount
-            if updated != 1:
+            if not repos.mention_jobs.fail(job_id, error=error, now=now):
                 return
-            log_activity(
-                conn,
-                self._actor(row["agent_id"], row["agent_name"]),
-                action="comment.agent_failed",
-                entity_type="card",
-                entity_id=row["card_id"],
-                changes={"job_id": job_id, "agent_id": row["agent_id"], "error": error},
+            speaker = agent_actor(job.agent_id, job.agent_name)
+            self._log(
+                repos,
+                speaker,
+                "comment.agent_failed",
+                "card",
+                job.card_id,
+                {"job_id": job_id, "agent_id": job.agent_id, "error": error},
+                now,
             )
             event = self._record(
-                conn,
-                row["card_id"],
+                repos,
+                job.card_id,
                 AGENT_FAILED,
                 {
                     "job_id": job_id,
-                    "comment_id": row["comment_id"],
-                    "agent_id": row["agent_id"],
-                    "agent_name": row["agent_name"],
+                    "comment_id": job.comment_id,
+                    "agent_id": job.agent_id,
+                    "agent_name": job.agent_name,
                     "error": error,
                     "duration_ms": duration_ms,
                 },
-                actor=self._actor(row["agent_id"], row["agent_name"]),
+                actor=speaker,
             )
         self._publish(board_id, event)
 
     # --- context -------------------------------------------------------------
 
     def _messages(
-        self, conn: Any, job: dict[str, Any], board_id: str
+        self, repos: BoardRepositories, job: CommentMentionJobsRow, board_id: str
     ) -> list[dict[str, str]] | None:
-        card = conn.execute(
-            text(
-                "SELECT c.title, c.description, c.priority, c.due_at, c.completed_at,"
-                " c.ticket_key, l.name AS list, lp.key AS loop_key, lp.name AS loop_name"
-                " FROM cards c LEFT JOIN lists l ON l.id = c.list_id"
-                " LEFT JOIN loops lp ON lp.id = c.loop_id WHERE c.id = :id"
-            ),
-            {"id": job["card_id"]},
-        ).mappings().first()
-        comment = conn.execute(
-            text("SELECT content FROM comments WHERE id = :id"), {"id": job["comment_id"]}
-        ).first()
-        if card is None or comment is None:
-            return None
-        mentioned_content = str(comment[0])
-        labels = [
-            row["name"]
-            for row in _rows(
-                conn,
-                "SELECT l.name FROM card_labels cl JOIN labels l ON l.id = cl.label_id"
-                " WHERE cl.card_id = :id ORDER BY l.name",
-                {"id": job["card_id"]},
+        return mention_messages(repos, job, board_id, registry=self.registry, files=self.files)
+
+    def _log(
+        self,
+        repos: BoardRepositories,
+        actor: ActorContext,
+        action: str,
+        entity_type: str,
+        entity_id: str,
+        changes: Mapping[str, object],
+        now: str,
+    ) -> None:
+        repos.activity.add(
+            activity_entry(
+                actor,
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                changes=changes,
+                entry_id=self._new_id(),
+                timestamp=now,
             )
-        ]
-        checklists = _rows(
-            conn,
-            "SELECT id, title FROM checklists WHERE card_id = :id ORDER BY position, rowid",
-            {"id": job["card_id"]},
-        )
-        items = _rows(
-            conn,
-            "SELECT checklist_id, text, completed FROM checklist_items WHERE checklist_id IN"
-            " (SELECT id FROM checklists WHERE card_id = :id) ORDER BY position, rowid",
-            {"id": job["card_id"]},
-        )
-        history = _rows(
-            conn,
-            "SELECT c.actor_id, c.content, c.created_at"
-            " FROM comments c"
-            " WHERE c.card_id = :id AND c.id != :comment"
-            " ORDER BY c.created_at DESC, c.rowid DESC LIMIT :limit",
-            {"id": job["card_id"], "comment": job["comment_id"], "limit": RECENT_COMMENTS},
-        )
-        history.reverse()
-        attachments = _rows(
-            conn,
-            "SELECT original_filename, content_type, size_bytes, stored_filename"
-            " FROM attachments"
-            " WHERE card_id = :id AND deleted_at IS NULL ORDER BY created_at",
-            {"id": job["card_id"]},
-        )
-        history = self._decorate_actors(history)
-
-        lines = [
-            f"Loop: {card['loop_name'] or '(unknown)'} ({card['loop_key'] or 'no key'})",
-            f"Ticket: {card['title']}",
-            f"Ticket id: {job['card_id']} (key: {card['ticket_key'] or 'not keyed yet'})",
-            f"List: {card['list'] or '(unknown)'}",
-            f"Priority: {card['priority']}",
-            f"Due: {card['due_at'] or 'none'}",
-            f"Status: {'completed' if card['completed_at'] else 'open'}",
-            f"Labels: {', '.join(labels) if labels else 'none'}",
-            f"Description:\n{(card['description'] or '(empty)')[:CONTEXT_CHARS]}",
-        ]
-        if checklists:
-            lines.append("Checklists:")
-            for checklist in checklists:
-                entries = [item for item in items if item["checklist_id"] == checklist["id"]]
-                rendered = "; ".join(
-                    f"[{'x' if item['completed'] else ' '}] {item['text']}" for item in entries
-                )
-                lines.append(f"- {checklist['title']}: {rendered or '(no items)'}")
-        if attachments:
-            lines.append("Attachments:")
-            excerpts = 0
-            for attachment in attachments[:20]:
-                lines.append(
-                    f"- {attachment['original_filename']} ({attachment['content_type']},"
-                    f" {attachment['size_bytes']} bytes)"
-                )
-                if excerpts < ATTACHMENT_EXCERPTS:
-                    excerpt = self._attachment_excerpt(board_id, attachment)
-                    if excerpt:
-                        excerpts += 1
-                        lines.append("  content:\n" + excerpt)
-        transcript = "\n".join(
-            f"[{entry.get('actor_name') or 'Unknown'} · {entry.get('actor_type') or 'user'}]"
-            f" {str(entry['content'])[:1000]}"
-            for entry in history
-        )
-        sections = ["\n".join(lines)]
-        if transcript:
-            sections.append(f"Recent comments:\n{transcript}")
-        sections.append(
-            f"Comment that mentioned you:\n{mentioned_content[:CONTEXT_CHARS]}"
-        )
-        sections.append(
-            "You were mentioned in this ticket. Answer the comment in the ticket thread as your "
-            "role: be concise, concrete and actionable. Do not repeat the ticket back. Never "
-            "mention other agents."
-        )
-        return [{"role": "user", "content": "\n\n".join(sections)}]
-
-    def _attachment_excerpt(self, board_id: str, attachment: dict[str, Any]) -> str:
-        """Head of a text attachment, for the agent that was mentioned on its ticket.
-
-        Binary formats stay metadata only: extracting them would need a parser per format, and a
-        mention should never attach megabytes to a prompt.
-        """
-        content_type = str(attachment.get("content_type") or "")
-        if not (content_type.startswith("text/") or content_type in TEXT_ATTACHMENT_TYPES):
-            return ""
-        if int(attachment.get("size_bytes") or 0) > ATTACHMENT_EXCERPT_BYTES:
-            return ""
-        stored = str(attachment.get("stored_filename") or "")
-        if not stored:
-            return ""
-        path = self.boards.attachments_dir(board_id) / stored
-        try:
-            raw = path.read_bytes()
-        except OSError:
-            return ""
-        text = raw.decode("utf-8", errors="replace").strip()
-        if not text:
-            return ""
-        if len(text) <= ATTACHMENT_EXCERPT_CHARS:
-            return text
-        return text[:ATTACHMENT_EXCERPT_CHARS] + "\n(truncated)"
-
-    def _decorate_actors(self, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        missing = {
-            str(comment["actor_id"])
-            for comment in comments
-            if comment.get("actor_name") is None and comment.get("actor_id")
-        }
-        if not missing:
-            return comments
-        params = {f"a{index}": actor_id for index, actor_id in enumerate(missing)}
-        placeholders = ", ".join(f":{key}" for key in params)
-        known = {
-            row["id"]: row
-            for row in self.registry.read(
-                f"SELECT id, name, type FROM actors WHERE id IN ({placeholders})", params
-            )
-        }
-        known.update(
-            {
-                row["id"]: row
-                for row in self.registry.read(
-                    f"SELECT id, name, 'agent' AS type FROM agents WHERE id IN ({placeholders})",
-                    params,
-                )
-            }
-        )
-        for comment in comments:
-            actor = known.get(str(comment["actor_id"]))
-            if actor:
-                comment["actor_name"] = actor["name"]
-                comment["actor_type"] = actor["type"]
-        return comments
-
-    def _snapshot(self, job: dict[str, Any]) -> dict[str, Any]:
-        try:
-            snapshot = json.loads(job.get("role_snapshot_json") or "{}")
-        except (TypeError, ValueError):
-            snapshot = {}
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    @staticmethod
-    def _actor(agent_id: str, agent_name: str) -> ActorContext:
-        return ActorContext(
-            actor_id=agent_id,
-            actor_type="agent",
-            actor_name=agent_name,
-            scopes=frozenset({"comments:write"}),
         )
 
     # --- events --------------------------------------------------------------
 
     def _record(
         self,
-        conn: Any,
+        repos: BoardRepositories,
         card_id: str,
         type: str,
-        payload: dict[str, Any],
+        payload: Mapping[str, object],
         *,
         actor: ActorContext | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> Event | None:
         if self.events is None:
             return None
         return self.events.record_card(
-            conn, card_id=card_id, type=type, payload=payload, actor=actor
+            repos, card_id=card_id, type=type, payload=payload, actor=actor
         )
 
-    def _publish(self, board_id: str, event: dict[str, Any] | None) -> None:
+    def _publish(self, board_id: str, event: Event | None) -> None:
         if event is not None and self.events is not None:
             self.events.publish(board_id, event)
 
 
-__all__ = ["MentionService", "extract_mentions"]
+__all__ = ["MentionAgents", "MentionService", "extract_mentions", "serialize_job"]

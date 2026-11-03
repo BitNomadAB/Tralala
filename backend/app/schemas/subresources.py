@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import Field
 
 from .common import Id, Name, OutModel, StrictModel
@@ -55,7 +53,7 @@ class ChecklistOut(OutModel):
     card_id: str
     title: str
     position: int
-    items: list[ChecklistItemOut] = Field(default_factory=list)
+    items: list[ChecklistItemOut] = Field(default_factory=list[ChecklistItemOut])
 
 
 class CommentCreate(StrictModel):
@@ -102,7 +100,7 @@ class CardEventOut(OutModel):
     id: str
     card_id: str
     type: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, object] = Field(default_factory=dict)
     actor_id: str | None = None
     actor_type: str | None = None
     actor_name: str | None = None
@@ -123,7 +121,7 @@ class ActivityOut(OutModel):
     entity_id: str
     request_id: str | None = None
     timestamp: str
-    changes: dict | None = None
+    changes: dict[str, object] | None = None
 
 
 class IdRef(StrictModel):

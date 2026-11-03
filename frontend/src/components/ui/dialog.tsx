@@ -16,7 +16,7 @@ export function DialogContent({
   children: ReactNode;
   className?: string;
   title: string;
-  description?: string;
+  description?: string | undefined;
 }) {
   return (
     <DialogPrimitive.Portal>

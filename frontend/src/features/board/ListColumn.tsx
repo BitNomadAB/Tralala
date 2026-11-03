@@ -1,13 +1,14 @@
-import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import type { BoardList, Card } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { CardTile } from "./CardTile";
+import type { DragData } from "./dragData";
 
 export function ListColumn({
   list,
@@ -24,26 +25,40 @@ export function ListColumn({
   onRename: (name: string) => void;
   onArchive: () => void;
 }) {
-  const sortable = useSortable({ id: list.id, data: { type: "list", listId: list.id } });
-  const droppable = useDroppable({ id: `list-body:${list.id}`, data: { type: "list-body", listId: list.id } });
+  // Destructured, so the ref callbacks stay separate from the values read while rendering.
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: list.id,
+    data: { type: "list", listId: list.id } satisfies DragData,
+  });
+  const { setNodeRef: setBodyRef, isOver } = useDroppable({
+    id: `list-body:${list.id}`,
+    data: { type: "list-body", listId: list.id } satisfies DragData,
+  });
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(list.name);
 
   const style = {
-    transform: CSS.Transform.toString(sortable.transform),
-    transition: sortable.transition,
+    transform: CSS.Transform.toString(transform),
+    transition,
   };
+
+  async function submitCard() {
+    if (!title.trim()) return;
+    await onCreateCard(title.trim());
+    setTitle("");
+    setAdding(false);
+  }
 
   return (
     <section
-      ref={sortable.setNodeRef}
+      ref={setNodeRef}
       style={style}
       aria-label={`List ${list.name}`}
       className={cn(
         "flex h-full w-[300px] shrink-0 flex-col rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_65%,transparent)]",
-        sortable.isDragging && "opacity-60",
+        isDragging && "opacity-60",
       )}
     >
       <header className="flex items-center gap-1.5 px-3 pt-3">
@@ -51,8 +66,8 @@ export function ListColumn({
           type="button"
           className="cursor-grab text-[var(--muted-foreground)]"
           aria-label={`Reorder list ${list.name}`}
-          {...sortable.attributes}
-          {...sortable.listeners}
+          {...attributes}
+          {...listeners}
         >
           <GripVertical size={14} />
         </button>
@@ -101,13 +116,16 @@ export function ListColumn({
       </header>
 
       <div
-        ref={droppable.setNodeRef}
+        ref={setBodyRef}
         className={cn(
           "scrollbar-thin mt-2 flex min-h-[60px] flex-1 flex-col gap-2 overflow-y-auto px-2.5 pb-2",
-          droppable.isOver && "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
+          isOver && "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
         )}
       >
-        <SortableContext items={cards.map((card) => card.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext
+          items={cards.map((card) => card.id)}
+          strategy={verticalListSortingStrategy}
+        >
           <ul className="flex flex-col gap-2">
             {cards.map((card) => (
               <CardTile key={card.id} card={card} onOpen={onOpenCard} />
@@ -124,12 +142,9 @@ export function ListColumn({
       <div className="p-2.5 pt-0">
         {adding ? (
           <form
-            onSubmit={async (event) => {
+            onSubmit={(event) => {
               event.preventDefault();
-              if (!title.trim()) return;
-              await onCreateCard(title.trim());
-              setTitle("");
-              setAdding(false);
+              void submitCard();
             }}
           >
             <Input

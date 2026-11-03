@@ -27,7 +27,7 @@ test.beforeAll(async () => {
       let body = "";
       request.on("data", (chunk) => (body += chunk));
       request.on("end", () => {
-        let model = "";
+        let model: string;
         try {
           model = String(JSON.parse(body || "{}").model ?? "");
         } catch {

@@ -1,4 +1,4 @@
-﻿# REST API
+# REST API
 
 Base path `/api/v1`. Interactive documentation: `/docs`, machine description: `/openapi.json`.
 Both require a session by default (`TRALALA_DOCS_REQUIRE_AUTH`) and disappear entirely when
@@ -32,7 +32,9 @@ Failure (same shape for every status):
 Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_token`,
 `token_revoked`, `token_expired`, `forbidden`, `csrf_failed`, `not_found`, `conflict`,
 `version_conflict`, `board_archived`, `board_migration_failed`, `board_schema_outdated`,
-`board_files_busy`, `idempotency_key_reused`, `creation_in_progress`, `creation_failed`,
+`board_files_busy`, `board_import_invalid`, `board_backup_invalid`, `board_database_unreadable`,
+`idempotency_key_reused`,
+`creation_in_progress`, `creation_failed`,
 `validation_failed`, `payload_too_large`, `rate_limited`, and the Loop workflow codes
 `loop_not_found`,
 `loop_required`, `loop_mismatch`, `loop_read_only`, `document_stale`, `approval_required`,
@@ -93,7 +95,7 @@ keys. API tokens may hold every scope except `credentials:admin` and `users:admi
 | POST | `/auth/login` | public; throttled per username and client address |
 | POST | `/auth/enrol` (`{"token","password"}`) | public; claims an invitation link, sets the password and starts a session |
 | POST | `/auth/logout` | authenticated; revokes the stored session |
-| POST | `/auth/password` | authenticated user; revokes every session |
+| POST | `/auth/password` | authenticated user; revokes every session. A wrong `current_password` is `422 invalid_credentials` and the session stays; a token gets `403 forbidden` |
 | GET | `/auth/me` | authenticated; returns `role`, effective `scopes` and the account's `preferences` |
 | GET | `/auth/scopes` | authenticated; the caller's effective scopes |
 | GET | `/auth/preferences` | signed-in account; `theme_mode` and `theme_kit` (null when unset) |
@@ -125,6 +127,10 @@ user, `POST /users/{id}/invite` returns a token that is stored only as a hash, a
 `invite_used` or `invite_expired` without revealing whether a token existed. Tralala sends no e-mail;
 the operator delivers the link.
 
+A `401` means the request is not authenticated: no session or token, or one that has expired or
+been revoked. The web client takes it as the end of its session and shows the sign-in page, which is
+why a mistyped current password on `POST /auth/password` answers `422`, not `401`.
+
 Logins are rate limited per client address and backed off per username after repeated failures
 (`429 rate_limited` with `details.retry_after_seconds`). Passwords must be at least
 `TRALALA_PASSWORD_MIN_LENGTH` characters (default 8) and are never accepted when they equal the
@@ -138,7 +144,7 @@ username.
 | POST | `/boards` (`Idempotency-Key` supported) | `boards:write` |
 | GET | `/boards/{board_id}` | `boards:read` |
 | PATCH | `/boards/{board_id}` | `boards:write` |
-| POST | `/boards/{board_id}/archive` | `boards:write` |
+| POST | `/boards/{board_id}/archive` (also when the board's database cannot be opened, so it can be deleted) | `boards:write` |
 | POST | `/boards/{board_id}/restore` | `boards:write` |
 | POST | `/boards/{board_id}/duplicate` | `boards:write` |
 | DELETE | `/boards/{board_id}` (body `{"confirm_name": "…"}`, board must be archived) | `boards:admin` |
@@ -156,11 +162,34 @@ snapshot from before this existed has no sidecar: the database is restored, the 
 are kept, and the restore response says exactly that — `attachments.skipped` is `true`,
 `attachments.reason` is `snapshot_has_no_file_archive`, and a top-level `warning` explains it.
 
+Before a restore touches the board, the snapshot is read as a file of unknown origin (read only,
+nothing written beside it) and must pass SQLite's `integrity_check` and then its `foreign_key_check`.
+One that fails is refused with `422 board_backup_invalid` and the board keeps its database:
+`details.name` is the snapshot, `details.reason` is `not_a_database`, `integrity_check_failed` or
+`foreign_key_check_failed`, and `details.detail` carries SQLite's answer (the first 20 findings or
+rows, and how many more there are). The restored board is checked once more, and that report is the
+response's `verification`.
+
 Deleting a board removes its database, its uploaded files and its backups before the registry row, so
 an interrupted delete leaves a board that can be deleted again. When the host will not release a file
 (Windows, or a share), the removal is retried briefly and then answered with
 `409 board_files_busy`, naming the leftover directory in `details.leftover` together with `errno`,
 `winerror` and `platform_profile`; the board and its data are untouched.
+
+`POST /boards/import` judges the archive's `board.sqlite` before anything uses it. The file is opened
+read only as a file of unknown origin, so nothing stored in it runs; SQLite's `integrity_check` runs
+first, then the board's tables and its schema revision must be ones this release can migrate. A file
+that fails is refused with `422 board_import_invalid`: `details.reason` is `not_a_database`,
+`integrity_check_failed`, `not_a_board_database`, `unknown_schema_revision` (an archive from a newer
+release) or `migration_failed` (the upgrade to the current schema failed), and `details.detail`
+carries SQLite's answer. A refused or failed import leaves nothing behind: no board row, no files and
+no pre-migration snapshot. An archive from an older release is migrated during the import.
+
+A board whose database file SQLite cannot read (not a database, or damaged) never fails the board
+list or startup. The list shows it with zero counters and its status, startup skips its interrupted
+work, and each logs `board_database_unreadable` once with the board id. A request that opens the board
+answers `503 board_database_unreadable` (not retryable), with `details.sqlite_error` naming SQLite's
+code.
 
 Snapshots are also taken automatically: `BackupScheduler` checks every active board and snapshots any
 whose newest `backup-<UTC>.sqlite` is older than `TRALALA_BACKUP_INTERVAL_HOURS` (default 24, `0`
@@ -366,9 +395,11 @@ HTTPS and runs no git binary, so a deploy key is not an alternative for this fie
 
 An agent needs either `role_template_id` or `role_prompt_override`. `connection_type` is
 `openai_compatible` or `a2a`. Base URLs are validated: `http`/`https` only, no embedded
-credentials, no cloud-metadata or link-local targets, no redirect following; private/loopback
-targets are allowed because local model servers are the primary use case
-(`TRALALA_AGENTS_ALLOW_PRIVATE_ENDPOINTS`).
+credentials, no cloud-metadata or link-local targets (a host name is judged by every address it
+resolves to), no redirect following; private/loopback targets, `[::1]` included, are allowed because
+local model servers are the primary use case (`TRALALA_AGENTS_ALLOW_PRIVATE_ENDPOINTS`). The same
+rule is checked again when a call or a connection test connects, and the connection goes to the
+checked address only; a refused address is reported as `ForbiddenAddressError`.
 
 API keys are sealed with Fernet (HKDF-derived from the install secret). Responses expose only
 `has_api_key` and a `••••ab12` hint — never the key itself. `/agents/directory` is the autocomplete
@@ -392,6 +423,17 @@ name exists and that the parameters a generation sends are accepted, which is th
 a green test and a run that fails with `400`. A refused completion fails the test and carries the
 provider's own sentence, while `models` still comes back so the form can offer the names the
 endpoint knows.
+
+That completion first asks for a JSON schema as the answer's format (`response_format` with
+`type: json_schema`). When the model answers it, the result says `supports_json_schema: true` (on
+the outcome and on `completion`), and testing a saved agent records it on the agent
+(`supports_json_schema` in `GET /agents/{id}`). A provider that refuses the request (any `4xx`) is
+asked once more without it, so the test still says whether the model itself works, and the agent is
+recorded without it. Every test writes the flag afresh; a test without a model call, or one that
+fails, leaves it `false`. Analysis, RoadMap and QA generations send the purpose's schema only to an
+agent with the flag set, so the provider keeps the answer to the schema instead of the repair round
+catching it afterwards; a provider that refuses it after all (a `400` that names `response_format`)
+is asked once more without it, and the generation goes on as before.
 
 Both endpoints write a pair of structured log events per attempt — `agent_probe_started` and then
 `agent_probe_finished` or `agent_probe_failed` (a warning) — carrying the endpoint, the model, whether
@@ -549,7 +591,7 @@ lists render without a cross-database join; every change is written to the activ
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/boards/{board_id}/cards` with `list_id|q|label|priority|due_before|overdue|completed|include_archived|sort|order|limit|offset` | `cards:read` |
+| GET | `/boards/{board_id}/cards` with `list_id\|q\|label\|priority\|due_before\|overdue\|completed\|include_archived\|sort\|order\|limit\|offset` | `cards:read` |
 | POST | `/boards/{board_id}/cards` (`Idempotency-Key`) | `cards:write` |
 | POST | `/boards/{board_id}/cards/bulk` (`{"cards": [...]}`, max 100, partial failures, `Idempotency-Key`) | `cards:write` |
 | GET | `/boards/{board_id}/cards/{card_id}?include=checklists,comments` | `cards:read` |
@@ -575,6 +617,10 @@ lists render without a cross-database join; every change is written to the activ
 | GET | `/boards/{board_id}/cards/{card_id}/events` (`text/event-stream`) | `cards:read` |
 | GET | `/boards/{board_id}/cards/{card_id}/events/history?after=&limit=` | `cards:read` |
 
+A label name is unique on its board, compared exactly (`Bug` and `bug` are two labels). Creating a
+label, or renaming one, to a name another label has answers `409 label_name_taken` with
+`details.name`.
+
 Mention an enabled agent in a comment with `@[Agent Name]` (the composer inserts this form; a bare
 `@Name` also matches an enabled agent whose name is an exact prefix). Saving the comment queues one
 job per mentioned agent and returns immediately; each job answers as a normal agent-authored comment
@@ -588,9 +634,14 @@ counters and the error text only, so clients refetch the comment instead of read
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/boards/{board_id}/search?q=&label=&priority=&overdue=&completed=&list_id=&include_archived=` | `cards:read` |
+| GET | `/boards/{board_id}/loops/{loop_id}/search?q=&label=&priority=&overdue=&completed=&list_id=&include_archived=` | `cards:read` |
 | GET | `/search?q=` (all active boards) | `cards:read` |
 | GET | `/boards/{board_id}/activity?entity_type=&entity_id=&actor_type=&action=` | `boards:read` |
+
+`q` is matched without the spaces around it. In a Loop's search a blank `q` (empty or only
+whitespace) is no text filter, so the other filters alone decide; `meta.engine` says whether the
+text was matched by the board's FTS5 index (`fts5`) or by `LIKE` (`like`). The App-wide search needs
+text and answers a blank `q` with `422 validation_failed`.
 
 ## Worker tools (MCP and `/llms.txt`)
 
@@ -604,7 +655,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | Tool | Scope | What it does |
 | --- | --- | --- |
 | `read_board` | `boards:read`, `loops:read` | Loops with stage, `execution_allowed` and `blocked_reason`, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | Goal, Info/Analysis/RoadMap documents, plan with per-Ticket readiness, Kanban columns |
+| `read_loop` | `loops:read` | Goal, Info/Analysis/RoadMap documents, plan with per-Ticket readiness, Kanban columns and the Loop's Tickets |
 | `read_ticket` | `cards:read` | Acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
 | `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
@@ -627,7 +678,8 @@ writes, provider configuration and the approval decisions themselves.
 
 A tool lists **every** scope it needs, and `tools/list` hides a tool unless the token holds all of
 them — advertising a call that would fail is worse than not advertising it. Calling a tool the token
-may not use is a JSON-RPC error (`-32602`) rather than a silent downgrade. A tool that fails returns
+may not use is a JSON-RPC error (`-32602`) rather than a silent downgrade, and so is a `tools/call`
+whose `params` or `arguments` is not a JSON object. A tool that fails returns
 `isError: true` with the API error code in the text content, so a client sees `version_conflict` or
 `human_action_required` instead of a broken transport.
 
@@ -670,7 +722,6 @@ Content-Type: application/json
 `413` payload too large · `422` validation failure · `429` rate limited · `503` temporarily
 unavailable.
 
-
 ## Cost of the board list
 
 `loop_count`, `list_count` and `card_count` live inside each board's own database, so measuring them
@@ -705,7 +756,6 @@ There is no transfer endpoint. Moving a Ticket between Loops or Boards would byp
 plan it belongs to, so the operation is refused rather than implemented: a caller that reaches the
 service directly gets `409 plan_change_required` with the reason. The supported path is a new Loop
 with its own Info, analysis and RoadMap — or a person recreating the Ticket deliberately.
-
 
 ## Board schema state
 

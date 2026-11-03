@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, XCircle } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { keys, useQaCycle } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
@@ -13,7 +13,7 @@ import type { Loop } from "@/lib/types";
 type QaStatus = "not_tested" | "tested_with_issues" | "passed";
 type ResultStatus = "passed" | "failed" | "blocked" | "not_run" | "not_applicable";
 
-const RESULT_OPTIONS: Array<{ value: ResultStatus; label: string }> = [
+const RESULT_OPTIONS: { value: ResultStatus; label: string }[] = [
   { value: "passed", label: "Passed" },
   { value: "failed", label: "Failed" },
   { value: "blocked", label: "Blocked" },
@@ -48,16 +48,15 @@ export function LoopCompletionDialog({
 
   const scenarios = useMemo(() => {
     const instructions = qaQuery.data?.human_instructions as
-      | { scenarios?: Array<{ id: string; title: string }> }
-      | undefined;
+      { scenarios?: { id: string; title: string }[] } | undefined;
     return instructions?.scenarios ?? [];
   }, [qaQuery.data]);
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: keys.qa(boardId, loop.id) });
-    queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loop.id) });
-    queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loop.id) });
-    queryClient.invalidateQueries({ queryKey: keys.history(boardId, {}) });
+    void queryClient.invalidateQueries({ queryKey: keys.qa(boardId, loop.id) });
+    void queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loop.id) });
+    void queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loop.id) });
+    void queryClient.invalidateQueries({ queryKey: keys.history(boardId, {}) });
     onChanged();
   };
 
@@ -78,8 +77,9 @@ export function LoopCompletionDialog({
       invalidate();
       toast.push({ title: "Implementation accepted", variant: "success" });
     },
-    onError: (error) =>
-      toast.push({ title: "Could not accept", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({ title: "Could not accept", description: errorText(error), variant: "error" });
+    },
   });
 
   const submitResults = useMutation({
@@ -96,8 +96,13 @@ export function LoopCompletionDialog({
       invalidate();
       toast.push({ title: "QA results recorded", variant: "success" });
     },
-    onError: (error) =>
-      toast.push({ title: "Could not record results", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({
+        title: "Could not record results",
+        description: errorText(error),
+        variant: "error",
+      });
+    },
   });
 
   const decide = useMutation({
@@ -113,8 +118,13 @@ export function LoopCompletionDialog({
       invalidate();
       toast.push({ title: "QA decision recorded", variant: "success" });
     },
-    onError: (error) =>
-      toast.push({ title: "Could not record the decision", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({
+        title: "Could not record the decision",
+        description: errorText(error),
+        variant: "error",
+      });
+    },
   });
 
   const completed = loop.stage === "completed";

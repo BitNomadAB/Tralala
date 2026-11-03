@@ -5,7 +5,7 @@ avoids going back: make the account yours, bring in one person, connect one agen
 repository, then run one Loop end to end. Each section is short on purpose; the why lives in
 [Architecture.md](Architecture.md) and the rules in [Loops.md](Loops.md).
 
-```
+```text
 1 account -> 2 people -> 3 agent -> 4 repository
    -> 5 one Loop: Info -> Analysis -> RoadMap -> Execution -> QA -> Finalize
    -> 6 habits

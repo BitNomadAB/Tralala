@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createRegistry } from "@/webmcp/registry";
 import { isWebMcpAvailable, getModelContext, type ModelContextApi } from "@/webmcp/capability";
+import { createRegistry } from "@/webmcp/registry";
 import { cardTools, dashboardTools, loopTools } from "@/webmcp/tools";
 
 function fakeApi() {
@@ -64,8 +64,7 @@ describe("webmcp tool definitions", () => {
         boardId: "b",
         loopId: "l",
         loopName: "Loop",
-        lists: [],
-        cardsByList: {},
+        columns: [],
         onOpenCard: () => undefined,
       }).map((tool) => tool.name),
       card: cardTools({
@@ -98,8 +97,7 @@ describe("webmcp tool definitions", () => {
         boardId: "b",
         loopId: "l",
         loopName: "Loop",
-        lists: [],
-        cardsByList: {},
+        columns: [],
         onOpenCard: () => undefined,
       }).find((tool) => tool.name === "create_card")?.requiredScope,
     ).toBe("cards:write");

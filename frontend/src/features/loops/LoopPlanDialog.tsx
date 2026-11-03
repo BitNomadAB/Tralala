@@ -1,8 +1,9 @@
-import { useMemo } from "react";
 import { AlertTriangle, Check, User } from "lucide-react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { api } from "@/lib/api";
 import { useReadiness } from "@/lib/queries";
 import type { Loop, PlanPhaseView, PlanTicketView } from "@/lib/types";
 
@@ -118,17 +119,13 @@ function TicketRow({
             <User size={11} /> Human action required
           </Badge>
         ) : null}
-        {ticket.execution_mode === "pre_phase_gate" ? (
-          <Badge tone="brand">gate</Badge>
-        ) : null}
+        {ticket.execution_mode === "pre_phase_gate" ? <Badge tone="brand">gate</Badge> : null}
         {ticket.completed_at ? (
           <Badge tone="success">
             <Check size={11} /> done
           </Badge>
         ) : null}
-        {!ticket.ready && !ticket.completed_at ? (
-          <Badge tone="neutral">blocked</Badge>
-        ) : null}
+        {!ticket.ready && !ticket.completed_at ? <Badge tone="neutral">blocked</Badge> : null}
       </div>
       {ticket.human_action_required && ticket.human_action_reason ? (
         <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
@@ -186,16 +183,19 @@ function ConfirmButton({
   disabled: boolean;
   onChanged: () => void;
 }) {
+  async function confirm() {
+    const card = await api.getCard(boardId, loopId, cardId);
+    await api.confirmHumanTicket(boardId, loopId, cardId, { version: card.version });
+    onChanged();
+  }
+
   return (
     <Button
       size="sm"
       variant="outline"
       disabled={disabled}
-      onClick={async () => {
-        const { api } = await import("@/lib/api");
-        const card = await api.getCard(boardId, loopId, cardId);
-        await api.confirmHumanTicket(boardId, loopId, cardId, { version: card.version });
-        onChanged();
+      onClick={() => {
+        void confirm();
       }}
     >
       Confirm human action

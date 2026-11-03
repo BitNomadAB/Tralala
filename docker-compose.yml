@@ -15,6 +15,7 @@ services:
       TRALALA_RATE_LIMIT_PER_MINUTE: ${TRALALA_RATE_LIMIT_PER_MINUTE:-600}
       TRALALA_ENABLE_DOCS: ${TRALALA_ENABLE_DOCS:-true}
       TRALALA_DOCS_REQUIRE_AUTH: ${TRALALA_DOCS_REQUIRE_AUTH:-true}
+      TRALALA_LOG_LEVEL: ${TRALALA_LOG_LEVEL:-INFO}
     volumes:
       - tralala-data:/data
     restart: unless-stopped

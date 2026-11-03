@@ -1,6 +1,16 @@
 -r requirements.txt
 pytest>=8.3,<10
-pytest-asyncio>=0.24,<2
-ruff>=0.8,<1
-# Starlette 1.x serves its TestClient from httpx2 and warns when only httpx is installed.
-httpx2>=2.16,<3
+# Runs the unit suite in parallel in CI (`-n auto`), which keeps proving the tests share no state.
+pytest-xdist==3.8.0
+# Coverage of the unit suite in CI, with the floor in pyproject.toml ([tool.coverage.report]).
+pytest-cov==7.1.0
+# Exact: a Ruff release can add rules to the selected families, so CI and local runs pin one.
+ruff==0.17.3
+# Exact for the same reason: the strict scope in pyrightconfig.json must mean one thing everywhere.
+# The package ships pyright itself and runs it on the Node.js it finds (CI images have one).
+pyright==1.1.414
+# `python -m tools.deps audit`: known vulnerabilities in what these files install. Exact, so a new
+# release cannot change what the check reports between two runs of the same commit.
+pip-audit==2.10.1
+# `python -m tools.deps licences` reads requirement lines and environment markers with it.
+packaging>=24,<27

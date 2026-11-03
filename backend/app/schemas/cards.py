@@ -84,7 +84,7 @@ class CardOut(OutModel):
     updated_at: str
     archived_at: str | None = None
     version: int
-    labels: list[LabelOut] = Field(default_factory=list)
+    labels: list[LabelOut] = Field(default_factory=list[LabelOut])
     checklist_total: int = 0
     checklist_completed: int = 0
     comment_count: int = 0
@@ -102,8 +102,8 @@ class CardOut(OutModel):
     acceptance_criteria: list[str] = Field(default_factory=list)
     expected_evidence: list[str] = Field(default_factory=list)
     ready: bool = True
-    blockers: list[dict] = Field(default_factory=list)
-    downstream_phase_numbers: list[int] = Field(default_factory=list)
+    blockers: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
+    downstream_phase_numbers: list[int] = Field(default_factory=list[int])
     plan_item_id: str | None = None
 
 
@@ -124,4 +124,4 @@ class CardListOut(OutModel):
 
 class BulkCreateResult(OutModel):
     created: list[CardOut]
-    failed: list[dict]
+    failed: list[dict[str, object]]

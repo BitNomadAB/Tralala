@@ -6,6 +6,7 @@ Only hashes of API tokens and passwords are persisted; raw values never touch th
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import logging
@@ -13,8 +14,12 @@ import os
 import secrets
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .platform import PROFILE_WINDOWS, resolve_profile
+
+if TYPE_CHECKING:  # annotation only: config is not imported at run time
+    from .config import Settings
 
 _SCRYPT_N = 2**14
 _SCRYPT_R = 8
@@ -24,7 +29,7 @@ _SCRYPT_DKLEN = 32
 logger = logging.getLogger("tralala.security")
 
 # Published default kept only so an upgraded deployment can be detected and repaired.
-INSECURE_DEFAULT_SECRET = "dev-insecure-secret-change-me"
+INSECURE_DEFAULT_SECRET = "dev-insecure-secret-change-me"  # noqa: S105 - refused, never used
 MIN_SECRET_LENGTH = 32
 WEAK_SECRETS = frozenset(
     {
@@ -37,8 +42,8 @@ WEAK_SECRETS = frozenset(
         "test-secret",
     }
 )
-SECRET_FILE_NAME = ".session-secret"
-BOOTSTRAP_PASSWORD_FILE_NAME = ".bootstrap-password"
+SECRET_FILE_NAME = ".session-secret"  # noqa: S105 - a file name, not a secret
+BOOTSTRAP_PASSWORD_FILE_NAME = ".bootstrap-password"  # noqa: S105 - a file name, not a secret
 
 # Shipped/placeholder values treated as "no password chosen".
 # Values that must never become an administrator password. The last one is the shared test password
@@ -51,6 +56,8 @@ INSECURE_BOOTSTRAP_PASSWORDS = frozenset(
 SESSION_COOKIE = "tralala_session"
 CSRF_COOKIE = "tralala_csrf"
 CSRF_HEADER = "x-csrf-token"
+# Methods that never change state, so a cookie session may use them without the CSRF header.
+CSRF_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def hash_password(password: str) -> str:
@@ -99,6 +106,18 @@ def new_csrf_token() -> str:
     return secrets.token_urlsafe(24)
 
 
+def csrf_satisfied(method: str, header_token: str, cookie_token: str) -> bool:
+    """The double-submit rule for a cookie-authenticated request.
+
+    A safe method needs nothing; any other method needs the header to repeat the cookie exactly.
+    """
+    if method in CSRF_SAFE_METHODS:
+        return True
+    if not header_token or not cookie_token:
+        return False
+    return hmac.compare_digest(header_token, cookie_token)
+
+
 def _sign(secret: str, payload: str) -> str:
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
@@ -136,25 +155,22 @@ def write_private_file(path: Path, value: str) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     fd = os.open(path, flags, 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        # newline="" keeps "\n" as written: the file is byte-identical on Windows and Linux.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.write(value)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.close(fd)
-        except OSError:
-            pass
         raise
     if resolve_profile(None) == PROFILE_WINDOWS:  # pragma: no cover - exercised on Windows
         # NTFS has no permission bits: this would only clear the read-only flag, and the file's
         # protection comes from the ACL it inherits from its directory.
         return
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
 
 
-def resolve_secret_key(settings) -> str:  # noqa: ANN001 - avoids a config import cycle
+def resolve_secret_key(settings: Settings) -> str:
     """Return the session-signing secret, never a weak or published value.
 
     An explicit secret wins only when it is long enough and not a published placeholder. Otherwise

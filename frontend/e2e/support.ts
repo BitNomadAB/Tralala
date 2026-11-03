@@ -133,7 +133,7 @@ export async function resolveLoopId(
   loopName?: string,
 ): Promise<string> {
   const response = await page.request.get(`/api/v1/boards/${boardId}/loops`);
-  const loops = (await response.json()).data as Array<{ id: string; name: string }>;
+  const loops = (await response.json()).data as { id: string; name: string }[];
   const match = loopName ? loops.find((loop) => loop.name === loopName) : loops[0];
   if (!match) throw new Error(`No loop found for board ${boardId}`);
   return match.id;

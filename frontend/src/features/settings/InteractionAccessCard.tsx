@@ -1,16 +1,17 @@
-import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { KeyRound, ShieldCheck } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
+import { scopeChoicesFor } from "@/lib/agentAccess";
 import { ApiError, api } from "@/lib/api";
-import { formatDateTime } from "@/lib/utils";
 import type { Credential } from "@/lib/types";
 import { AgentAccessGuide } from "./AgentAccessGuide";
-import { scopeChoicesFor } from "@/lib/agentAccess";
+import { CredentialRow } from "./CredentialRow";
+import { IssuedTokenDialog } from "./IssuedTokenDialog";
 
 interface InteractionAccessCardProps {
   isAdmin: boolean;
@@ -61,8 +62,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     : [];
 
   function invalidate() {
-    queryClient.invalidateQueries({ queryKey: ["credentials"] });
-    queryClient.invalidateQueries({ queryKey: ["users"] });
+    void queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    void queryClient.invalidateQueries({ queryKey: ["users"] });
   }
 
   const createMutation = useMutation({
@@ -78,12 +79,13 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
       setName("");
       invalidate();
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not create the agent access",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const revokeMutation = useMutation({
@@ -104,13 +106,25 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         description: "The previous token stopped working.",
       });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not rotate the access",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
+
+  async function copySnippet(snippet: string) {
+    await navigator.clipboard.writeText(snippet);
+    toast.push({ title: "MCP configuration copied", variant: "success" });
+  }
+
+  async function copyToken() {
+    if (!issued?.token) return;
+    await navigator.clipboard.writeText(issued.token);
+    toast.push({ title: "Token copied", variant: "success" });
+  }
 
   function openCreate() {
     // Start from the smallest useful set instead of the first N scopes in the catalogue, and keep it
@@ -124,53 +138,14 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
 
   function renderRow(credential: Credential, showOwner: boolean) {
     return (
-      <li key={credential.id} className="flex flex-wrap items-center gap-2 py-2.5">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">
-            {credential.name}
-            {showOwner && credential.owner_name ? (
-              <span className="ml-2 text-[11px] font-normal text-[var(--muted-foreground)]">
-                owner {credential.owner_name}
-              </span>
-            ) : null}
-            {showOwner && !credential.owner_name ? (
-              <span className="ml-2 text-[11px] font-normal text-[var(--muted-foreground)]">
-                installation-wide
-              </span>
-            ) : null}
-          </p>
-          <p className="text-[11px] text-[var(--muted-foreground)]">
-            {credential.scopes.join(", ")} · created {formatDateTime(credential.created_at)}
-            {credential.last_used_at
-              ? ` · last used ${formatDateTime(credential.last_used_at)}`
-              : " · never used"}
-            {credential.expires_at ? ` · expires ${formatDateTime(credential.expires_at)}` : ""}
-          </p>
-        </div>
-        <Badge tone={credential.revoked_at ? "danger" : "success"}>
-          {credential.revoked_at ? "revoked" : "active"}
-        </Badge>
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={`Rotate ${credential.name}`}
-          title="Rotate: issue a new token and revoke this one"
-          disabled={Boolean(credential.revoked_at) || rotateMutation.isPending}
-          onClick={() => rotateMutation.mutate(credential)}
-        >
-          <RefreshCw size={14} />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={`Revoke ${credential.name}`}
-          title="Revoke"
-          disabled={Boolean(credential.revoked_at)}
-          onClick={() => revokeMutation.mutate(credential)}
-        >
-          <Trash2 size={14} />
-        </Button>
-      </li>
+      <CredentialRow
+        key={credential.id}
+        credential={credential}
+        showOwner={showOwner}
+        rotating={rotateMutation.isPending}
+        onRotate={() => rotateMutation.mutate(credential)}
+        onRevoke={() => revokeMutation.mutate(credential)}
+      />
     );
   }
 
@@ -186,17 +161,16 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         </div>
         <p className="mt-1 text-xs text-[var(--muted-foreground)]">
           A key for an agent on your own machine. It can read boards, open Loops, write the Info you
-          agree on, ask the local agents and track Tickets — never approve a plan, manage accounts or
-          change a board&apos;s structure. The key is shown once; &quot;last used&quot; is how you
-          recognise which machine is connected.
+          agree on, ask the local agents and track Tickets — never approve a plan, manage accounts
+          or change a board&apos;s structure. The key is shown once; &quot;last used&quot; is how
+          you recognise which machine is connected.
         </p>
 
         <div className="mt-2">
           <AgentAccessGuide
             token={issued?.token}
-            onCopy={async (snippet) => {
-              await navigator.clipboard.writeText(snippet);
-              toast.push({ title: "MCP configuration copied", variant: "success" });
+            onCopy={(snippet) => {
+              void copySnippet(snippet);
             }}
           />
         </div>
@@ -206,9 +180,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
           ) : null}
           {mine.map((credential) => renderRow(credential, false))}
           {!credentialsQuery.isLoading && mine.length === 0 ? (
-            <li className="py-2.5 text-xs text-[var(--muted-foreground)]">
-              No agent access yet.
-            </li>
+            <li className="py-2.5 text-xs text-[var(--muted-foreground)]">No agent access yet.</li>
           ) : null}
         </ul>
       </div>
@@ -302,36 +274,13 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(issued)} onOpenChange={(open) => !open && setIssued(null)}>
-        <DialogContent
-          title="Copy this token now"
-          description="The server stores only a hash. It cannot be shown again."
-        >
-          <div className="flex items-center gap-2">
-            <Input readOnly value={issued?.token ?? ""} aria-label="New API token" />
-            <Button
-              size="icon"
-              variant="secondary"
-              aria-label="Copy token"
-              onClick={async () => {
-                if (!issued?.token) return;
-                await navigator.clipboard.writeText(issued.token);
-                toast.push({ title: "Token copied", variant: "success" });
-              }}
-            >
-              <Copy size={14} />
-            </Button>
-          </div>
-          <p className="mt-3 text-[11px] text-[var(--muted-foreground)]">
-            Paste it into your MCP client as{" "}
-            <code>Authorization: Bearer &lt;token&gt;</code>. The card above now shows the config
-            with this token filled in.
-          </p>
-          <div className="mt-3 flex justify-end">
-            <Button onClick={() => setIssued(null)}>Done</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <IssuedTokenDialog
+        issued={issued}
+        onClose={() => setIssued(null)}
+        onCopy={() => {
+          void copyToken();
+        }}
+      />
     </>
   );
 }

@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ...schemas.loops import (
     ApprovalOut,
     ApprovalRequest,
@@ -38,7 +38,7 @@ from ..deps import RequestContext, get_context, idempotency_key, ok
 router = APIRouter(tags=["loops"])
 
 
-def _agent_preferences(loop_id: str, stored: dict[str, str | None]) -> dict:
+def _agent_preferences(loop_id: str, stored: dict[str, str | None]) -> dict[str, object]:
     """Purpose-keyed storage, the wire shape the schema names per purpose."""
     return {
         "loop_id": loop_id,
@@ -49,14 +49,14 @@ def _agent_preferences(loop_id: str, stored: dict[str, str | None]) -> dict:
 
 
 @router.get("/boards/{board_id}/loops", response_model=Envelope[list[LoopOut]])
-async def list_loops(
+def list_loops(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     include_completed: Annotated[bool, Query()] = False,
     include_archived: Annotated[bool, Query()] = False,
     stage: Annotated[str | None, Query(max_length=40)] = None,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     items = ctx.services.loop.list(
         board_id,
@@ -70,13 +70,13 @@ async def list_loops(
 @router.post(
     "/boards/{board_id}/loops", response_model=Envelope[LoopOut], status_code=201
 )
-async def create_loop(
+def create_loop(
     board_id: str,
     payload: LoopCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     key: Annotated[str | None, Depends(idempotency_key)] = None,
-) -> dict:
+) -> dict[str, object]:
     loop, replayed = ctx.services.loop.create(
         ctx.actor, board_id, payload, idempotency_key=key
     )
@@ -86,45 +86,45 @@ async def create_loop(
 
 
 @router.get("/boards/{board_id}/loops/{loop_id}", response_model=Envelope[LoopOut])
-async def get_loop(
+def get_loop(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop.get(board_id, loop_id))
 
 
 @router.patch("/boards/{board_id}/loops/{loop_id}", response_model=Envelope[LoopOut])
-async def update_loop(
+def update_loop(
     board_id: str,
     loop_id: str,
     payload: LoopUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.loop.update(ctx.actor, board_id, loop_id, payload))
 
 
 @router.post("/boards/{board_id}/loops/{loop_id}/cancel", response_model=Envelope[LoopOut])
-async def cancel_loop(
+def cancel_loop(
     board_id: str,
     loop_id: str,
     payload: LoopCancel,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.loop.cancel(ctx.actor, board_id, loop_id, payload))
 
 
 @router.post("/boards/{board_id}/loops/{loop_id}/archive", response_model=Envelope[LoopOut])
-async def archive_loop(
+def archive_loop(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.loop.archive(ctx.actor, board_id, loop_id))
 
 
@@ -132,18 +132,18 @@ async def archive_loop(
     "/boards/{board_id}/loops/{loop_id}/documents",
     response_model=Envelope[DocumentListOut],
 )
-async def get_documents(
+def get_documents(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop_document.documents(board_id, loop_id))
 
 
-@router.get("/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions")
-async def list_document_revisions(
+@router.get("/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions", response_model=dict)
+def list_document_revisions(
     board_id: str,
     loop_id: str,
     kind: str,
@@ -151,7 +151,7 @@ async def list_document_revisions(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     items, total = ctx.services.loop_document.revision_history(
         board_id, loop_id, kind, limit=limit, offset=offset
@@ -172,13 +172,13 @@ async def list_document_revisions(
     "/boards/{board_id}/loops/{loop_id}/documents/info",
     response_model=Envelope[DocumentListOut],
 )
-async def save_info(
+def save_info(
     board_id: str,
     loop_id: str,
     payload: InfoRevisionWrite,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.loop_document.save_info(ctx.actor, board_id, loop_id, payload)
     )
@@ -189,13 +189,13 @@ async def save_info(
     response_model=Envelope[DocumentListOut],
     status_code=201,
 )
-async def submit_candidate(
+def submit_candidate(
     board_id: str,
     loop_id: str,
     payload: CandidateSubmission,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.loop_document.submit_candidate(ctx.actor, board_id, loop_id, payload),
@@ -207,14 +207,14 @@ async def submit_candidate(
     response_model=Envelope[ApprovalOut],
     status_code=201,
 )
-async def review_scope(
+def review_scope(
     board_id: str,
     loop_id: str,
     scope: str,
     payload: ApprovalRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.loop_document.review(ctx.actor, board_id, loop_id, scope, payload),
@@ -225,14 +225,14 @@ async def review_scope(
     "/boards/{board_id}/loops/{loop_id}/reviews/{scope}/reset",
     response_model=Envelope[ScopeResetOut],
 )
-async def reset_scope(
+def reset_scope(
     board_id: str,
     loop_id: str,
     scope: str,
     payload: ScopeResetRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     """Clears a scope's documents and drops any approval behind them. Human only."""
     return ok(
         request,
@@ -241,12 +241,12 @@ async def reset_scope(
 
 
 @router.get("/boards/{board_id}/loops/{loop_id}/plan", response_model=Envelope[PlanOut])
-async def get_plan(
+def get_plan(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop.plan(board_id, loop_id))
 
@@ -254,12 +254,12 @@ async def get_plan(
 @router.get(
     "/boards/{board_id}/loops/{loop_id}/readiness", response_model=Envelope[ReadinessOut]
 )
-async def get_readiness(
+def get_readiness(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop.readiness(board_id, loop_id))
 
@@ -267,12 +267,12 @@ async def get_readiness(
 @router.get(
     "/boards/{board_id}/loops/{loop_id}/context", response_model=Envelope[LoopContextOut]
 )
-async def get_context_resource(
+def get_context_resource(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop_document.context(board_id, loop_id))
 
@@ -280,12 +280,12 @@ async def get_context_resource(
 @router.get(
     "/boards/{board_id}/loops/{loop_id}/agents", response_model=Envelope[LoopAgentPreferencesOut]
 )
-async def get_loop_agents(
+def get_loop_agents(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     stored = ctx.services.loop_agents.get(board_id, loop_id)
     return ok(request, _agent_preferences(loop_id, stored))
@@ -294,14 +294,14 @@ async def get_loop_agents(
 @router.put(
     "/boards/{board_id}/loops/{loop_id}/agents", response_model=Envelope[LoopAgentPreferencesOut]
 )
-async def set_loop_agents(
+def set_loop_agents(
     board_id: str,
     loop_id: str,
     payload: LoopAgentPreferencesUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
-    assignments = {}
+) -> dict[str, object]:
+    assignments: dict[str, str | None] = {}
     if "analysis_agent_id" in payload.model_fields_set:
         assignments["analysis"] = payload.analysis_agent_id
     if "roadmap_agent_id" in payload.model_fields_set:
@@ -317,14 +317,14 @@ async def set_loop_agents(
     response_model=Envelope[GenerationRunOut],
     status_code=202,
 )
-async def start_generation(
+def start_generation(
     board_id: str,
     loop_id: str,
     payload: GenerationRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     key: Annotated[str | None, Depends(idempotency_key)] = None,
-) -> dict:
+) -> dict[str, object]:
     run, replayed = ctx.services.loop_generation.start(
         ctx.actor, board_id, loop_id, payload, idempotency_key=key
     )
@@ -337,13 +337,13 @@ async def start_generation(
     "/boards/{board_id}/loops/{loop_id}/generation-runs",
     response_model=Envelope[list[GenerationRunOut]],
 )
-async def list_generation_runs(
+def list_generation_runs(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(
         request, ctx.services.loop_generation.list_runs(board_id, loop_id, limit=limit)
@@ -354,13 +354,13 @@ async def list_generation_runs(
     "/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}",
     response_model=Envelope[GenerationRunOut],
 )
-async def get_generation_run(
+def get_generation_run(
     board_id: str,
     loop_id: str,
     run_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop_generation.get(board_id, loop_id, run_id))
 
@@ -369,13 +369,13 @@ async def get_generation_run(
     "/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/cancel",
     response_model=Envelope[GenerationRunOut],
 )
-async def cancel_generation_run(
+def cancel_generation_run(
     board_id: str,
     loop_id: str,
     run_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.loop_generation.cancel(ctx.actor, board_id, loop_id, run_id)
     )
@@ -386,13 +386,13 @@ async def cancel_generation_run(
     response_model=Envelope[GenerationRunOut],
     status_code=202,
 )
-async def retry_generation_run(
+def retry_generation_run(
     board_id: str,
     loop_id: str,
     run_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     run, replayed = ctx.services.loop_generation.retry(ctx.actor, board_id, loop_id, run_id)
     if replayed:
         request.state.replayed = True
@@ -401,15 +401,15 @@ async def retry_generation_run(
 
 @router.post(
     "/boards/{board_id}/loops/{loop_id}/completion",
-    response_model=Envelope[dict],
+    response_model=Envelope[OpenObject],
 )
-async def accept_implementation(
+def accept_implementation(
     board_id: str,
     loop_id: str,
     payload: ImplementationAcceptance,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.loop_qa.accept_implementation(ctx.actor, board_id, loop_id, payload),
@@ -417,12 +417,12 @@ async def accept_implementation(
 
 
 @router.get("/boards/{board_id}/loops/{loop_id}/qa", response_model=Envelope[QaCycleOut])
-async def get_qa_cycle(
+def get_qa_cycle(
     board_id: str,
     loop_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop_qa.cycle(board_id, loop_id))
 
@@ -431,13 +431,13 @@ async def get_qa_cycle(
     "/boards/{board_id}/loops/{loop_id}/qa/instructions",
     response_model=Envelope[QaCycleOut],
 )
-async def submit_qa_instructions(
+def submit_qa_instructions(
     board_id: str,
     loop_id: str,
     payload: QaInstructions,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.loop_qa.submit_instructions(ctx.actor, board_id, loop_id, payload),
@@ -449,29 +449,29 @@ async def submit_qa_instructions(
     response_model=Envelope[QaCycleOut],
     status_code=201,
 )
-async def submit_qa_results(
+def submit_qa_results(
     board_id: str,
     loop_id: str,
     payload: QaResultSubmission,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.loop_qa.submit_results(ctx.actor, board_id, loop_id, payload)
     )
 
 
 @router.post(
-    "/boards/{board_id}/loops/{loop_id}/qa/decision", response_model=Envelope[dict]
+    "/boards/{board_id}/loops/{loop_id}/qa/decision", response_model=Envelope[OpenObject]
 )
-async def decide_qa(
+def decide_qa(
     board_id: str,
     loop_id: str,
     payload: QaDecision,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     key: Annotated[str | None, Depends(idempotency_key)] = None,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.loop_qa.decide(
@@ -482,16 +482,16 @@ async def decide_qa(
 
 @router.post(
     "/boards/{board_id}/loops/{loop_id}/cards/{card_id}/confirm",
-    response_model=Envelope[dict],
+    response_model=Envelope[OpenObject],
 )
-async def confirm_human_ticket(
+def confirm_human_ticket(
     board_id: str,
     loop_id: str,
     card_id: str,
     payload: HumanConfirmation,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     """A human confirms a human-only Ticket; agents are rejected by the service."""
     return ok(
         request,

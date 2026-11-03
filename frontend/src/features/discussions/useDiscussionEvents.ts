@@ -31,12 +31,10 @@ export function useDiscussionEvents(
 
   useEffect(() => {
     if (!boardId || !discussionId || typeof EventSource === "undefined") {
-      setLive(false);
+      // Nothing to follow: `live` starts false, and the previous subscription's cleanup resets it.
       return;
     }
-    const source = new EventSource(
-      `/api/v1/boards/${boardId}/discussions/${discussionId}/events`,
-    );
+    const source = new EventSource(`/api/v1/boards/${boardId}/discussions/${discussionId}/events`);
     let timer: number | undefined;
     const notify = () => {
       if (timer !== undefined) return;
@@ -45,8 +43,12 @@ export function useDiscussionEvents(
         onEvent();
       }, COALESCE_MS);
     };
-    source.onopen = () => setLive(true);
-    source.onerror = () => setLive(false);
+    source.onopen = () => {
+      setLive(true);
+    };
+    source.onerror = () => {
+      setLive(false);
+    };
     for (const type of EVENT_TYPES) source.addEventListener(type, notify);
     return () => {
       if (timer !== undefined) window.clearTimeout(timer);

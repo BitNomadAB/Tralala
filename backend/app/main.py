@@ -1,19 +1,19 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-import json
 import logging
-import re
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, get_args
+from typing import get_args
 
-from fastapi import FastAPI, Request
+import anyio.to_thread
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import RequestResponseEndpoint
 
 from .api import mcp as mcp_routes
 from .api.deps import get_context
@@ -33,27 +33,26 @@ from .api.v1 import templates as template_routes
 from .api.v1 import users as user_routes
 from .core.config import Settings, get_settings
 from .core.errors import ApiError
+from .core.identifiers import accepted_request_id
+from .core.logging import bound_request_id, configure_logging
 from .core.ratelimit import LoginThrottle, RateLimiter
 from .services import Services
 from .storage.sqlite import sqlite_supports_fts5
 
 logger = logging.getLogger("tralala")
 
-REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
-
-
-def _configure_logging() -> None:
-    if logger.handlers:
-        return
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
+# Routes and dependencies are plain functions, so FastAPI runs each in an anyio worker thread and
+# the event loop keeps to connections, middleware, request bodies and event streams. This is how
+# many run at once. It is anyio's default, set explicitly so the bound is a decision:
+# requests to one board already queue on that board's lock, SQLite takes one writer per database,
+# the discussion, generation and mention executors have pools of their own, and open event streams
+# wait on their own limiter (``EVENT_STREAM_TOKENS`` in ``api/v1/streaming.py``). Forty requests
+# in flight is ample for one process serving a team on a private network.
+THREADPOOL_TOKENS = 40
 
 
 def _error_response(
-    request: Request, status_code: int, code: str, message: str, **extra: Any
+    request: Request, status_code: int, code: str, message: str, **extra: object
 ) -> JSONResponse:
     body = {
         "success": False,
@@ -65,8 +64,8 @@ def _error_response(
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    _configure_logging()
     settings = settings or get_settings()
+    configure_logging(settings)
     app = FastAPI(
         title="Tralala API",
         version="1.0.0",
@@ -93,13 +92,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Served locally so the schema and Swagger UI can require a session instead of being
         # publicly enumerable. Bearer-only agents can fetch /openapi.json with their token.
         @app.get("/openapi.json", include_in_schema=False)
-        async def openapi_schema(request: Request) -> JSONResponse:
+        def openapi_schema(request: Request) -> JSONResponse:
             if settings.docs_require_auth:
                 get_context(request)
             return JSONResponse(app.openapi())
 
         @app.get("/docs", include_in_schema=False)
-        async def swagger_docs(request: Request) -> HTMLResponse:
+        def swagger_docs(request: Request) -> HTMLResponse:
             if settings.docs_require_auth:
                 get_context(request)
             return get_swagger_ui_html(
@@ -117,41 +116,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.middleware("http")
-    async def observability(request: Request, call_next):  # noqa: ANN001, ANN202
+    async def observability(request: Request, call_next: RequestResponseEndpoint) -> Response:
         incoming = request.headers.get("x-request-id", "")
-        request.state.request_id = (
-            incoming if REQUEST_ID_PATTERN.match(incoming) else str(uuid.uuid4())
-        )
-        content_length = request.headers.get("content-length")
-        if content_length and content_length.isdigit():
-            if int(content_length) > settings.max_request_bytes:
+        request_id = incoming if accepted_request_id(incoming) else str(uuid.uuid4())
+        request.state.request_id = request_id
+        # Every line logged while this request is served carries its id, threads included.
+        with bound_request_id(request_id):
+            content_length = request.headers.get("content-length")
+            if (
+                content_length
+                and content_length.isdigit()
+                and int(content_length) > settings.max_request_bytes
+            ):
                 return _error_response(
                     request, 413, "payload_too_large", "Request body exceeds the configured limit"
                 )
-        started = time.perf_counter()
-        response = await call_next(request)
-        duration_ms = round((time.perf_counter() - started) * 1000, 2)
-        response.headers["X-Request-ID"] = request.state.request_id
-        if request.url.path.startswith("/api/") or request.url.path == "/mcp":
-            response.headers["Cache-Control"] = "no-store"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        logger.info(
-            json.dumps(
-                {
-                    "event": "http_request",
-                    "request_id": request.state.request_id,
+            started = time.perf_counter()
+            response = await call_next(request)
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            response.headers["X-Request-ID"] = request_id
+            if request.url.path.startswith("/api/") or request.url.path == "/mcp":
+                response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            logger.info(
+                "http_request",
+                extra={
                     "method": request.method,
                     "path": request.url.path,
                     "status": response.status_code,
                     "duration_ms": duration_ms,
                     "actor_id": getattr(request.state, "actor_id", None),
                     "replayed": getattr(request.state, "replayed", False),
-                }
+                },
             )
-        )
-        return response
+            return response
 
     @app.exception_handler(ApiError)
     async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
@@ -189,27 +189,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
-        # The type is enough to triage; messages and tracebacks can carry SQL values.
-        logger.error(
-            json.dumps(
-                {
-                    "event": "unhandled_exception",
-                    "request_id": getattr(request.state, "request_id", ""),
-                    "path": request.url.path,
-                    "error_type": type(exc).__name__,
-                }
+        # The type is enough to triage; messages and tracebacks can carry SQL values. This handler
+        # runs outside the observability middleware, so it binds the request id again.
+        with bound_request_id(getattr(request.state, "request_id", "")):
+            logger.error(
+                "unhandled_exception",
+                extra={"path": request.url.path, "error_type": type(exc).__name__},
             )
-        )
         return _error_response(
             request, 500, "internal_error", "An unexpected error occurred", retryable=True
         )
 
-    @app.get("/api/v1/health", tags=["system"])
-    async def health() -> dict:
+    @app.get("/api/v1/health", response_model=dict, tags=["system"])
+    def health() -> dict[str, object]:
         return {"success": True, "data": {"status": "ok"}}
 
-    @app.get("/api/v1/meta", tags=["system"])
-    async def meta(request: Request) -> dict:
+    @app.get("/api/v1/meta", response_model=dict, tags=["system"])
+    def meta(request: Request) -> dict[str, object]:
         ctx = get_context(request)
         from .core.context import MEMBER_TOKEN_SCOPES, SCOPES
         from .schemas.auth import Scope
@@ -266,22 +262,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # anyio keeps one default limiter per event loop, so it is sized here, inside the loop.
+        anyio.to_thread.current_default_thread_limiter().total_tokens = THREADPOOL_TOKENS
         app.state.services.initialize()
-        purged = app.state.services.registry.purge_expired_sessions()
+        purged = app.state.services.auth.purge_expired_sessions()
         logger.info(
-            json.dumps(
-                {
-                    "event": "startup",
-                    "data_dir": str(settings.data_dir),
-                    "purged_sessions": purged,
-                }
-            )
+            "startup",
+            extra={"data_dir": str(settings.data_dir), "purged_sessions": purged},
         )
         try:
             yield
         finally:
             app.state.services.shutdown()
-            logger.info(json.dumps({"event": "shutdown"}))
+            logger.info("shutdown")
 
     app.router.lifespan_context = lifespan
 

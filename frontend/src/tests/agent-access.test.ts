@@ -20,9 +20,9 @@ describe("interaction agent access", () => {
   });
 
   it("builds a paste-ready MCP client entry for this origin", () => {
-    const snippet = mcpConfigSnippet("https://tralala.tailnet.ts.net", "trl_abc");
-    expect(snippet).toContain('"url": "https://tralala.tailnet.ts.net/mcp"');
+    const snippet = mcpConfigSnippet("https://tralala.example.com", "trl_abc");
+    expect(snippet).toContain('"url": "https://tralala.example.com/mcp"');
     expect(snippet).toContain('"Authorization": "Bearer trl_abc"');
-    expect(() => JSON.parse(snippet)).not.toThrow();
+    expect((): unknown => JSON.parse(snippet)).not.toThrow();
   });
 });

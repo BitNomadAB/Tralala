@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Select } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
-import { useAgents, useBoard, useLoopAgents } from "@/lib/queries";
 import { generationAgents } from "@/lib/boardAgents";
+import { useAgents, useBoard, useLoopAgents } from "@/lib/queries";
 import type { Loop, LoopAgentPreferences } from "@/lib/types";
 
 const PURPOSES = [
@@ -15,6 +15,15 @@ const PURPOSES = [
   { key: "roadmap_agent_id", purpose: "roadmap", label: "RoadMap" },
   { key: "qa_agent_id", purpose: "qa", label: "QA instructions" },
 ] as const;
+
+type PurposeKey = (typeof PURPOSES)[number]["key"];
+
+/** "" is "Board default" in every select, and is sent as null. */
+const NO_CHOICE: Record<PurposeKey, string> = {
+  analysis_agent_id: "",
+  roadmap_agent_id: "",
+  qa_agent_id: "",
+};
 
 /**
  * Which agent this Loop prefers per purpose. A stored choice only fills in the default of the next
@@ -36,22 +45,24 @@ export function LoopAgentsDialog({
   const boardQuery = useBoard(boardId);
   const agentsQuery = useAgents();
   const preferencesQuery = useLoopAgents(boardId, loop.id);
-  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<Record<PurposeKey, string>>(NO_CHOICE);
+  const [draftSource, setDraftSource] = useState<LoopAgentPreferences | undefined>(undefined);
 
   const boardAgents = useMemo(
     () => generationAgents(agentsQuery.data ?? [], boardQuery.data?.agent_ids).agents,
     [agentsQuery.data, boardQuery.data?.agent_ids],
   );
 
-  useEffect(() => {
-    const stored = preferencesQuery.data;
-    if (!stored) return;
+  // The draft follows each new copy of the stored choice; set while rendering, not in an effect.
+  const stored = preferencesQuery.data;
+  if (stored && stored !== draftSource) {
+    setDraftSource(stored);
     setDraft({
       analysis_agent_id: stored.analysis_agent_id ?? "",
       roadmap_agent_id: stored.roadmap_agent_id ?? "",
       qa_agent_id: stored.qa_agent_id ?? "",
     });
-  }, [preferencesQuery.data]);
+  }
 
   const save = useMutation({
     mutationFn: () =>
@@ -61,16 +72,17 @@ export function LoopAgentsDialog({
         qa_agent_id: draft.qa_agent_id || null,
       } satisfies Partial<LoopAgentPreferences>),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["loop-agents", boardId, loop.id] });
+      void queryClient.invalidateQueries({ queryKey: ["loop-agents", boardId, loop.id] });
       toast.push({ title: "Loop agents saved", variant: "success" });
       onClose();
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not save",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   return (
@@ -90,7 +102,7 @@ export function LoopAgentsDialog({
             <Field key={entry.key} label={entry.label} htmlFor={`loop-agent-${entry.purpose}`}>
               <Select
                 id={`loop-agent-${entry.purpose}`}
-                value={draft[entry.key] ?? ""}
+                value={draft[entry.key]}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, [entry.key]: event.target.value }))
                 }

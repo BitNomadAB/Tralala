@@ -98,6 +98,9 @@ class AgentOut(OutModel):
     last_test_status: str | None = None
     last_test_message: str | None = None
     last_tested_at: str | None = None
+    # Set by the last connection test: the model answered a call that asked for a JSON schema as
+    # the answer's format, so a generation sends the purpose's schema with its request.
+    supports_json_schema: bool = False
     created_at: str
     updated_at: str
 
@@ -132,6 +135,7 @@ class AgentCompletionResult(OutModel):
     status: str
     message: str
     latency_ms: int | None = None
+    supports_json_schema: bool = False
 
 
 class AgentTestResult(OutModel):
@@ -140,6 +144,8 @@ class AgentTestResult(OutModel):
     message: str
     latency_ms: int | None = None
     models: list[str] = Field(default_factory=list)
+    # What the model call found; testing a saved agent records it on the agent.
+    supports_json_schema: bool = False
     # Present for an OpenAI-compatible endpoint with a model set: listing models does not prove the
     # model call works, which is the difference between a green test and a failed generation.
     completion: AgentCompletionResult | None = None

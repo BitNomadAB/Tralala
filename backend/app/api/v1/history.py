@@ -14,7 +14,7 @@ router = APIRouter(tags=["history"])
 
 
 @router.get("/boards/{board_id}/history", response_model=Envelope[list[HistorySummary]])
-async def search_history(
+def search_history(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
@@ -26,7 +26,7 @@ async def search_history(
     date_to: Annotated[str | None, Query(max_length=40)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("history:read")
     result = ctx.services.loop_history.search(
         board_id,
@@ -53,12 +53,12 @@ async def search_history(
 
 
 @router.get("/boards/{board_id}/history/{history_id}", response_model=Envelope[HistoryDetail])
-async def get_history_record(
+def get_history_record(
     board_id: str,
     history_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("history:read")
     return ok(request, ctx.services.loop_history.detail(board_id, history_id))
 
@@ -68,12 +68,12 @@ async def get_history_record(
     response_model=Envelope[HistoryDetail],
     status_code=201,
 )
-async def import_legacy_record(
+def import_legacy_record(
     board_id: str,
     payload: LegacyImportRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     record, replayed = ctx.services.loop_history.import_legacy(ctx.actor, board_id, payload)
     if replayed:
         request.state.replayed = True

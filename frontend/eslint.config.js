@@ -1,0 +1,184 @@
+// @ts-check
+import js from "@eslint/js";
+import { defineConfig, globalIgnores } from "eslint/config";
+import eslintConfigPrettier from "eslint-config-prettier/flat";
+import { createTypeScriptImportResolver } from "eslint-import-resolver-typescript";
+import { importX } from "eslint-plugin-import-x";
+import jsxA11y from "eslint-plugin-jsx-a11y-x";
+import reactHooks from "eslint-plugin-react-hooks";
+import { reactRefresh } from "eslint-plugin-react-refresh";
+import globals from "globals";
+import tseslint from "typescript-eslint";
+
+/**
+ * Every enabled rule is an error. A warning that never fails a build is a warning nobody reads,
+ * so shared configs that ship a rule at `warn` are promoted here instead of rule by rule.
+ *
+ * @param {import("eslint").Linter.Config[]} configs
+ * @returns {import("eslint").Linter.Config[]}
+ */
+function allErrors(configs) {
+  /** @param {import("eslint").Linter.RuleEntry | undefined} entry */
+  const promote = (entry) => {
+    if (entry === "warn" || entry === 1) return "error";
+    if (Array.isArray(entry) && (entry[0] === "warn" || entry[0] === 1)) {
+      return ["error", ...entry.slice(1)];
+    }
+    return entry;
+  };
+  return configs.map((config) =>
+    config.rules
+      ? {
+          ...config,
+          rules: Object.fromEntries(
+            Object.entries(config.rules).map(([name, entry]) => [name, promote(entry)]),
+          ),
+        }
+      : config,
+  );
+}
+
+export default allErrors(
+  defineConfig(
+    globalIgnores(["dist/", "coverage/", "playwright-report/", "test-results/", "e2e/.data/"]),
+    {
+      // A rule is configured here or nowhere: an inline `eslint-disable` has no effect and is
+      // reported, which `--max-warnings 0` turns into a failure.
+      linterOptions: {
+        noInlineConfig: true,
+      },
+    },
+    {
+      files: ["**/*.{js,mjs,ts,tsx}"],
+      extends: [
+        js.configs.recommended,
+        tseslint.configs.strictTypeChecked,
+        tseslint.configs.stylisticTypeChecked,
+        importX.flatConfigs.recommended,
+        importX.flatConfigs.typescript,
+      ],
+      languageOptions: {
+        parserOptions: {
+          projectService: true,
+          tsconfigRootDir: import.meta.dirname,
+        },
+      },
+      settings: {
+        "import-x/resolver-next": [createTypeScriptImportResolver({ project: "./tsconfig.json" })],
+      },
+      rules: {
+        "import-x/order": [
+          "error",
+          {
+            groups: ["builtin", "external", "internal", "parent", "sibling", "index"],
+            pathGroups: [{ pattern: "@/**", group: "internal" }],
+            "newlines-between": "never",
+            alphabetize: { order: "asc", caseInsensitive: true },
+          },
+        ],
+        "import-x/no-cycle": ["error", { ignoreExternal: true }],
+        // Off: TypeScript already checks these five (typescript-eslint, "Performance troubleshooting").
+        "import-x/named": "off",
+        "import-x/namespace": "off",
+        "import-x/default": "off",
+        "import-x/no-named-as-default-member": "off",
+        "import-x/no-unresolved": "off",
+        // Option: a handler returning into a void slot, e.g. `onClick={() => setOpen(false)}`.
+        "@typescript-eslint/no-confusing-void-expression": [
+          "error",
+          { ignoreVoidReturningFunctions: true },
+        ],
+        // Option: strictTypeChecked's settings plus allowNumber, which interpolates predictably.
+        "@typescript-eslint/restrict-template-expressions": [
+          "error",
+          {
+            allowAny: false,
+            allowBoolean: false,
+            allowNever: false,
+            allowNullish: false,
+            allowNumber: true,
+            allowRegExp: false,
+          },
+        ],
+        // Option: `const { omitted, ...rest } = value` is how a key is left out of a copy.
+        "@typescript-eslint/no-unused-vars": ["error", { ignoreRestSiblings: true }],
+        // On: under verbatimModuleSyntax `import { type A } from "m"` still loads "m" at runtime;
+        // TypeScript itself requires the `type` marker, so consistent-type-imports stays off.
+        "@typescript-eslint/no-import-type-side-effects": "error",
+        // On, for every file including tests and the API catalogue: a file past 300 lines of code
+        // does several things, and each of them reads better in its own module.
+        "max-lines": ["error", { max: 300, skipBlankLines: true, skipComments: true }],
+      },
+    },
+    {
+      files: ["src/**/*.{ts,tsx}"],
+      extends: [
+        reactHooks.configs.flat["recommended-latest"],
+        reactRefresh.configs.vite(),
+        jsxA11y.configs.strict,
+      ],
+      languageOptions: {
+        globals: globals.browser,
+      },
+      rules: {
+        // Off: autoFocus is only used to move focus into what the user just opened (WAI-ARIA dialog).
+        "jsx-a11y-x/no-autofocus": "off",
+        // On: the browser console is not the app's log; the one reporter is allowed below.
+        "no-console": "error",
+        // On: one sign-out path, AuthProvider's signOutLocally(), with no file exempt. Clearing the
+        // query cache drops `me` from under AuthProvider's observer, which then keeps a dead session
+        // on screen while the pages keep asking with it. A later block that sets this rule replaces
+        // the list instead of adding to it, so further restrictions go into this list.
+        "no-restricted-syntax": [
+          "error",
+          {
+            selector:
+              "CallExpression[callee.property.name='clear']:matches([callee.object.name=/[Qq]ueryClient$/], [callee.object.callee.name='useQueryClient'], [callee.object.callee.property.name='getQueryCache'])",
+            message:
+              "Sign out with useAuth().signOutLocally(); clearing the query cache detaches the session's observer and leaves a dead session on screen.",
+          },
+          // A test answers the API through MSW (src/tests/msw/), never by replacing the client or
+          // fetch: a replaced client skips the envelope check, the JSON body and the 401 path.
+          {
+            selector:
+              "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock)$/][arguments.0.value=/lib.api/]",
+            message:
+              "Answer the request with an MSW handler (src/tests/msw/) instead of mocking the API client.",
+          },
+          {
+            selector:
+              "CallExpression[callee.object.name='vi'][callee.property.name='spyOn'][arguments.0.name='api']",
+            message:
+              "Answer the request with an MSW handler (src/tests/msw/) instead of replacing an API call.",
+          },
+          {
+            selector:
+              "CallExpression[callee.object.name='vi'][callee.property.name='stubGlobal'][arguments.0.value='fetch']",
+            message:
+              "Answer the request with an MSW handler (src/tests/msw/) instead of replacing fetch.",
+          },
+        ],
+      },
+    },
+    {
+      // console.error is how the root reports an error a boundary caught (main.tsx's onCaughtError).
+      files: ["src/app/errorReporting.ts"],
+      rules: {
+        "no-console": ["error", { allow: ["error"] }],
+      },
+    },
+    {
+      // No type information here: the JavaScript files are outside tsconfig.json, and the journeys
+      // import Playwright, which scripts/run-playwright.mjs links in rather than installs.
+      files: ["**/*.{js,mjs}", "e2e/**/*.ts", "playwright.config.ts"],
+      extends: [tseslint.configs.disableTypeChecked],
+      languageOptions: {
+        globals: globals.node,
+      },
+    },
+    // Last, so it wins: layout is Prettier's (`prettier --check` in `pnpm lint`), and this turns
+    // off every rule that would argue with it. In this config that is only no-unexpected-multiline,
+    // which guards against a missing semicolon that Prettier always inserts.
+    eslintConfigPrettier,
+  ),
+);

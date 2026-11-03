@@ -20,7 +20,7 @@ export function useCardEvents(
 
   useEffect(() => {
     if (!boardId || !loopId || !cardId || typeof EventSource === "undefined") {
-      setLive(false);
+      // Nothing to follow: `live` starts false, and the previous subscription's cleanup resets it.
       return;
     }
     const source = new EventSource(
@@ -34,8 +34,12 @@ export function useCardEvents(
         onEvent();
       }, COALESCE_MS);
     };
-    source.onopen = () => setLive(true);
-    source.onerror = () => setLive(false);
+    source.onopen = () => {
+      setLive(true);
+    };
+    source.onerror = () => {
+      setLive(false);
+    };
     for (const type of EVENT_TYPES) source.addEventListener(type, notify);
     return () => {
       if (timer !== undefined) window.clearTimeout(timer);

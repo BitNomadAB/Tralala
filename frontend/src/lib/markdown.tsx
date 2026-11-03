@@ -15,7 +15,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
   let index = 0;
   for (const match of text.matchAll(INLINE_PATTERN)) {
     const token = match[0];
-    const offset = match.index ?? 0;
+    const offset = match.index;
     if (offset > index) nodes.push(text.slice(index, offset));
     index = offset + token.length;
 
@@ -26,20 +26,15 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     } else if (token.startsWith("*") && token.endsWith("*")) {
       nodes.push(<em key={`${keyPrefix}-i-${offset}`}>{token.slice(1, -1)}</em>);
     } else {
-      const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token);
-      if (link && /^https?:\/\//i.test(link[2])) {
+      const [, label, href] = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token) ?? [];
+      if (label !== undefined && href !== undefined && /^https?:\/\//i.test(href)) {
         nodes.push(
-          <a
-            key={`${keyPrefix}-a-${offset}`}
-            href={link[2]}
-            rel="noreferrer noopener"
-            target="_blank"
-          >
-            {link[1]}
+          <a key={`${keyPrefix}-a-${offset}`} href={href} rel="noreferrer noopener" target="_blank">
+            {label}
           </a>,
         );
-      } else if (link) {
-        nodes.push(link[1]);
+      } else if (label !== undefined) {
+        nodes.push(label);
       } else {
         nodes.push(token);
       }
@@ -49,6 +44,20 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
   return nodes;
 }
 
+/** `#` to `####` become h1 to h4; the heading pattern admits nothing longer. */
+function headingTag(hashes: string): "h1" | "h2" | "h3" | "h4" {
+  switch (hashes.length) {
+    case 1:
+      return "h1";
+    case 2:
+      return "h2";
+    case 3:
+      return "h3";
+    default:
+      return "h4";
+  }
+}
+
 export function renderMarkdown(source: string): ReactNode {
   if (!source.trim()) return null;
   const lines = source.replace(/\r\n/g, "\n").split("\n");
@@ -56,16 +65,20 @@ export function renderMarkdown(source: string): ReactNode {
   let index = 0;
   let key = 0;
 
-  while (index < lines.length) {
-    const line = lines[index];
-
-    if (line.trim().startsWith("```")) {
-      const code: string[] = [];
+  /** Consumes the lines from `index` on while `test` holds, and returns them. */
+  const takeWhile = (test: (line: string) => boolean): string[] => {
+    const taken: string[] = [];
+    for (let line = lines[index]; line !== undefined && test(line); line = lines[index]) {
+      taken.push(line);
       index += 1;
-      while (index < lines.length && !lines[index].trim().startsWith("```")) {
-        code.push(lines[index]);
-        index += 1;
-      }
+    }
+    return taken;
+  };
+
+  for (let line = lines[index]; line !== undefined; line = lines[index]) {
+    if (line.trim().startsWith("```")) {
+      index += 1;
+      const code = takeWhile((next) => !next.trim().startsWith("```"));
       index += 1;
       blocks.push(
         <pre key={`code-${key++}`}>
@@ -75,40 +88,31 @@ export function renderMarkdown(source: string): ReactNode {
       continue;
     }
 
-    const heading = /^(#{1,4})\s+(.*)$/.exec(line);
-    if (heading) {
-      const level = heading[1].length;
-      const content = renderInline(heading[2], `h-${key}`);
-      const Tag = (["h1", "h2", "h3", "h4"] as const)[level - 1];
+    const [, hashes, text] = /^(#{1,4})\s+(.*)$/.exec(line) ?? [];
+    if (hashes !== undefined && text !== undefined) {
+      const content = renderInline(text, `h-${key}`);
+      const Tag = headingTag(hashes);
       blocks.push(<Tag key={`heading-${key++}`}>{content}</Tag>);
       index += 1;
       continue;
     }
 
     if (/^\s*[-*]\s+/.test(line)) {
-      const items: ReactNode[] = [];
-      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
-        items.push(
-          <li key={`li-${key}-${items.length}`}>
-            {renderInline(lines[index].replace(/^\s*[-*]\s+/, ""), `li-${key}-${items.length}`)}
-          </li>,
-        );
-        index += 1;
-      }
+      const items = takeWhile((next) => /^\s*[-*]\s+/.test(next)).map((item, position) => (
+        <li key={`li-${key}-${position}`}>
+          {renderInline(item.replace(/^\s*[-*]\s+/, ""), `li-${key}-${position}`)}
+        </li>
+      ));
       blocks.push(<ul key={`ul-${key++}`}>{items}</ul>);
       continue;
     }
 
     if (/^\s*\d+\.\s+/.test(line)) {
-      const items: ReactNode[] = [];
-      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
-        items.push(
-          <li key={`oli-${key}-${items.length}`}>
-            {renderInline(lines[index].replace(/^\s*\d+\.\s+/, ""), `oli-${key}-${items.length}`)}
-          </li>,
-        );
-        index += 1;
-      }
+      const items = takeWhile((next) => /^\s*\d+\.\s+/.test(next)).map((item, position) => (
+        <li key={`oli-${key}-${position}`}>
+          {renderInline(item.replace(/^\s*\d+\.\s+/, ""), `oli-${key}-${position}`)}
+        </li>
+      ));
       blocks.push(<ol key={`ol-${key++}`}>{items}</ol>);
       continue;
     }
@@ -118,21 +122,22 @@ export function renderMarkdown(source: string): ReactNode {
       continue;
     }
 
-    const paragraph: string[] = [];
-    while (
-      index < lines.length &&
-      lines[index].trim() !== "" &&
-      !/^(#{1,4})\s+/.test(lines[index]) &&
-      !/^\s*[-*]\s+/.test(lines[index]) &&
-      !/^\s*\d+\.\s+/.test(lines[index]) &&
-      !lines[index].trim().startsWith("```")
-    ) {
-      paragraph.push(lines[index]);
-      index += 1;
-    }
-    blocks.push(
-      <p key={`p-${key++}`}>{renderInline(paragraph.join(" "), `p-${key}`)}</p>,
-    );
+    // The line that got here always opens the paragraph, so the loop advances on any input. A
+    // line such as "# a" + CR + "b" fails the heading pattern above but passes the heading test
+    // below; when the paragraph started with that test, nothing was consumed and the page hung.
+    index += 1;
+    const paragraph = [
+      line,
+      ...takeWhile(
+        (next) =>
+          next.trim() !== "" &&
+          !/^(#{1,4})\s+/.test(next) &&
+          !/^\s*[-*]\s+/.test(next) &&
+          !/^\s*\d+\.\s+/.test(next) &&
+          !next.trim().startsWith("```"),
+      ),
+    ];
+    blocks.push(<p key={`p-${key++}`}>{renderInline(paragraph.join(" "), `p-${key}`)}</p>);
   }
 
   return <>{blocks}</>;

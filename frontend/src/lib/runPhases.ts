@@ -1,4 +1,4 @@
-import type { GenerationRun, GenerationRunRepository } from "@/lib/types";
+import type { GenerationRun } from "@/lib/types";
 
 /** The steps a generation run passes through, in the order the server records them. */
 export type RunPhaseKey = "reading_info" | "analysing_repository" | "generating";
@@ -12,7 +12,11 @@ export interface RunStep {
   state: RunStepState;
 }
 
-const ORDER: RunPhaseKey[] = ["reading_info", "analysing_repository", "generating"];
+const ORDER: readonly [RunPhaseKey, ...RunPhaseKey[]] = [
+  "reading_info",
+  "analysing_repository",
+  "generating",
+];
 
 /** Only status and phase are always known; the recorded sources arrive once the step has run. */
 type RunFacts = Pick<GenerationRun, "status" | "phase"> &
@@ -43,14 +47,10 @@ const CAPTIONS: Record<RunPhaseKey, string> = {
  * links none and `warning` when at least one repository could not be read, because a green tick there
  * claimed the model had seen code it never received.
  */
-export function runSteps(
-  purpose: "analysis" | "roadmap" | "qa",
-  run?: RunFacts | null,
-): RunStep[] {
+export function runSteps(purpose: "analysis" | "roadmap" | "qa", run?: RunFacts | null): RunStep[] {
   const names = labels(purpose === "roadmap" ? "roadmap" : "analysis");
-  const reached = run?.phase && ORDER.includes(run.phase as RunPhaseKey)
-    ? (run.phase as RunPhaseKey)
-    : null;
+  const reached =
+    run?.phase && ORDER.includes(run.phase as RunPhaseKey) ? (run.phase as RunPhaseKey) : null;
   const reachedIndex = reached ? ORDER.indexOf(reached) : -1;
   const failed = run?.status === "failed";
   const finished = run?.status === "completed";
@@ -58,7 +58,7 @@ export function runSteps(
 
   return ORDER.map((key, index) => {
     let state: RunStepState = "pending";
-    if (failed && run?.phase === null && index === 0) {
+    if (failed && run.phase === null && index === 0) {
       // A run rejected before its first step (no agent, closed Loop) still has to point somewhere.
       state = "failed";
     } else if (reachedIndex >= 0) {
@@ -79,11 +79,13 @@ export function runSteps(
 function failedRepositories(run: RunFacts): boolean {
   const value = run.source_revisions?.repositories;
   if (!Array.isArray(value)) return false;
-  return (value as GenerationRunRepository[]).some((repository) => Boolean(repository.error));
+  return value.some((repository) => Boolean(repository.error));
 }
 
 /** The failing step's own JSON, so a person can copy the provider's answer instead of retyping it. */
-export function runFailureJson(run: Pick<GenerationRun, "status" | "phase" | "error_code" | "error_message">): string | null {
+export function runFailureJson(
+  run: Pick<GenerationRun, "status" | "phase" | "error_code" | "error_message">,
+): string | null {
   if (run.status !== "failed") return null;
   return JSON.stringify(
     {
@@ -107,14 +109,12 @@ export function failedStepKey(run: Pick<GenerationRun, "status" | "phase">): Run
 
 /** What the repository step actually got, so a fast step cannot read as "it read the code". */
 export type RepositoryOutcome =
-  | { kind: "waiting" }
-  | { kind: "none" }
-  | { kind: "listed"; lines: string[] };
+  { kind: "waiting" } | { kind: "none" } | { kind: "listed"; lines: string[] };
 
 export function repositoryOutcome(run: RunFacts): RepositoryOutcome {
   const value = run.source_revisions?.repositories;
   if (!Array.isArray(value)) return { kind: "waiting" };
-  const repositories = value as GenerationRunRepository[];
+  const repositories = value;
   if (repositories.length === 0) return { kind: "none" };
   return {
     kind: "listed",
