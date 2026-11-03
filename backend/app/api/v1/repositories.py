@@ -1,4 +1,5 @@
-"""GitHub repositories, managed from the administrator page and assigned to boards."""
+"""Code repositories (GitHub, or a Git mirror of an allowed HTTPS host), managed from the
+administrator page and assigned to boards."""
 
 from __future__ import annotations
 

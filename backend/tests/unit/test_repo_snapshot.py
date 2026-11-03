@@ -14,6 +14,7 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
+from app.repositories.code_repositories import MirrorRecord
 from app.services import repo_snapshot
 from app.services.repo_snapshot import (
     RepositorySnapshotService,
@@ -222,6 +223,7 @@ def _entry(name: str) -> RepositoryEntry:
         "provider": "github",
         "url": f"https://github.com/acme/{name}",
         "branch": "main",
+        "default_branch": None,
         "enabled": True,
         "created_at": "2026-11-03T10:00:00Z",
         "updated_at": "2026-11-03T10:00:00Z",
@@ -243,6 +245,14 @@ class Repositories:
     def token(self, repository_id: str) -> str | None:
         del repository_id
         return None
+
+    def record_fetch(self, repository_id: str, record: MirrorRecord) -> None:
+        del repository_id, record
+        raise AssertionError("a GitHub repository has no mirror")
+
+    def record_mirror_error(self, repository_id: str, code: str) -> None:
+        del repository_id, code
+        raise AssertionError("a GitHub repository has no mirror")
 
 
 def _github_serving(archives: dict[str, bytes]) -> Callable[[httpx.Request], httpx.Response]:

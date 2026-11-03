@@ -52,6 +52,7 @@ from app.repositories.board_rows import (
 from app.repositories.code_repositories import (
     CodeRepositoryRepository,
     LinkedBoard,
+    MirrorRecord,
     RepositoryChanges,
     RepositoryLinkRepository,
 )
@@ -365,11 +366,12 @@ def repository_row(
     token_ciphertext: str | None = None,
     token_hint: str | None = None,
     enabled: bool = True,
+    provider: str = "github",
 ) -> RepositoriesRow:
     return RepositoriesRow(
         id=repository_id,
         name=name or f"Repository {repository_id}",
-        provider="github",
+        provider=provider,
         url=url or f"https://github.com/acme/{repository_id}",
         branch=branch,
         token_ciphertext=token_ciphertext,
@@ -380,6 +382,11 @@ def repository_row(
         last_check_detail=None,
         created_at=CREATED,
         updated_at=CREATED,
+        default_branch=None,
+        last_sha=None,
+        fetched_at=None,
+        mirror_bytes=None,
+        mirror_error=None,
     )
 
 
@@ -1065,6 +1072,29 @@ class FakeCodeRepositoryRepository:
                 last_check_detail=detail,
                 updated_at=now,
             )
+
+    def record_default_branch(self, repository_id: str, default_branch: str) -> None:
+        row = self._state.code_repositories.get(repository_id)
+        if row is not None:
+            self._state.code_repositories[repository_id] = row.__replace__(
+                default_branch=default_branch
+            )
+
+    def record_fetch(self, repository_id: str, record: MirrorRecord) -> None:
+        row = self._state.code_repositories.get(repository_id)
+        if row is not None:
+            self._state.code_repositories[repository_id] = row.__replace__(
+                default_branch=record.default_branch or row.default_branch,
+                last_sha=record.last_sha,
+                fetched_at=record.fetched_at,
+                mirror_bytes=record.mirror_bytes,
+                mirror_error=None,
+            )
+
+    def record_mirror_error(self, repository_id: str, code: str) -> None:
+        row = self._state.code_repositories.get(repository_id)
+        if row is not None:
+            self._state.code_repositories[repository_id] = row.__replace__(mirror_error=code)
 
     def delete(self, repository_id: str) -> None:
         self._state.code_repositories.pop(repository_id, None)

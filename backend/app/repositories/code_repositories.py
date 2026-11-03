@@ -36,6 +36,18 @@ class RepositoryChanges(TypedDict, total=False):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class MirrorRecord:
+    """What a good fetch of a repository's Git mirror leaves on its row."""
+
+    default_branch: str | None
+    """The branch the remote's HEAD named; None keeps the one stored (an explicit branch was
+    fetched, so the remote was not asked)."""
+    last_sha: str
+    fetched_at: str
+    mirror_bytes: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class LinkedBoard:
     """A board's link to a repository, with the board."""
 
@@ -64,6 +76,18 @@ class CodeRepositoryRepository(Protocol):
 
     def record_check(self, repository_id: str, *, status: str, detail: str, now: str) -> None:
         """The outcome of the last access check; ``updated_at`` becomes ``now`` too."""
+        ...
+
+    def record_default_branch(self, repository_id: str, default_branch: str) -> None:
+        """The branch the remote's HEAD names, as an access check found it."""
+        ...
+
+    def record_fetch(self, repository_id: str, record: MirrorRecord) -> None:
+        """A good fetch of the mirror; it clears ``mirror_error``."""
+        ...
+
+    def record_mirror_error(self, repository_id: str, code: str) -> None:
+        """Why the last fetch failed; what the last good fetch recorded stays."""
         ...
 
     def delete(self, repository_id: str) -> None:

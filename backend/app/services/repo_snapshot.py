@@ -2,8 +2,12 @@
 
 The generation path is a single provider call: there is no tool loop and the model cannot reach the
 network. Whatever it may inspect is therefore fetched here, once, with hard caps, and placed in the
-prompt as data. Nothing is cloned into the data directory, no `git` binary runs, and nothing is
-written back to the repository.
+prompt as data. Nothing is written back to a repository.
+
+A repository comes as a tarball of one commit, from one of two providers: ``github`` downloads it
+through the GitHub API, ``git_https`` fetches the latest main branch into the Tralala-managed
+mirror and archives it there (``repo_mirror.py``). Everything after the tarball is shared, so
+filters, caps, order and budget are the same for both.
 
 Two rules shape the code below.
 
@@ -28,6 +32,9 @@ from urllib.parse import urlsplit
 from pydantic import JsonValue
 
 from ..core.errors import ValidationFailure
+from ..repositories.code_repositories import MirrorRecord
+from .repo_mirror import MirrorRequest, MirrorSnapshot
+from .repo_mirror_git import MirrorError
 from .repositories import API_BASE, RepositoryEntry, RepositoryService
 
 if TYPE_CHECKING:  # httpx is imported where a client is built
@@ -338,20 +345,68 @@ def read_snapshot(archive_bytes: bytes, *, budget_chars: int | None = None) -> S
     return {"files": files, "truncated": truncated, "text_bytes": used_bytes, "chars": used_chars}
 
 
+def _log_captured(repository_id: str, sha: str, snapshot: Snapshot, started: float) -> None:
+    logger.info(
+        "repository_snapshot_captured",
+        extra={
+            "repository_id": repository_id,
+            "commit_sha": sha,
+            "files": len(snapshot["files"]),
+            "text_bytes": snapshot["text_bytes"],
+            "truncated": snapshot["truncated"],
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        },
+    )
+
+
+def _contents(snapshot: Snapshot, budget: int | None) -> JsonObject:
+    """The snapshot's part of an entry: the files, and with a budget what it allowed and used."""
+    budgeted: JsonObject = (
+        {}
+        if budget is None
+        else {
+            "budget_chars": budget,
+            "snapshot_chars_included": snapshot["chars"],
+            # Not even the first file fitted in this repository's share.
+            "content_omitted": not snapshot["files"] and snapshot["truncated"],
+        }
+    )
+    return {
+        "file_count": len(snapshot["files"]),
+        "truncated": snapshot["truncated"],
+        **budgeted,
+        "files": [
+            {"path": file["path"], "bytes": file["bytes"], "content": file["content"]}
+            for file in snapshot["files"]
+        ],
+    }
+
+
 class RepositorySource(Protocol):
     """What a snapshot needs of ``RepositoryService``: the board's enabled repositories in link
-    order, and a repository's token."""
+    order, a repository's token, and where a mirror's outcome is recorded."""
 
     def for_board(self, board_id: str) -> list[RepositoryEntry]: ...
 
     def token(self, repository_id: str) -> str | None: ...
 
+    def record_fetch(self, repository_id: str, record: MirrorRecord) -> None: ...
+
+    def record_mirror_error(self, repository_id: str, code: str) -> None: ...
+
+
+class MirrorSource(Protocol):
+    """``MirrorService.read_latest``: fetch the repository's branch, then archive what it holds."""
+
+    def read_latest(self, request: MirrorRequest, token: str | None) -> MirrorSnapshot: ...
+
 
 class RepositorySnapshotService:
     """Turn a board's repository links into the snapshot one generation run may see."""
 
-    def __init__(self, repositories: RepositorySource) -> None:
+    def __init__(self, repositories: RepositorySource, mirror: MirrorSource | None = None) -> None:
         self.repositories = repositories
+        self.mirror = mirror
 
     def for_board(self, board_id: str, *, budget_chars: int | None = None) -> list[JsonObject]:
         """One entry per enabled repository on the board; failures are entries, not exceptions.
@@ -383,6 +438,8 @@ class RepositorySnapshotService:
             "url": row["url"],
             "branch": row.get("branch"),
         }
+        if row["provider"] == "git_https":
+            return self._from_mirror(row, entry, budget)
         try:
             owner, name = RepositoryService.parse(row["url"])
         except ValidationFailure:
@@ -403,38 +460,58 @@ class RepositorySnapshotService:
                 },
             )
             return {**entry, "error": exc.code}
-        logger.info(
-            "repository_snapshot_captured",
-            extra={
-                "repository_id": row["id"],
-                "commit_sha": sha,
-                "files": len(snapshot["files"]),
-                "text_bytes": snapshot["text_bytes"],
-                "truncated": snapshot["truncated"],
-                "duration_ms": int((time.monotonic() - started) * 1000),
-            },
-        )
-        budgeted: JsonObject = (
-            {}
-            if budget is None
-            else {
-                "budget_chars": budget,
-                "snapshot_chars_included": snapshot["chars"],
-                # Not even the first file fitted in this repository's share.
-                "content_omitted": not snapshot["files"] and snapshot["truncated"],
-            }
-        )
+        _log_captured(row["id"], sha, snapshot, started)
+        return {**entry, "commit_sha": sha, **_contents(snapshot, budget)}
+
+    def _from_mirror(
+        self, row: RepositoryEntry, entry: JsonObject, budget: int | None
+    ) -> JsonObject:
+        """The repository's latest main branch through the mirror, with what the run should know
+        of it: the branch, the commit, when it was fetched and whether that fetch failed."""
+        entry = {**entry, "provider": "git_https"}
+        started = time.monotonic()
+        request = MirrorRequest(repository_id=row["id"], url=row["url"], branch=row["branch"])
+        try:
+            latest = self._read_latest(request)
+            snapshot = read_snapshot(latest.archive, budget_chars=budget)
+        except (MirrorError, SnapshotError) as exc:
+            self.repositories.record_mirror_error(row["id"], exc.code)
+            logger.warning(
+                "repository_snapshot_failed",
+                extra={
+                    "repository_id": row["id"],
+                    "provider": "git_https",
+                    "code": exc.code,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+            return {**entry, "error": exc.code}
+        head = latest.head
+        if head.fetch_error is not None:
+            self.repositories.record_mirror_error(row["id"], head.fetch_error)
+        else:
+            record = MirrorRecord(
+                default_branch=head.default_branch,
+                last_sha=latest.commit_sha,
+                fetched_at=head.fetched_at,
+                mirror_bytes=head.mirror_bytes,
+            )
+            self.repositories.record_fetch(row["id"], record)
+        _log_captured(row["id"], latest.commit_sha, snapshot, started)
         return {
             **entry,
-            "commit_sha": sha,
-            "file_count": len(snapshot["files"]),
-            "truncated": snapshot["truncated"],
-            **budgeted,
-            "files": [
-                {"path": file["path"], "bytes": file["bytes"], "content": file["content"]}
-                for file in snapshot["files"]
-            ],
+            "branch": head.branch,
+            "commit_sha": latest.commit_sha,
+            "fetched_at": head.fetched_at,
+            "stale_mirror": head.stale_mirror,
+            **({"fetch_error": head.fetch_error} if head.fetch_error else {}),
+            **_contents(snapshot, budget),
         }
+
+    def _read_latest(self, request: MirrorRequest) -> MirrorSnapshot:
+        if self.mirror is None:
+            raise MirrorError("git_missing")
+        return self.mirror.read_latest(request, self.repositories.token(request.repository_id))
 
     @staticmethod
     def describe() -> str:

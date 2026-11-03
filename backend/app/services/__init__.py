@@ -39,6 +39,9 @@ from .loop_qa import LoopQaService
 from .loops import LoopService
 from .mentions import MentionService
 from .orchestrator import Orchestrator
+from .repo_mirror import MirrorService
+from .repo_mirror_files import DiskMirrorFiles
+from .repo_mirror_git import SubprocessGit
 from .repo_snapshot import RepositorySnapshotService
 from .repositories import RepositoryService
 from .runs import RunService
@@ -68,8 +71,21 @@ class Services:
         self.migrations = MigrationManager(settings, self.registry, self.boards)
         self.role_templates = RoleTemplateService(self.registry_store)
         self.agent = AgentService(settings, self.registry_store)
-        self.repository = RepositoryService(settings, self.registry_store)
-        self.repo_snapshot = RepositorySnapshotService(self.repository)
+        # The Git mirrors of the ``git_https`` repositories: the real git program and the real
+        # files under <data>/repos, the only two things the mirror service does not decide itself.
+        self.repository_mirror = MirrorService(
+            SubprocessGit(settings.repository_git_binary, settings.repos_dir),
+            DiskMirrorFiles(settings.repos_dir, profile=settings.file_profile),
+            hosts=settings.allowed_repository_hosts,
+            max_bytes=settings.repository_mirror_max_bytes,
+            timeout_seconds=settings.repository_fetch_timeout_seconds,
+        )
+        self.repository = RepositoryService(
+            settings, self.registry_store, mirror=self.repository_mirror
+        )
+        self.repo_snapshot = RepositorySnapshotService(
+            self.repository, mirror=self.repository_mirror
+        )
         self.board = BoardService(
             settings,
             self.registry_store,

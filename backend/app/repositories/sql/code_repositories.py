@@ -15,7 +15,12 @@ from ...db.generated.registry import (
     BoardsRow,
     RepositoriesRow,
 )
-from ..code_repositories import REPOSITORY_EDITABLE, LinkedBoard, RepositoryChanges
+from ..code_repositories import (
+    REPOSITORY_EDITABLE,
+    LinkedBoard,
+    MirrorRecord,
+    RepositoryChanges,
+)
 
 _BOARD = "board__"
 
@@ -35,15 +40,25 @@ _URL_TAKEN_BY_OTHER = text("SELECT id FROM repositories WHERE url = :url AND id 
 _ADD_REPOSITORY = text(
     "INSERT INTO repositories"
     " (id, name, provider, url, branch, token_ciphertext, token_hint, enabled, last_checked_at,"
-    "  last_check_status, last_check_detail, created_at, updated_at)"
+    "  last_check_status, last_check_detail, created_at, updated_at, default_branch, last_sha,"
+    "  fetched_at, mirror_bytes, mirror_error)"
     " VALUES (:id, :name, :provider, :url, :branch, :token_ciphertext, :token_hint, :enabled,"
     "         :last_checked_at, :last_check_status, :last_check_detail, :created_at,"
-    "         :updated_at)"
+    "         :updated_at, :default_branch, :last_sha, :fetched_at, :mirror_bytes, :mirror_error)"
 )
 _RECORD_CHECK = text(
     "UPDATE repositories SET last_checked_at = :now, last_check_status = :status,"
     " last_check_detail = :detail, updated_at = :now WHERE id = :id"
 )
+_RECORD_DEFAULT_BRANCH = text(
+    "UPDATE repositories SET default_branch = :default_branch WHERE id = :id"
+)
+_RECORD_FETCH = text(
+    "UPDATE repositories SET default_branch = COALESCE(:default_branch, default_branch),"
+    " last_sha = :last_sha, fetched_at = :fetched_at, mirror_bytes = :mirror_bytes,"
+    " mirror_error = NULL WHERE id = :id"
+)
+_RECORD_MIRROR_ERROR = text("UPDATE repositories SET mirror_error = :code WHERE id = :id")
 _DELETE_REPOSITORY = text("DELETE FROM repositories WHERE id = :id")
 _SEALED_TOKENS = text(
     "SELECT id, token_ciphertext FROM repositories WHERE token_ciphertext IS NOT NULL"
@@ -112,6 +127,11 @@ class SqlCodeRepositoryRepository:
                 "last_check_detail": row.last_check_detail,
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
+                "default_branch": row.default_branch,
+                "last_sha": row.last_sha,
+                "fetched_at": row.fetched_at,
+                "mirror_bytes": row.mirror_bytes,
+                "mirror_error": row.mirror_error,
             },
         )
 
@@ -126,6 +146,25 @@ class SqlCodeRepositoryRepository:
     def record_check(self, repository_id: str, *, status: str, detail: str, now: str) -> None:
         parameters = {"now": now, "status": status, "detail": detail, "id": repository_id}
         self._connection.execute(_RECORD_CHECK, parameters)
+
+    def record_default_branch(self, repository_id: str, default_branch: str) -> None:
+        parameters = {"default_branch": default_branch, "id": repository_id}
+        self._connection.execute(_RECORD_DEFAULT_BRANCH, parameters)
+
+    def record_fetch(self, repository_id: str, record: MirrorRecord) -> None:
+        self._connection.execute(
+            _RECORD_FETCH,
+            {
+                "default_branch": record.default_branch,
+                "last_sha": record.last_sha,
+                "fetched_at": record.fetched_at,
+                "mirror_bytes": record.mirror_bytes,
+                "id": repository_id,
+            },
+        )
+
+    def record_mirror_error(self, repository_id: str, code: str) -> None:
+        self._connection.execute(_RECORD_MIRROR_ERROR, {"code": code, "id": repository_id})
 
     def delete(self, repository_id: str) -> None:
         self._connection.execute(_DELETE_REPOSITORY, {"id": repository_id})

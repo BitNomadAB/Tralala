@@ -1,5 +1,5 @@
 """RepositoryService's rules on an in-memory registry: the list, board links, edits, the GitHub
-check and resealing.
+check, resealing, and the Git-over-HTTPS provider (its URL rules and its ls-remote check).
 
 The service runs its real code; only the repositories, the unit of work, the clock, the id source
 and the GitHub call are replaced. Tokens are sealed with the real ``core.secrets``, so a test can
@@ -18,9 +18,13 @@ from app.core.config import Settings
 from app.core.context import ActorContext, scopes_for_role
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure
 from app.core.secrets import open_secret, open_secret_state, seal_secret
+from app.repositories.code_repositories import MirrorRecord
 from app.repositories.registry import RegistryUnitOfWork
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
+from app.services.repo_mirror import MirrorService
+from app.services.repo_mirror_git import ERROR_TEXT, authorization_header
 from app.services.repositories import GitHubGet, JsonObject, RepositoryService
+from tests.unit.fakes.mirror import FakeGit, FakeMirrorFiles, FakeRemote
 from tests.unit.fakes.registry import (
     CREATED,
     FakeRegistryUnitOfWork,
@@ -211,7 +215,12 @@ def test_a_new_repository_is_named_after_its_url_and_its_token_is_sealed(
     )
     assert (entry["has_token"], entry["boards"]) == (True, [])
     assert events(caplog.records) == [
-        {"event": "repository_created", "repository_id": row.id, "has_token": True}
+        {
+            "event": "repository_created",
+            "repository_id": row.id,
+            "provider": "github",
+            "has_token": True,
+        }
     ]
     assert "ghp-tool-2222" not in json.dumps(lines(caplog.records))
 
@@ -408,3 +417,186 @@ def test_tokens_sealed_with_the_previous_secret_move_to_the_current_one(
     assert repos.state.code_repositories["alpha-repo"].updated_at == CREATED
     assert "repository alpha-repo has a token that no configured secret can open" in caplog.text
     assert repos.service.reseal_tokens() == 0
+
+
+# --- Git over HTTPS (the mirror provider) --------------------------------------------------------
+
+MIRROR_URL = "https://git.example.com/team/app.git"
+MIRROR_SHA = "c" * 40
+
+
+@dataclass(slots=True)
+class MirroredRepositories:
+    repos: Repositories
+    remote: FakeRemote
+    git: FakeGit
+
+
+def make_mirrored(settings: Settings, *, mirror: bool = True) -> MirroredRepositories:
+    """``make_repositories`` with ``git.example.com`` allowed and a mirror over the fake git."""
+    allowed = settings.model_copy(update={"repository_hosts": "git.example.com, GIT.example.net "})
+    repos = make_repositories(allowed)
+    remote = FakeRemote(head="master", token=TOKEN)
+    remote.push("master", MIRROR_SHA, {"README.md": b"# App\n"})
+    files = FakeMirrorFiles()
+    git = FakeGit(files, {MIRROR_URL: remote})
+    probe = MirrorService(
+        git,
+        files,
+        hosts=allowed.allowed_repository_hosts,
+        max_bytes=10_000,
+        timeout_seconds=120,
+        clock=lambda: NOW,
+    )
+    repos.service = RepositoryService(
+        allowed,
+        repos.store,
+        clock=lambda: NOW,
+        new_id=Ids(),
+        github_get=repos.github,
+        mirror=probe if mirror else None,
+    )
+    return MirroredRepositories(repos, remote, git)
+
+
+def _add_mirrored(made: MirroredRepositories, **fields: str | None) -> str:
+    payload = RepositoryCreate(provider="git_https", url=MIRROR_URL, token=TOKEN)
+    entry = made.repos.service.create(ADMIN, payload.model_copy(update=fields))
+    return entry["id"]
+
+
+def test_a_mirrored_repository_takes_any_allowed_https_host(settings: Settings) -> None:
+    made = make_mirrored(settings)
+    entry = made.repos.service.create(
+        ADMIN, RepositoryCreate(provider="git_https", url=" https://git.example.net/x/tool.git ")
+    )
+    row = made.repos.state.code_repositories[entry["id"]]
+    assert (row.provider, row.name, row.url, row.default_branch) == (
+        "git_https",
+        "tool",
+        "https://git.example.net/x/tool.git",
+        None,
+    )
+    assert (entry["provider"], entry["default_branch"], entry.get("mirror_error")) == (
+        "git_https",
+        None,
+        None,
+    )
+
+
+def test_a_host_outside_the_allowlist_is_refused_when_the_repository_is_added(
+    settings: Settings,
+) -> None:
+    made = make_mirrored(settings)
+    with pytest.raises(ValidationFailure) as caught:
+        made.repos.service.create(
+            ADMIN, RepositoryCreate(provider="git_https", url="https://code.example.org/a/b.git")
+        )
+    assert caught.value.code == "host_not_allowed"
+    assert caught.value.details == {
+        "field": "url",
+        "allowed": ["git.example.com", "git.example.net"],
+    }
+    assert set(made.repos.state.code_repositories) == {"app", "lib", "alpha-repo"}
+    assert made.git.calls == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://git.example.com/team/app.git",
+        "https://user:secret@git.example.com/team/app.git",
+        "https://git.example.com/",
+    ],
+)
+def test_a_mirrored_url_must_be_plain_https(settings: Settings, url: str) -> None:
+    made = make_mirrored(settings)
+    with pytest.raises(ValidationFailure) as caught:
+        made.repos.service.create(ADMIN, RepositoryCreate(provider="git_https", url=url))
+    assert (caught.value.code, caught.value.details) == ("validation_failed", {"field": "url"})
+
+
+def test_a_mirrored_branch_and_a_new_url_are_held_to_the_same_rules(settings: Settings) -> None:
+    made = make_mirrored(settings)
+    with pytest.raises(ValidationFailure) as branch:
+        _add_mirrored(made, branch="--upload-pack=x")
+    assert branch.value.details == {"field": "branch"}
+    repository_id = _add_mirrored(made, branch="release/1.0")
+    with pytest.raises(ValidationFailure) as moved:
+        made.repos.service.update(
+            ADMIN, repository_id, RepositoryUpdate(url="https://code.example.org/team/app.git")
+        )
+    assert moved.value.code == "host_not_allowed"
+    with pytest.raises(ValidationFailure):
+        made.repos.service.update(ADMIN, repository_id, RepositoryUpdate(branch="a..b"))
+    made.repos.service.update(ADMIN, repository_id, RepositoryUpdate(branch="main"))
+    assert made.repos.state.code_repositories[repository_id].branch == "main"
+
+
+def test_the_mirror_check_asks_the_remote_only_and_stores_the_default_branch(
+    settings: Settings,
+) -> None:
+    made = make_mirrored(settings)
+    repository_id = _add_mirrored(made)
+    result = made.repos.service.check(ADMIN, repository_id)
+    assert result == {
+        "status": "ok",
+        "detail": "Readable; the main branch is 'master'",
+        "default_branch": "master",
+        "private": None,
+        "size_kb": None,
+        "checked_at": NOW,
+    }
+    assert made.git.commands == ["ls-remote"]
+    assert made.git.calls[0].env["GIT_CONFIG_VALUE_0"] == authorization_header(TOKEN)
+    row = made.repos.state.code_repositories[repository_id]
+    assert (row.default_branch, row.last_check_status, row.last_checked_at) == ("master", "ok", NOW)
+    assert made.repos.github.calls == []
+
+
+def test_the_mirror_check_names_a_missing_branch_and_a_refusal(settings: Settings) -> None:
+    made = make_mirrored(settings)
+    repository_id = _add_mirrored(made, branch="feature")
+    missing = made.repos.service.check(ADMIN, repository_id)
+    assert (missing["status"], missing["detail"], missing["default_branch"]) == (
+        "branch_missing",
+        "Branch 'feature' does not exist",
+        "master",
+    )
+    made.remote.token = "another-token"
+    refused = made.repos.service.check(ADMIN, repository_id)
+    assert (refused["status"], refused["detail"], refused["default_branch"]) == (
+        "auth_failed",
+        ERROR_TEXT["auth_failed"],
+        None,
+    )
+    row = made.repos.state.code_repositories[repository_id]
+    assert (row.default_branch, row.last_check_status) == ("master", "auth_failed")
+
+
+def test_without_git_the_mirror_check_says_so(settings: Settings) -> None:
+    made = make_mirrored(settings, mirror=False)
+    repository_id = _add_mirrored(made)
+    result = made.repos.service.check(ADMIN, repository_id)
+    assert (result["status"], result["detail"]) == ("git_missing", ERROR_TEXT["git_missing"])
+
+
+def test_a_fetch_and_a_failure_are_recorded_on_the_row(settings: Settings) -> None:
+    made = make_mirrored(settings)
+    repository_id = _add_mirrored(made)
+    record = MirrorRecord(
+        default_branch="master", last_sha=MIRROR_SHA, fetched_at=NOW, mirror_bytes=1_000
+    )
+    made.repos.service.record_fetch(repository_id, record)
+    made.repos.service.record_mirror_error(repository_id, "timeout")
+    entry = made.repos.service.get(repository_id)
+    assert (
+        entry.get("default_branch"),
+        entry.get("last_sha"),
+        entry.get("fetched_at"),
+        entry.get("mirror_bytes"),
+        entry.get("mirror_error"),
+    ) == ("master", MIRROR_SHA, NOW, 1_000, "timeout")
+    made.repos.service.record_fetch(repository_id, record.__replace__(default_branch=None))
+    row = made.repos.state.code_repositories[repository_id]
+    assert (row.default_branch, row.mirror_error) == ("master", None)

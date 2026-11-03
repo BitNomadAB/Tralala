@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     # characters (about 100 k tokens by default). The documents come first; the snapshot gets the
     # rest, cut to fit.
     generation_context_chars: int = 400_000
+    # Git over HTTPS (the repository provider ``git_https``): the host names a mirror may fetch
+    # from, comma-separated. A repository on any other host is refused when it is added and again
+    # before every fetch.
+    repository_hosts: str = "github.com"
+    # A mirror still larger than this after its hygiene is removed; the next run clones it again.
+    repository_mirror_max_bytes: int = 1024 * 1024 * 1024
+    # How long one git command (ls-remote, clone, fetch, archive or a hygiene step) may take.
+    repository_fetch_timeout_seconds: int = 120
+    # The git program the mirror runs; a bare name is looked up on PATH.
+    repository_git_binary: str = "git"
     # A file cannot exceed the request body that carries it, so this tracks max_request_bytes
     # rather than promising a size the request ceiling would refuse.
     attachment_max_bytes: int = 8 * 1024 * 1024
@@ -107,6 +117,18 @@ class Settings(BaseSettings):
     @property
     def exports_dir(self) -> Path:
         return self.data_dir / "exports"
+
+    @property
+    def repos_dir(self) -> Path:
+        """Where the Git mirrors are: a cache that backups leave out and a run rebuilds."""
+        return self.data_dir / "repos"
+
+    @property
+    def allowed_repository_hosts(self) -> frozenset[str]:
+        """``repository_hosts`` as lower-case host names, without blanks."""
+        return frozenset(
+            host.strip().lower() for host in self.repository_hosts.split(",") if host.strip()
+        )
 
     @property
     def list_names(self) -> list[str]:

@@ -213,6 +213,9 @@ jobs:
           [[ -n "$default" && "$default" != *203.0.113.7* ]]
       - name: Build the backend image
         run: docker build -t tralala-backend:ci ./backend
+      # A git_https repository is read through a mirror the backend keeps with git.
+      - name: The backend image has git
+        run: docker run --rm tralala-backend:ci git --version
       # A local model preset points at host.docker.internal; the mapping is what makes that name
       # reach the host on Docker for Linux.
       - name: The backend reaches a model on the host
