@@ -1,17 +1,17 @@
-import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Copy, PlugZap, Trash2, Wand2 } from "lucide-react";
+import { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
-import { useAgent, useRoleTemplates } from "@/lib/queries";
 import { PROVIDER_PRESETS, presetById, presetRequirements } from "@/lib/providers";
-import { formatDateTime } from "@/lib/utils";
+import { useAgent, useRoleTemplates } from "@/lib/queries";
 import type { Agent, AgentTestResult, ConnectionType } from "@/lib/types";
+import { formatDateTime } from "@/lib/utils";
 
 const ADJECTIVES = [
   "Curious",
@@ -55,7 +55,8 @@ export function AgentEditorPage() {
   const roles = rolesQuery.data ?? [];
 
   const [hydratedId, setHydratedId] = useState<string | null>(isNew ? "new" : null);
-  const [name, setName] = useState("");
+  // A fresh agent starts with a generated name; an existing one is filled in below once it loads.
+  const [name, setName] = useState(() => (isNew ? randomName() : ""));
   const [description, setDescription] = useState("");
   const [roleTemplateId, setRoleTemplateId] = useState("");
   const [override, setOverride] = useState("");
@@ -76,33 +77,28 @@ export function AgentEditorPage() {
   const testModels = testResult?.models ?? [];
   const [confirming, setConfirming] = useState(false);
 
-  useEffect(() => {
-    const agent: Agent | undefined = agentQuery.data;
-    if (!agent || hydratedId === agent.id) return;
-    setName(agent.name);
-    setDescription(agent.description);
-    setRoleTemplateId(agent.role_template_id ?? "");
-    setConnectionType(agent.connection_type);
-    setBaseUrl(agent.base_url);
+  // Fill the form from the loaded agent once per agent, while rendering rather than in an effect, so
+  // the first paint already shows it (React: "adjusting state when a prop changes").
+  const loaded: Agent | undefined = agentQuery.data;
+  if (loaded && hydratedId !== loaded.id) {
+    setName(loaded.name);
+    setDescription(loaded.description);
+    setRoleTemplateId(loaded.role_template_id ?? "");
+    setConnectionType(loaded.connection_type);
+    setBaseUrl(loaded.base_url);
     setProviderId(
       PROVIDER_PRESETS.find(
-        (preset) => preset.baseUrl && agent.base_url.startsWith(preset.baseUrl),
+        (preset) => preset.baseUrl && loaded.base_url.startsWith(preset.baseUrl),
       )?.id ?? "custom",
     );
-    setModel(agent.model ?? "");
-    setNoKey(!agent.has_api_key);
-    setTemperature(agent.temperature === null ? "" : String(agent.temperature));
-    setMaxTokens(agent.max_output_tokens === null ? "" : String(agent.max_output_tokens));
-    setTimeoutSeconds(String(agent.timeout_seconds));
-    setEnabled(agent.enabled);
-    setHydratedId(agent.id);
-  }, [agentQuery.data, hydratedId]);
-
-  useEffect(() => {
-    if (isNew && !name) setName(randomName());
-    // Only seed a default name once for a fresh agent.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNew]);
+    setModel(loaded.model ?? "");
+    setNoKey(!loaded.has_api_key);
+    setTemperature(loaded.temperature === null ? "" : String(loaded.temperature));
+    setMaxTokens(loaded.max_output_tokens === null ? "" : String(loaded.max_output_tokens));
+    setTimeoutSeconds(String(loaded.timeout_seconds));
+    setEnabled(loaded.enabled);
+    setHydratedId(loaded.id);
+  }
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["agents"] });
 
@@ -132,20 +128,21 @@ export function AgentEditorPage() {
           ? { api_key: apiKey.trim() }
           : {};
       const body = { ...payload, ...credentials };
-      return isNew ? api.createAgent(body) : api.updateAgent(String(agentId), body);
+      return isNew ? api.createAgent(body) : api.updateAgent(agentId, body);
     },
     onSuccess: (agent) => {
-      invalidate();
+      void invalidate();
       queryClient.setQueryData(["agent", agent.id], agent);
       toast.push({ title: "Agent saved", variant: "success" });
-      navigate("/settings");
+      void navigate("/settings");
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not save agent",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const testMutation = useMutation({
@@ -162,55 +159,58 @@ export function AgentEditorPage() {
       // first would put a configuration in the registry that nobody has proved works.
       return isNew
         ? api.probeAgent({ ...connection, timeout_seconds: Number(timeoutSeconds) || 30 })
-        : api.testAgent(String(agentId), connection);
+        : api.testAgent(agentId, connection);
     },
     onSuccess: (result) => {
       setTestResult(result);
-      invalidate();
-      queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+      void invalidate();
+      void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
       toast.push({
         title: result.ok ? "Connection works" : "Connection failed",
         description: result.message,
         variant: result.ok ? "success" : "error",
       });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Test failed",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const duplicateMutation = useMutation({
     mutationFn: () => api.duplicateAgent(String(agentId)),
     onSuccess: (agent) => {
-      invalidate();
+      void invalidate();
       toast.push({ title: "Agent duplicated", variant: "success" });
-      navigate(`/settings/agents/${agent.id}`);
+      void navigate(`/settings/agents/${agent.id}`);
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not duplicate agent",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteAgent(String(agentId)),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       setConfirming(false);
       toast.push({ title: "Agent deleted", variant: "success" });
-      navigate("/settings");
+      void navigate("/settings");
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not delete agent",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   if (!isNew && agentQuery.isLoading) {
@@ -262,7 +262,9 @@ export function AgentEditorPage() {
       <div>
         <button
           type="button"
-          onClick={() => navigate("/settings")}
+          onClick={() => {
+            void navigate("/settings");
+          }}
           className="inline-flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
         >
           <ArrowLeft size={14} /> Settings
@@ -482,7 +484,7 @@ export function AgentEditorPage() {
             htmlFor="agent-api-key"
             hint={
               hasStoredKey
-                ? `A key is stored (${stored?.api_key_hint}). Leave empty to keep it.`
+                ? `A key is stored${stored?.api_key_hint ? ` (${stored.api_key_hint})` : ""}. Leave empty to keep it.`
                 : connectionType === "a2a"
                   ? "Only if the agent card requires one."
                   : requirements.apiKey === "required"
@@ -632,7 +634,13 @@ export function AgentEditorPage() {
               <Copy size={14} /> Duplicate
             </Button>
           ) : null}
-          <Button type="button" variant="ghost" onClick={() => navigate("/settings")}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              void navigate("/settings");
+            }}
+          >
             Cancel
           </Button>
           <Button type="submit" disabled={!canSave || saveMutation.isPending}>

@@ -1,15 +1,5 @@
 import { KeyRound, Terminal } from "lucide-react";
-
-const REPOSITORY_PATTERN = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i;
-
-/** Neutral placeholder: the guide never carries an example repository of its own. */
-const PLACEHOLDER = "your-org/your-repo";
-
-/** `owner/repository` from the URL field, so the guide can name the exact pages. */
-export function repositorySlug(url: string): string {
-  const match = REPOSITORY_PATTERN.exec(url.trim());
-  return match ? `${match[1]}/${match[2]}` : PLACEHOLDER;
-}
+import { REPOSITORY_SLUG_PLACEHOLDER, repositorySlug } from "@/lib/repositorySlug";
 
 function Code({ children }: { children: string }) {
   return (
@@ -21,7 +11,7 @@ function Code({ children }: { children: string }) {
 
 export function RepositoryTokenGuide({ url }: { url: string }) {
   const slug = repositorySlug(url);
-  const hasRepository = slug !== PLACEHOLDER;
+  const hasRepository = slug !== REPOSITORY_SLUG_PLACEHOLDER;
   const keyName = slug.replace("/", "-").toLowerCase();
 
   return (

@@ -1,19 +1,17 @@
+import { useMutation, useQueryClient, useQuery  } from "@tanstack/react-query";
+import { AlertTriangle, ArrowRight, Bot, GitBranch, History, Pencil, Plus } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, Bot, GitBranch, History, Pencil, Plus } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { ApiError, api } from "@/lib/api";
-import { keys, useAgents, useBoard, useLoops } from "@/lib/queries";
-import { api as apiClient } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
-import type { Loop, LoopStage } from "@/lib/types";
+import { useToast } from "@/components/ui/useToast";
 import { AgentPicker } from "@/features/boards/AgentPicker";
 import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
+import { ApiError, api, api as apiClient  } from "@/lib/api";
+import { keys, useAgents, useBoard, useLoops } from "@/lib/queries";
+import type { Loop, LoopStage } from "@/lib/types";
 
 const STAGE_TONES: Record<LoopStage, BadgeTone> = {
   draft: "neutral",
@@ -57,32 +55,34 @@ export function BoardLoopsPage() {
       setCreating(false);
       setName("");
       setGoal("");
-      queryClient.invalidateQueries({ queryKey: ["loops", boardId] });
-      queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
+      void queryClient.invalidateQueries({ queryKey: ["loops", boardId] });
+      void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
       toast.push({ title: "Loop created", variant: "success" });
-      navigate(`/boards/${boardId}/loops/${loop.id}`);
+      void navigate(`/boards/${boardId}/loops/${loop.id}`);
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not create the Loop",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const retryMigration = useMutation({
     mutationFn: () => api.retryMigration(boardId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
-      queryClient.invalidateQueries({ queryKey: ["loops", boardId] });
+      void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
+      void queryClient.invalidateQueries({ queryKey: ["loops", boardId] });
       toast.push({ title: "Migration retried", variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Migration still fails",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const saveBoard = useMutation({
@@ -95,18 +95,19 @@ export function BoardLoopsPage() {
       }),
     onSuccess: () => {
       setEditing(false);
-      queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
-      queryClient.invalidateQueries({ queryKey: ["boards"] });
-      queryClient.invalidateQueries({ queryKey: ["repositories"] });
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
+      void queryClient.invalidateQueries({ queryKey: ["boards"] });
+      void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+      void queryClient.invalidateQueries({ queryKey: ["agents"] });
       toast.push({ title: "Board updated", variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not update the board",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   if (boardQuery.isLoading) {
@@ -148,8 +149,8 @@ export function BoardLoopsPage() {
             {finished.length} completed
           </p>
           <BoardContext
-            agentIds={board.agent_ids ?? []}
-            repositoryIds={board.repository_ids ?? []}
+            agentIds={board.agent_ids}
+            repositoryIds={board.repository_ids}
             agents={agentsQuery.data ?? []}
             repositories={repositoriesQuery.data ?? []}
           />
@@ -161,8 +162,8 @@ export function BoardLoopsPage() {
             onClick={() => {
               setEditName(board.name);
               setEditDescription(board.description);
-              setEditRepositoryIds(board.repository_ids ?? []);
-              setEditAgentIds(board.agent_ids ?? []);
+              setEditRepositoryIds(board.repository_ids);
+              setEditAgentIds(board.agent_ids);
               setEditing(true);
             }}
           >
@@ -397,8 +398,8 @@ function BoardContext({
 }: {
   agentIds: string[];
   repositoryIds: string[];
-  agents: Array<{ id: string; name: string }>;
-  repositories: Array<{ id: string; name: string }>;
+  agents: { id: string; name: string }[];
+  repositories: { id: string; name: string }[];
 }) {
   const agentNames = agentIds
     .map((id) => agents.find((agent) => agent.id === id)?.name)

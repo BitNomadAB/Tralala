@@ -111,7 +111,8 @@ Frontend (run from `frontend/`):
 ```powershell
 pnpm test           # vitest unit/component tests
 pnpm typecheck      # tsc --noEmit
-pnpm build          # production build (includes typecheck)
+pnpm lint           # ESLint (eslint.config.js), every rule an error, zero warnings
+pnpm build          # production build (includes typecheck and lint)
 pnpm dev            # dev server on :5173, proxies /api to :8000
 pnpm test:e2e       # Playwright journeys against an isolated stack (:8077 + :5273)
 pnpm lint:md        # markdownlint on README.md, AGENTS.md, docs/ and public_docs/
@@ -131,6 +132,9 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   `.editorconfig`). Backend code writes text with `newline=""` or writes bytes, so a file written on
   Windows is byte-identical to one written on Linux; `tests/test_text_files.py` enforces both.
 - TypeScript: strict, no `any` unless justified, semantic CSS variables from `src/index.css`.
+- ESLint (`frontend/eslint.config.js`): typed typescript-eslint, React hooks, jsx-a11y and import
+  rules, every one an error. A rule is switched off or configured only in that file, with its reason
+  on the line above; there is no inline `eslint-disable`.
 - API: JSON envelope `{success, data, request_id, meta}`; errors `{success:false, error, request_id}`.
   Unknown request fields are rejected (`extra="forbid"`). Timestamps are ISO 8601 UTC.
 - Frontend state: TanStack Query for server state; no global store for board data.
@@ -144,7 +148,7 @@ A story is complete only when:
   database at the previous revision, the explicit development reset and failure recovery
   (pre-Loop data is deliberately not migrated),
 - the smallest relevant test command passes,
-- `ruff check` (backend) and `tsc --noEmit` (frontend) pass,
+- `ruff check` (backend), `tsc --noEmit` and `pnpm lint` (frontend) pass,
 - the production frontend build succeeds for UI changes,
 - API-level tests exist for behavioural changes,
 - user-journey changes extend `frontend/e2e/*.spec.ts`,
@@ -184,6 +188,8 @@ log (`docs/decisions/0009`, untracked).
 - A contribution that cannot be covered by a signed CLA must not be merged — under this licence a
   merged pull request can make the code unsellable.
 - A dependency under a copyleft licence is a decision, not a detail: record it in the decision log.
-  The current set is MIT, ISC, BSD, 0BSD, Apache-2.0, PSF, MIT-0, MPL-2.0 and CC-BY-4.0 (the last
-  only for `caniuse-lite`, which is data with an attribution notice and no code). Nothing copyleft.
+  The current set is MIT, ISC, BSD, 0BSD, Apache-2.0, PSF, MIT-0, MPL-2.0, BlueOak-1.0.0 (only
+  `minimatch`, used by the lint tooling) and two data licences: CC-BY-4.0 (only `caniuse-lite`, data
+  with an attribution notice and no code) and CC0-1.0 (only `language-subtag-registry`, the IANA
+  language list the accessibility linter reads). Nothing copyleft.
 - Never publish signed contributor agreements in the repository.

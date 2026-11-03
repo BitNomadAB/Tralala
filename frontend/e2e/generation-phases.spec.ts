@@ -1,6 +1,6 @@
 import http from "node:http";
 import { expect, test } from "playwright/test";
-import { boardIdFromUrl, boardWithLoop, csrfToken, login, uniqueName } from "./support";
+import { boardWithLoop, csrfToken, login, uniqueName } from "./support";
 
 /**
  * A generation run is one background call, so the only honest way to test the progress panel is a
@@ -47,7 +47,7 @@ test.beforeAll(async () => {
       let body = "";
       request.on("data", (chunk) => (body += chunk));
       request.on("end", () => {
-        let model = "";
+        let model: string;
         try {
           model = String(JSON.parse(body || "{}").model ?? "");
         } catch {
@@ -93,9 +93,6 @@ test.describe("generation progress", () => {
     await login(page);
     const boardName = uniqueName("Progress journey");
     await boardWithLoop(page, boardName, "Session expiry");
-    const boardId = boardIdFromUrl(page);
-    const loopId = page.url().split("/loops/")[1];
-    const loopBase = `/api/v1/boards/${boardId}/loops/${loopId}`;
     const headers = { "X-CSRF-Token": await csrfToken(page) };
 
     const templates = (await (await page.request.get("/api/v1/role-templates")).json()).data;
@@ -163,8 +160,6 @@ test.describe("generation progress", () => {
     await login(page);
     const boardName = uniqueName("Failure journey");
     await boardWithLoop(page, boardName, "Session expiry");
-    const boardId = boardIdFromUrl(page);
-    const loopId = page.url().split("/loops/")[1];
     const headers = { "X-CSRF-Token": await csrfToken(page) };
 
     const templates = (await (await page.request.get("/api/v1/role-templates")).json()).data;

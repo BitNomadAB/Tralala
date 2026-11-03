@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, Bot, CheckSquare, Circle, CircleCheck, Send, User } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Badge, LabelChip } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
+import { useCardEvents } from "@/features/cards/useCardEvents";
 import { ApiError, api } from "@/lib/api";
-import { keys, useActivity, useLabels } from "@/lib/queries";
 import { renderMarkdown } from "@/lib/markdown";
 import { activeMention, applyMention, matchingAgents, type MentionToken } from "@/lib/mentions";
-import { formatDateTime, fromDateInputValue, toDateInputValue } from "@/lib/utils";
+import { keys, useActivity, useLabels } from "@/lib/queries";
 import {
   PRIORITIES,
   type AgentDirectoryEntry,
@@ -19,7 +19,7 @@ import {
   type MentionJob,
   type Priority,
 } from "@/lib/types";
-import { useCardEvents } from "@/features/cards/useCardEvents";
+import { formatDateTime, fromDateInputValue, toDateInputValue } from "@/lib/utils";
 import { useCardTools } from "@/webmcp/useWebMcp";
 
 const MENTION_TONES: Record<MentionJob["status"], "neutral" | "brand" | "success" | "danger"> = {
@@ -77,8 +77,8 @@ export function CardDialog({
   const [checklistTitle, setChecklistTitle] = useState("");
   const [itemText, setItemText] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    if (!card || draft) return;
+  // The draft starts from the card once it has loaded; set while rendering, not in an effect.
+  if (card && !draft) {
     setDraft({
       title: card.title,
       description: card.description,
@@ -86,14 +86,14 @@ export function CardDialog({
       due: toDateInputValue(card.due_at),
       labels: card.labels.map((label) => label.id),
     });
-  }, [card, draft]);
+  }
 
   const refresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: keys.card(boardId, loopId, cardId) });
-    queryClient.invalidateQueries({ queryKey: keys.loopCardsPrefix(boardId, loopId) });
-    queryClient.invalidateQueries({ queryKey: keys.activity(boardId, cardId) });
-    queryClient.invalidateQueries({ queryKey: keys.activity(boardId) });
-    queryClient.invalidateQueries({ queryKey: keys.mentions(boardId, loopId, cardId) });
+    void queryClient.invalidateQueries({ queryKey: keys.card(boardId, loopId, cardId) });
+    void queryClient.invalidateQueries({ queryKey: keys.loopCardsPrefix(boardId, loopId) });
+    void queryClient.invalidateQueries({ queryKey: keys.activity(boardId, cardId) });
+    void queryClient.invalidateQueries({ queryKey: keys.activity(boardId) });
+    void queryClient.invalidateQueries({ queryKey: keys.mentions(boardId, loopId, cardId) });
   }, [queryClient, boardId, loopId, cardId]);
 
   const live = useCardEvents(boardId, loopId, cardId, refresh);
@@ -634,7 +634,7 @@ export function CardDialog({
                     onChange={(event) => {
                       const value = event.target.value;
                       setComment(value);
-                      setMentionToken(activeMention(value, event.target.selectionStart ?? 0));
+                      setMentionToken(activeMention(value, event.target.selectionStart));
                       setMentionIndex(0);
                     }}
                     onKeyDown={(event) => {

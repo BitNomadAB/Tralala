@@ -1,14 +1,14 @@
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Search } from "lucide-react";
+import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import { keys, useBoard, useHistory } from "@/lib/queries";
 import { renderMarkdown } from "@/lib/markdown";
+import { keys, useBoard, useHistory } from "@/lib/queries";
 import type { HistoryDetail, HistorySummary } from "@/lib/types";
 
 export function HistoryPage() {
@@ -75,9 +75,7 @@ export function HistoryPage() {
 
       <p className="text-xs text-[var(--muted-foreground)]">
         {historyQuery.data?.meta?.total ?? items.length} record(s) ·{" "}
-        {String(
-          (historyQuery.data?.meta as { engine?: string } | undefined)?.engine ?? "like",
-        )}{" "}
+        {(historyQuery.data?.meta as { engine?: string } | undefined)?.engine ?? "like"}{" "}
         search
       </p>
 
@@ -144,7 +142,7 @@ function HistoryRecordDialog({
   });
   const record: HistoryDetail | undefined = detail.data;
   const documents = (
-    (record?.envelope.documents as Array<{ kind: string; content: string }> | undefined) ?? []
+    (record?.envelope.documents as { kind: string; content: string }[] | undefined) ?? []
   ).filter((document) => document.content);
 
   return (
@@ -152,7 +150,10 @@ function HistoryRecordDialog({
       <DialogContent
         title={record ? record.loop_name : "History record"}
         description={
-          record?.label || "Read-only snapshot captured when the Loop was completed."
+          // Only a legacy import carries a label; every other record has "" and gets this sentence.
+          record && record.label !== ""
+            ? record.label
+            : "Read-only snapshot captured when the Loop was completed."
         }
         className="w-[min(920px,96vw)]"
       >

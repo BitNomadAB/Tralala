@@ -1,12 +1,12 @@
-import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, MessagesSquare, Plus, Send } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { keys, useAgents } from "@/lib/queries";
 import { formatDateTime } from "@/lib/utils";
@@ -51,16 +51,16 @@ export function DiscussionsPage() {
   const dialogBoardEntry = boards.find((entry) => entry.board_id === dialogBoardId) ?? null;
 
   const invalidate = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: keys.discussions(activeBoard) });
+    void queryClient.invalidateQueries({ queryKey: keys.discussions(activeBoard) });
     if (selectedId) {
-      queryClient.invalidateQueries({ queryKey: ["discussion", activeBoard, selectedId] });
+      void queryClient.invalidateQueries({ queryKey: ["discussion", activeBoard, selectedId] });
     }
   }, [queryClient, activeBoard, selectedId]);
 
   const backToBoards = useCallback(() => {
     // The overview is one query for every board; refresh it when the list becomes visible instead
     // of on every thread event.
-    queryClient.invalidateQueries({ queryKey: keys.discussionBoards });
+    void queryClient.invalidateQueries({ queryKey: keys.discussionBoards });
     setBoardId("");
     setSelectedId(null);
   }, [queryClient]);
@@ -105,19 +105,20 @@ export function DiscussionsPage() {
       setParticipants([]);
       // The dialog can name a board other than the one being viewed, so follow the thread there.
       const target = dialogBoardId;
-      queryClient.invalidateQueries({ queryKey: keys.discussions(target) });
-      queryClient.invalidateQueries({ queryKey: ["discussion-tickets", target] });
-      queryClient.invalidateQueries({ queryKey: keys.discussionBoards });
+      void queryClient.invalidateQueries({ queryKey: keys.discussions(target) });
+      void queryClient.invalidateQueries({ queryKey: ["discussion-tickets", target] });
+      void queryClient.invalidateQueries({ queryKey: keys.discussionBoards });
       setBoardId(target);
       setSelectedId(discussion.id);
       toast.push({ title: "Discussion created", variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not create discussion",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const reviewMutation = useMutation({
@@ -129,12 +130,13 @@ export function DiscussionsPage() {
       invalidate();
       toast.push({ title: `Discussion ${discussion.status}`, variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not record the decision",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const replyMutation = useMutation({
@@ -163,12 +165,13 @@ export function DiscussionsPage() {
         });
       }
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not post message",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const boardTickets = useMemo(() => ticketsQuery.data ?? [], [ticketsQuery.data]);
@@ -322,7 +325,7 @@ export function DiscussionsPage() {
                 </h2>
                 <p className="text-[11px] text-[var(--muted-foreground)]">
                   {selected.mode} · created by {selected.created_by_name} ·{" "}
-                  {selected.participants?.length ?? selected.participant_count} snapshot(s)
+                  {selected.participants.length} snapshot(s)
                 </p>
                 {selected.loop_id ? (
                   <p className="mt-1 text-[11px]">
@@ -339,7 +342,7 @@ export function DiscussionsPage() {
                   </p>
                 ) : null}
                 <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
-                  {(selected.participants ?? [])
+                  {selected.participants
                     .map(
                       (participant) =>
                         `${participant.display_name} (${participant.role_template_name ?? "no role"})`,
@@ -352,7 +355,7 @@ export function DiscussionsPage() {
                     variant="outline"
                     disabled={
                       ["approved", "vetoed", "cancelled"].includes(selected.status) ||
-                      ["running", "paused"].includes(selected.run_state ?? "idle")
+                      ["running", "paused"].includes(selected.run_state)
                     }
                     onClick={() => setReviewing({ decision: "approve" })}
                   >
@@ -363,7 +366,7 @@ export function DiscussionsPage() {
                     variant="outline"
                     disabled={
                       ["approved", "vetoed", "cancelled"].includes(selected.status) ||
-                      ["running", "paused"].includes(selected.run_state ?? "idle")
+                      ["running", "paused"].includes(selected.run_state)
                     }
                     onClick={() => setReviewing({ decision: "rework" })}
                   >
@@ -374,7 +377,7 @@ export function DiscussionsPage() {
                     variant="danger"
                     disabled={
                       ["approved", "vetoed", "cancelled"].includes(selected.status) ||
-                      ["running", "paused"].includes(selected.run_state ?? "idle")
+                      ["running", "paused"].includes(selected.run_state)
                     }
                     onClick={() => setReviewing({ decision: "veto" })}
                   >
@@ -404,7 +407,7 @@ export function DiscussionsPage() {
                 ) : null}
               </div>
               <ul className="scrollbar-thin flex-1 overflow-y-auto py-2">
-                {(selected.messages ?? []).map((message) => (
+                {selected.messages.map((message) => (
                   <li key={message.id} className="mb-3">
                     <p className="text-[11px] text-[var(--muted-foreground)]">
                       <span className="font-medium text-[var(--foreground)]">

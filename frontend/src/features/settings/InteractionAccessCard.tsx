@@ -1,16 +1,16 @@
-import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
-import { ApiError, api } from "@/lib/api";
-import { formatDateTime } from "@/lib/utils";
-import type { Credential } from "@/lib/types";
-import { AgentAccessGuide } from "./AgentAccessGuide";
+import { useToast } from "@/components/ui/useToast";
 import { scopeChoicesFor } from "@/lib/agentAccess";
+import { ApiError, api } from "@/lib/api";
+import type { Credential } from "@/lib/types";
+import { formatDateTime } from "@/lib/utils";
+import { AgentAccessGuide } from "./AgentAccessGuide";
 
 interface InteractionAccessCardProps {
   isAdmin: boolean;
@@ -61,8 +61,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     : [];
 
   function invalidate() {
-    queryClient.invalidateQueries({ queryKey: ["credentials"] });
-    queryClient.invalidateQueries({ queryKey: ["users"] });
+    void queryClient.invalidateQueries({ queryKey: ["credentials"] });
+    void queryClient.invalidateQueries({ queryKey: ["users"] });
   }
 
   const createMutation = useMutation({
@@ -78,12 +78,13 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
       setName("");
       invalidate();
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not create the agent access",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const revokeMutation = useMutation({
@@ -104,13 +105,25 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         description: "The previous token stopped working.",
       });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not rotate the access",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
+
+  async function copySnippet(snippet: string) {
+    await navigator.clipboard.writeText(snippet);
+    toast.push({ title: "MCP configuration copied", variant: "success" });
+  }
+
+  async function copyToken() {
+    if (!issued?.token) return;
+    await navigator.clipboard.writeText(issued.token);
+    toast.push({ title: "Token copied", variant: "success" });
+  }
 
   function openCreate() {
     // Start from the smallest useful set instead of the first N scopes in the catalogue, and keep it
@@ -194,9 +207,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         <div className="mt-2">
           <AgentAccessGuide
             token={issued?.token}
-            onCopy={async (snippet) => {
-              await navigator.clipboard.writeText(snippet);
-              toast.push({ title: "MCP configuration copied", variant: "success" });
+            onCopy={(snippet) => {
+              void copySnippet(snippet);
             }}
           />
         </div>
@@ -313,10 +325,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
               size="icon"
               variant="secondary"
               aria-label="Copy token"
-              onClick={async () => {
-                if (!issued?.token) return;
-                await navigator.clipboard.writeText(issued.token);
-                toast.push({ title: "Token copied", variant: "success" });
+              onClick={() => {
+                void copyToken();
               }}
             >
               <Copy size={14} />

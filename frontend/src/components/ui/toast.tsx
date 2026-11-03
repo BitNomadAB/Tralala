@@ -1,8 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { CheckCircle2, Info, TriangleAlert, XCircle } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
-
-type ToastVariant = "info" | "success" | "warning" | "error";
+import { ToastContext, type ToastVariant } from "./useToast";
 
 interface Toast {
   id: number;
@@ -10,12 +9,6 @@ interface Toast {
   description?: string;
   variant: ToastVariant;
 }
-
-interface ToastContextValue {
-  push: (toast: { title: string; description?: string; variant?: ToastVariant }) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
 
 const icons = {
   info: Info,
@@ -86,10 +79,4 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       </div>
     </ToastContext.Provider>
   );
-}
-
-export function useToast(): ToastContextValue {
-  const context = useContext(ToastContext);
-  if (!context) throw new Error("useToast must be used within ToastProvider");
-  return context;
 }

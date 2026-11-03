@@ -1,16 +1,16 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, Plus, Power, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
-import { useAgents } from "@/lib/queries";
 import { providerLabelFor } from "@/lib/providers";
-import { formatDateTime } from "@/lib/utils";
+import { useAgents } from "@/lib/queries";
 import type { Agent } from "@/lib/types";
+import { formatDateTime } from "@/lib/utils";
 
 function testTone(agent: Agent): "success" | "danger" | "neutral" {
   if (!agent.last_test_status) return "neutral";
@@ -29,40 +29,48 @@ export function AgentsCard() {
   const toggleMutation = useMutation({
     mutationFn: (agent: Agent) => api.updateAgent(agent.id, { enabled: !agent.enabled }),
     onSuccess: (agent) => {
-      invalidate();
+      void invalidate();
       toast.push({
         title: agent.enabled ? "Agent enabled" : "Agent disabled",
         variant: "success",
       });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not update agent",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (agent: Agent) => api.deleteAgent(agent.id),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       setDeleting(null);
       toast.push({ title: "Agent deleted", variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not delete agent",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   return (
     <div className="card-surface p-5">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold">AI agents</h2>
-        <Button size="sm" className="ml-auto" onClick={() => navigate("/settings/agents/new")}>
+        <Button
+          size="sm"
+          className="ml-auto"
+          onClick={() => {
+            void navigate("/settings/agents/new");
+          }}
+        >
           <Plus size={14} /> New agent
         </Button>
       </div>
@@ -114,7 +122,9 @@ export function AgentsCard() {
                     size="sm"
                     variant="secondary"
                     aria-label={`Edit ${agent.name}`}
-                    onClick={() => navigate(`/settings/agents/${agent.id}`)}
+                    onClick={() => {
+                      void navigate(`/settings/agents/${agent.id}`);
+                    }}
                   >
                     Edit
                   </Button>

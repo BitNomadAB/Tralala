@@ -1,5 +1,3 @@
-import { useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -11,17 +9,19 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { useToast } from "@/components/ui/useToast";
 import { AgentPicker } from "@/features/boards/AgentPicker";
 import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
-import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { useBoards, useTemplates } from "@/lib/queries";
-import { formatDate } from "@/lib/utils";
 import type { Board } from "@/lib/types";
+import { formatDate } from "@/lib/utils";
 import { useDashboardTools } from "@/webmcp/useWebMcp";
 
 export function DashboardPage() {
@@ -62,7 +62,7 @@ export function DashboardPage() {
         agent_ids: agentIds,
       }),
     onSuccess: (board) => {
-      invalidate();
+      void invalidate();
       setCreating(false);
       setName("");
       setDescription("");
@@ -70,14 +70,15 @@ export function DashboardPage() {
       setRepositoryIds([]);
       setAgentIds([]);
       toast.push({ title: "Board created", variant: "success" });
-      navigate(`/boards/${board.id}`);
+      void navigate(`/boards/${board.id}`);
     },
-    onError: (mutationError) =>
+    onError: (mutationError) => {
       toast.push({
         title: "Could not create board",
         description: mutationError instanceof ApiError ? mutationError.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const lifecycleMutation = useMutation({
@@ -90,7 +91,7 @@ export function DashboardPage() {
       return api.duplicateBoard(action.board.id);
     },
     onSuccess: (_result, action) => {
-      invalidate();
+      void invalidate();
       toast.push({
         title:
           action.type === "archive"
@@ -101,43 +102,46 @@ export function DashboardPage() {
         variant: "success",
       });
     },
-    onError: (mutationError) =>
+    onError: (mutationError) => {
       toast.push({
         title: "Action failed",
         description: mutationError instanceof ApiError ? mutationError.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (board: Board) => api.deleteBoard(board.id, confirmName),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       setDeleting(null);
       setConfirmName("");
       toast.push({ title: "Board deleted", variant: "success" });
     },
-    onError: (mutationError) =>
+    onError: (mutationError) => {
       toast.push({
         title: "Could not delete board",
         description: mutationError instanceof ApiError ? mutationError.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const importMutation = useMutation({
     mutationFn: (file: File) => api.importBoard(file),
     onSuccess: (board) => {
-      invalidate();
+      void invalidate();
       toast.push({ title: "Board imported", variant: "success" });
-      navigate(`/boards/${board.id}`);
+      void navigate(`/boards/${board.id}`);
     },
-    onError: (mutationError) =>
+    onError: (mutationError) => {
       toast.push({
         title: "Import failed",
         description: mutationError instanceof ApiError ? mutationError.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const boards = data?.items ?? [];
@@ -232,7 +236,9 @@ export function DashboardPage() {
                 <div className="min-w-0">
                   <button
                     type="button"
-                    onClick={() => navigate(`/boards/${board.id}`)}
+                    onClick={() => {
+                      void navigate(`/boards/${board.id}`);
+                    }}
                     className="truncate text-left text-sm font-semibold hover:text-[var(--primary)]"
                   >
                     {board.name}
@@ -264,7 +270,13 @@ export function DashboardPage() {
                 </div>
               </dl>
               <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-2">
-                <Button size="sm" variant="secondary" onClick={() => navigate(`/boards/${board.id}`)}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    void navigate(`/boards/${board.id}`);
+                  }}
+                >
                   Open
                 </Button>
                 <Button

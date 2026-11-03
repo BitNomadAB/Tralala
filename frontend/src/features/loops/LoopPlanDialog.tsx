@@ -1,8 +1,9 @@
-import { useMemo } from "react";
 import { AlertTriangle, Check, User } from "lucide-react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { api } from "@/lib/api";
 import { useReadiness } from "@/lib/queries";
 import type { Loop, PlanPhaseView, PlanTicketView } from "@/lib/types";
 
@@ -186,16 +187,19 @@ function ConfirmButton({
   disabled: boolean;
   onChanged: () => void;
 }) {
+  async function confirm() {
+    const card = await api.getCard(boardId, loopId, cardId);
+    await api.confirmHumanTicket(boardId, loopId, cardId, { version: card.version });
+    onChanged();
+  }
+
   return (
     <Button
       size="sm"
       variant="outline"
       disabled={disabled}
-      onClick={async () => {
-        const { api } = await import("@/lib/api");
-        const card = await api.getCard(boardId, loopId, cardId);
-        await api.confirmHumanTicket(boardId, loopId, cardId, { version: card.version });
-        onChanged();
+      onClick={() => {
+        void confirm();
       }}
     >
       Confirm human action

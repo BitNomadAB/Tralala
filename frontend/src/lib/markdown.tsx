@@ -15,7 +15,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
   let index = 0;
   for (const match of text.matchAll(INLINE_PATTERN)) {
     const token = match[0];
-    const offset = match.index ?? 0;
+    const offset = match.index;
     if (offset > index) nodes.push(text.slice(index, offset));
     index = offset + token.length;
 

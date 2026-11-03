@@ -1,9 +1,10 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { MessagesSquare, LayoutGrid, LogOut, Settings, Sun, Moon, MonitorSmartphone } from "lucide-react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/features/auth/AuthProvider";
-import { useTheme, type ThemeMode } from "@/themes/ThemeProvider";
+import { useAuth } from "@/features/auth/useAuth";
 import { cn } from "@/lib/utils";
+import type { ThemeMode } from "@/themes/theme";
+import { useTheme } from "@/themes/useTheme";
 
 const themeOptions: { value: ThemeMode; label: string; Icon: typeof Sun }[] = [
   { value: "dark", label: "Dark theme", Icon: Moon },
@@ -18,6 +19,11 @@ export function AppLayout() {
 
   const nextTheme = themeOptions[(themeOptions.findIndex((item) => item.value === mode) + 1) % 3];
   const ActiveIcon = themeOptions.find((item) => item.value === mode)?.Icon ?? Moon;
+
+  async function signOut() {
+    await logout();
+    void navigate("/login", { replace: true });
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -84,9 +90,8 @@ export function AppLayout() {
               size="icon"
               aria-label="Sign out"
               title="Sign out"
-              onClick={async () => {
-                await logout();
-                navigate("/login", { replace: true });
+              onClick={() => {
+                void signOut();
               }}
             >
               <LogOut size={15} />

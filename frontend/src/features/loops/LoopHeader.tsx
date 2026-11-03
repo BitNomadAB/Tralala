@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Bot, ClipboardCheck, FileText, ListChecks, Lock, Sparkles } from "lucide-react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
+import { useAuth } from "@/features/auth/useAuth";
 import { ApiError, api } from "@/lib/api";
+import { generationAgents } from "@/lib/boardAgents";
+import { describeRunRepositories } from "@/lib/loopRuns";
+import { renderMarkdown } from "@/lib/markdown";
 import {
   keys,
   useAgents,
@@ -16,11 +20,7 @@ import {
   useLoopDocuments,
   useReadiness,
 } from "@/lib/queries";
-import { useAuth } from "@/features/auth/AuthProvider";
-import { generationAgents } from "@/lib/boardAgents";
-import { renderMarkdown } from "@/lib/markdown";
 import type { Card, DocumentKind, GenerationRun, Loop } from "@/lib/types";
-import { describeRunRepositories } from "@/lib/loopRuns";
 import { LoopAgentsDialog } from "./LoopAgentsDialog";
 import { LoopCompletionDialog } from "./LoopCompletionDialog";
 import { LoopPlanDialog } from "./LoopPlanDialog";
@@ -78,7 +78,7 @@ export function LoopHeader({
     [readiness.data],
   );
 
-  const documentState = (kind: DocumentKind) => documents.data?.documents[kind]?.state ?? "empty";
+  const documentState = (kind: DocumentKind) => documents.data?.documents[kind].state ?? "empty";
 
   return (
     <header className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
@@ -257,8 +257,8 @@ function LoopDocumentDialog({
   const savedAgentName = candidates.agents.find((agent) => agent.id === savedAgentId)?.name;
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loop.id) });
-    queryClient.invalidateQueries({ queryKey: keys.generationRuns(boardId, loop.id) });
+    void queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loop.id) });
+    void queryClient.invalidateQueries({ queryKey: keys.generationRuns(boardId, loop.id) });
     onChanged();
   };
 
@@ -276,7 +276,9 @@ function LoopDocumentDialog({
       invalidate();
       toast.push({ title: "Info saved as a new revision", variant: "success" });
     },
-    onError: (error) => toast.push({ title: "Could not save Info", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({ title: "Could not save Info", description: errorText(error), variant: "error" });
+    },
   });
 
   const generate = useMutation({
@@ -289,8 +291,9 @@ function LoopDocumentDialog({
       invalidate();
       toast.push({ title: "Generation started", description: "Following the run?", variant: "success" });
     },
-    onError: (error) =>
-      toast.push({ title: "Generation unavailable", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({ title: "Generation unavailable", description: errorText(error), variant: "error" });
+    },
   });
 
   // Follow the run instead of asking the person to reload: generation answers in the background.
@@ -316,30 +319,37 @@ function LoopDocumentDialog({
     refetchInterval: runId && !runFinished ? 1500 : false,
   });
   const purposeRuns = (runsQuery.data ?? []).filter((entry) => entry.purpose === tab);
-  const lastRun = purposeRuns[0];
+  const lastRun = purposeRuns.at(0);
 
-  useEffect(() => {
-    if (!runFinished || !run) return;
-    invalidate();
+  // A finished run stops being followed, and a failed one keeps its step and the provider's answer on
+  // screen instead of a toast that scrolls away. Both are state, so they are set while rendering
+  // (React: "adjusting state when a prop changes"); the toast and the refresh are side effects and
+  // wait for the effect below.
+  const [finishedRun, setFinishedRun] = useState<GenerationRun | null>(null);
+  if (run && runFinished) {
     setRunId(null);
-    if (run.status === "completed") {
-      setFailure(null);
+    setFinishedRun(run);
+    if (run.status === "completed") setFailure(null);
+    else if (run.status === "failed") setFailure(run);
+  }
+
+  // Reads the latest toast and callbacks without re-announcing a run when they change.
+  const announceFinishedRun = useEffectEvent((finished: GenerationRun) => {
+    invalidate();
+    if (finished.status === "completed") {
       toast.push({ title: "Draft ready for review", variant: "success" });
       return;
     }
-    if (run.status === "failed") {
-      // Keep the step that failed on screen, with the provider's own answer, instead of a toast that
-      // scrolls away.
-      setFailure(run);
-    }
     toast.push({
-      title: run.status === "cancelled" ? "Generation cancelled" : "Generation failed",
-      description: run?.error_message ?? "The provider did not return a usable answer.",
+      title: finished.status === "cancelled" ? "Generation cancelled" : "Generation failed",
+      description: finished.error_message ?? "The provider did not return a usable answer.",
       variant: "error",
     });
-    // `invalidate` and `toast` are stable enough for this one-shot reaction to a finished run.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runFinished]);
+  });
+
+  useEffect(() => {
+    if (finishedRun) announceFinishedRun(finishedRun);
+  }, [finishedRun]);
 
   const review = useMutation({
     mutationFn: (args: { scope: "analysis" | "roadmap"; decision: "approved" | "changes_requested" }) => {
@@ -349,7 +359,7 @@ function LoopDocumentDialog({
           ? (["info", "analysis_ai", "analysis"] as DocumentKind[])
           : (["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"] as DocumentKind[]);
       kinds.forEach((kind) => {
-        const revision = documents?.[kind]?.current_revision_id;
+        const revision = documents?.[kind].current_revision_id;
         if (revision) revisions[kind] = revision;
       });
       const payload = {
@@ -367,8 +377,9 @@ function LoopDocumentDialog({
       invalidate();
       toast.push({ title: "Decision recorded", variant: "success" });
     },
-    onError: (error) =>
-      toast.push({ title: "Could not record the decision", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({ title: "Could not record the decision", description: errorText(error), variant: "error" });
+    },
   });
 
   const resetScope = useMutation({
@@ -384,8 +395,9 @@ function LoopDocumentDialog({
         variant: "success",
       });
     },
-    onError: (error) =>
-      toast.push({ title: "Could not reset the scope", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({ title: "Could not reset the scope", description: errorText(error), variant: "error" });
+    },
   });
 
   const visible = useMemo(() => {
@@ -404,7 +416,7 @@ function LoopDocumentDialog({
       : documents?.roadmap.state === "approved";
   // Reset is for the draft too, not only for an approval: a bad generation has to be clearable before
   // anyone signs it off.
-  const canResetScope = isHuman && !readOnly && (scopeHasText || Boolean(approvedForScope));
+  const canResetScope = isHuman && !readOnly && (scopeHasText || approvedForScope);
   const canReviewScope =
     isHuman &&
     scopeHasText &&
@@ -417,10 +429,6 @@ function LoopDocumentDialog({
   const generating = Boolean(runId) && !runFinished;
   // A failed run keeps its panel until dismissed, so the step and the provider's answer stay put.
   const visibleRun = generating ? run : tab === "info" ? undefined : failure;
-
-  useEffect(() => {
-    setConfirmWithdraw(false);
-  }, [tab]);
 
   return (
     <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
@@ -445,7 +453,11 @@ function LoopDocumentDialog({
               key={entry}
               size="sm"
               variant={tab === entry ? "primary" : "ghost"}
-              onClick={() => setTab(entry)}
+              onClick={() => {
+                // A pending reset confirmation belongs to the tab it was asked on.
+                if (entry !== tab) setConfirmWithdraw(false);
+                setTab(entry);
+              }}
             >
               {entry === "info" ? "Info" : entry === "analysis" ? "Analysis" : "RoadMap"}
             </Button>
@@ -731,20 +743,6 @@ function LoopDocumentDialog({
         : null}
     </Dialog>
   );
-}
-
-export function blockerLabel(blocker: {
-  type: string;
-  key?: string | null;
-  title?: string;
-  name?: string;
-  reason: string;
-  phase_number?: number | null;
-}): string {
-  if (blocker.type === "phase") {
-    return `Phase ${blocker.phase_number ?? "?"} ${blocker.name ?? ""}`.trim();
-  }
-  return `${blocker.key ?? "Ticket"} ${blocker.title ?? ""}`.trim();
 }
 
 export type { Card };

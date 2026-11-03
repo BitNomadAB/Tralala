@@ -1,4 +1,4 @@
-import type { GenerationRun, GenerationRunRepository } from "@/lib/types";
+import type { GenerationRun } from "@/lib/types";
 
 /** The steps a generation run passes through, in the order the server records them. */
 export type RunPhaseKey = "reading_info" | "analysing_repository" | "generating";
@@ -58,7 +58,7 @@ export function runSteps(
 
   return ORDER.map((key, index) => {
     let state: RunStepState = "pending";
-    if (failed && run?.phase === null && index === 0) {
+    if (failed && run.phase === null && index === 0) {
       // A run rejected before its first step (no agent, closed Loop) still has to point somewhere.
       state = "failed";
     } else if (reachedIndex >= 0) {
@@ -79,7 +79,7 @@ export function runSteps(
 function failedRepositories(run: RunFacts): boolean {
   const value = run.source_revisions?.repositories;
   if (!Array.isArray(value)) return false;
-  return (value as GenerationRunRepository[]).some((repository) => Boolean(repository.error));
+  return value.some((repository) => Boolean(repository.error));
 }
 
 /** The failing step's own JSON, so a person can copy the provider's answer instead of retyping it. */
@@ -114,7 +114,7 @@ export type RepositoryOutcome =
 export function repositoryOutcome(run: RunFacts): RepositoryOutcome {
   const value = run.source_revisions?.repositories;
   if (!Array.isArray(value)) return { kind: "waiting" };
-  const repositories = value as GenerationRunRepository[];
+  const repositories = value;
   if (repositories.length === 0) return { kind: "none" };
   return {
     kind: "listed",

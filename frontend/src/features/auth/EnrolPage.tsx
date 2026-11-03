@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ApiError, api } from "@/lib/api";
-import { useAuth } from "./AuthProvider";
+import { useAuth } from "./useAuth";
 
 /**
  * Public page behind an invitation link. The token is single use: it sets the password and signs the
@@ -23,15 +23,15 @@ export function EnrolPage() {
   const mismatch = confirmation.length > 0 && confirmation !== password;
   const ready = token.trim().length > 0 && password.length >= 8 && password === confirmation;
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!ready) return;
     setPending(true);
     setError(null);
     try {
-      const result = await api.enrol(token.trim(), password);
+      await api.enrol(token.trim(), password);
       await refresh();
-      navigate(result.actor ? "/" : "/login", { replace: true });
+      void navigate("/", { replace: true });
     } catch (enrolError) {
       setError(
         enrolError instanceof ApiError
@@ -46,7 +46,9 @@ export function EnrolPage() {
   return (
     <main className="relative flex min-h-screen items-center justify-center px-4">
       <form
-        onSubmit={handleSubmit}
+        onSubmit={(event) => {
+          void handleSubmit(event);
+        }}
         className="card-surface flex w-full max-w-sm flex-col gap-4 p-7"
         aria-label="Accept invitation"
       >

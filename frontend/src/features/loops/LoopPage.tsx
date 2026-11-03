@@ -1,6 +1,3 @@
-import { useCallback, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
   DragOverlay,
@@ -13,18 +10,22 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, History, LayoutTemplate, Plus, Search } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
+import { ActivityPanel } from "@/features/activity/ActivityPanel";
+import { CardTile } from "@/features/board/CardTile";
+import { dragData } from "@/features/board/dragData";
+import { ListColumn } from "@/features/board/ListColumn";
+import { CardDialog } from "@/features/cards/CardDialog";
 import { ApiError, api } from "@/lib/api";
 import { keys, useBoard, useLists, useLoop } from "@/lib/queries";
 import type { BoardList, Card, Priority } from "@/lib/types";
-import { CardTile } from "@/features/board/CardTile";
-import { ListColumn } from "@/features/board/ListColumn";
-import { CardDialog } from "@/features/cards/CardDialog";
-import { ActivityPanel } from "@/features/activity/ActivityPanel";
 import { useLoopTools } from "@/webmcp/useWebMcp";
 import { LoopHeader } from "./LoopHeader";
 
@@ -56,7 +57,7 @@ export function LoopPage() {
     overdue: false,
   });
 
-  const lists = listsQuery.data ?? [];
+  const lists = useMemo(() => listsQuery.data ?? [], [listsQuery.data]);
 
   const openCard = useCallback((id: string) => setSelectedCardId(id), []);
   const closeCard = useCallback(() => {
@@ -103,33 +104,36 @@ export function LoopPage() {
   }, [filtersActive, searchQuery.data]);
 
   const invalidateLists = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: keys.lists(boardId, loopId) });
-    queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
+    void queryClient.invalidateQueries({ queryKey: keys.lists(boardId, loopId) });
+    void queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
   }, [queryClient, boardId, loopId]);
 
   const invalidateCards = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: keys.loopCardsPrefix(boardId, loopId) });
-    queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) });
-    queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
-    queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
+    void queryClient.invalidateQueries({ queryKey: keys.loopCardsPrefix(boardId, loopId) });
+    void queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) });
+    void queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
+    void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
   }, [queryClient, boardId, loopId]);
 
   const createCardMutation = useMutation({
     mutationFn: ({ listId, title }: { listId: string; title: string }) =>
       api.createCard(boardId, loopId, { list_id: listId, title }),
     onSuccess: invalidateCards,
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not create ticket",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const createListMutation = useMutation({
     mutationFn: (name: string) => api.createList(boardId, loopId, name),
     onSuccess: invalidateLists,
-    onError: () => toast.push({ title: "Could not create column", variant: "error" }),
+    onError: () => {
+      toast.push({ title: "Could not create column", variant: "error" });
+    },
   });
 
   const saveTemplateMutation = useMutation({
@@ -142,15 +146,16 @@ export function LoopPage() {
       setTemplateOpen(false);
       setTemplateName("");
       setTemplateDescription("");
-      queryClient.invalidateQueries({ queryKey: ["templates"] });
+      void queryClient.invalidateQueries({ queryKey: ["templates"] });
       toast.push({ title: "Template saved", variant: "success" });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not save template",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const renameListMutation = useMutation({
@@ -206,7 +211,7 @@ export function LoopPage() {
   );
 
   function handleDragStart(event: DragStartEvent) {
-    const data = event.active.data.current;
+    const data = dragData(event.active.data.current);
     if (data?.type === "card") {
       const card = Object.values(cardsByList)
         .flat()
@@ -217,13 +222,14 @@ export function LoopPage() {
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveCard(null);
-    const activeData = event.active.data.current;
+    const activeData = dragData(event.active.data.current);
     const over = event.over;
     if (!over) return;
+    const overData = dragData(over.data.current);
 
     if (activeData?.type === "list") {
       const fromIndex = lists.findIndex((list) => list.id === activeData.listId);
-      const overId = over.data.current?.listId ?? over.id;
+      const overId = overData?.listId ?? over.id;
       const toIndex = lists.findIndex((list) => list.id === overId);
       if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
       moveListMutation.mutate({ listId: activeData.listId, position: toIndex });
@@ -231,21 +237,18 @@ export function LoopPage() {
     }
 
     if (activeData?.type !== "card") return;
-    const cardId = String(activeData.cardId);
+    const cardId = activeData.cardId;
     const card = Object.values(cardsByList)
       .flat()
       .find((item) => item.id === cardId);
     if (!card) return;
 
-    const overData = over.data.current as
-      | { type?: string; listId?: string; cardId?: string }
-      | undefined;
     const targetListId = overData?.listId;
     if (!targetListId) return;
 
     const targetCards = (cardsByList[targetListId] ?? []).filter((item) => item.id !== cardId);
     let index = targetCards.length;
-    if (overData?.type === "card" && overData.cardId) {
+    if (overData.type === "card") {
       const overIndex = targetCards.findIndex((item) => item.id === overData.cardId);
       if (overIndex >= 0) index = overIndex;
     }
@@ -297,6 +300,23 @@ export function LoopPage() {
     loop.stage === "completed" ||
     loop.stage === "cancelled" ||
     loop.archived_at !== null;
+
+  async function retryMigration() {
+    setRetrying(true);
+    try {
+      const report = await api.retryMigration(board.id);
+      toast.push({ title: `Migration ${report.status}`, variant: "success" });
+      void queryClient.invalidateQueries();
+    } catch (error) {
+      toast.push({
+        title: "Migration failed",
+        description: error instanceof ApiError ? error.message : "See the server log.",
+        variant: "error",
+      });
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   return (
     <section className="flex h-[calc(100vh-7rem)] flex-col gap-3">
@@ -379,10 +399,10 @@ export function LoopPage() {
         loop={loop}
         boardStatus={board.status}
         onChanged={() => {
-          queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
-          queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loopId) });
-          queryClient.invalidateQueries({ queryKey: keys.loopPlan(boardId, loopId) });
-          queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) });
+          void queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
+          void queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loopId) });
+          void queryClient.invalidateQueries({ queryKey: keys.loopPlan(boardId, loopId) });
+          void queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) });
           invalidateCards();
         }}
       />
@@ -394,21 +414,8 @@ export function LoopPage() {
             size="sm"
             variant="outline"
             disabled={retrying}
-            onClick={async () => {
-              setRetrying(true);
-              try {
-                const report = await api.retryMigration(board.id);
-                toast.push({ title: `Migration ${report.status}`, variant: "success" });
-                queryClient.invalidateQueries();
-              } catch (error) {
-                toast.push({
-                  title: "Migration failed",
-                  description: error instanceof ApiError ? error.message : "See the server log.",
-                  variant: "error",
-                });
-              } finally {
-                setRetrying(false);
-              }
+            onClick={() => {
+              void retryMigration();
             }}
           >
             {retrying ? "Migrating…" : "Retry migration"}
@@ -523,7 +530,7 @@ export function LoopPage() {
           onConfirmHuman={async (version, note) => {
             await api.confirmHumanTicket(boardId, loopId, selectedCardId, { version, note });
             invalidateCards();
-            queryClient.invalidateQueries({
+            void queryClient.invalidateQueries({
               queryKey: keys.card(boardId, loopId, selectedCardId),
             });
           }}

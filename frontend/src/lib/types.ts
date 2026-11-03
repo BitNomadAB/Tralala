@@ -67,7 +67,7 @@ export interface BoardTemplate {
   name: string;
   description: string;
   lists: string[];
-  labels: Array<{ name: string; color: string }>;
+  labels: { name: string; color: string }[];
   created_at: string;
   updated_at: string;
   list_count: number;
@@ -175,14 +175,14 @@ export interface LoopDocument {
   approved_content: string | null;
   stale: boolean;
   stale_reasons: string[];
-  revisions: Array<{
+  revisions: {
     id: string;
     revision_number: number;
     status: string;
     author_name: string;
     author_actor_type: string;
     created_at: string;
-  }>;
+  }[];
 }
 
 export interface LoopDocuments {
@@ -260,7 +260,7 @@ export interface LoopPlanView {
   activated_at: string | null;
   approved_at: string | null;
   phases: PlanPhaseView[];
-  warnings: Array<{ code: string; message: string }>;
+  warnings: { code: string; message: string }[];
 }
 
 export interface LoopReadiness {
@@ -282,7 +282,7 @@ export interface QaCycle {
   delivery_baseline: string;
   ai_instructions: Record<string, unknown>;
   human_instructions: Record<string, unknown>;
-  results: Array<{
+  results: {
     id: string;
     scenario_id: string;
     status: string;
@@ -292,7 +292,7 @@ export interface QaCycle {
     actor_type: string;
     tested_baseline: string;
     created_at: string;
-  }>;
+  }[];
   created_at: string;
   updated_at: string;
   decided_at: string | null;
@@ -336,7 +336,7 @@ export interface Loop {
     ticket_completed: number;
     ticket_archived_incomplete: number;
   };
-  warnings: Array<{ code: string; message: string; kind?: string; reasons?: string[] }>;
+  warnings: { code: string; message: string; kind?: string; reasons?: string[] }[];
 }
 
 export interface GenerationRunRepository {
@@ -379,7 +379,7 @@ export interface Repository {
   enabled: boolean;
   has_token: boolean;
   token_hint: string | null;
-  boards: Array<{ id: string; name: string }>;
+  boards: { id: string; name: string }[];
   last_checked_at: string | null;
   last_check_status: string | null;
   last_check_detail: string | null;
@@ -415,14 +415,14 @@ export interface HistorySummary {
 
 export interface HistoryDetail extends HistorySummary {
   envelope: Record<string, unknown>;
-  artifacts: Array<{
+  artifacts: {
     id: string;
     filename: string;
     media_type: string;
     content_hash: string;
     size_bytes: number;
     inclusion: string;
-  }>;
+  }[];
 }
 
 export interface Card {
@@ -663,8 +663,8 @@ export interface DiscussionRunSummary {
   stop_reason: string | null;
   answers: number;
   round_status: string | null;
-  votes: Array<{ participant_id: string; position: string }>;
-  failures: Array<{ agent: string; error: string }>;
+  votes: { participant_id: string; position: string }[];
+  failures: { agent: string; error: string }[];
   pending: boolean;
   run: DiscussionRun;
 }
@@ -709,13 +709,13 @@ export interface Discussion {
   runs?: DiscussionRun[];
   /** Set on a message response: started, already_running, thread_closed or no_participants. */
   auto_run?: string | null;
-  votes?: Array<{
+  votes?: {
     participant_id: string;
     display_name: string | null;
     position: string;
     justification: string;
     round_number: number;
     created_at: string;
-  }>;
+  }[];
 }
 

@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import type { BoardTemplate } from "@/lib/types";
 
@@ -36,15 +36,16 @@ export function TemplateEditorPage() {
   const [labels, setLabels] = useState<LabelDraft[]>([]);
   const [confirming, setConfirming] = useState(false);
 
-  useEffect(() => {
-    const template: BoardTemplate | undefined = templateQuery.data;
-    if (!template || hydratedId === template.id) return;
-    setName(template.name);
-    setDescription(template.description);
-    setLists(template.lists.length > 0 ? template.lists : [""]);
-    setLabels(template.labels.map((label) => ({ name: label.name, color: label.color })));
-    setHydratedId(template.id);
-  }, [templateQuery.data, hydratedId]);
+  // Fill the form from the loaded template once per template, while rendering rather than in an
+  // effect.
+  const loaded: BoardTemplate | undefined = templateQuery.data;
+  if (loaded && hydratedId !== loaded.id) {
+    setName(loaded.name);
+    setDescription(loaded.description);
+    setLists(loaded.lists.length > 0 ? loaded.lists : [""]);
+    setLabels(loaded.labels.map((label) => ({ name: label.name, color: label.color })));
+    setHydratedId(loaded.id);
+  }
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["templates"] });
 
@@ -58,36 +59,38 @@ export function TemplateEditorPage() {
           .map((label) => ({ name: label.name.trim(), color: label.color }))
           .filter((label) => label.name.length > 0),
       };
-      return isNew ? api.createTemplate(payload) : api.updateTemplate(String(templateId), payload);
+      return isNew ? api.createTemplate(payload) : api.updateTemplate(templateId, payload);
     },
     onSuccess: (template) => {
-      invalidate();
+      void invalidate();
       queryClient.setQueryData(["template", template.id], template);
       toast.push({ title: "Template saved", variant: "success" });
-      navigate("/settings");
+      void navigate("/settings");
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not save template",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteTemplate(String(templateId)),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       setConfirming(false);
       toast.push({ title: "Template deleted", variant: "success" });
-      navigate("/settings");
+      void navigate("/settings");
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not delete template",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   if (!isNew && templateQuery.isLoading) {
@@ -119,7 +122,9 @@ export function TemplateEditorPage() {
       <div>
         <button
           type="button"
-          onClick={() => navigate("/settings")}
+          onClick={() => {
+            void navigate("/settings");
+          }}
           className="inline-flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
         >
           <ArrowLeft size={14} /> Settings
@@ -300,7 +305,13 @@ export function TemplateEditorPage() {
               <Trash2 size={14} /> Delete template
             </Button>
           ) : null}
-          <Button type="button" variant="ghost" onClick={() => navigate("/settings")}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              void navigate("/settings");
+            }}
+          >
             Cancel
           </Button>
           <Button type="submit" disabled={!name.trim() || saveMutation.isPending}>

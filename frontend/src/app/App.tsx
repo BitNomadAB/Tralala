@@ -1,22 +1,23 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ToastProvider } from "@/components/ui/toast";
-import { ThemeProvider } from "@/themes/ThemeProvider";
-import { AmbientBackground } from "./AmbientBackground";
-import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
+import { AuthProvider } from "@/features/auth/AuthProvider";
 import { EnrolPage } from "@/features/auth/EnrolPage";
 import { LoginPage } from "@/features/auth/LoginPage";
-import { AppLayout } from "./AppLayout";
+import { useAuth } from "@/features/auth/useAuth";
 import { DashboardPage } from "@/features/boards/DashboardPage";
+import { DiscussionsPage } from "@/features/discussions/DiscussionsPage";
+import { HistoryPage } from "@/features/history/HistoryPage";
 import { BoardLoopsPage } from "@/features/loops/BoardLoopsPage";
 import { LoopPage } from "@/features/loops/LoopPage";
-import { HistoryPage } from "@/features/history/HistoryPage";
-import { DiscussionsPage } from "@/features/discussions/DiscussionsPage";
-import { SettingsPage } from "@/features/settings/SettingsPage";
-import { RepositoriesPage } from "@/features/settings/RepositoriesPage";
-import { TemplateEditorPage } from "@/features/settings/TemplateEditorPage";
-import { RoleTemplateEditorPage } from "@/features/settings/RoleTemplateEditorPage";
 import { AgentEditorPage } from "@/features/settings/AgentEditorPage";
+import { RepositoriesPage } from "@/features/settings/RepositoriesPage";
+import { RoleTemplateEditorPage } from "@/features/settings/RoleTemplateEditorPage";
+import { SettingsPage } from "@/features/settings/SettingsPage";
+import { TemplateEditorPage } from "@/features/settings/TemplateEditorPage";
+import { ThemeProvider } from "@/themes/ThemeProvider";
+import { AmbientBackground } from "./AmbientBackground";
+import { AppLayout } from "./AppLayout";
 
 const queryClient = new QueryClient({
   defaultOptions: {

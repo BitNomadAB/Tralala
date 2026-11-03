@@ -235,8 +235,9 @@ cd backend
 ../.venv/bin/python -m ruff check app tests migrations
 cd ../frontend
 pnpm typecheck
+pnpm lint           # ESLint, zero warnings
 pnpm test
-pnpm build          # also runs the client build guard
+pnpm build          # also runs typecheck, ESLint and the client build guard
 pnpm lint:md        # Markdown lint on the documentation
 pnpm test:e2e       # the browser journeys against an isolated stack
 ```

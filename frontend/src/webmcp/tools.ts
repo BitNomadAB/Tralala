@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import type { BoardList, Card } from "@/lib/types";
+import type { Card } from "@/lib/types";
 import type { ModelContextToolDefinition } from "./capability";
 
 export interface McpTool extends ModelContextToolDefinition {
@@ -9,6 +9,14 @@ export interface McpTool extends ModelContextToolDefinition {
 const stringSchema = (description: string) => ({ type: "string", description });
 
 const boardIdSchema = stringSchema("Board identifier");
+
+/**
+ * An optional string argument, or undefined when it is absent or empty. The input schemas declare
+ * these as strings, so anything else an agent sends is treated as absent, never as "[object Object]".
+ */
+function optionalText(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
 
 export function dashboardTools(options: {
   onOpenBoard: (boardId: string) => void;
@@ -69,8 +77,8 @@ export function dashboardTools(options: {
       execute: async (input) => {
         const board = await api.createBoard({
           name: String(input.name),
-          description: input.description ? String(input.description) : "",
-          template_id: input.template_id ? String(input.template_id) : null,
+          description: optionalText(input.description) ?? "",
+          template_id: optionalText(input.template_id) ?? null,
         });
         options.onOpenBoard(board.id);
         return { id: board.id, name: board.name };
@@ -109,12 +117,18 @@ export function dashboardTools(options: {
   ];
 }
 
+/** One column of the active Loop as the overview tool reports it. */
+export interface LoopColumn {
+  id: string;
+  name: string;
+  card_count: number;
+}
+
 export function loopTools(options: {
   boardId: string;
   loopId: string;
   loopName: string;
-  lists: BoardList[];
-  cardsByList: Record<string, Card[]>;
+  columns: LoopColumn[];
   onOpenCard: (cardId: string) => void;
 }): McpTool[] {
   const { boardId, loopId } = options;
@@ -146,11 +160,7 @@ export function loopTools(options: {
             state: phase.state,
             blocked_by: phase.blocked_by.map((blocker) => blocker.reason),
           })),
-          lists: options.lists.map((list) => ({
-            id: list.id,
-            name: list.name,
-            card_count: (options.cardsByList[list.id] ?? []).length,
-          })),
+          lists: options.columns,
         };
       },
     },
@@ -209,7 +219,7 @@ export function loopTools(options: {
       },
       execute: async (input) => {
         const cards = await api.listCards(boardId, loopId, {
-          list_id: input.list_id ? String(input.list_id) : undefined,
+          list_id: optionalText(input.list_id),
           limit: 200,
         });
         return {
@@ -262,8 +272,8 @@ export function loopTools(options: {
         const card = await api.createCard(boardId, loopId, {
           list_id: String(input.list_id),
           title: String(input.title),
-          description: input.description ? String(input.description) : "",
-          priority: (input.priority as Card["priority"]) ?? "none",
+          description: optionalText(input.description) ?? "",
+          priority: (input.priority ?? "none") as Card["priority"],
         });
         return { id: card.id, version: card.version, list_id: card.list_id };
       },
@@ -284,8 +294,8 @@ export function loopTools(options: {
       },
       execute: async (input) => {
         const { items } = await api.searchCards(boardId, loopId, {
-          q: input.query ? String(input.query) : undefined,
-          label: input.label ? String(input.label) : undefined,
+          q: optionalText(input.query),
+          label: optionalText(input.label),
           priority: input.priority as Card["priority"] | undefined,
           overdue: input.overdue === true,
           limit: 50,
@@ -395,8 +405,9 @@ export function cardTools(options: {
       execute: async (input) => {
         const card = await api.updateCard(boardId, loopId, cardId, {
           version: Number(input.version),
-          title: input.title ? String(input.title) : undefined,
-          description: input.description !== undefined ? String(input.description) : undefined,
+          title: optionalText(input.title),
+          // An empty string is kept here: it clears the description.
+          description: typeof input.description === "string" ? input.description : undefined,
           priority: input.priority as Card["priority"] | undefined,
           completed: typeof input.completed === "boolean" ? input.completed : undefined,
         });

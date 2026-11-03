@@ -1,9 +1,9 @@
-import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 
 export function SecurityCard() {
@@ -24,12 +24,13 @@ export function SecurityCard() {
       queryClient.clear();
       queryClient.setQueryData(["me"], null);
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not change the password",
         description: error instanceof ApiError ? error.message : undefined,
         variant: "error",
-      }),
+      });
+    },
   });
 
   const mismatch = confirm.length > 0 && confirm !== next;

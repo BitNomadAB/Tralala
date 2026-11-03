@@ -1,9 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import {
-  RepositoryTokenGuide,
-  repositorySlug,
-} from "@/features/settings/RepositoryTokenGuide";
+import { RepositoryTokenGuide } from "@/features/settings/RepositoryTokenGuide";
+import { repositorySlug } from "@/lib/repositorySlug";
 
 describe("repositorySlug", () => {
   it("takes owner and repository from a GitHub URL", () => {

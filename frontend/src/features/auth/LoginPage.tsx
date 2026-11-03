@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
-import { useAuth } from "./AuthProvider";
+import { useAuth } from "./useAuth";
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -16,13 +16,13 @@ export function LoginPage() {
 
   const target = (location.state as { from?: string } | null)?.from ?? "/";
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     setError(null);
     try {
       await login(username, password);
-      navigate(target, { replace: true });
+      void navigate(target, { replace: true });
     } catch (loginError) {
       setError(
         loginError instanceof ApiError ? loginError.message : "Unable to sign in right now.",
@@ -35,7 +35,9 @@ export function LoginPage() {
   return (
     <main className="relative flex min-h-screen items-center justify-center px-4">
       <form
-        onSubmit={handleSubmit}
+        onSubmit={(event) => {
+          void handleSubmit(event);
+        }}
         className="card-surface flex w-full max-w-sm flex-col gap-4 p-7"
         aria-label="Sign in"
       >

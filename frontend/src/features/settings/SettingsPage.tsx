@@ -1,13 +1,14 @@
 import { GitBranch } from "lucide-react";
-import { useAuth } from "@/features/auth/AuthProvider";
 import { Link } from "react-router-dom";
-import { THEME_KITS, useTheme, type ThemeKit, type ThemeMode } from "@/themes/ThemeProvider";
-import { BoardTemplatesCard } from "./BoardTemplatesCard";
-import { RoleTemplatesCard } from "./RoleTemplatesCard";
+import { useAuth } from "@/features/auth/useAuth";
+import { THEME_KITS, type ThemeKit, type ThemeMode } from "@/themes/theme";
+import { useTheme } from "@/themes/useTheme";
 import { AgentsCard } from "./AgentsCard";
+import { BoardTemplatesCard } from "./BoardTemplatesCard";
+import { InteractionAccessCard } from "./InteractionAccessCard";
+import { RoleTemplatesCard } from "./RoleTemplatesCard";
 import { SecurityCard } from "./SecurityCard";
 import { UsersCard } from "./UsersCard";
-import { InteractionAccessCard } from "./InteractionAccessCard";
 
 const themeChoices: { value: ThemeMode; label: string; description: string }[] = [
   { value: "dark", label: "Dark", description: "Night palette of the chosen theme" },
@@ -131,7 +132,7 @@ export function SettingsPage() {
 
       <SecurityCard />
 
-      <InteractionAccessCard isAdmin={Boolean(isAdmin)} currentUserId={actor?.id ?? ""} />
+      <InteractionAccessCard isAdmin={isAdmin} currentUserId={actor?.id ?? ""} />
     </section>
   );
 }

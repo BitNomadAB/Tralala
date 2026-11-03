@@ -40,7 +40,7 @@ jobs:
         run: python -m pytest
 
   frontend:
-    name: Frontend (types, unit tests, build, Markdown)
+    name: Frontend (types, lint, unit tests, build, Markdown)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,9 +59,13 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
+      # ESLint with type information (eslint.config.js): every rule is an error and any warning fails.
+      - name: Lint
+        run: pnpm lint
       - name: Unit tests
         run: pnpm test
-      # Includes `tsc --noEmit` and the client build guard (no source maps, no server-only strings).
+      # Includes `tsc --noEmit`, ESLint and the client build guard (no source maps, no server-only
+      # strings), so the container image build cannot skip them either.
       - name: Production build
         run: pnpm build
       # The shipped documentation (README.md, AGENTS.md, docs/, public_docs/). markdownlint-cli2 is

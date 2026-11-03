@@ -1,14 +1,14 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, Link2, Plus, Power } from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { ROLES, type InviteCreated, type Role, type UserAccount } from "@/lib/types";
-import { formatDateTime } from "@/lib/utils";
+import { clipboard, formatDateTime } from "@/lib/utils";
 
 export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const queryClient = useQueryClient();
@@ -24,17 +24,18 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["users"] });
 
-  const onError = (title: string) => (error: unknown) =>
+  const onError = (title: string) => (error: unknown) => {
     toast.push({
       title,
       description: error instanceof ApiError ? error.message : undefined,
       variant: "error",
     });
+  };
 
   const createMutation = useMutation({
     mutationFn: () => api.createUser({ name: name.trim(), password, role }),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       setCreating(false);
       setName("");
       setPassword("");
@@ -48,7 +49,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
     mutationFn: (payload: { userId: string; role?: Role; disabled?: boolean }) =>
       api.updateUser(payload.userId, { role: payload.role, disabled: payload.disabled }),
     onSuccess: (user) => {
-      invalidate();
+      void invalidate();
       toast.push({
         title: user.disabled ? `${user.name} is disabled` : `${user.name} updated`,
         variant: "success",
@@ -60,7 +61,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const resetMutation = useMutation({
     mutationFn: () => api.resetUserPassword(resetting?.id ?? "", newPassword),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       setResetting(null);
       setNewPassword("");
       toast.push({ title: "Password reset", description: "Existing sessions were signed out." });
@@ -70,7 +71,9 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
 
   const inviteMutation = useMutation({
     mutationFn: (userId: string) => api.inviteUser(userId),
-    onSuccess: (invite) => setInvited(invite),
+    onSuccess: (invite) => {
+      setInvited(invite);
+    },
     onError: onError("Could not create an invitation link"),
   });
 
@@ -241,7 +244,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
               <Button
                 variant="ghost"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(inviteLink);
+                  void clipboard()?.writeText(inviteLink);
                   toast.push({ title: "Link copied", variant: "success" });
                 }}
               >

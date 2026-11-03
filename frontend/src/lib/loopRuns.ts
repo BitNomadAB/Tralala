@@ -2,8 +2,8 @@ import type { GenerationRun, GenerationRunRepository } from "@/lib/types";
 
 /** The repositories a run was based on, from its recorded source revisions. */
 export function runRepositories(run: GenerationRun): GenerationRunRepository[] {
-  const value = run.source_revisions?.repositories;
-  return Array.isArray(value) ? (value as GenerationRunRepository[]) : [];
+  const value = run.source_revisions.repositories;
+  return Array.isArray(value) ? value : [];
 }
 
 /**
@@ -13,9 +13,9 @@ export function runRepositories(run: GenerationRun): GenerationRunRepository[] {
  * person needs the commit and the count, not the files.
  */
 export function describeRunRepositories(run: GenerationRun): string | null {
-  const value = run.source_revisions?.repositories;
+  const value = run.source_revisions.repositories;
   if (!Array.isArray(value)) return null;
-  const repositories = value as GenerationRunRepository[];
+  const repositories = value;
   if (repositories.length === 0) return "no enabled repository linked to this board";
   return repositories
     .map((repository) =>

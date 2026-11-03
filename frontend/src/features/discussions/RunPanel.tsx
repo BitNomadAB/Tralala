@@ -1,11 +1,11 @@
-import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Gauge, Pause, Play, Square, Timer } from "lucide-react";
+import { useState } from "react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import type { Discussion, DiscussionRunSummary } from "@/lib/types";
 
@@ -59,7 +59,7 @@ export function RunPanel({
 
   const activeRun = discussion.active_run ?? null;
   const latestRun = discussion.runs?.[0] ?? activeRun;
-  const runState = discussion.run_state ?? "idle";
+  const runState = discussion.run_state;
   const closed = ["approved", "vetoed", "cancelled"].includes(discussion.status);
   const busy = runState === "running";
   const paused = runState === "paused";
@@ -98,12 +98,13 @@ export function RunPanel({
       setPlanning(false);
       report(result);
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not start the run",
         description: failureMessage(error),
         variant: "error",
-      }),
+      });
+    },
   });
 
   const controlMutation = useMutation({
@@ -122,12 +123,13 @@ export function RunPanel({
         variant: action === "stop" ? "error" : "success",
       });
     },
-    onError: (error) =>
+    onError: (error) => {
       toast.push({
         title: "Could not update the run",
         description: failureMessage(error),
         variant: "error",
-      }),
+      });
+    },
   });
 
   return (

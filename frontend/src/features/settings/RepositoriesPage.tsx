@@ -1,25 +1,25 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, GitBranch, KeyRound, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/useToast";
+import { useAuth } from "@/features/auth/useAuth";
 import { ApiError, api } from "@/lib/api";
-import { useAuth } from "@/features/auth/AuthProvider";
 import { RepositoryTokenGuide } from "./RepositoryTokenGuide";
 
 const REPOSITORIES_KEY = ["repositories"];
 
-type Draft = {
+interface Draft {
   id: string | null;
   name: string;
   url: string;
   branch: string;
   token: string;
   enabled: boolean;
-};
+}
 
 const EMPTY: Draft = {
   id: null,
@@ -70,36 +70,39 @@ export function RepositoriesPage() {
     },
     onSuccess: () => {
       setDraft(null);
-      invalidate();
+      void invalidate();
       toast.push({ title: "Repository saved", variant: "success" });
     },
-    onError: (error) =>
-      toast.push({ title: "Could not save", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({ title: "Could not save", description: errorText(error), variant: "error" });
+    },
   });
 
   const check = useMutation({
     mutationFn: (repositoryId: string) => api.checkRepository(repositoryId),
     onSuccess: (result, repositoryId) => {
       setChecks((current) => ({ ...current, [repositoryId]: `${result.status}: ${result.detail ?? ""}` }));
-      invalidate();
+      void invalidate();
       toast.push({
         title: result.status === "ok" ? "Access verified" : "Access failed",
         description: result.detail ?? undefined,
         variant: result.status === "ok" ? "success" : "error",
       });
     },
-    onError: (error) =>
-      toast.push({ title: "Could not check access", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({ title: "Could not check access", description: errorText(error), variant: "error" });
+    },
   });
 
   const remove = useMutation({
     mutationFn: (repositoryId: string) => api.deleteRepository(repositoryId),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       toast.push({ title: "Repository removed", variant: "success" });
     },
-    onError: (error) =>
-      toast.push({ title: "Could not remove", description: errorText(error), variant: "error" }),
+    onError: (error) => {
+      toast.push({ title: "Could not remove", description: errorText(error), variant: "error" });
+    },
   });
 
   if (!isAdmin) {
@@ -164,7 +167,8 @@ export function RepositoriesPage() {
               {checks[repository.id] ?? repository.last_check_detail ? (
                 <p className="flex items-center gap-1.5 text-[11px]">
                   <CheckCircle2 size={12} className="text-[var(--muted-foreground)]" />
-                  {checks[repository.id] ?? `${repository.last_check_status}: ${repository.last_check_detail}`}
+                  {checks[repository.id] ??
+                    `${repository.last_check_status ?? ""}: ${repository.last_check_detail ?? ""}`}
                 </p>
               ) : null}
               <div className="flex flex-wrap items-center gap-2">
@@ -235,7 +239,9 @@ function RepositoryDialog({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const update = (patch: Partial<Draft>) => onChange({ ...draft, ...patch });
+  const update = (patch: Partial<Draft>) => {
+    onChange({ ...draft, ...patch });
+  };
 
   return (
     <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>

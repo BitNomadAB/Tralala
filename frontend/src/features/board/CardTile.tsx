@@ -2,8 +2,9 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { CalendarClock, CheckSquare, Lock, MessageSquare, User } from "lucide-react";
 import { LabelChip } from "@/components/ui/badge";
-import { cn, isOverdue } from "@/lib/utils";
 import type { Card } from "@/lib/types";
+import { cn, isOverdue } from "@/lib/utils";
+import type { DragData } from "./dragData";
 
 const priorityTone: Record<Card["priority"], string> = {
   none: "border-[var(--border)] text-[var(--muted-foreground)]",
@@ -24,7 +25,7 @@ export function CardTile({
 }) {
   const sortable = useSortable({
     id: card.id,
-    data: { type: "card", cardId: card.id, listId: card.list_id },
+    data: { type: "card", cardId: card.id, listId: card.list_id } satisfies DragData,
     disabled: overlay,
   });
   const style = overlay

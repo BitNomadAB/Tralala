@@ -88,6 +88,12 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
 }
 
+/**
+ * A query parameter before it is sent. Optional parameters can hold `undefined` at run time, which
+ * the type `Object.entries` infers for them leaves out, so the filters below name it.
+ */
+type QueryValue = string | number | boolean | undefined;
+
 async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
@@ -122,7 +128,7 @@ async function request<T>(
     | ErrorEnvelope
     | null;
 
-  if (!response.ok || payload === null || payload.success === false) {
+  if (!response.ok || !payload?.success) {
     const error = (payload as ErrorEnvelope | null)?.error;
     if (response.status === 401) {
       window.dispatchEvent(new CustomEvent("tralala:unauthorized"));
@@ -144,7 +150,7 @@ export interface TemplatePayload {
   name: string;
   description?: string;
   lists?: string[];
-  labels?: Array<{ name: string; color: string }>;
+  labels?: { name: string; color: string }[];
 }
 
 export interface RoleTemplatePayload {
@@ -218,7 +224,7 @@ export const api = {
     params: { include_completed?: boolean; include_archived?: boolean } = {},
   ): Promise<Loop[]> {
     const query = new URLSearchParams(
-      Object.entries(params)
+      Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined)
         .map(([key, value]) => [key, String(value)]),
     );
@@ -279,9 +285,9 @@ export const api = {
     boardId: string,
     loopId: string,
     kind: DocumentKind,
-  ): Promise<Array<Record<string, unknown>>> {
+  ): Promise<Record<string, unknown>[]> {
     return json(
-      await request<Array<Record<string, unknown>>>(
+      await request<Record<string, unknown>[]>(
         `/boards/${boardId}/loops/${loopId}/documents/${kind}/revisions`,
       ),
     );
@@ -455,7 +461,7 @@ export const api = {
   async submitQaResults(
     boardId: string,
     loopId: string,
-    payload: { results: Array<Record<string, string>> },
+    payload: { results: Record<string, string>[] },
   ): Promise<QaCycle> {
     return json(
       await request<QaCycle>(`/boards/${boardId}/loops/${loopId}/qa/results`, {
@@ -503,7 +509,7 @@ export const api = {
     params: { q?: string; source_kind?: string; qa_status?: string; limit?: number; offset?: number },
   ): Promise<{ items: HistorySummary[]; meta?: PageMeta }> {
     const query = new URLSearchParams(
-      Object.entries(params)
+      Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined && value !== "")
         .map(([key, value]) => [key, String(value)]),
     );
@@ -631,9 +637,9 @@ export const api = {
 
   async listAgents(params: { q?: string; enabled?: boolean } = {}): Promise<Agent[]> {
     const query = new URLSearchParams(
-      Object.entries(params)
+      Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined && value !== "")
-        .map(([key, value]) => [key, String(value)]) as [string, string][],
+        .map(([key, value]) => [key, String(value)]),
     );
     return json(await request<Agent[]>(`/agents?${query.toString()}`));
   },
@@ -905,14 +911,14 @@ export const api = {
   async listBoardTickets(
     boardId: string,
     params: { q?: string; limit?: number } = {},
-  ): Promise<Array<Card & { loop_key: string; loop_name: string }>> {
+  ): Promise<(Card & { loop_key: string; loop_name: string })[]> {
     const query = new URLSearchParams(
-      Object.entries(params)
+      Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined && value !== "")
         .map(([key, value]) => [key, String(value)]),
     );
     return json(
-      await request<Array<Card & { loop_key: string; loop_name: string }>>(
+      await request<(Card & { loop_key: string; loop_name: string })[]>(
         `/boards/${boardId}/tickets?${query.toString()}`,
       ),
     );
@@ -924,7 +930,7 @@ export const api = {
     params: { list_id?: string; limit?: number; include_archived?: boolean } = {},
   ): Promise<Card[]> {
     const query = new URLSearchParams(
-      Object.entries(params)
+      Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined && value !== "")
         .map(([key, value]) => [key, String(value)]),
     );
@@ -947,7 +953,7 @@ export const api = {
     },
   ): Promise<{ items: Card[]; meta?: PageMeta }> {
     const query = new URLSearchParams(
-      Object.entries(params)
+      Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined && value !== "" && value !== false)
         .map(([key, value]) => [key, String(value)]),
     );
@@ -1185,7 +1191,7 @@ export const api = {
     params: { entity_id?: string; limit?: number } = {},
   ): Promise<ActivityEntry[]> {
     const query = new URLSearchParams(
-      Object.entries(params)
+      Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined)
         .map(([key, value]) => [key, String(value)]),
     );
