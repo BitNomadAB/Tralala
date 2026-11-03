@@ -1,11 +1,8 @@
-"""Migrate both chains into memory, read the tables back and hold them to the schema rules."""
+"""Migrate both chains into memory and describe their tables for the rules and the rows."""
 
 from __future__ import annotations
 
-import keyword
 import sqlite3
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -13,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.storage.schema import ensure_fts, runner
 
 from . import BuildError
+from .rules import Column, ForeignKey, Index, Table
 
 CHAINS = ("registry", "board")
 
@@ -33,25 +31,6 @@ EXCLUDED_TABLES = frozenset(
         "loop_history_fts_idx",
     }
 )
-# Names a generated row already uses for itself.
-_RESERVED_COLUMNS = frozenset({"from_mapping"})
-
-
-@dataclass(frozen=True, slots=True)
-class Column:
-    name: str
-    declared: str
-    python: str
-    nullable: bool
-
-
-@dataclass(frozen=True, slots=True)
-class Table:
-    name: str
-    columns: tuple[Column, ...]
-
-
-type Schema = Mapping[str, Sequence[Table]]
 
 
 # --- migrations ---------------------------------------------------------------------------------
@@ -122,8 +101,62 @@ def python_type(declared: str) -> str | None:
     return None
 
 
+def _primary_key(database: sqlite3.Connection, table: str) -> tuple[str, ...]:
+    rows: list[tuple[str, int]] = database.execute(
+        "SELECT name, pk FROM pragma_table_info(?) WHERE pk > 0", (table,)
+    ).fetchall()
+    return tuple(name for name, _position in sorted(rows, key=lambda row: row[1]))
+
+
+def _foreign_keys(database: sqlite3.Connection, table: str) -> tuple[ForeignKey, ...]:
+    """Each key with its columns in order; naming no parent column means the parent's PK."""
+    rows: list[tuple[int, str, str, str | None, str]] = database.execute(
+        'SELECT id, "table", "from", "to", on_delete FROM pragma_foreign_key_list(?)'
+        " ORDER BY id, seq",
+        (table,),
+    ).fetchall()
+    grouped: dict[int, list[tuple[str, str, str | None, str]]] = {}
+    for key, parent, column, parent_column, on_delete in rows:
+        grouped.setdefault(key, []).append((parent, column, parent_column, on_delete))
+    keys: list[ForeignKey] = []
+    for parts in grouped.values():
+        parent, on_delete = parts[0][0], parts[0][3]
+        named = tuple(part[2] for part in parts if part[2] is not None)
+        keys.append(
+            ForeignKey(
+                columns=tuple(part[1] for part in parts),
+                parent=parent,
+                parent_columns=(
+                    named if len(named) == len(parts) else _primary_key(database, parent)
+                ),
+                on_delete=on_delete.upper(),
+            )
+        )
+    return tuple(keys)
+
+
+def _indexes(database: sqlite3.Connection, table: str) -> list[Index]:
+    """Every index SQLite keeps for the table, including those behind PRIMARY KEY and UNIQUE."""
+    found: list[Index] = []
+    listed: list[tuple[str, int]] = database.execute(
+        "SELECT name, partial FROM pragma_index_list(?) ORDER BY name", (table,)
+    ).fetchall()
+    for index, partial in listed:
+        keys: list[tuple[str | None]] = database.execute(
+            "SELECT name FROM pragma_index_info(?) ORDER BY seqno", (index,)
+        ).fetchall()
+        found.append(
+            Index(
+                name=index,
+                columns=tuple(column or "" for (column,) in keys),
+                partial=bool(partial),
+            )
+        )
+    return found
+
+
 def read_tables(database: sqlite3.Connection) -> list[Table]:
-    """Every table outside the exclusion list, columns in declaration order."""
+    """Every table outside the exclusion list: columns in declaration order, keys and indexes."""
     names = [
         str(name)
         for (name,) in database.execute(
@@ -142,14 +175,18 @@ def read_tables(database: sqlite3.Connection) -> list[Table]:
         ).fetchall()
         key_columns = sum(1 for row in rows if row[5])
         columns: list[Column] = []
+        indexes = _indexes(database, name)
         for _cid, column, declared, not_null, _default, primary, hidden in rows:
             if hidden:
                 raise BuildError(
                     f"{name}.{column} is a hidden column; a virtual table belongs on"
                     " EXCLUDED_TABLES in tools/dbgen/schema.py"
                 )
-            # An INTEGER PRIMARY KEY is the rowid and is never NULL, NOT NULL or not.
+            # An INTEGER PRIMARY KEY is the rowid and is never NULL, NOT NULL or not; it is the
+            # table's own b-tree key, so it is indexed without an entry in pragma_index_list.
             rowid = bool(primary) and key_columns == 1 and declared.upper() == "INTEGER"
+            if rowid:
+                indexes.append(Index(name="rowid", columns=(column,)))
             columns.append(
                 Column(
                     name=column,
@@ -158,72 +195,12 @@ def read_tables(database: sqlite3.Connection) -> list[Table]:
                     nullable=not not_null and not rowid,
                 )
             )
-        tables.append(Table(name=name, columns=tuple(columns)))
-    return tables
-
-
-# --- rules --------------------------------------------------------------------------------------
-
-
-def class_name(table: str) -> str:
-    return "".join(part.capitalize() for part in table.split("_")) + "Row"
-
-
-def rule_every_column_has_a_python_type(schema: Schema) -> list[str]:
-    return [
-        f"{chain}: {table.name}.{column.name} is declared {column.declared or 'without a type'!r},"
-        " which has no single Python type; declare it TEXT, INTEGER, REAL, BLOB or BOOLEAN"
-        for chain, tables in schema.items()
-        for table in tables
-        for column in table.columns
-        if not column.python
-    ]
-
-
-def rule_names_fit_a_row(schema: Schema) -> list[str]:
-    problems: list[str] = []
-    for chain, tables in schema.items():
-        seen: dict[str, str] = {}
-        for table in tables:
-            other = seen.setdefault(class_name(table.name), table.name)
-            if other != table.name:
-                problems.append(f"{chain}: {table.name} and {other} both become {other}Row")
-            problems.extend(
-                f"{chain}: {table.name}.{column.name} cannot be a dataclass field"
-                for column in table.columns
-                if not column.name.isidentifier()
-                or keyword.iskeyword(column.name)
-                or column.name in _RESERVED_COLUMNS
+        tables.append(
+            Table(
+                name=name,
+                columns=tuple(columns),
+                foreign_keys=_foreign_keys(database, name),
+                indexes=tuple(indexes),
             )
-    return problems
-
-
-def rule_shared_tables_match(schema: Schema) -> list[str]:
-    """A table both chains have must be the same table.
-
-    SQL is checked against both databases and passes when either accepts it (see sqlcheck), which
-    is exact only while a table name means one shape.
-    """
-    shapes: dict[str, tuple[str, tuple[Column, ...]]] = {}
-    problems: list[str] = []
-    for chain, tables in schema.items():
-        for table in tables:
-            other = shapes.setdefault(table.name, (chain, table.columns))
-            if other[0] != chain and other[1] != table.columns:
-                problems.append(
-                    f"{table.name} differs between the {other[0]} and {chain} chains;"
-                    " rename one of them"
-                )
-    return problems
-
-
-# GCS-T18 (foreign keys and their indexes) and GCS-T22 (STRICT tables) add their rules here.
-SCHEMA_RULES: tuple[Callable[[Schema], list[str]], ...] = (
-    rule_every_column_has_a_python_type,
-    rule_names_fit_a_row,
-    rule_shared_tables_match,
-)
-
-
-def schema_problems(schema: Schema) -> list[str]:
-    return [problem for rule in SCHEMA_RULES for problem in rule(schema)]
+        )
+    return tables

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .schema import Column, Table, class_name
+from .rules import Column, Table, class_name
 
 # The checked converter in app/db/values.py for each Python type.
 _CONVERTERS = {"str": "text", "int": "integer", "float": "real", "bool": "flag", "bytes": "blob"}

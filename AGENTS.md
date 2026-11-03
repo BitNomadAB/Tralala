@@ -46,7 +46,10 @@ message broker.
    pre-migration backup, validates integrity and marks a failed board `migration_failed`. The
    migrations are the only description of the schema: `python -m tools.dbgen` validates both
    chains, generates the typed rows in `app/db/generated` from them and compiles every SQL
-   statement in `app/` against the result, so nothing hand-written mirrors a table.
+   statement in `app/` against the result, so nothing hand-written mirrors a table. Every column
+   named `*_id` or `*_by` has a foreign key, an index that starts with it and an explicit
+   `ON DELETE` (RESTRICT by default, CASCADE or SET NULL with a comment saying why), or an entry
+   with its reason in `tools/dbgen/rules.py`; dbgen stops the build otherwise.
 10. **No new infrastructure** without a documented decision in `docs/decisions/` (a local, untracked
     working document) that proves a requirement.
 11a. **Planning decisions are human decisions.** Approving analysis or a RoadMap, resetting a scope,

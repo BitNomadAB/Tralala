@@ -110,7 +110,7 @@ Two independent Alembic chains live under `backend/migrations`:
 - The migrations are also the build's source of truth. `python -m tools.dbgen` (run from
   `backend/`, first in every build) refuses a chain with more than one head, a merge or a branch,
   migrates both chains into an in-memory database, applies the schema rules in
-  `tools/dbgen/schema.py`, writes one frozen dataclass per table to `app/db/generated/` (git-ignored;
+  `tools/dbgen/rules.py`, writes one frozen dataclass per table to `app/db/generated/` (git-ignored;
   Alembic's table and the FTS5 tables are excluded by name) and compiles every SQL statement in
   `app/` against that schema with SQLite's `EXPLAIN`. A table name the two chains share
   (`idempotency_records`) must have the same columns in both, because a statement passes when
@@ -124,6 +124,24 @@ Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestr
 
 - Foreign keys are enabled on every connection; deleting a card cascades to labels links,
   checklists, items and comments.
+- Every column named `*_id` or `*_by` has a foreign key, unless `tools/dbgen/rules.py` lists it
+  with its reason: `CROSS_DATABASE` (board columns that name an actor, agent, role template or
+  board in the registry, which no constraint can reach), `NOT_REFERENCES` (polymorphic ids and
+  correlation ids) or `UNENFORCED` (same-database references still without a key, each with what
+  blocks it). Every foreign key starts an index and declares `ON DELETE`: RESTRICT by default;
+  CASCADE or SET NULL only with a comment in the revision. Between two rows a Loop deletes
+  together, RESTRICT would make deleting the Loop depend on the order SQLite visits the tables, so
+  those keys CASCADE (the row is part of what it names) or SET NULL (an optional link).
+  `python -m tools.dbgen` enforces all of this and keeps the lists exact.
+- A revision adds a foreign key by rebuilding the table with `batch_alter_table`. The runner
+  enforces foreign keys inside its transaction, and dropping the old copy fires the `ON DELETE`
+  action of every row that references it, so a revision only rebuilds tables nothing references
+  and adds no self-reference; the rest of `UNENFORCED` waits for migrations that run with foreign
+  keys off and check them before commit (SQLite's documented table-rebuild procedure). Before a
+  key is added, a reference whose row is gone is settled by meaning: an optional one becomes NULL,
+  a NOT NULL one that the application cannot orphan stops the upgrade and names the rows. A
+  revision starts with that DML, because Python's `sqlite3` runs DDL before the first
+  INSERT/UPDATE/DELETE outside the transaction.
 - Lists require archiving before deletion and must be empty of active cards.
 - Boards require archiving and a name confirmation before physical deletion.
 - All timestamps are ISO 8601 UTC strings with second precision (`2026-10-30T12:00:00Z`).

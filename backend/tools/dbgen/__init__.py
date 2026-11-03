@@ -6,7 +6,7 @@ In pipeline order, each step stopping the build on a failure:
    both chains apply from empty to head in an in-memory SQLite database through
    ``app/storage/schema/runner.py`` (the board chain also gets the FTS5 bootstrap the application
    runs). These two in-memory databases are the only ones the tool opens.
-2. **Schema rules** (``schema.SCHEMA_RULES``): structural rules that belong to the build, not to a
+2. **Schema rules** (``rules.SCHEMA_RULES``): structural rules that belong to the build, not to a
    test.
 3. **Rows.** ``app/db/generated/{registry,board}.py``: one frozen, slotted, keyword-only dataclass
    per table with a checked ``from_mapping`` and a column tuple, so a repository selects exactly a

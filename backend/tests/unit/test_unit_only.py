@@ -36,6 +36,9 @@ FORBIDDEN_MODULES = (
     "app.repositories.sql",
     "tools.dbgen",
 )
+# Modules inside a forbidden package that open nothing: the build tool's schema rules are plain
+# functions over plain data, so the unit suite holds them to fixed descriptions.
+PURE_MODULES = ("tools.dbgen.rules",)
 # Calls that wait for real time or run work beside the test: (module, attribute).
 FORBIDDEN_CALLS = frozenset(
     {
@@ -48,6 +51,8 @@ DYNAMIC_IMPORTS = frozenset({("importlib", "import_module"), ("builtins", "__imp
 
 
 def _forbidden_module(name: str) -> str | None:
+    if any(name == pure or name.startswith(pure + ".") for pure in PURE_MODULES):
+        return None
     for prefix in FORBIDDEN_MODULES:
         if name == prefix or name.startswith(prefix + "."):
             return prefix
@@ -97,7 +102,8 @@ def violations(source: str, filename: str = "<source>") -> list[str]:
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             for alias in node.names:
                 full = f"{node.module}.{alias.name}"
-                if _forbidden_module(node.module) or _forbidden_module(full):
+                # "from tools.dbgen import rules" names a pure module inside a forbidden package.
+                if _forbidden_module(full):
                     found.append(f"{filename}:{node.lineno}: imports {full}")
         elif isinstance(node, ast.Call):
             target = _call_target(node.func, modules, attributes)
@@ -149,6 +155,8 @@ def test_the_test_suite_is_unit_tests_only() -> None:
         "from tools.dbgen import schema",
         "from tools import dbgen",
         "import tools.dbgen.sqlcheck",
+        "from tools.dbgen import rules, schema",
+        "from tools.dbgen.rulesets import anything",
         "import importlib\nimportlib.import_module('sqlite3')",
         "__import__('sqlalchemy.orm')",
         "import time\ntime.sleep(0.05)",
@@ -180,6 +188,9 @@ def test_the_guard_flags_an_integration_habit(source: str) -> None:
         "note = 'time.sleep(1) and import sqlite3 are fine inside a string'",
         "class Fake:\n    def sleep(self, seconds):\n        return seconds\nFake().sleep(1)",
         "from app.core import platform\nplatform.remove_tree",
+        "from tools.dbgen import rules",
+        "from tools.dbgen.rules import Table, schema_problems",
+        "import tools.dbgen.rules",
     ],
 )
 def test_the_guard_accepts_a_unit_test(source: str) -> None:
@@ -191,3 +202,17 @@ def test_a_violation_names_the_file_and_the_line() -> None:
     assert violations(source, "tests/test_example.py") == [
         "tests/test_example.py:3: imports sqlalchemy.text"
     ]
+
+
+def test_a_pure_module_imports_nothing_that_opens_a_database() -> None:
+    """A pure module uses the standard library only: no sibling module, no database layer."""
+    for module in PURE_MODULES:
+        path = BACKEND_ROOT.joinpath(*module.split(".")).with_suffix(".py")
+        source = path.read_text(encoding="utf-8")
+        relative = [
+            node.lineno
+            for node in ast.walk(ast.parse(source, str(path)))
+            if isinstance(node, ast.ImportFrom) and node.level > 0
+        ]
+        assert relative == [], f"{module} imports a sibling module at line(s) {relative}"
+        assert violations(source, module) == []

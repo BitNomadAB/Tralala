@@ -124,13 +124,13 @@ class _Databases:
 
 def _generate(databases: Callable[[], dict[str, sqlite3.Connection]]) -> list[str]:
     """Validate the chains, migrate, apply the schema rules and write the rows; problems or []."""
-    from . import render, schema
+    from . import render, rules, schema
 
     problems = [problem for chain in schema.CHAINS for problem in schema.chain_problems(chain)]
     if problems:
         return problems
     tables = {chain: schema.read_tables(database) for chain, database in databases().items()}
-    problems = schema.schema_problems(tables)
+    problems = rules.schema_problems(tables)
     if problems:
         return problems
     freshness.GENERATED_DIR.mkdir(parents=True, exist_ok=True)
