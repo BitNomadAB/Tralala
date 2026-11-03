@@ -219,6 +219,12 @@ jobs:
         run: |
           TRALALA_SECRET_KEY=ci TRALALA_BOOTSTRAP_PASSWORD=ci docker compose config > compose.ci.yml
           grep -Eq 'host\.docker\.internal[:=]host-gateway' compose.ci.yml
+      # The data directory is the named volume unless TRALALA_DATA_PATH names a host directory.
+      - name: The data directory follows TRALALA_DATA_PATH
+        run: |
+          export TRALALA_SECRET_KEY=ci TRALALA_BOOTSTRAP_PASSWORD=ci
+          docker compose config | grep -B2 'target: /data$' | grep -q 'source: tralala-data$'
+          TRALALA_DATA_PATH=/srv/tralala/data docker compose config | grep -B2 'target: /data$' | grep -q 'source: /srv/tralala/data$'
       - name: Logs on failure
         if: failure()
         run: for name in web web-trusted backend; do docker logs "$name" || true; done

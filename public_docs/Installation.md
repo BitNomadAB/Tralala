@@ -274,6 +274,9 @@ cd backend
 
 The session secret is kept, and the next start recreates a clean schema.
 
+Rolling an upgrade back with the pre-migration snapshots is described in
+[Operations.md](Operations.md#rolling-back).
+
 ## Verify the installation
 
 ```bash
@@ -318,6 +321,10 @@ already exists and only downloads Chromium when no browser build is present
 
 A board is its directory: deleting a board removes its database and its files together, duplicating
 it copies both, and a backup is the database plus its files.
+
+Keeping a server install running (start on boot, the data directory on a disk of your choice,
+backups and restoring a board, upgrading and rolling back, disk housekeeping, outbound connections,
+trusting a private certificate) is in [Operations.md](Operations.md).
 
 Read [Architecture.md](Architecture.md) for how the pieces fit together, and
 [Onboarding.md](Onboarding.md) for what to do in the first hour.
