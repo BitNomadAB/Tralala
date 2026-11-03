@@ -21,6 +21,9 @@ message broker.
    `services/auth.py` are the references; services not converted yet still hold those handles until
    their conversion. The Loop workflow services reach the converted Loop and Ticket rules through
    the transitional `services/loop_bridge.py`, which is deleted when they are converted.
+   `tests/unit/test_service_layer.py` holds the line: a service module that imports SQLAlchemy or
+   `app.storage`, or calls `text`/`exec_driver_sql`, fails unless it is on that test's
+   `NOT_YET_ON_REPOSITORIES` list, and the list only shrinks.
 2. **Board isolation.** A board's data lives only in `data/boards/{uuid}/board.sqlite`. A board id
    is always a UUID resolved through `BoardDatabaseManager`; never build a path from user text.
 2b. **A Loop owns its Kanban.** Boards contain Loops; loops contain lists, Tickets, documents,
