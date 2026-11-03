@@ -72,8 +72,11 @@ message broker.
 ## Repository layout
 
 ```text
-backend/app/{api,core,models,repositories,schemas,services,storage,security,migrations}
+backend/app/{api,core,models,repositories,schemas,services,storage,security,seeds}
+backend/migrations/{registry,board}
+backend/tests/   pytest, including the guard tests that hold the code to these rules
 frontend/src/{app,components,features,lib,webmcp,themes,tests}
+frontend/e2e/    the Playwright journeys
 public_docs/     everything a user or operator follows: installation, onboarding, commands,
                  architecture, troubleshooting, security, agent usage, the API and the Loop workflow
 docs/            maintainer notes that stay in the repository: the database and schema reference
@@ -88,13 +91,18 @@ scripts/         run-playwright.mjs, the isolated Playwright runner
 `models/`, `repositories/` and `security/` are reserved for code that is promoted out of
 `storage/` and `core/` when it grows; do not duplicate logic into them.
 
+`tests/test_instruction_files.py` holds this file to the tree: the layout block above, the commands
+below and every file path it names must exist, every relative link in a shipped document must
+resolve, and no shipped document or source may describe the licence as anything but
+source-available. Move a directory and its line here in the same change.
+
 ## Commands
 
 Backend (run from `backend/`):
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest          # tests (primary gate)
-..\.venv\Scripts\python.exe -m ruff check app  # lint
+..\.venv\Scripts\python.exe -m pytest                            # tests (primary gate)
+..\.venv\Scripts\python.exe -m ruff check app tests migrations  # lint, what CI runs
 ..\.venv\Scripts\python.exe -m uvicorn app.main:create_app --factory --reload
 ```
 
