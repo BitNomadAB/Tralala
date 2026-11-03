@@ -14,6 +14,7 @@ import { useEffect, useRef } from "react";
 import type { RunStepState } from "@/lib/runPhases";
 import { traceStages, type TraceStage } from "@/lib/runTrace";
 import type { GenerationRun, RunTraceStep } from "@/lib/types";
+import type { RunPurpose } from "./loopUi";
 
 const TONE: Record<RunStepState, string> = {
   failed: "text-[var(--destructive)]",
@@ -116,7 +117,7 @@ export function RunTree({
   compact,
   failureJson,
 }: {
-  purpose: "analysis" | "roadmap";
+  purpose: RunPurpose;
   run: GenerationRun;
   compact: boolean;
   failureJson: string | null;

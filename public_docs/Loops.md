@@ -37,7 +37,9 @@ The server appends the traceability block itself and stores the text as the `ana
 with the run, the agent and the model in its provenance (`written`). A board without an enabled
 agent keeps the rendered view. The analysis cannot be approved while that run is queued or running
 (`409 generation_in_progress`); an approved analysis is not rewritten until a person requests
-changes or resets it.
+changes or resets it. In the Analysis tab the human view carries a label — *Written by* the agent,
+or *Rendered from the structure* — and **Rewrite for people** starts the run again for the current
+technical analysis. While one runs, the tab says so and **Approve analysis** waits for it.
 
 Changing an input invalidates what depended on it: a new Info revision makes the analysis pair and
 both RoadMap views stale, the Loop moves to `replanning`, and execution transitions are rejected

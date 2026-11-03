@@ -1,4 +1,4 @@
-import type { GenerationRun } from "@/lib/types";
+import type { GenerationPurpose, GenerationRun } from "@/lib/types";
 
 /** The steps a generation run passes through, in the order the server records them. */
 export type RunPhaseKey = "reading_info" | "analysing_repository" | "generating";
@@ -47,7 +47,7 @@ const CAPTIONS: Record<RunPhaseKey, string> = {
  * links none and `warning` when at least one repository could not be read, because a green tick there
  * claimed the model had seen code it never received.
  */
-export function runSteps(purpose: "analysis" | "roadmap" | "qa", run?: RunFacts | null): RunStep[] {
+export function runSteps(purpose: GenerationPurpose, run?: RunFacts | null): RunStep[] {
   const names = labels(purpose === "roadmap" ? "roadmap" : "analysis");
   const reached =
     run?.phase && ORDER.includes(run.phase as RunPhaseKey) ? (run.phase as RunPhaseKey) : null;

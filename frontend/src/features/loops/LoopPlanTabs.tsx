@@ -1,4 +1,4 @@
-import { Lock, Sparkles } from "lucide-react";
+import { Lock, PenLine, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import type { GenerationCandidates } from "@/lib/boardAgents";
@@ -18,6 +18,8 @@ export function LoopPlanTabs({
   generating,
   generateDisabled,
   onGenerate,
+  onRewrite,
+  rewriteDisabled = true,
 }: {
   tab: PlanTab;
   onTabChange: (tab: PlanTab) => void;
@@ -31,6 +33,9 @@ export function LoopPlanTabs({
   generating: boolean;
   generateDisabled: boolean;
   onGenerate: (scope: PlanScope) => void;
+  /** Have a board agent write the analysis for people again; absent for a reader. */
+  onRewrite?: (() => void) | undefined;
+  rewriteDisabled?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-2">
@@ -47,6 +52,11 @@ export function LoopPlanTabs({
       {tab !== "info" ? (
         <Button size="sm" variant="ghost" onClick={onToggleTechnical}>
           {technical ? "Human view" : "Technical view"}
+        </Button>
+      ) : null}
+      {tab === "analysis" && !technical && onRewrite ? (
+        <Button size="sm" variant="ghost" disabled={rewriteDisabled} onClick={onRewrite}>
+          <PenLine size={14} /> Rewrite for people
         </Button>
       ) : null}
       {tab !== "info" ? (

@@ -1,6 +1,7 @@
 import type {
   Card,
   DocumentKind,
+  GenerationPurpose,
   GenerationRun,
   LoopAgentPreferences,
   LoopApproval,
@@ -121,7 +122,7 @@ export const loopWorkflowApi = {
   async startGeneration(
     boardId: string,
     loopId: string,
-    purpose: "analysis" | "roadmap" | "qa",
+    purpose: GenerationPurpose,
     agentId?: string,
   ): Promise<GenerationRun> {
     return json(

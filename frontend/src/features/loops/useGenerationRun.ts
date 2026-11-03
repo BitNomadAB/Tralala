@@ -4,8 +4,8 @@ import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
-import type { GenerationRun } from "@/lib/types";
-import type { PlanScope, PlanTab } from "./loopUi";
+import type { GenerationPurpose, GenerationRun } from "@/lib/types";
+import type { PlanTab } from "./loopUi";
 
 const inFlight = (run: Pick<GenerationRun, "status">) =>
   run.status === "queued" || run.status === "running";
@@ -34,7 +34,7 @@ export function useGenerationRun({
   const [failure, setFailure] = useState<GenerationRun | null>(null);
 
   const generate = useMutation({
-    mutationFn: (purpose: PlanScope) =>
+    mutationFn: (purpose: GenerationPurpose) =>
       api.startGeneration(boardId, loopId, purpose, agentId || undefined),
     onSuccess: (run) => {
       setRunId(run.id);
@@ -79,6 +79,21 @@ export function useGenerationRun({
   });
   const purposeRuns = (runsQuery.data ?? []).filter((entry) => entry.purpose === tab);
   const lastRun = purposeRuns.at(0);
+  // A board agent writes a new analysis for people in a run of its own, started by the server; the
+  // list follows it, and its end brings the written view in.
+  const writingForPeople = (runsQuery.data ?? []).some(
+    (entry) => entry.purpose === "analysis_human" && inFlight(entry),
+  );
+  const [wasWriting, setWasWriting] = useState(false);
+  const [writtenAt, setWrittenAt] = useState(0);
+  if (writingForPeople !== wasWriting) {
+    setWasWriting(writingForPeople);
+    if (!writingForPeople) setWrittenAt((count) => count + 1);
+  }
+  const refreshWritten = useEffectEvent(() => invalidate());
+  useEffect(() => {
+    if (writtenAt > 0) refreshWritten();
+  }, [writtenAt]);
 
   // A finished run stops being followed, and a failed one keeps its step and the provider's answer on
   // screen instead of a toast that scrolls away. Both are state, so they are set while rendering
@@ -143,6 +158,8 @@ export function useGenerationRun({
     cancelRun,
     lastRun,
     lastRunLoading: runsQuery.isLoading,
+    /** A board agent is writing the analysis for people; it is not approved meanwhile. */
+    writingForPeople,
     dismissFailure: () => {
       setFailure(null);
     },

@@ -8,6 +8,7 @@ import {
 } from "@/lib/runPhases";
 import { hasTree } from "@/lib/runTrace";
 import type { GenerationRun } from "@/lib/types";
+import type { RunPurpose } from "./loopUi";
 import { RunTree } from "./RunTree";
 
 /** What the step achieved, not what it was supposed to do: a skipped step says so. */
@@ -33,7 +34,7 @@ export function RunPhases({
   onDismiss,
   compact = false,
 }: {
-  purpose: "analysis" | "roadmap";
+  purpose: RunPurpose;
   run: GenerationRun;
   onDismiss?: (() => void) | undefined;
   compact?: boolean;
@@ -82,7 +83,7 @@ function PhaseList({
   compact,
   failureJson,
 }: {
-  purpose: "analysis" | "roadmap";
+  purpose: RunPurpose;
   run: GenerationRun;
   compact: boolean;
   failureJson: string | null;

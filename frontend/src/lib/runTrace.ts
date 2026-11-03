@@ -1,5 +1,5 @@
 import { repositoryOutcome, type RunStepState } from "@/lib/runPhases";
-import type { GenerationRun, RunStage, RunTraceStep } from "@/lib/types";
+import type { GenerationPurpose, GenerationRun, RunStage, RunTraceStep } from "@/lib/types";
 
 /** The stages of a run's tree, in the order the server reaches them. */
 export const STAGE_ORDER: readonly RunStage[] = [
@@ -18,13 +18,22 @@ export interface TraceStage {
   steps: RunTraceStep[];
 }
 
-type Purpose = "analysis" | "roadmap" | "qa";
+type Purpose = GenerationPurpose;
 
 function document(purpose: Purpose): string {
   return purpose === "roadmap" ? "RoadMap" : purpose === "qa" ? "QA instructions" : "analysis";
 }
 
+/** The analysis written for people reads the technical analysis and writes prose; no repository. */
+const FOR_PEOPLE: Readonly<Partial<Record<RunStage, string>>> = {
+  documents: "Reading the analysis",
+  writing: "Writing for people",
+  checking: "Checking coverage",
+};
+
 export function stageLabel(stage: RunStage, purpose: Purpose): string {
+  const forPeople = purpose === "analysis_human" ? FOR_PEOPLE[stage] : undefined;
+  if (forPeople) return forPeople;
   switch (stage) {
     case "documents":
       return "Reading the Loop's documents";
@@ -37,6 +46,11 @@ export function stageLabel(stage: RunStage, purpose: Purpose): string {
     case "saving":
       return "Saving";
   }
+}
+
+/** A run that never reads a repository: QA instructions and the analysis written for people. */
+function readsRepository(purpose: Purpose): boolean {
+  return purpose === "analysis" || purpose === "roadmap";
 }
 
 function inFlight(run: Pick<GenerationRun, "status">): boolean {
@@ -63,7 +77,7 @@ export function hasTree(run: Pick<GenerationRun, "status" | "trace">): boolean {
  */
 export function traceStages(purpose: Purpose, run: GenerationRun): TraceStage[] {
   const steps = run.trace ?? [];
-  const stages = STAGE_ORDER.filter((stage) => purpose !== "qa" || stage !== "repository");
+  const stages = STAGE_ORDER.filter((stage) => readsRepository(purpose) || stage !== "repository");
   const reached = stages.filter((stage) => steps.some((step) => step.stage === stage));
   const last = reached.at(-1);
   const anyError = steps.some((step) => step.kind === "error");

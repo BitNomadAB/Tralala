@@ -88,8 +88,11 @@ export function LoopDocumentDialog({
   // Reset is for the draft too, not only for an approval: a bad generation has to be clearable before
   // anyone signs it off.
   const canResetScope = isHuman && !readOnly && (scopeHasText || approvedForScope);
+  // The text a person would approve is about to be replaced by the one written for them.
+  const writingForPeople = tab === "analysis" && generation.writingForPeople;
   const canReviewScope =
     isHuman &&
+    !writingForPeople &&
     scopeHasText &&
     scopeDocuments.every((kind) => {
       const document = documents?.[kind as DocumentKind];
@@ -145,7 +148,19 @@ export function LoopDocumentDialog({
           generating={generating}
           generateDisabled={generateDisabled}
           onGenerate={(purpose) => generation.generate.mutate(purpose)}
+          onRewrite={readOnly ? undefined : () => generation.generate.mutate("analysis_human")}
+          rewriteDisabled={
+            generateDisabled ||
+            writingForPeople ||
+            approvedForScope ||
+            !documents?.analysis_ai.current_content?.trim()
+          }
         />
+        {writingForPeople ? (
+          <p role="status" className="mt-2 text-xs text-[var(--muted-foreground)]">
+            A board agent is writing this analysis for people. It can be approved when that is done.
+          </p>
+        ) : null}
         {/* Once, under the button that started the run; from 2xl the aside below shows it instead. */}
         {visibleRun ? (
           <GenerationRunPanel scope={scope} run={visibleRun} onDismiss={dismissRun} />

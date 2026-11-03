@@ -31,6 +31,11 @@ export interface LoopDocument {
   current_content: string | null;
   current_payload: Record<string, unknown> | null;
   current_created_at: string | null;
+  /**
+   * How the current revision came about: a run's agent and model, `rendered` for a view rendered
+   * from the structure, `written` for one a board agent wrote for people (absent before PLN-007).
+   */
+  current_provenance?: Record<string, unknown> | undefined;
   approved_revision_id: string | null;
   approved_revision_number: number | null;
   approved_content: string | null;
@@ -255,10 +260,13 @@ export interface RunTraceStep {
   };
 }
 
+/** What a generation run writes; `analysis_human` is the analysis written for people. */
+export type GenerationPurpose = "analysis" | "analysis_human" | "roadmap" | "qa";
+
 export interface GenerationRun {
   id: string;
   loop_id: string;
-  purpose: "analysis" | "roadmap" | "qa";
+  purpose: GenerationPurpose;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   /** The step the run reached: reading_info, analysing_repository, generating (null before 0010). */
   phase: string | null;

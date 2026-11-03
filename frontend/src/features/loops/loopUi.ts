@@ -1,5 +1,5 @@
 import type { BadgeTone } from "@/components/ui/badge";
-import type { DocumentKind, LoopStage } from "@/lib/types";
+import type { DocumentKind, LoopDocument, LoopStage } from "@/lib/types";
 
 export const STAGE_TONES: Record<LoopStage, BadgeTone> = {
   draft: "neutral",
@@ -48,6 +48,21 @@ export function staleReasonText(code: string): string {
 /** The planning documents dialog's tabs; the last two are the scopes an agent generates. */
 export type PlanTab = "info" | "analysis" | "roadmap";
 export type PlanScope = Exclude<PlanTab, "info">;
+/** What a run panel describes: a scope's run, or the analysis written for people. */
+export type RunPurpose = PlanScope | "analysis_human";
+
+/**
+ * Who wrote the human view of an analysis: the board agent that wrote it for people, or the server
+ * that rendered it from the structure. Null for a revision that says neither.
+ */
+export function viewAuthorship(document: LoopDocument): string | null {
+  const provenance = document.current_provenance ?? {};
+  if (provenance.written === true) {
+    const agent = provenance.agent_name;
+    return typeof agent === "string" && agent ? `Written by ${agent}` : "Written by a board agent";
+  }
+  return provenance.rendered === true ? "Rendered from the structure" : null;
+}
 
 /** How many cards one column loads; the drag and drop writes to the same query keys. */
 export const LIST_LIMIT = 200;

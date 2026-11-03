@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { Badge } from "@/components/ui/badge";
 import { renderMarkdown } from "@/lib/markdown";
 import type { DocumentKind, LoopDocument } from "@/lib/types";
-import { DOCUMENT_LABELS, staleReasonText } from "./loopUi";
+import { DOCUMENT_LABELS, staleReasonText, viewAuthorship } from "./loopUi";
 
 /** One planning document: its state, current text, approved baseline and revision list. */
 export function PlanDocumentPanel({
@@ -14,6 +14,8 @@ export function PlanDocumentPanel({
 }) {
   // Both approvals can supersede the same document, and one sentence says it once.
   const reasons = [...new Set(document.stale_reasons)];
+  // A view a board agent wrote for people reads differently from one rendered from the structure.
+  const authorship = kind === "analysis" ? viewAuthorship(document) : null;
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -29,6 +31,7 @@ export function PlanDocumentPanel({
         >
           {document.state.replace("_", " ")}
         </Badge>
+        {authorship ? <Badge tone="neutral">{authorship}</Badge> : null}
         {document.current_revision_number ? (
           <span className="text-[var(--muted-foreground)]">
             revision {document.current_revision_number}
