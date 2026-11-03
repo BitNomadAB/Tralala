@@ -8,7 +8,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ...core.errors import PayloadTooLarge
 from ...schemas.attachments import AttachmentOut
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ..body import read_limited_body
 from ..deps import RequestContext, get_context, ok
 
@@ -21,7 +21,7 @@ def list_attachments(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     card_id: Annotated[str | None, Query(max_length=64)] = None,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     return ok(request, ctx.services.attachment.list(board_id, card_id=card_id))
 
@@ -35,7 +35,7 @@ async def upload_attachment(
     request: Request,
     card_id: Annotated[str, Query(max_length=64)],
     filename: Annotated[str, Query(min_length=1, max_length=255)],
-) -> dict:
+) -> dict[str, object]:
     # Reading the body awaits, so this route stays async and the upload runs in the thread pool.
     data = await read_limited_body(request)
     if not data:
@@ -61,7 +61,7 @@ def get_attachment(
     attachment_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     return ok(request, ctx.services.attachment.get(board_id, attachment_id))
 
@@ -86,13 +86,15 @@ def download_attachment(
     )
 
 
-@router.delete("/boards/{board_id}/attachments/{attachment_id}", response_model=Envelope[dict])
+@router.delete(
+    "/boards/{board_id}/attachments/{attachment_id}", response_model=Envelope[OpenObject]
+)
 def delete_attachment(
     board_id: str,
     attachment_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.attachment.delete(ctx.actor, board_id, attachment_id)
     return ok(request, {"id": attachment_id, "deleted": True})
 

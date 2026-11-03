@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ...schemas.lists import ListCreate, ListMove, ListOut, ListUpdate
 from ..deps import RequestContext, get_context, ok
 
@@ -22,7 +22,7 @@ def list_lists(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     include_archived: Annotated[bool, Query()] = False,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     return ok(
         request,
@@ -37,7 +37,7 @@ def create_list(
     payload: ListCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.list.create(ctx.actor, board_id, loop_id, payload))
 
 
@@ -48,7 +48,7 @@ def get_list(
     list_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     return ok(request, ctx.services.list.get(board_id, loop_id, list_id))
 
@@ -61,7 +61,7 @@ def update_list(
     payload: ListUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.list.update(ctx.actor, board_id, loop_id, list_id, payload)
     )
@@ -75,7 +75,7 @@ def move_list(
     payload: ListMove,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.list.move(ctx.actor, board_id, loop_id, list_id, payload)
     )
@@ -88,7 +88,7 @@ def archive_list(
     list_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.list.archive(ctx.actor, board_id, loop_id, list_id))
 
 
@@ -99,18 +99,18 @@ def restore_list(
     list_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.list.restore(ctx.actor, board_id, loop_id, list_id))
 
 
-@router.delete(f"{PREFIX}/{{list_id}}", response_model=Envelope[dict])
+@router.delete(f"{PREFIX}/{{list_id}}", response_model=Envelope[OpenObject])
 def delete_list(
     board_id: str,
     loop_id: str,
     list_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.list.delete(ctx.actor, board_id, loop_id, list_id)
     return ok(request, {"id": list_id, "deleted": True})
 

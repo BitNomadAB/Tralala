@@ -200,13 +200,13 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   `tests/unit/test_sql.py` holds the two equal. A write SQLite may refuse for a constraint a request
   can break (a taken unique name) raises `ConstraintViolationError` from the SQL repository, and the
   service answers it, so no service imports a driver error.
-- Pyright runs strict on the scope in `backend/pyrightconfig.json`: `app/core`, `app/schemas`, the
-  generated rows, the repositories, every converted service, the unit tests and the build tools.
-  In that scope there is no `Any`, no `cast` and no `# type: ignore`. Each converted service joins
-  the scope. `app/api`, `app/main.py` and `app/dev_reset.py` are checked in pyright's `standard`
-  mode while the services they call return untyped values; `app/storage` and the unconverted
-  services are not checked yet. `tests/unit/test_strict_scope.py` enforces all of it, so the
-  scope can only grow.
+- Pyright runs strict on the scope in `backend/pyrightconfig.json`: `app/api`, `app/main.py`,
+  `app/dev_reset.py`, `app/core`, `app/schemas`, the generated rows, the repositories,
+  `app/storage`, every converted service, the unit tests and the build tools. In that scope there
+  is no `Any`, no `cast` and no `# type: ignore`. Each converted service joins the scope; the
+  unconverted services are not checked yet. A route is annotated with the envelope it builds,
+  `dict[str, object]`, while its `response_model` stays what the OpenAPI document describes.
+  `tests/unit/test_strict_scope.py` enforces all of it, so the scope can only grow.
 - TypeScript: strict, plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
   `noImplicitOverride` and `verbatimModuleSyntax` (`frontend/tsconfig.json`). An index or regex
   result is narrowed, never asserted with `!`; an optional property that may be passed `undefined`

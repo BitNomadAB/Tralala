@@ -21,7 +21,7 @@ it that way.
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -123,7 +123,7 @@ class ForeignKeyCheckError(RuntimeError):
 
 
 @contextmanager
-def migration_transaction(engine: Engine) -> Iterator[Connection]:
+def migration_transaction(engine: Engine) -> Generator[Connection]:
     """The one transaction an upgrade runs in, per SQLite's table-rebuild procedure.
 
     Alembic joins a transaction its caller has opened, and the engine sends the BEGIN itself

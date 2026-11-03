@@ -22,14 +22,17 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, TypedDict
 
 from sqlalchemy.engine import Connection, Engine
 
 from ..core.config import Settings
 from ..core.errors import NotFound
 from ..core.integrity import foreign_key_problem
+from ..db import values
+from ..db.generated.registry import BoardsRow
 from ..repositories.board_files import DatabaseProblem
+from ..repositories.board_rows import BoardChanges
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
 from ..storage.schema import ensure_fts, runner
@@ -44,6 +47,26 @@ def _short(text: str) -> str:
     return text if len(text) <= DETAIL_MAX_CHARS else text[: DETAIL_MAX_CHARS - 3] + "..."
 
 
+class FileCheck(TypedDict):
+    """``integrity_check`` on a backup file: its answer, and whether that answer is "ok"."""
+
+    integrity: str
+    ok: bool
+
+
+class Validation(TypedDict):
+    """A migrated database's checks, logged with the migration and refused when not ``ok``."""
+
+    integrity: str
+    foreign_key_violations: int
+    ok: bool
+    foreign_key_detail: NotRequired[str]
+
+
+type ReportValue = str | int | bool | None
+"""A field of a :class:`MigrationReport`."""
+
+
 @dataclass(frozen=True)
 class MigrationReport:
     chain: str
@@ -56,7 +79,7 @@ class MigrationReport:
     adopted: bool = False
     error: str | None = None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, ReportValue]:
         return asdict(self)
 
 
@@ -105,14 +128,15 @@ class MigrationManager:
         rows = self.registry.read("SELECT id FROM boards ORDER BY created_at, id")
         self._log("board_migration_batch_started", boards=len(rows))
         for row in rows:
+            board_id = values.text(row, "id")
             try:
-                reports.append(self.migrate_board(row["id"]))
+                reports.append(self.migrate_board(board_id))
             except Exception as exc:  # one board must not stop the others
-                logger.exception("unexpected error while migrating board %s", row["id"])
+                logger.exception("unexpected error while migrating board %s", board_id)
                 reports.append(
                     MigrationReport(
                         chain="board",
-                        board_id=row["id"],
+                        board_id=board_id,
                         status="failed",
                         from_revision=None,
                         to_revision=None,
@@ -154,7 +178,7 @@ class MigrationManager:
             return report
 
         path = self.boards.path(board_id)
-        previous_status = row["status"]
+        previous_status = row.status
         backup: str | None = None
 
         with self.boards.locked(board_id):
@@ -261,7 +285,7 @@ class MigrationManager:
             )
         return None
 
-    def status(self) -> dict[str, Any]:
+    def status(self) -> dict[str, str | int]:
         return {
             "registry_head": runner.head_revision("registry"),
             "board_head": runner.head_revision("board"),
@@ -272,7 +296,7 @@ class MigrationManager:
 
     def _upgrade_chain(
         self, chain: str, engine: Engine, invalid: str
-    ) -> tuple[str | None, str, bool, dict[str, Any]]:
+    ) -> tuple[str | None, str, bool, Validation]:
         """Stamp a legacy database, upgrade it to head and validate it. Safe to repeat."""
         baseline = runner.CHAIN_BASELINES[chain]
         head = runner.head_revision(chain)
@@ -305,23 +329,21 @@ class MigrationManager:
             # Before the COMMIT, so a database that fails is left as it was.
             validation = self._validate(connection)
             self._require_valid(validation, invalid)
-        if to_revision != head:
+        if to_revision is None or to_revision != head:
             raise RuntimeError(f"{chain} schema did not reach head ({to_revision!r} != {head!r})")
         return from_revision, to_revision, adopted, validation
 
-    def _reconcile_registry(self, row: dict[str, Any], revision: str, previous_status: str) -> None:
-        updates: dict[str, Any] = {
-            "schema_revision": revision,
-            "schema_version": runner.revision_count("board"),
-        }
+    def _reconcile_registry(self, row: BoardsRow, revision: str, previous_status: str) -> None:
+        schema_version = runner.revision_count("board")
+        updates: BoardChanges = {"schema_revision": revision, "schema_version": schema_version}
         if previous_status == "migration_failed":
-            updates["status"] = "archived" if row["archived_at"] else "active"
+            updates["status"] = "archived" if row.archived_at else "active"
         if (
-            updates.get("schema_revision") != row.get("schema_revision")
-            or updates["schema_version"] != row.get("schema_version")
+            revision != row.schema_revision
+            or schema_version != row.schema_version
             or "status" in updates
         ):
-            self.registry.update_board(row["id"], **updates)
+            self.registry.update_board(row.id, **updates)
 
     def _mark_failed(self, board_id: str, exc: Exception, previous_status: str) -> None:
         logger.exception("board migration failed: %s", board_id)
@@ -350,7 +372,7 @@ class MigrationManager:
         return name
 
     @staticmethod
-    def _check_file(path: Path) -> dict[str, Any]:
+    def _check_file(path: Path) -> FileCheck:
         try:
             connection = sqlite3.connect(path)
             try:
@@ -362,16 +384,16 @@ class MigrationManager:
         return {"integrity": integrity, "ok": integrity == "ok"}
 
     @staticmethod
-    def _require_valid(validation: dict[str, Any], message: str) -> None:
+    def _require_valid(validation: Validation, message: str) -> None:
         if not validation["ok"]:
             raise RuntimeError(f"{message}: {validation}")
 
     @staticmethod
-    def _validate(connection: Connection) -> dict[str, Any]:
+    def _validate(connection: Connection) -> Validation:
         # integrity_check answers one row "ok", or one row per problem it found.
         findings = [str(row[0]) for row in connection.exec_driver_sql("PRAGMA integrity_check")]
         violations = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
-        validation: dict[str, Any] = {
+        validation: Validation = {
             "integrity": "; ".join(findings),
             "foreign_key_violations": len(violations),
             "ok": findings == ["ok"] and not violations,
@@ -381,8 +403,8 @@ class MigrationManager:
             validation["foreign_key_detail"] = problem
         return validation
 
-    def _log(self, event: str, report: MigrationReport | None = None, **fields: Any) -> None:
-        payload: dict[str, Any] = dict(fields)
+    def _log(self, event: str, report: MigrationReport | None = None, **fields: object) -> None:
+        payload: dict[str, object] = dict(fields)
         if report is not None:
             payload.update(
                 {key: value for key, value in report.to_dict().items() if value is not None}

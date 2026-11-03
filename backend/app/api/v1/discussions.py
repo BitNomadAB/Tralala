@@ -17,7 +17,7 @@ from ...schemas.discussions import (
     DiscussionRunOut,
     DiscussionRunStart,
 )
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ..deps import RequestContext, get_context, ok
 from .streaming import STREAM_HEADERS, event_stream
 
@@ -28,7 +28,7 @@ router = APIRouter(tags=["discussions"])
 def discussion_board_overview(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     ctx.actor.require("discussions:read")
     items = ctx.services.discussion.board_overview()
@@ -42,7 +42,7 @@ def list_discussions(
     request: Request,
     status: Annotated[str | None, Query(max_length=40)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("discussions:read")
     items = ctx.services.discussion.list(board_id, status=status, limit=limit)
     return ok(request, {"items": items, "total": len(items)})
@@ -56,7 +56,7 @@ def create_discussion(
     payload: DiscussionCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.discussion.create(ctx.actor, board_id, payload))
 
 
@@ -69,14 +69,14 @@ def get_discussion(
     discussion_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("discussions:read")
     return ok(request, ctx.services.discussion.get(board_id, discussion_id))
 
 
 @router.post(
     "/boards/{board_id}/discussions/{discussion_id}/start",
-    response_model=Envelope[dict],
+    response_model=Envelope[OpenObject],
 )
 def start_discussion(
     board_id: str,
@@ -84,7 +84,7 @@ def start_discussion(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     payload: DiscussionRunStart | None = None,
-) -> dict:
+) -> dict[str, object]:
     options = payload or DiscussionRunStart()
     return ok(
         request,
@@ -102,7 +102,7 @@ def start_discussion(
 
 @router.post(
     "/boards/{board_id}/discussions/{discussion_id}/runs",
-    response_model=Envelope[dict],
+    response_model=Envelope[OpenObject],
     status_code=202,
 )
 def create_run(
@@ -111,7 +111,7 @@ def create_run(
     payload: DiscussionRunStart,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.run.start(
@@ -137,7 +137,7 @@ def list_runs(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("discussions:read")
     items = ctx.services.run.list(board_id, discussion_id, limit=limit)
     return ok(request, {"items": items, "total": len(items)})
@@ -153,14 +153,14 @@ def get_run(
     run_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("discussions:read")
     return ok(request, ctx.services.run.get(board_id, discussion_id, run_id))
 
 
 @router.post(
     "/boards/{board_id}/discussions/{discussion_id}/runs/{run_id}/pause",
-    response_model=Envelope[dict],
+    response_model=Envelope[OpenObject],
 )
 def pause_run(
     board_id: str,
@@ -168,13 +168,13 @@ def pause_run(
     run_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.run.pause(ctx.actor, board_id, discussion_id, run_id))
 
 
 @router.post(
     "/boards/{board_id}/discussions/{discussion_id}/runs/{run_id}/resume",
-    response_model=Envelope[dict],
+    response_model=Envelope[OpenObject],
 )
 def resume_run(
     board_id: str,
@@ -182,13 +182,13 @@ def resume_run(
     run_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.run.resume(ctx.actor, board_id, discussion_id, run_id))
 
 
 @router.post(
     "/boards/{board_id}/discussions/{discussion_id}/runs/{run_id}/stop",
-    response_model=Envelope[dict],
+    response_model=Envelope[OpenObject],
 )
 def stop_run(
     board_id: str,
@@ -196,7 +196,7 @@ def stop_run(
     run_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.run.stop(ctx.actor, board_id, discussion_id, run_id))
 
 
@@ -211,7 +211,7 @@ def review_discussion(
     payload: DiscussionReview,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.discussion.review(
@@ -235,7 +235,7 @@ def post_discussion_message(
     payload: DiscussionMessageCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.discussion.add_message(ctx.actor, board_id, discussion_id, payload)
     )
@@ -252,7 +252,7 @@ def discussion_event_history(
     request: Request,
     after: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("discussions:read")
     items = ctx.services.event.replay(board_id, discussion_id, after=after, limit=limit)
     return ok(request, {"items": items, "total": len(items)})

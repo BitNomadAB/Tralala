@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, TypedDict
 
 from fastapi import Header, Query, Request
 
@@ -66,7 +67,7 @@ class Pagination:
     offset: int
 
     @property
-    def meta(self) -> dict:
+    def meta(self) -> dict[str, int | bool]:
         return page_meta(0, self.limit, self.offset)
 
 
@@ -77,11 +78,22 @@ def pagination(
     return Pagination(limit=limit, offset=offset)
 
 
-def ok(request: Request, data: object, meta: dict | None = None) -> dict:
+def ok(
+    request: Request, data: object, meta: Mapping[str, object] | None = None
+) -> dict[str, object]:
     return envelope(data, request, meta)
 
 
-def page(request: Request, result: dict) -> dict:
+class PageResult(TypedDict):
+    """One page of a listing: its items and where they sit in the whole."""
+
+    items: object
+    total: int
+    limit: int
+    offset: int
+
+
+def page(request: Request, result: PageResult) -> dict[str, object]:
     return envelope(
         result["items"],
         request,
@@ -90,6 +102,7 @@ def page(request: Request, result: dict) -> dict:
 
 
 __all__ = [
+    "PageResult",
     "Pagination",
     "RequestContext",
     "get_context",

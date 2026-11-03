@@ -40,7 +40,7 @@ def list_board_tickets(
     request: Request,
     q: Annotated[str | None, Query(max_length=200)] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
-) -> dict:
+) -> dict[str, object]:
     """Aggregate read across every active Loop; each item names its owning Loop."""
     ctx.actor.require("cards:read")
     items = ctx.services.card.list_board_tickets(board_id, q=q, limit=limit)
@@ -65,7 +65,7 @@ def list_cards(
     include_archived: Annotated[bool, Query()] = False,
     sort: Annotated[str, Query()] = "position",
     order: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     items, total = ctx.services.card.list(
         board_id,
@@ -104,7 +104,7 @@ def create_card(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     key: Annotated[str | None, Depends(idempotency_key)] = None,
-) -> dict:
+) -> dict[str, object]:
     card, replayed = ctx.services.card.create(
         ctx.actor, board_id, loop_id, payload, idempotency_key=key
     )
@@ -121,7 +121,7 @@ def bulk_create_cards(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     key: Annotated[str | None, Depends(idempotency_key)] = None,
-) -> dict:
+) -> dict[str, object]:
     result, replayed = ctx.services.card.bulk_create(
         ctx.actor, board_id, loop_id, payload, idempotency_key=key
     )
@@ -138,7 +138,7 @@ def get_card(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     include: Annotated[str | None, Query(description="Comma list: checklists,comments")] = None,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     card = ctx.services.card.get(board_id, loop_id, card_id)
     requested = {part.strip() for part in (include or "").split(",") if part.strip()}
@@ -157,7 +157,7 @@ def update_card(
     payload: CardUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.card.update(ctx.actor, board_id, loop_id, card_id, payload)
     )
@@ -171,7 +171,7 @@ def move_card(
     payload: CardMove,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.card.move(ctx.actor, board_id, loop_id, card_id, payload))
 
 
@@ -182,7 +182,7 @@ def archive_card(
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.card.archive(ctx.actor, board_id, loop_id, card_id))
 
 
@@ -193,7 +193,7 @@ def restore_card(
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.card.restore(ctx.actor, board_id, loop_id, card_id))
 
 
@@ -204,7 +204,7 @@ def list_comments(
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.comment.list(board_id, card_id))
@@ -222,7 +222,7 @@ def add_comment(
     payload: CommentCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.comment.create(ctx.actor, board_id, card_id, payload))
 
@@ -236,7 +236,7 @@ def list_mentions(
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.mention.list(board_id, card_id))
@@ -254,7 +254,7 @@ def retry_mention(
     job_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.mention.retry(ctx.actor, board_id, card_id, job_id))
 
@@ -270,7 +270,7 @@ def card_event_history(
     request: Request,
     after: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     items = ctx.services.event.replay_card(board_id, card_id, after=after, limit=limit)
@@ -323,7 +323,7 @@ def list_checklists(
     card_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("cards:read")
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.checklist.list(board_id, card_id))
@@ -341,7 +341,7 @@ def create_checklist(
     payload: ChecklistCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.card.require_membership(board_id, loop_id, card_id)
     return ok(request, ctx.services.checklist.create(ctx.actor, board_id, card_id, payload))
 

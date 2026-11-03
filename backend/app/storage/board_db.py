@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
@@ -35,7 +35,7 @@ UNREADABLE_CODES = frozenset({sqlite3.SQLITE_NOTADB, sqlite3.SQLITE_CORRUPT})
 
 
 @contextmanager
-def _readable() -> Iterator[None]:
+def _readable() -> Generator[None]:
     """SQLite refusing a board's file, raised as ``BoardUnreadable`` instead of a driver error.
 
     Callers that step past a board they cannot open (the board list's counters, startup recovery,
@@ -129,7 +129,7 @@ class BoardDatabaseManager:
             return self._board_locks.setdefault(self.validate_board_id(board_id), RLock())
 
     @contextmanager
-    def locked(self, board_id: str) -> Iterator[None]:
+    def locked(self, board_id: str) -> Generator[None]:
         """Exclusive access to one board, shared by readers, writers and restore.
 
         The lock is re-entrant, so nested ``open``/``session`` calls from the same thread are
@@ -197,7 +197,7 @@ class BoardDatabaseManager:
         return self._fts[board_id]
 
     @contextmanager
-    def session(self, board_id: str) -> Iterator[Connection]:
+    def session(self, board_id: str) -> Generator[Connection]:
         """Single transactional unit of work against one board database."""
         with self._board_lock(board_id):
             engine = self.open(board_id)
@@ -208,7 +208,7 @@ class BoardDatabaseManager:
             self._notify_write(board_id)
 
     @contextmanager
-    def reader(self, board_id: str) -> Iterator[Connection]:
+    def reader(self, board_id: str) -> Generator[Connection]:
         with self._board_lock(board_id):
             engine = self.open(board_id)
             with _readable(), engine.connect() as conn:

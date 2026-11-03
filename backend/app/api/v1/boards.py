@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ...core.errors import PayloadTooLarge
 from ...schemas.boards import BoardCreate, BoardDelete, BoardOut, BoardUpdate
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ..body import read_limited_body
 from ..deps import Pagination, RequestContext, get_context, idempotency_key, ok, pagination
 
@@ -24,7 +24,7 @@ def list_boards(
     sort: Annotated[str, Query()] = "updated_at",
     order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     with_counts: Annotated[bool, Query()] = True,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     items, total = ctx.services.board.list(
         q=q,
@@ -53,7 +53,7 @@ def create_board(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     key: Annotated[str | None, Depends(idempotency_key)] = None,
-) -> dict:
+) -> dict[str, object]:
     board, replayed = ctx.services.board.create(ctx.actor, payload, idempotency_key=key)
     if replayed:
         request.state.replayed = True
@@ -64,7 +64,7 @@ def create_board(
 async def import_board(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     # Reading the body awaits, so this route stays async and the import runs in the thread pool.
     data = await read_limited_body(request)
     if not data:
@@ -78,7 +78,7 @@ def get_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     return ok(request, ctx.services.board.get(board_id))
 
@@ -89,7 +89,7 @@ def update_board(
     payload: BoardUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.board.update(ctx.actor, board_id, payload))
 
 
@@ -98,7 +98,7 @@ def archive_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.board.archive(ctx.actor, board_id))
 
 
@@ -107,7 +107,7 @@ def restore_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.board.restore(ctx.actor, board_id))
 
 
@@ -117,17 +117,17 @@ def duplicate_board(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     name: Annotated[str | None, Query(max_length=200)] = None,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.board.duplicate(ctx.actor, board_id, name))
 
 
-@router.delete("/boards/{board_id}", response_model=Envelope[dict])
+@router.delete("/boards/{board_id}", response_model=Envelope[OpenObject])
 def delete_board(
     board_id: str,
     payload: BoardDelete,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.board.delete(ctx.actor, board_id, payload.confirm_name)
     return ok(request, {"id": board_id, "deleted": True})
 
@@ -149,12 +149,12 @@ def export_board(
     )
 
 
-@router.get("/boards/{board_id}/actors", response_model=Envelope[dict])
+@router.get("/boards/{board_id}/actors", response_model=Envelope[OpenObject])
 def list_board_actors(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     """Who a worker may assign (`people`) and who it may ask (`agents`).
 
     A token is its own agent actor and cannot read the user list, so this is the one lookup that
@@ -171,53 +171,53 @@ def list_board_actors(
     )
 
 
-@router.get("/boards/{board_id}/validate", response_model=Envelope[dict])
+@router.get("/boards/{board_id}/validate", response_model=Envelope[OpenObject])
 def validate_board(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     return ok(request, ctx.services.backup.validate(board_id))
 
 
-@router.post("/boards/{board_id}/migrate", response_model=Envelope[dict])
+@router.post("/boards/{board_id}/migrate", response_model=Envelope[OpenObject])
 def retry_board_migration(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:admin")
     report = ctx.services.migrations.migrate_board(board_id)
     return ok(request, report.to_dict())
 
 
-@router.get("/boards/{board_id}/backups", response_model=Envelope[list[dict]])
+@router.get("/boards/{board_id}/backups", response_model=Envelope[list[OpenObject]])
 def list_backups(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     return ok(request, ctx.services.backup.list(board_id))
 
 
-@router.post("/boards/{board_id}/backups", response_model=Envelope[dict], status_code=201)
+@router.post("/boards/{board_id}/backups", response_model=Envelope[OpenObject], status_code=201)
 def create_backup(
     board_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.backup.create(ctx.actor, board_id))
 
 
-@router.post("/boards/{board_id}/backups/{name}/restore", response_model=Envelope[dict])
+@router.post("/boards/{board_id}/backups/{name}/restore", response_model=Envelope[OpenObject])
 def restore_backup(
     board_id: str,
     name: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.backup.restore(ctx.actor, board_id, name))
 
 

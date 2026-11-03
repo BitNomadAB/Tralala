@@ -26,7 +26,7 @@ def search_history(
     date_to: Annotated[str | None, Query(max_length=40)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("history:read")
     result = ctx.services.loop_history.search(
         board_id,
@@ -58,7 +58,7 @@ def get_history_record(
     history_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("history:read")
     return ok(request, ctx.services.loop_history.detail(board_id, history_id))
 
@@ -73,7 +73,7 @@ def import_legacy_record(
     payload: LegacyImportRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     record, replayed = ctx.services.loop_history.import_legacy(ctx.actor, board_id, payload)
     if replayed:
         request.state.replayed = True

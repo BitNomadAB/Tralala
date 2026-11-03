@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import json
 import queue
-from collections.abc import Callable
-from typing import Any
+from collections.abc import AsyncGenerator, Callable, Mapping
 
 import anyio
 from anyio.lowlevel import RunVar
@@ -25,6 +24,9 @@ from fastapi import Request
 
 HEARTBEAT_SECONDS = 15.0
 EVENT_STREAM_TOKENS = 100
+
+type Event = dict[str, object]
+"""An event as the event service publishes and replays it."""
 
 _stream_limiter: RunVar[anyio.CapacityLimiter] = RunVar("tralala_event_stream_limiter")
 
@@ -39,7 +41,7 @@ def stream_limiter() -> anyio.CapacityLimiter:
         return limiter
 
 
-def sse_frame(event: dict[str, Any]) -> str:
+def sse_frame(event: Mapping[str, object]) -> str:
     return (
         f"id: {event['seq']}\n"
         f"event: {event['type']}\n"
@@ -47,22 +49,30 @@ def sse_frame(event: dict[str, Any]) -> str:
     )
 
 
+def _seq(event: Event) -> int:
+    """The event's sequence number, which the event service always sets as an int."""
+    seq = event["seq"]
+    if not isinstance(seq, int):
+        raise TypeError(f"an event's seq is an int, not {type(seq).__name__}")
+    return seq
+
+
 def event_stream(
     request: Request,
     *,
     after: int,
-    subscribe: Callable[[], queue.Queue],
-    unsubscribe: Callable[[queue.Queue], None],
-    replay: Callable[[], list[dict[str, Any]]],
-) -> Any:
+    subscribe: Callable[[], queue.Queue[Event]],
+    unsubscribe: Callable[[queue.Queue[Event]], None],
+    replay: Callable[[], list[Event]],
+) -> AsyncGenerator[str]:
     listener = subscribe()
 
-    async def stream() -> Any:
+    async def stream() -> AsyncGenerator[str]:
         last = after
         try:
             yield ": connected\n\n"
             for event in await anyio.to_thread.run_sync(replay):
-                last = int(event["seq"])
+                last = _seq(event)
                 yield sse_frame(event)
             idle = 0.0
             while True:
@@ -79,9 +89,9 @@ def event_stream(
                         yield ": keep-alive\n\n"
                     continue
                 idle = 0.0
-                if int(event["seq"]) <= last:
+                if _seq(event) <= last:
                     continue
-                last = int(event["seq"])
+                last = _seq(event)
                 yield sse_frame(event)
         finally:
             unsubscribe(listener)

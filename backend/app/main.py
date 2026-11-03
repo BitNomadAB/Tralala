@@ -4,15 +4,16 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, get_args
+from typing import get_args
 
 import anyio.to_thread
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import RequestResponseEndpoint
 
 from .api import mcp as mcp_routes
 from .api.deps import get_context
@@ -51,7 +52,7 @@ THREADPOOL_TOKENS = 40
 
 
 def _error_response(
-    request: Request, status_code: int, code: str, message: str, **extra: Any
+    request: Request, status_code: int, code: str, message: str, **extra: object
 ) -> JSONResponse:
     body = {
         "success": False,
@@ -115,7 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.middleware("http")
-    async def observability(request: Request, call_next):
+    async def observability(request: Request, call_next: RequestResponseEndpoint) -> Response:
         incoming = request.headers.get("x-request-id", "")
         request_id = incoming if accepted_request_id(incoming) else str(uuid.uuid4())
         request.state.request_id = request_id
@@ -199,12 +200,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request, 500, "internal_error", "An unexpected error occurred", retryable=True
         )
 
-    @app.get("/api/v1/health", tags=["system"])
-    def health() -> dict:
+    @app.get("/api/v1/health", response_model=dict, tags=["system"])
+    def health() -> dict[str, object]:
         return {"success": True, "data": {"status": "ok"}}
 
-    @app.get("/api/v1/meta", tags=["system"])
-    def meta(request: Request) -> dict:
+    @app.get("/api/v1/meta", response_model=dict, tags=["system"])
+    def meta(request: Request) -> dict[str, object]:
         ctx = get_context(request)
         from .core.context import MEMBER_TOKEN_SCOPES, SCOPES
         from .schemas.auth import Scope

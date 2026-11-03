@@ -16,7 +16,7 @@ def test_the_registry_answers(registry: Registry, board_id: str) -> None:
     assert registry.read("SELECT 1 AS ok") == [{"ok": 1}]
     row = registry.board(board_id)
     assert row is not None
-    assert row["id"] == board_id
+    assert row.id == board_id
 
 
 def test_a_board_answers_through_the_unit_of_work(store: SqlBoardUnitOfWork, board_id: str) -> None:

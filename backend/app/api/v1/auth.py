@@ -18,7 +18,7 @@ from ...schemas.auth import (
     PreferencesOut,
     PreferencesUpdate,
 )
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ..deps import RequestContext, get_context, ok
 
 router = APIRouter(tags=["auth"])
@@ -36,7 +36,7 @@ def client_address(request: Request) -> str:
 
 
 @router.post("/auth/login", response_model=Envelope[LoginResponse])
-def login(payload: LoginRequest, request: Request, response: Response) -> dict:
+def login(payload: LoginRequest, request: Request, response: Response) -> dict[str, object]:
     services = request.app.state.services
     address = client_address(request)
     throttle = request.app.state.login_throttle
@@ -77,7 +77,7 @@ def login(payload: LoginRequest, request: Request, response: Response) -> dict:
 
 
 @router.post("/auth/enrol", response_model=Envelope[LoginResponse])
-def enrol(payload: EnrolRequest, request: Request, response: Response) -> dict:
+def enrol(payload: EnrolRequest, request: Request, response: Response) -> dict[str, object]:
     """Use a one-time invitation link: set the password and start a session.
 
     Public by design (the person has no session yet), so it is throttled like login and answers with
@@ -117,8 +117,8 @@ def enrol(payload: EnrolRequest, request: Request, response: Response) -> dict:
     return ok(request, {"actor": result["actor"], "csrf_token": result["csrf_token"]})
 
 
-@router.post("/auth/logout", response_model=Envelope[dict])
-def logout(request: Request, response: Response) -> dict:
+@router.post("/auth/logout", response_model=Envelope[OpenObject])
+def logout(request: Request, response: Response) -> dict[str, object]:
     services = request.app.state.services
     services.auth.logout(request.cookies.get(SESSION_COOKIE))
     response.delete_cookie(SESSION_COOKIE, path="/")
@@ -126,13 +126,13 @@ def logout(request: Request, response: Response) -> dict:
     return ok(request, {"logged_out": True})
 
 
-@router.post("/auth/password", response_model=Envelope[dict])
+@router.post("/auth/password", response_model=Envelope[OpenObject])
 def change_password(
     payload: PasswordChange,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     response: Response,
-) -> dict:
+) -> dict[str, object]:
     result = ctx.services.auth.change_password(
         ctx.actor, payload.current_password, payload.new_password
     )
@@ -143,7 +143,7 @@ def change_password(
 
 
 @router.get("/auth/me", response_model=Envelope[ActorOut])
-def me(ctx: Annotated[RequestContext, Depends(get_context)], request: Request) -> dict:
+def me(ctx: Annotated[RequestContext, Depends(get_context)], request: Request) -> dict[str, object]:
     actor = ctx.actor
     return ok(
         request,
@@ -161,7 +161,7 @@ def me(ctx: Annotated[RequestContext, Depends(get_context)], request: Request) -
 @router.get("/auth/preferences", response_model=Envelope[PreferencesOut])
 def read_preferences(
     ctx: Annotated[RequestContext, Depends(get_context)], request: Request
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.auth.preferences(ctx.actor))
 
 
@@ -170,12 +170,14 @@ def write_preferences(
     payload: PreferencesUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.auth.update_preferences(ctx.actor, payload))
 
 
 @router.get("/auth/scopes", response_model=Envelope[list[str]])
-def scopes(ctx: Annotated[RequestContext, Depends(get_context)], request: Request) -> dict:
+def scopes(
+    ctx: Annotated[RequestContext, Depends(get_context)], request: Request
+) -> dict[str, object]:
     return ok(request, sorted(ctx.actor.scopes))
 
 
@@ -184,7 +186,7 @@ def list_credentials(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     owner_id: Annotated[str | None, Query(max_length=64)] = None,
-) -> dict:
+) -> dict[str, object]:
     """Your own agent access; an administrator may list everybody's, optionally for one person."""
     return ok(request, ctx.services.auth.list_credentials(ctx.actor, owner_id=owner_id))
 
@@ -194,7 +196,7 @@ def create_credential(
     payload: CredentialCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.auth.create_credential(ctx.actor, payload))
 
 
@@ -207,16 +209,16 @@ def rotate_credential(
     credential_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.auth.rotate_credential(ctx.actor, credential_id))
 
 
-@router.post("/credentials/{credential_id}/revoke", response_model=Envelope[dict])
+@router.post("/credentials/{credential_id}/revoke", response_model=Envelope[OpenObject])
 def revoke_credential(
     credential_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     revoked = ctx.services.auth.revoke_credential(ctx.actor, credential_id)
     if not revoked:
         raise Unauthorized("Credential not found or already revoked")
@@ -226,7 +228,7 @@ def revoke_credential(
 @router.get("/credentials/mine", response_model=Envelope[list[CredentialOut]])
 def list_my_credentials(
     ctx: Annotated[RequestContext, Depends(get_context)], request: Request
-) -> dict:
+) -> dict[str, object]:
     """Explicit alias for a person's own agent access, whatever their role."""
     owner = ctx.actor.actor_id
     return ok(request, ctx.services.auth.list_credentials(ctx.actor, owner_id=owner))

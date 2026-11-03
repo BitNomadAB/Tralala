@@ -12,7 +12,7 @@ from ...schemas.auth import (
     UserPasswordReset,
     UserUpdate,
 )
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ..deps import RequestContext, get_context, ok
 
 router = APIRouter(tags=["users"])
@@ -21,7 +21,7 @@ router = APIRouter(tags=["users"])
 @router.get("/users", response_model=Envelope[list[UserOut]])
 def list_users(
     ctx: Annotated[RequestContext, Depends(get_context)], request: Request
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.auth.list_users(ctx.actor))
 
 
@@ -30,7 +30,7 @@ def create_user(
     payload: UserCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.auth.create_user(
@@ -45,7 +45,7 @@ def update_user(
     payload: UserUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.auth.update_user(
@@ -54,13 +54,13 @@ def update_user(
     )
 
 
-@router.post("/users/{user_id}/password", response_model=Envelope[dict])
+@router.post("/users/{user_id}/password", response_model=Envelope[OpenObject])
 def reset_user_password(
     user_id: str,
     payload: UserPasswordReset,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request, ctx.services.auth.reset_password(ctx.actor, user_id, payload.new_password)
     )
@@ -72,7 +72,7 @@ def invite_user(
     payload: InviteCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.auth.create_invite(

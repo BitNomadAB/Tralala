@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from dataclasses import asdict
-from typing import Any
+from typing import Unpack
 
 from sqlalchemy import TextClause, text
 from sqlalchemy.engine import Connection
 
 from ..core.config import Settings
-from ..repositories.board_rows import BOARD_EDITABLE
+from ..db.generated.registry import BoardsRow
+from ..repositories.board_rows import BoardChanges
 from ..repositories.sql.board_rows import SqlBoardRowRepository
 from .sqlite import create_sqlite_engine, utcnow, write_transaction
 
@@ -40,8 +40,8 @@ class Registry:
             yield conn
 
     def read(
-        self, statement: str | TextClause, params: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
+        self, statement: str | TextClause, params: Mapping[str, object] | None = None
+    ) -> list[dict[str, object]]:
         """Every row as a dict. A string is SQL text; a prepared statement is passed as it is."""
         if isinstance(statement, str):
             statement = text(statement)
@@ -49,8 +49,8 @@ class Registry:
             return [dict(row) for row in conn.execute(statement, params or {}).mappings()]
 
     def read_one(
-        self, statement: str | TextClause, params: dict[str, Any] | None = None
-    ) -> dict[str, Any] | None:
+        self, statement: str | TextClause, params: Mapping[str, object] | None = None
+    ) -> dict[str, object] | None:
         rows = self.read(statement, params)
         return rows[0] if rows else None
 
@@ -58,18 +58,16 @@ class Registry:
     # The Migration Manager reads and writes board rows through these; the SQL is the board-row
     # repository's, so it exists once.
 
-    def board(self, board_id: str) -> dict[str, Any] | None:
+    def board(self, board_id: str) -> BoardsRow | None:
         with self.reader() as conn:
-            row = SqlBoardRowRepository(conn).get(board_id)
-        return None if row is None else asdict(row)
+            return SqlBoardRowRepository(conn).get(board_id)
 
-    def update_board(self, board_id: str, **fields: Any) -> None:
-        """Write the editable fields among ``fields``; any other name is ignored."""
-        changes = {key: value for key, value in fields.items() if key in BOARD_EDITABLE}
-        if not changes:
+    def update_board(self, board_id: str, **fields: Unpack[BoardChanges]) -> None:
+        """Write ``fields``, editable columns of the board row; nothing when there are none."""
+        if not fields:
             return
         with self.connect() as conn:
-            SqlBoardRowRepository(conn).update(board_id, changes, now=utcnow())
+            SqlBoardRowRepository(conn).update(board_id, fields, now=utcnow())
 
     def dispose(self) -> None:
         self.engine.dispose()

@@ -1,14 +1,16 @@
 """The pyright-strict scope has no way around the checker: no ``Any``, no ``cast``, no ignore.
 
-``pyrightconfig.json`` lists the strict scope (``app/core``, ``app/schemas``, the generated rows,
-the repositories, every service converted to them, the unit tests and the build tools). Strict mode
-reports an *unknown* type but accepts a declared ``Any``, a ``cast`` and an ignore comment, each of
-which switches the check off for one value. This guard reads every file in the scope and refuses all
+``pyrightconfig.json`` lists the strict scope (the routes, the app factory and the development
+reset, ``app/core``, ``app/schemas``, the generated rows, the repositories, the storage layer, every
+service converted to the repositories, the unit tests and the build tools). Strict mode reports an
+*unknown* type but accepts a declared ``Any``, a ``cast`` and an ignore comment, each of which
+switches the check off for one value. This guard reads every file in the scope and refuses all
 three.
 
-Everything else pyright checks runs in its ``standard`` mode, so an entry dropped from ``strict``
-would lose strictness without a sound. The scope guard below names those modules, and the modules
-of ``app/`` pyright does not check yet, exactly: the scope can only grow.
+Every module pyright checks is in the strict scope; one that is included but not strict would run
+in pyright's ``standard`` mode, so an entry dropped from ``strict`` would lose strictness without a
+sound. The scope guard below names those modules (none), and the modules of ``app/`` pyright does
+not check yet, exactly: the scope can only grow.
 """
 
 from __future__ import annotations
@@ -112,11 +114,11 @@ def test_the_guard_accepts_typed_code(source: str) -> None:
     assert escapes(source) == []
 
 
-# Checked in pyright's standard mode, not strict: the routes and the app factory pass the services'
-# untyped results through. An entry leaves this set by moving into "strict".
-STANDARD_ONLY = frozenset({"app/api", "app/dev_reset.py", "app/main.py"})
-# Not checked yet: each joins the scope once its code is on the repositories.
-UNCHECKED = frozenset({"app/services", "app/storage"})
+# Checked in pyright's standard mode, not strict: nothing. An entry leaves this set by moving into
+# "strict", and a new one needs the reason it cannot be strict yet.
+STANDARD_ONLY: frozenset[str] = frozenset()
+# Not checked yet: the services not on the repositories; each joins the scope once its code is.
+UNCHECKED = frozenset({"app/services"})
 
 
 def scope(root: Path = BACKEND_ROOT) -> tuple[list[str], list[str]]:

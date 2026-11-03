@@ -13,10 +13,11 @@ agent to start working, without inventing endpoints.
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Mapping
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
 from ..core.config import Settings
@@ -40,15 +41,15 @@ INSTRUCTIONS = (
 )
 
 
-def _result(message_id: Any, result: dict[str, Any]) -> dict[str, Any]:
+def _result(message_id: JsonValue, result: Mapping[str, object]) -> dict[str, object]:
     return {"jsonrpc": "2.0", "id": message_id, "result": result}
 
 
-def _error(message_id: Any, code: int, message: str) -> dict[str, Any]:
+def _error(message_id: JsonValue, code: int, message: str) -> dict[str, object]:
     return {"jsonrpc": "2.0", "id": message_id, "error": {"code": code, "message": message}}
 
 
-def tool_list(actor: ActorContext) -> list[dict[str, Any]]:
+def tool_list(actor: ActorContext) -> list[dict[str, object]]:
     """The ``tools/list`` payload: each catalogue entry the actor holds the scopes for, in order."""
     return [
         {
@@ -61,7 +62,7 @@ def tool_list(actor: ActorContext) -> list[dict[str, Any]]:
     ]
 
 
-def _tool_result(payload: dict[str, Any]) -> dict[str, Any]:
+def _tool_result(payload: Mapping[str, object]) -> dict[str, object]:
     encoded = json.dumps(payload, ensure_ascii=False)
     return {
         "content": [{"type": "text", "text": encoded}],
@@ -70,7 +71,7 @@ def _tool_result(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _tool_failure(error: ApiError) -> dict[str, Any]:
+def _tool_failure(error: ApiError) -> dict[str, object]:
     encoded = json.dumps(
         {
             "error": {
@@ -101,7 +102,7 @@ async def mcp_endpoint(request: Request) -> Response:
 
     method = message.get("method")
     message_id = message.get("id")
-    params = message.get("params") or {}
+    params: JsonValue = message.get("params") or {}
 
     if "id" not in message:  # notifications/initialized and friends
         return Response(status_code=202)
@@ -126,8 +127,12 @@ async def mcp_endpoint(request: Request) -> Response:
         return JSONResponse(_result(message_id, {"tools": tool_list(ctx.actor)}))
 
     if method == "tools/call":
+        if not isinstance(params, dict):
+            # A params that is not an object ends the request as a server error (500); the
+            # endpoint does not answer it with a JSON-RPC error.
+            raise TypeError("tools/call params must be an object")
         name = str(params.get("name") or "")
-        arguments = params.get("arguments") or {}
+        arguments: JsonValue = params.get("arguments") or {}
         if not isinstance(arguments, dict):
             return JSONResponse(_error(message_id, -32602, "arguments must be an object"))
         tool = tool_catalog().get(name)

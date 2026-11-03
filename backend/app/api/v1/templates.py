@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ...schemas.templates import (
     TemplateCreate,
     TemplateFromBoard,
@@ -21,7 +21,7 @@ router = APIRouter(tags=["templates"])
 def list_templates(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     items = ctx.services.template.list()
     return ok(request, {"items": items, "total": len(items)})
@@ -32,7 +32,7 @@ def create_template(
     payload: TemplateCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.template.create(ctx.actor, payload))
 
 
@@ -41,7 +41,7 @@ def get_template(
     template_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     return ok(request, ctx.services.template.get(template_id))
 
@@ -52,16 +52,16 @@ def update_template(
     payload: TemplateUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.template.update(ctx.actor, template_id, payload))
 
 
-@router.delete("/templates/{template_id}", response_model=Envelope[dict])
+@router.delete("/templates/{template_id}", response_model=Envelope[OpenObject])
 def delete_template(
     template_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.template.delete(ctx.actor, template_id)
     return ok(request, {"id": template_id, "deleted": True})
 
@@ -77,7 +77,7 @@ def save_loop_as_template(
     payload: TemplateFromBoard,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(
         request,
         ctx.services.template.create_from_loop(ctx.actor, board_id, loop_id, payload),

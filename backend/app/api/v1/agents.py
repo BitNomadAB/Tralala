@@ -17,7 +17,7 @@ from ...schemas.agents import (
     RoleTemplateOut,
     RoleTemplateUpdate,
 )
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ..deps import RequestContext, get_context, ok
 
 router = APIRouter(tags=["agents"])
@@ -27,7 +27,7 @@ router = APIRouter(tags=["agents"])
 def list_role_templates(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.role_templates.list())
 
@@ -37,7 +37,7 @@ def create_role_template(
     payload: RoleTemplateCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.role_templates.create(ctx.actor, payload))
 
 
@@ -46,7 +46,7 @@ def get_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.role_templates.get(role_id))
 
@@ -57,7 +57,7 @@ def update_role_template(
     payload: RoleTemplateUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.role_templates.update(ctx.actor, role_id, payload))
 
 
@@ -71,7 +71,7 @@ def duplicate_role_template(
     payload: RoleTemplateDuplicate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.role_templates.duplicate(ctx.actor, role_id, payload))
 
 
@@ -83,16 +83,16 @@ def restore_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.role_templates.restore_defaults(ctx.actor, role_id))
 
 
-@router.delete("/role-templates/{role_id}", response_model=Envelope[dict])
+@router.delete("/role-templates/{role_id}", response_model=Envelope[OpenObject])
 def delete_role_template(
     role_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.role_templates.delete(ctx.actor, role_id)
     return ok(request, {"id": role_id, "deleted": True})
 
@@ -103,7 +103,7 @@ def list_agents(
     request: Request,
     q: Annotated[str | None, Query(max_length=200)] = None,
     enabled: Annotated[bool | None, Query()] = None,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.agent.list(q=q, enabled=enabled))
 
@@ -112,7 +112,7 @@ def list_agents(
 def agent_directory(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     """Enabled agents with only id, name and role; used by mention autocomplete."""
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.agent.directory())
@@ -123,7 +123,7 @@ def create_agent(
     payload: AgentCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.agent.create(ctx.actor, payload))
 
 
@@ -132,7 +132,7 @@ def get_agent(
     agent_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("agents:read")
     return ok(request, ctx.services.agent.get(agent_id))
 
@@ -143,7 +143,7 @@ def update_agent(
     payload: AgentUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.agent.update(ctx.actor, agent_id, payload))
 
 
@@ -153,7 +153,7 @@ def duplicate_agent(
     payload: AgentDuplicate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.agent.duplicate(ctx.actor, agent_id, payload))
 
 
@@ -162,7 +162,7 @@ def probe_agent(
     payload: AgentTestRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     """Test a connection before the agent is saved; nothing is written."""
     return ok(request, ctx.services.agent.probe(ctx.actor, payload))
 
@@ -173,16 +173,16 @@ def test_agent(
     payload: AgentTestRequest,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.agent.test(ctx.actor, agent_id, payload))
 
 
-@router.delete("/agents/{agent_id}", response_model=Envelope[dict])
+@router.delete("/agents/{agent_id}", response_model=Envelope[OpenObject])
 def delete_agent(
     agent_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.agent.delete(ctx.actor, agent_id)
     return ok(request, {"id": agent_id, "deleted": True})
 

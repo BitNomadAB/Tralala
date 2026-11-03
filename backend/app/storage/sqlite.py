@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -85,7 +85,7 @@ def close_maintenance(path: Path) -> None:
 
 
 @contextmanager
-def write_transaction(engine: Engine) -> Iterator[Connection]:
+def write_transaction(engine: Engine) -> Generator[Connection]:
     """``engine.begin()`` for a transaction that writes: it starts with ``BEGIN IMMEDIATE``.
 
     Committed when the block ends and rolled back when it raises, as ``engine.begin()`` is. A
@@ -96,7 +96,7 @@ def write_transaction(engine: Engine) -> Iterator[Connection]:
 
 
 @contextmanager
-def _immediate(connection: Connection) -> Iterator[None]:
+def _immediate(connection: Connection) -> Generator[None]:
     """The one place a transaction is begun by hand: as a writer, so ``BEGIN IMMEDIATE``."""
     connection.execution_options(**{WRITER: True})
     with connection.begin():
@@ -104,7 +104,7 @@ def _immediate(connection: Connection) -> Iterator[None]:
 
 
 @contextmanager
-def schema_change_transaction(engine: Engine) -> Iterator[Connection]:
+def schema_change_transaction(engine: Engine) -> Generator[Connection]:
     """A ``write_transaction`` with foreign key enforcement off, for a schema change.
 
     SQLite rebuilds a table to change it (https://www.sqlite.org/lang_altertable.html, "Making Other

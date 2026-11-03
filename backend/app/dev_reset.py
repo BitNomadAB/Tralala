@@ -15,7 +15,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 from .core.config import Settings, get_settings
 from .core.platform import remove_tree
@@ -24,13 +24,28 @@ from .core.security import SECRET_FILE_NAME
 logger = logging.getLogger("tralala.dev_reset")
 
 
+class ResetPlan(TypedDict):
+    """The data directory, what a reset removes from it, and what it keeps."""
+
+    data_dir: str
+    targets: list[str]
+    keeps: list[str]
+
+
+class ResetResult(TypedDict):
+    """The data directory and what the reset removed."""
+
+    data_dir: str
+    removed: list[str]
+
+
 def _resolve_settings(data_dir: str | None) -> Settings:
     if data_dir:
         return Settings(data_dir=Path(data_dir))
     return get_settings()
 
 
-def plan(settings: Settings) -> dict[str, Any]:
+def plan(settings: Settings) -> ResetPlan:
     """Describe exactly what a reset would remove; used by the CLI and by tests."""
     data_dir = Path(settings.data_dir)
     targets: list[Path] = []
@@ -47,7 +62,7 @@ def plan(settings: Settings) -> dict[str, Any]:
     }
 
 
-def reset(settings: Settings, *, confirm: bool) -> dict[str, Any]:
+def reset(settings: Settings, *, confirm: bool) -> ResetResult:
     """Remove every board database, its assets and its backups. Requires ``confirm=True``."""
     overview = plan(settings)
     if not confirm:

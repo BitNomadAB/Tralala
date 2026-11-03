@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from ...schemas.envelope import Envelope
+from ...schemas.envelope import Envelope, OpenObject
 from ...schemas.repositories import (
     RepositoryCheckOut,
     RepositoryCreate,
@@ -32,7 +32,7 @@ def list_repositories(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     board_id: Annotated[str | None, Query()] = None,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     return ok(
         request,
@@ -47,7 +47,7 @@ def create_repository(
     payload: RepositoryCreate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.repository.create(ctx.actor, payload))
 
 
@@ -60,7 +60,7 @@ def get_repository(
     repository_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.actor.require("boards:read")
     return ok(
         request,
@@ -74,16 +74,16 @@ def update_repository(
     payload: RepositoryUpdate,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.repository.update(ctx.actor, repository_id, payload))
 
 
-@router.delete("/repositories/{repository_id}", response_model=Envelope[dict])
+@router.delete("/repositories/{repository_id}", response_model=Envelope[OpenObject])
 def delete_repository(
     repository_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     ctx.services.repository.delete(ctx.actor, repository_id)
     return ok(request, {"deleted": True})
 
@@ -93,5 +93,5 @@ def check_repository(
     repository_id: str,
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
-) -> dict:
+) -> dict[str, object]:
     return ok(request, ctx.services.repository.check(ctx.actor, repository_id))

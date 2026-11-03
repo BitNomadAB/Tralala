@@ -9,12 +9,17 @@ stale lock behind, and the file only carries the owner's pid to make the message
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import IO
 
 from ..core.platform import PROFILE_WINDOWS, lock_primitive
 
 LOCK_FILE_NAME = ".process.lock"
+
+# ``lock_primitive`` chooses the locking call, and it names Windows exactly where ``sys.platform``
+# is "win32". The lock calls test both: the second test is the one pyright evaluates statically, so
+# the module, checked as Linux, does not look up ``msvcrt.locking``, which Linux's stub lacks.
 
 
 class DataDirectoryLock:
@@ -41,7 +46,7 @@ class DataDirectoryLock:
         handle = self.path.open("a+b")
         try:
             handle.seek(0)
-            if lock_primitive() == PROFILE_WINDOWS:  # pragma: no cover - Windows only
+            if lock_primitive() == PROFILE_WINDOWS and sys.platform == "win32":  # pragma: no cover
                 import msvcrt
 
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
@@ -71,7 +76,7 @@ class DataDirectoryLock:
         self._handle = None
         try:
             handle.seek(0)
-            if lock_primitive() == PROFILE_WINDOWS:  # pragma: no cover - Windows only
+            if lock_primitive() == PROFILE_WINDOWS and sys.platform == "win32":  # pragma: no cover
                 import msvcrt
 
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
