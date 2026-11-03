@@ -26,8 +26,8 @@ logger = logging.getLogger("tralala.agents")
 class ProbeOutcome(TypedDict):
     """A connection test: the endpoint probe, plus the model call when a model was named.
 
-    ``supports_json_schema`` is what the model call found (``connections.probe_completion``), and
-    false when no model call was made or it failed.
+    ``supports_json_schema`` and ``supports_tools`` are what the model call found
+    (``connections.probe_completion``), and false when no model call was made or it failed.
     """
 
     ok: bool
@@ -36,6 +36,7 @@ class ProbeOutcome(TypedDict):
     latency_ms: int
     models: list[str]
     supports_json_schema: bool
+    supports_tools: bool
     completion: NotRequired[CompletionProbe]
 
 
@@ -133,6 +134,7 @@ def probe_connection(
         "latency_ms": found["latency_ms"],
         "models": found["models"],
         "supports_json_schema": False,
+        "supports_tools": False,
     }
 
     completion: CompletionProbe | None = None
@@ -147,6 +149,7 @@ def probe_connection(
         result["completion"] = completion
         if completion["ok"]:
             result["supports_json_schema"] = completion["supports_json_schema"]
+            result["supports_tools"] = completion["supports_tools"]
             result["message"] = (
                 f"{result['message']}; model {selected_model} answered "
                 f"in {completion['latency_ms']} ms"
@@ -170,6 +173,7 @@ def probe_connection(
         latency_ms=result["latency_ms"],
         models=len(result["models"]),
         completion_status=completion["status"] if completion else None,
+        supports_tools=result["supports_tools"],
         reason=None if result["ok"] else result["message"][:200],
     )
     return result

@@ -22,7 +22,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from app.core.config import Settings
 from app.core.secrets import seal_secret
-from app.services import connections, runtime
+from app.services import connections, runtime, runtime_tools
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -138,6 +138,7 @@ def test_a_completion_sends_the_system_prompt_first(
         "ok": True,
         "error": None,
         "text": "AGREE",
+        "tool_calls": [],
         "model": "served-model",
         "usage": {"total_tokens": 9},
     }
@@ -190,6 +191,7 @@ def test_a_call_that_runs_out_of_time_names_the_agents_timeout(
         "ok": False,
         "error": "No answer within 180 s (the agent's timeout setting)",
         "text": "",
+        "tool_calls": [],
     }
 
 
@@ -214,7 +216,12 @@ def test_a_refused_completion_carries_the_provider_sentence(
 ) -> None:
     provider(lambda _request: httpx.Response(400, json={"error": {"message": "Model Not Exist"}}))
     result = runtime.call_completion(settings, _agent(), system_prompt="s", messages=[])
-    assert result == {"ok": False, "error": "HTTP 400: Model Not Exist", "text": ""}
+    assert result == {
+        "ok": False,
+        "error": "HTTP 400: Model Not Exist",
+        "text": "",
+        "tool_calls": [],
+    }
 
 
 def test_an_answer_that_is_not_a_completion_is_malformed(
@@ -222,7 +229,7 @@ def test_an_answer_that_is_not_a_completion_is_malformed(
 ) -> None:
     provider(lambda _request: httpx.Response(200, json={"choices": []}))
     result = runtime.call_completion(settings, _agent(), system_prompt="s", messages=[])
-    assert result == {"ok": False, "error": "malformed_response", "text": ""}
+    assert result == {"ok": False, "error": "malformed_response", "text": "", "tool_calls": []}
 
 
 def test_an_unreachable_provider_is_named_by_its_failure(
@@ -233,7 +240,7 @@ def test_an_unreachable_provider_is_named_by_its_failure(
 
     provider(refuse)
     result = runtime.call_completion(settings, _agent(), system_prompt="s", messages=[])
-    assert result == {"ok": False, "error": "ConnectError", "text": ""}
+    assert result == {"ok": False, "error": "ConnectError", "text": "", "tool_calls": []}
 
 
 def test_a_name_moved_to_a_refused_address_is_never_called(
@@ -242,7 +249,7 @@ def test_a_name_moved_to_a_refused_address_is_never_called(
     recorder = provider(lambda _request: _completion("ok"))
     moved = _agent(base_url="http://moved.example.com/v1")
     result = runtime.call_completion(settings, moved, system_prompt="s", messages=[])
-    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": ""}
+    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": "", "tool_calls": []}
     assert recorder.requests == []
 
 
@@ -252,7 +259,7 @@ def test_a_private_model_is_not_called_when_private_endpoints_are_disabled(
     recorder = provider(lambda _request: _completion("ok"))
     public_only = settings.model_copy(update={"agents_allow_private_endpoints": False})
     result = runtime.call_completion(public_only, _agent(), system_prompt="s", messages=[])
-    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": ""}
+    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": "", "tool_calls": []}
     assert recorder.client_options == [{"timeout": 10.0, "allow_private": False}]
     assert recorder.requests == []
 
@@ -342,7 +349,12 @@ def test_a_refusal_that_does_not_name_the_format_is_reported_not_retried(
     result = runtime.call_completion(
         settings, agent, system_prompt="s", messages=[], response_schema=SCHEMA
     )
-    assert result == {"ok": False, "error": "HTTP 400: context too long", "text": ""}
+    assert result == {
+        "ok": False,
+        "error": "HTTP 400: context too long",
+        "text": "",
+        "tool_calls": [],
+    }
     assert len(recorder.requests) == 1
 
 
@@ -413,7 +425,14 @@ def test_an_a2a_agent_is_called_over_message_send(
         system_prompt="You are the architect.",
         messages=[{"role": "user", "content": "Is the plan sound?"}],
     )
-    assert result == {"ok": True, "error": None, "text": "AGREE\nEcho", "model": "a2a", "usage": {}}
+    assert result == {
+        "ok": True,
+        "error": None,
+        "text": "AGREE\nEcho",
+        "tool_calls": [],
+        "model": "a2a",
+        "usage": {},
+    }
     card, rpc = recorder.requests
     assert _named(card) == "http://llm.example.com/v1/.well-known/agent.json"
     assert _named(rpc) == "http://a2a.example.com/rpc"
@@ -445,7 +464,7 @@ def test_a_card_that_names_a_refused_endpoint_is_not_followed(
 ) -> None:
     recorder = provider(_a2a(lambda _message: _task("ok"), card_url))
     result = runtime.call_a2a(settings, _agent("a2a"), system_prompt="", messages=[])
-    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": ""}
+    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": "", "tool_calls": []}
     assert [request.method for request in recorder.requests] == ["GET"]
 
 
@@ -465,7 +484,7 @@ def test_an_a2a_failure_is_reported_not_invented(
 ) -> None:
     provider(_a2a(lambda _message: answer, None))
     result = runtime.call_a2a(settings, _agent("a2a"), system_prompt="", messages=[])
-    assert result == {"ok": False, "error": error, "text": ""}
+    assert result == {"ok": False, "error": error, "text": "", "tool_calls": []}
 
 
 def test_the_transcript_carries_every_role_in_order() -> None:
@@ -489,3 +508,250 @@ def test_text_is_collected_from_every_shape_a_server_answers_with() -> None:
     assert runtime._text_parts(answer) == ["message part", "artifact part", "status part"]
     assert runtime._text_parts(None) == []
     assert runtime._text_parts(["not", "a", "dict"]) == []
+
+
+# --- tools: offered where the model calls them, the calls read back -----------------------------
+
+READ_FILE: runtime_tools.ToolDefinition = {
+    "name": "read_file",
+    "description": "Read a file of the repository.",
+    "parameters": {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+    },
+}
+WIRE_TOOLS: list[JsonValue] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a file of the repository.",
+            "parameters": READ_FILE["parameters"],
+        },
+    }
+]
+
+
+def _calls(message: dict[str, JsonValue]) -> httpx.Response:
+    """A chat completion whose answer is ``message``."""
+    return httpx.Response(
+        200, json={"model": "served-model", "choices": [{"message": message}], "usage": {}}
+    )
+
+
+def _call(call_id: str, name: str, arguments: JsonValue) -> dict[str, JsonValue]:
+    return {"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}}
+
+
+def test_an_answer_that_calls_tools_returns_the_calls_and_no_text(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    answer: dict[str, JsonValue] = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            _call("call_a", "read_file", '{"path": "README.md"}'),
+            _call("call_b", "read_file", '{"path": "docs/'),
+        ],
+    }
+    provider(lambda _request: _calls(answer))
+    result = runtime.call_completion(
+        settings, _agent(supports_tools=1), system_prompt="s", messages=[], tools=[READ_FILE]
+    )
+    assert (result["ok"], result["error"], result["text"]) == (True, None, "")
+    good, bad = result["tool_calls"]
+    assert good == {
+        "id": "call_a",
+        "name": "read_file",
+        "arguments": {"path": "README.md"},
+        "arguments_error": None,
+        "arguments_text": '{"path": "README.md"}',
+    }
+    # Arguments that are not JSON are named, not a failed call: the model is told and tries again.
+    assert (bad["id"], bad["arguments"]) == ("call_b", None)
+    assert bad["arguments_text"] == '{"path": "docs/'
+    assert str(bad["arguments_error"]).startswith("The arguments are not JSON: ")
+
+
+def test_an_answer_that_only_calls_tools_may_carry_no_content_key(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    provider(lambda _request: _calls({"tool_calls": [_call("c", "read_file", "{}")]}))
+    result = runtime.call_completion(
+        settings, _agent(supports_tools=1), system_prompt="s", messages=[], tools=[READ_FILE]
+    )
+    assert (result["ok"], result["text"], len(result["tool_calls"])) == (True, "", 1)
+    # Without a call, a message without content is still not a completion.
+    provider(lambda _request: _calls({"role": "assistant"}))
+    malformed = runtime.call_completion(settings, _agent(), system_prompt="s", messages=[])
+    assert malformed == {"ok": False, "error": "malformed_response", "text": "", "tool_calls": []}
+
+
+def test_a_text_answer_has_no_tool_calls(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    provider(lambda _request: _completion("Done."))
+    result = runtime.call_completion(
+        settings, _agent(supports_tools=1), system_prompt="s", messages=[], tools=[READ_FILE]
+    )
+    assert (result["text"], result["tool_calls"]) == ("Done.", [])
+
+
+def test_an_agent_whose_model_calls_tools_is_offered_them(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(lambda _request: _completion("ok"))
+    agent = _agent(supports_tools=1)
+    runtime.call_completion(settings, agent, system_prompt="s", messages=[], tools=[READ_FILE])
+    assert (recorder.body()["tools"], recorder.body()["tool_choice"]) == (WIRE_TOOLS, "auto")
+    runtime.call_completion(
+        settings, agent, system_prompt="s", messages=[], tools=[READ_FILE], tool_choice="none"
+    )
+    assert recorder.body()["tool_choice"] == "none"
+
+
+@pytest.mark.parametrize(
+    ("supports", "tools"),
+    [(0, [READ_FILE]), (1, None), (1, [])],
+    ids=["model without", "no tools", "an empty list"],
+)
+def test_tools_are_sent_only_when_given_to_a_model_that_calls_them(
+    settings: Settings,
+    provider: Callable[[Handler], Provider],
+    supports: int,
+    tools: list[runtime_tools.ToolDefinition] | None,
+) -> None:
+    recorder = provider(lambda _request: _completion("ok"))
+    agent = _agent(supports_tools=supports)
+    result = runtime.call_completion(settings, agent, system_prompt="s", messages=[], tools=tools)
+    assert result["ok"] is True
+    assert ("tools" in recorder.body(), "tool_choice" in recorder.body()) == (False, False)
+
+
+def test_an_a2a_agent_never_gets_tools(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(_a2a(lambda _message: _task("ok"), None))
+    agent = _agent("a2a", supports_tools=1)
+    result = runtime.call_completion(
+        settings, agent, system_prompt="s", messages=[], tools=[READ_FILE]
+    )
+    assert (result["ok"], result["tool_calls"]) == (True, [])
+    assert "tools" not in json.dumps(recorder.body())
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "registry.ollama.ai/library/gemma:2b does not support tools",
+        '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set',
+        "tools param requires --jinja flag",
+        "Unrecognized request argument supplied: functions",
+    ],
+)
+def test_a_provider_that_refuses_the_tools_is_named_and_not_asked_again(
+    settings: Settings, provider: Callable[[Handler], Provider], sentence: str
+) -> None:
+    recorder = provider(lambda _request: httpx.Response(400, json={"error": {"message": sentence}}))
+    result = runtime.call_completion(
+        settings, _agent(supports_tools=1), system_prompt="s", messages=[], tools=[READ_FILE]
+    )
+    assert result == {
+        "ok": False,
+        "error": f"{runtime_tools.TOOLS_REFUSED}: HTTP 400: {sentence}",
+        "text": "",
+        "tool_calls": [],
+    }
+    assert len(recorder.requests) == 1
+
+
+def test_a_refusal_is_only_about_the_tools_when_tools_were_sent(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    refusal = {"error": {"message": "this model does not support tools"}}
+    provider(lambda _request: httpx.Response(400, json=refusal))
+    agent = _agent(supports_tools=1)
+    result = runtime.call_completion(settings, agent, system_prompt="s", messages=[])
+    assert result["error"] == "HTTP 400: this model does not support tools"
+
+
+def test_a_refusal_of_the_tools_is_a_400_or_422_that_names_them() -> None:
+    def refusal(status: int, sentence: str) -> bool:
+        return runtime_tools.refuses_tools(
+            httpx.Response(status, json={"error": {"message": sentence}})
+        )
+
+    assert refusal(400, "tool_choice is only allowed when tools are specified")
+    assert refusal(422, "Tool calling is not supported by this model")
+    assert not refusal(500, "tools param requires --jinja flag")
+    assert not refusal(400, "Model Not Exist")
+    # A context overflow counts the tools in its sentence; it is not a refusal of them.
+    assert not refusal(
+        400, "maximum context length is 8192 tokens; you requested 9000 (500 in the functions)"
+    )
+
+
+def test_a_conversation_with_tool_calls_is_sent_as_the_api_names_it(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(lambda _request: _completion("The README says so."))
+    call: runtime_tools.ToolCall = {
+        "id": "call_a",
+        "name": "read_file",
+        "arguments": {"path": "README.md"},
+        "arguments_error": None,
+        "arguments_text": '{"path": "README.md"}',
+    }
+    messages: list[runtime_tools.Message] = [
+        {"role": "user", "content": "Is there a README?"},
+        runtime_tools.assistant_message("", [call]),
+        runtime_tools.tool_message(call, "1: # Tralala"),
+        runtime_tools.assistant_message("Noted.", []),
+        {"role": "user", "content": "Answer now."},
+    ]
+    runtime.call_completion(
+        settings, _agent(supports_tools=1), system_prompt="s", messages=messages, tools=[READ_FILE]
+    )
+    assert recorder.body()["messages"] == [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "Is there a README?"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_a",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path": "README.md"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_a", "content": "1: # Tralala"},
+        {"role": "assistant", "content": "Noted."},
+        {"role": "user", "content": "Answer now."},
+    ]
+
+
+def test_every_call_shape_a_server_answers_with_is_read() -> None:
+    message: JsonValue = {
+        "tool_calls": [
+            {"function": {"name": "list_files", "arguments": ""}},
+            {"id": "call_b", "function": {"name": "search", "arguments": {"pattern": "TODO"}}},
+            {"id": "call_c", "function": {"name": "read_file"}},
+            {"id": "no-name", "function": {"arguments": "{}"}},
+            {"id": "no-function"},
+            "not a call",
+        ]
+    }
+    calls = runtime_tools.read_tool_calls(message)
+    assert [(call["id"], call["name"], call["arguments"]) for call in calls] == [
+        ("call_0", "list_files", {}),
+        ("call_b", "search", {"pattern": "TODO"}),
+        ("call_c", "read_file", {}),
+    ]
+    assert [call["arguments_text"] for call in calls] == ["{}", '{"pattern": "TODO"}', "{}"]
+    assert runtime_tools.read_tool_calls({"tool_calls": "none"}) == []
+    assert runtime_tools.read_tool_calls(None) == []
+    assert runtime_tools.answer_message({"choices": [{"message": message}]}) == message
+    assert runtime_tools.answer_message({"choices": []}) is None

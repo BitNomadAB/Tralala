@@ -84,16 +84,17 @@ _ADD_AGENT = text(
     " (id, name, description, role_template_id, role_prompt_override, connection_type,"
     "  base_url, model, api_key_ciphertext, api_key_hint, temperature, max_output_tokens,"
     "  timeout_seconds, enabled, last_test_status, last_test_message, last_tested_at,"
-    "  created_at, updated_at, supports_json_schema)"
+    "  created_at, updated_at, supports_json_schema, supports_tools)"
     " VALUES (:id, :name, :description, :role_template_id, :role_prompt_override,"
     "         :connection_type, :base_url, :model, :api_key_ciphertext, :api_key_hint,"
     "         :temperature, :max_output_tokens, :timeout_seconds, :enabled, :last_test_status,"
     "         :last_test_message, :last_tested_at, :created_at, :updated_at,"
-    "         :supports_json_schema)"
+    "         :supports_json_schema, :supports_tools)"
 )
 _RECORD_TEST = text(
     "UPDATE agents SET last_test_status = :status, last_test_message = :message,"
-    " last_tested_at = :now, supports_json_schema = :supports_json_schema WHERE id = :id"
+    " last_tested_at = :now, supports_json_schema = :supports_json_schema,"
+    " supports_tools = :supports_tools WHERE id = :id"
 )
 _CLEAR_ROLE_TEMPLATE = text(
     "UPDATE agents SET role_template_id = NULL WHERE role_template_id = :id"
@@ -239,6 +240,7 @@ class SqlAgentRepository:
             "created_at": row.created_at,
             "updated_at": row.updated_at,
             "supports_json_schema": row.supports_json_schema,
+            "supports_tools": row.supports_tools,
         }
         try:
             self._connection.execute(_ADD_AGENT, parameters)
@@ -264,12 +266,14 @@ class SqlAgentRepository:
         message: str,
         now: str,
         supports_json_schema: bool,
+        supports_tools: bool,
     ) -> None:
         parameters = {
             "status": status,
             "message": message,
             "now": now,
             "supports_json_schema": 1 if supports_json_schema else 0,
+            "supports_tools": 1 if supports_tools else 0,
             "id": agent_id,
         }
         self._connection.execute(_RECORD_TEST, parameters)

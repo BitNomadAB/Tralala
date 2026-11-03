@@ -74,6 +74,11 @@ Worth knowing when you look at the dashboard:
   (`supports_json_schema`). Analysis, RoadMap and QA runs on such an agent then send their schema
   the same way, so fewer answers need a repair round; a provider that refuses is asked again
   without it. Existing agents start without the flag: test the connection once to set it.
+- **The connection test also finds out whether the model calls tools.** After the completion it
+  makes one more small call that offers a dummy tool and records whether the model called it
+  (`supports_tools`); Settings lists such an agent as "reads repositories with tools" and a tested
+  agent without it as "no tool calling". A model that answers in text or a provider that refuses
+  tools never fails the test. Existing agents start without the flag: test the connection once.
 - **An analysis can read the code, within stated limits.** When a board links repositories, analysis
   and RoadMap runs carry a snapshot of the branch head — at most 2 MB of archive, 200 files and
   200 KB of text per repository, filtered for what informs a decision. The prompt names the caps and

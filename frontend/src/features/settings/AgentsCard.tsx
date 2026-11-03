@@ -18,6 +18,20 @@ function testTone(agent: Agent): "success" | "danger" | "neutral" {
   return agent.last_test_status === "connected" ? "success" : "danger";
 }
 
+/** What the last connection test found about tool calling; nothing before the first test. */
+function ToolCalling({ agent }: { agent: Agent }) {
+  if (!agent.last_tested_at) return null;
+  return agent.supports_tools ? (
+    <span title="A run lets this agent read the board's repositories itself">
+      reads repositories with tools
+    </span>
+  ) : (
+    <span title="A run sends this agent a fixed snapshot of the board's repositories">
+      no tool calling
+    </span>
+  );
+}
+
 export function AgentsCard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -115,6 +129,7 @@ export function AgentsCard() {
                       <span>tested {formatDateTime(agent.last_tested_at)}</span>
                     ) : null}
                     {agent.has_api_key ? <span>key {agent.api_key_hint}</span> : null}
+                    <ToolCalling agent={agent} />
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">

@@ -460,9 +460,11 @@ def test_a_probe_reaches_a_checked_endpoint(
 ) -> None:
     result = probe("https://api.example.com/v1", api_key=None, timeout=5, allow_private=False)
     assert result["ok"] is True
-    (sent,) = upstream.requests
-    assert sent.url.host == PUBLIC_V4
-    assert sent.headers["host"] == "api.example.com"
+    # The model call is followed by the tool call; both go through the pinned client.
+    assert len(upstream.requests) == (2 if probe is PROBES["completion"] else 1)
+    for sent in upstream.requests:
+        assert sent.url.host == PUBLIC_V4
+        assert sent.headers["host"] == "api.example.com"
 
 
 def _refused(request: httpx.Request) -> httpx.Response:
@@ -561,7 +563,7 @@ def test_a_model_that_answers_the_schema_call_takes_a_json_schema(upstream: Upst
     upstream.answer = _answers(_chat('{"answer": "ok"}'))
     result = _trial()
     assert (result["ok"], result["supports_json_schema"]) == (True, True)
-    (sent,) = upstream.requests
+    sent, _tool_call = upstream.requests
     assert _sent(sent)["response_format"] == connections.PROBE_RESPONSE_FORMAT
 
 
@@ -582,8 +584,9 @@ def test_a_provider_that_refuses_the_schema_is_tested_without_it(
         "message": "Model example-model answered: ok",
         "latency_ms": result["latency_ms"],
         "supports_json_schema": False,
+        "supports_tools": False,
     }
-    first, second = (_sent(request) for request in upstream.requests)
+    first, second, _tool_call = (_sent(request) for request in upstream.requests)
     assert second == {key: value for key, value in first.items() if key != "response_format"}
 
 
@@ -604,8 +607,9 @@ def test_a_model_the_plain_call_cannot_reach_fails_the_test_with_its_own_refusal
 def test_the_model_call_sends_no_temperature(upstream: Upstream) -> None:
     upstream.answer = _answers(_chat('{"answer": "ok"}'))
     _trial()
-    (sent,) = upstream.requests
+    sent, tool_call = upstream.requests
     assert ("temperature" in _sent(sent), _sent(sent)["max_tokens"]) == (False, 16)
+    assert "temperature" not in _sent(tool_call)
 
 
 def test_a_model_that_runs_out_of_time_names_the_tests_own_limit(upstream: Upstream) -> None:
@@ -636,3 +640,100 @@ def test_a_server_error_is_reported_without_a_second_call(upstream: Upstream) ->
     result = _trial()
     assert (result["ok"], result["status"]) == (False, "http_503")
     assert len(upstream.requests) == 1
+
+
+# --- one more call offers a dummy tool: a model that calls it takes tools -----------------------
+
+
+def _offers_tools(request: httpx.Request) -> bool:
+    return "tools" in _sent(request)
+
+
+def _tool_answer(name: str) -> httpx.Response:
+    call = {"id": "call_1", "type": "function", "function": {"name": name, "arguments": "{}"}}
+    return httpx.Response(
+        200, json={"choices": [{"message": {"content": None, "tool_calls": [call]}}]}
+    )
+
+
+def _with_tools(
+    answer: Callable[[httpx.Request], httpx.Response],
+) -> Callable[[httpx.Request], httpx.Response]:
+    """A server that answers the model call as before and the tool call with ``answer``."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return answer(request) if _offers_tools(request) else _chat('{"answer": "ok"}')
+
+    return handle
+
+
+def test_a_model_that_calls_the_dummy_tool_takes_tools(upstream: Upstream) -> None:
+    upstream.answer = _with_tools(lambda _request: _tool_answer("report_ok"))
+    result = _trial()
+    assert (result["ok"], result["supports_json_schema"], result["supports_tools"]) == (
+        True,
+        True,
+        True,
+    )
+    assert result["message"] == 'Model example-model answered: {"answer": "ok"}'
+    plain, offer = upstream.requests
+    assert not _offers_tools(plain)
+    sent = _sent(offer)
+    assert sent["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "report_ok",
+                "description": "Report that the connection test reached you.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    assert (sent["model"], sent["tool_choice"], "response_format" in sent) == (
+        "example-model",
+        "auto",
+        False,
+    )
+    assert "report_ok" in json.dumps(sent["messages"])
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        _chat("ok"),
+        _tool_answer("something_else"),
+        httpx.Response(400, json={"error": {"message": "does not support tools"}}),
+        httpx.Response(200, json={"choices": []}),
+        httpx.Response(200, text="not json"),
+    ],
+    ids=["text answer", "another tool", "refused", "no completion", "not JSON"],
+)
+def test_a_model_that_does_not_call_the_dummy_tool_takes_no_tools_and_still_passes(
+    upstream: Upstream, answer: httpx.Response
+) -> None:
+    upstream.answer = _with_tools(_answers(answer))
+    result = _trial()
+    assert (result["ok"], result["status"], result["supports_tools"]) == (
+        True,
+        "completed",
+        False,
+    )
+    assert len(upstream.requests) == 2
+
+
+def test_a_tool_call_that_runs_out_of_time_takes_no_tools_and_still_passes(
+    upstream: Upstream,
+) -> None:
+    def too_slow(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    upstream.answer = _with_tools(too_slow)
+    result = _trial()
+    assert (result["ok"], result["supports_tools"]) == (True, False)
+
+
+def test_a_model_call_that_fails_offers_no_tools(upstream: Upstream) -> None:
+    upstream.answer = _answers(httpx.Response(404, json={"error": "no such model"}))
+    result = _trial()
+    assert (result["ok"], result["supports_tools"]) == (False, False)
+    assert not any(_offers_tools(request) for request in upstream.requests)

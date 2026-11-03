@@ -67,6 +67,7 @@ COMPLETED: CompletionProbe = {
     "message": "Model m1 answered: ok",
     "latency_ms": 7,
     "supports_json_schema": True,
+    "supports_tools": True,
 }
 
 
@@ -239,6 +240,7 @@ def test_an_entry_says_a_key_exists_but_carries_neither_the_key_nor_the_override
         "last_test_message",
         "last_tested_at",
         "supports_json_schema",
+        "supports_tools",
         "created_at",
         "updated_at",
         "role_template_name",
@@ -550,7 +552,10 @@ def test_a_duplicate_keeps_the_connection_but_never_the_key_or_the_last_test(
     agents: Agents,
 ) -> None:
     agents.state.agents["helper"] = agents.state.agents["helper"].__replace__(
-        last_test_status="connected", last_tested_at=CREATED, supports_json_schema=1
+        last_test_status="connected",
+        last_tested_at=CREATED,
+        supports_json_schema=1,
+        supports_tools=1,
     )
     entry = agents.service.duplicate(ADMIN, "helper", AgentDuplicate())
     copy = agents.state.agents["new-1"]
@@ -563,6 +568,7 @@ def test_a_duplicate_keeps_the_connection_but_never_the_key_or_the_last_test(
     )
     assert (copy.api_key_ciphertext, copy.api_key_hint, copy.last_test_status) == (None, None, None)
     assert (copy.supports_json_schema, entry["supports_json_schema"]) == (0, False)
+    assert (copy.supports_tools, entry["supports_tools"]) == (0, False)
     assert (copy.created_at, copy.updated_at) == (NOW, NOW)
     assert agents.service.duplicate(ADMIN, "helper", AgentDuplicate(name=" Two "))["name"] == "Two"
     with pytest.raises(Conflict) as caught:
@@ -696,6 +702,9 @@ def test_testing_a_stored_agent_uses_its_key_model_and_timeout_and_records_the_o
     # The model answered the call that asked for a JSON schema, so generations will send one.
     assert (result["supports_json_schema"], row.supports_json_schema) == (True, 1)
     assert agents.service.get("helper")["supports_json_schema"] is True
+    # The model answered the dummy tool with a call to it, so a run may give it tools.
+    assert (result["supports_tools"], row.supports_tools) == (True, 1)
+    assert agents.service.get("helper")["supports_tools"] is True
 
 
 @pytest.mark.parametrize(
@@ -708,6 +717,7 @@ def test_testing_a_stored_agent_uses_its_key_model_and_timeout_and_records_the_o
             "message": "The model call was refused: no such model",
             "latency_ms": 6,
             "supports_json_schema": True,
+            "supports_tools": True,
         },
     ],
     ids=["refused the schema", "model call failed"],
@@ -724,13 +734,40 @@ def test_every_test_records_afresh_whether_the_provider_takes_a_json_schema(
     assert agents.state.agents["helper"].supports_json_schema == 0
 
 
+@pytest.mark.parametrize(
+    "completion",
+    [
+        {**COMPLETED, "supports_tools": False},
+        {
+            "ok": False,
+            "status": "timeout",
+            "message": "The model did not answer",
+            "latency_ms": 6,
+            "supports_json_schema": True,
+            "supports_tools": True,
+        },
+    ],
+    ids=["answered without a call", "model call failed"],
+)
+def test_every_test_records_afresh_whether_the_model_calls_tools(
+    agents: Agents, completion: CompletionProbe
+) -> None:
+    agents.state.agents["helper"] = agents.state.agents["helper"].__replace__(supports_tools=1)
+    agents.endpoints.completion = completion
+    result = agents.service.test(ADMIN, "helper", AgentTestRequest())
+    assert result["supports_tools"] is False
+    assert agents.state.agents["helper"].supports_tools == 0
+    assert agents.service.get("helper")["supports_tools"] is False
+
+
 def test_a_test_without_a_model_call_records_no_json_schema(agents: Agents) -> None:
     agents.state.agents["override"] = agents.state.agents["override"].__replace__(
-        supports_json_schema=1
+        supports_json_schema=1, supports_tools=1
     )
     result = agents.service.test(ADMIN, "override", AgentTestRequest())
     assert ("completion" not in result, result["supports_json_schema"]) == (True, False)
     assert agents.state.agents["override"].supports_json_schema == 0
+    assert (result["supports_tools"], agents.state.agents["override"].supports_tools) == (False, 0)
 
 
 def test_a_test_may_go_without_the_stored_key_or_with_another(agents: Agents) -> None:
@@ -761,6 +798,7 @@ def test_a_model_that_does_not_answer_fails_the_test_but_keeps_the_model_list(
         "message": "The model call was refused: no such model",
         "latency_ms": 6,
         "supports_json_schema": False,
+        "supports_tools": False,
     }
     result = agents.service.probe(
         ADMIN, AgentTestRequest(base_url="http://10.0.0.5/v1", model="missing")
@@ -773,13 +811,14 @@ def test_a_model_that_does_not_answer_fails_the_test_but_keeps_the_model_list(
         "latency_ms": 5,
         "models": ["m1", "m2"],
         "supports_json_schema": False,
+        "supports_tools": False,
         "completion": agents.endpoints.completion,
     }
 
 
 def test_without_a_model_or_a_list_no_model_call_is_made(agents: Agents) -> None:
     unsaved = agents.service.probe(ADMIN, AgentTestRequest(base_url="http://10.0.0.5/v1"))
-    unsaved_outcome = {**CONNECTED, "supports_json_schema": False}
+    unsaved_outcome = {**CONNECTED, "supports_json_schema": False, "supports_tools": False}
     assert (unsaved, len(agents.endpoints.calls)) == (unsaved_outcome, 1)
     agents.endpoints.models = {
         "ok": False,
@@ -792,6 +831,20 @@ def test_without_a_model_or_a_list_no_model_call_is_made(agents: Agents) -> None
         ADMIN, AgentTestRequest(base_url="http://10.0.0.5/v1", model="m1")
     )
     assert ("completion" not in refused, len(agents.endpoints.calls)) == (True, 2)
+
+
+def test_an_unsaved_probe_returns_what_the_model_call_found(agents: Agents) -> None:
+    before = dict(agents.state.agents)
+    result = agents.service.probe(
+        ADMIN, AgentTestRequest(base_url="http://10.0.0.5/v1", model="m1")
+    )
+    assert (result["ok"], result["supports_json_schema"], result["supports_tools"]) == (
+        True,
+        True,
+        True,
+    )
+    assert result.get("completion") == COMPLETED
+    assert agents.state.agents == before
 
 
 def test_an_a2a_agent_is_probed_for_its_card_and_never_for_a_model(agents: Agents) -> None:

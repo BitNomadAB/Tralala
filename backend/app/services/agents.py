@@ -54,6 +54,7 @@ class AgentEntry(TypedDict):
     last_test_message: str | None
     last_tested_at: str | None
     supports_json_schema: bool
+    supports_tools: bool
     created_at: str
     updated_at: str
     role_template_name: str | None
@@ -135,6 +136,7 @@ def _agent_entry(row: AgentsRow, roles: Mapping[str, RoleTemplatesRow]) -> Agent
         "last_test_message": row.last_test_message,
         "last_tested_at": row.last_tested_at,
         "supports_json_schema": bool(row.supports_json_schema),
+        "supports_tools": bool(row.supports_tools),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "role_template_name": role.name if role else None,
@@ -348,6 +350,7 @@ class AgentService:
             created_at=now,
             updated_at=now,
             supports_json_schema=0,
+            supports_tools=0,
         )
         try:
             with self.store.writer() as repos:
@@ -424,6 +427,7 @@ class AgentService:
             last_test_message=None,
             last_tested_at=None,
             supports_json_schema=0,
+            supports_tools=0,
             created_at=now,
             updated_at=now,
         )
@@ -496,9 +500,10 @@ class AgentService:
     def test(self, actor: ActorContext, agent_id: str, payload: AgentTestRequest) -> ProbeOutcome:
         """Probe a stored agent and record the outcome on it.
 
-        The outcome includes whether the model took a JSON schema as the answer's format, which a
-        generation reads (``runtime.call_completion``); every test writes it afresh, so a failed
-        test or one without a model call leaves the agent without it until a test shows it again.
+        The outcome includes whether the model took a JSON schema as the answer's format and whether
+        it answered a tool call, which a generation reads (``runtime.call_completion``); every test
+        writes both afresh, so a failed test or one without a model call leaves the agent without
+        them until a test shows them again.
         """
         actor.require("agents:write")
         row = self.get_row(agent_id)
@@ -510,6 +515,7 @@ class AgentService:
                 message=result["message"][:500],
                 now=self._clock(),
                 supports_json_schema=result["supports_json_schema"],
+                supports_tools=result["supports_tools"],
             )
         return result
 

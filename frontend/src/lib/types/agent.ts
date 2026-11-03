@@ -37,6 +37,8 @@ export interface Agent {
   last_test_status: string | null;
   last_test_message: string | null;
   last_tested_at: string | null;
+  /** The last connection test found that the model calls tools, so a run lets it read repositories. */
+  supports_tools: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -55,6 +57,8 @@ export interface AgentTestResult {
   message: string;
   latency_ms: number | null;
   models: string[];
+  /** The model answered the test's dummy tool with a call to it. */
+  supports_tools?: boolean;
   /** The tiny real chat completion behind the test; absent for an A2A agent. */
   completion?: {
     ok: boolean;

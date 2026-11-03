@@ -1,11 +1,15 @@
-"""Agent runtime: call an OpenAI-compatible endpoint and extract a structured position."""
+"""Agent runtime: call an OpenAI-compatible endpoint and extract a structured position.
+
+An OpenAI-compatible call may offer the model tools; the shapes of a tool, a call and the messages
+that carry them live in ``runtime_tools``.
+"""
 
 from __future__ import annotations
 
 import json
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import NotRequired, TypedDict, TypeIs
 
 import httpx
@@ -15,6 +19,17 @@ from ..core.config import Settings
 from ..core.errors import ValidationFailure
 from ..core.secrets import CredentialError, open_secret
 from . import connections
+from .runtime_tools import (
+    TOOLS_REFUSED,
+    Message,
+    ToolCall,
+    ToolChoice,
+    ToolDefinition,
+    read_tool_calls,
+    refuses_tools,
+    tool_definitions,
+    wire_message,
+)
 
 # Transports that can actually execute a request. Everything that picks an agent for a run asks
 # this set instead of naming one transport, so a new transport is added in a single place.
@@ -51,12 +66,15 @@ class Completion(TypedDict):
     """What one agent call returned: the answer's text, or the error that stopped it.
 
     ``model`` and ``usage`` come with an answer only: the model the provider names (else the one
-    asked for) and the provider's token counts, as it reported them.
+    asked for) and the provider's token counts, as it reported them. ``tool_calls`` are the calls
+    the model made when it was offered tools, empty otherwise; an answer that only calls tools
+    has no text, and that is an answer, not a malformed one.
     """
 
     ok: bool
     error: str | None
     text: str
+    tool_calls: list[ToolCall]
     model: NotRequired[object]
     usage: NotRequired[JsonValue]
 
@@ -73,6 +91,10 @@ def _app_settings(settings: object) -> Settings:
     if isinstance(settings, Settings):
         return settings
     raise TypeError(f"an agent call needs the application Settings, not {type(settings).__name__}")
+
+
+def _failed(error: str) -> Completion:
+    return {"ok": False, "error": error, "text": "", "tool_calls": []}
 
 
 def timeout_error(timeout: float) -> str:
@@ -104,13 +126,19 @@ def _member(value: JsonValue, key: str | int) -> JsonValue:
     raise TypeError(f"{type(value).__name__} has no member {key!r}")
 
 
-def completion_content(body: JsonValue) -> JsonValue:
-    """``body["choices"][0]["message"]["content"]``: the answer of a chat completion.
+def completion_message(body: JsonValue) -> JsonValue:
+    """``body["choices"][0]["message"]``: the answer of a chat completion, text and tool calls.
 
     A body of another shape raises the ``KeyError``, ``IndexError`` or ``TypeError`` that reading
     it by subscript raised, so a caller treats a malformed answer exactly as before.
     """
-    return _member(_member(_member(_member(body, "choices"), 0), "message"), "content")
+    return _member(_member(_member(body, "choices"), 0), "message")
+
+
+def completion_content(body: JsonValue) -> JsonValue:
+    """``body["choices"][0]["message"]["content"]``: the text of a chat completion; raises as
+    ``completion_message`` does."""
+    return _member(completion_message(body), "content")
 
 
 def provider_error(response: httpx.Response) -> str:
@@ -196,7 +224,7 @@ def _agent_key(settings: object, agent_row: Mapping[str, object]) -> str | None:
         raise ValidationFailure("Agent credential cannot be decrypted") from exc
 
 
-def _transcript(system_prompt: str, messages: list[dict[str, str]]) -> str:
+def _transcript(system_prompt: str, messages: Sequence[Message]) -> str:
     """One A2A message carries the whole exchange; the protocol has no system role."""
     lines = [f"[instructions]\n{system_prompt}"] if system_prompt else []
     for message in messages:
@@ -231,7 +259,7 @@ def call_a2a(
     agent_row: Mapping[str, object],
     *,
     system_prompt: str,
-    messages: list[dict[str, str]],
+    messages: Sequence[Message],
 ) -> Completion:
     """Send one message over the A2A protocol and return the answer text.
 
@@ -276,30 +304,31 @@ def call_a2a(
             }
             response = client.post(endpoint, headers=headers, json=payload)
     except httpx.TimeoutException:
-        return {"ok": False, "error": timeout_error(timeout), "text": ""}
+        return _failed(timeout_error(timeout))
     except Exception as exc:  # noqa: BLE001 - surfaced as an agent failure
-        return {"ok": False, "error": f"{type(exc).__name__}", "text": ""}
+        return _failed(type(exc).__name__)
     if response.status_code >= 400:
-        return {"ok": False, "error": provider_error(response), "text": ""}
+        return _failed(provider_error(response))
     body: JsonValue
     try:
         body = response.json()
     except ValueError:
-        return {"ok": False, "error": "malformed_response", "text": ""}
+        return _failed("malformed_response")
     if isinstance(body, dict) and (error := body.get("error")):
         if not isinstance(error, dict):
             # Reading the code off an error that is not an object always raised; it still does.
             raise AttributeError(f"'{type(error).__name__}' object has no attribute 'get'")
         code = str(error.get("code") or "a2a_error")
-        return {"ok": False, "error": f"a2a:{code}", "text": ""}
+        return _failed(f"a2a:{code}")
     result = body.get("result") if isinstance(body, dict) else None
     text = "\n".join(part.strip() for part in _text_parts(result) if part.strip())
     if not text:
-        return {"ok": False, "error": "a2a_empty_response", "text": ""}
+        return _failed("a2a_empty_response")
     return {
         "ok": True,
         "error": None,
         "text": text,
+        "tool_calls": [],
         "model": str(agent_row.get("model") or "a2a"),
         "usage": {},
     }
@@ -310,10 +339,12 @@ def call_completion(
     agent_row: Mapping[str, object],
     *,
     system_prompt: str,
-    messages: list[dict[str, str]],
+    messages: Sequence[Message],
     temperature: float | None = None,
     max_tokens: int | None = None,
     response_schema: ResponseSchema | None = None,
+    tools: Sequence[ToolDefinition] | None = None,
+    tool_choice: ToolChoice = "auto",
 ) -> Completion:
     """Call an agent and return the raw answer, whichever transport it speaks.
 
@@ -326,6 +357,14 @@ def call_completion(
     A provider that refuses it after all (a 400 that names ``response_format``) is asked once more
     without it, and that answer is returned as if nothing had happened. An A2A agent has no such
     field and never gets it.
+
+    ``tools`` are offered, with ``tool_choice`` (``"auto"``: the model decides; ``"none"``: it must
+    answer in text), the same way: only to an OpenAI-compatible agent whose connection test found
+    that its model answers a tool call (``supports_tools``). The calls the model made come back in
+    ``tool_calls``, and ``messages`` carries them on (``AssistantMessage`` with the calls, then one
+    ``ToolMessage`` per result). A provider that refuses the tools (a 400 or 422 that names them)
+    is not asked again behind the caller's back: the error starts with ``TOOLS_REFUSED``, and the
+    caller decides whether to go on without them. An A2A agent never gets tools.
     """
     if str(agent_row.get("connection_type") or "openai_compatible") == "a2a":
         return call_a2a(settings, agent_row, system_prompt=system_prompt, messages=messages)
@@ -333,7 +372,10 @@ def call_completion(
     headers = _agent_headers(api_key)
     payload: dict[str, object] = {
         "model": agent_row.get("model") or "default",
-        "messages": [{"role": "system", "content": system_prompt}, *messages],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            *(wire_message(message) for message in messages),
+        ],
     }
     # Sent only when the caller or the agent chose one: some reasoning models refuse the
     # parameter, and the provider's default is what nobody choosing means.
@@ -348,6 +390,9 @@ def call_completion(
             "type": "json_schema",
             "json_schema": {"name": response_schema["name"], "schema": response_schema["schema"]},
         }
+    if tools and agent_row.get("supports_tools"):
+        payload["tools"] = tool_definitions(tools)
+        payload["tool_choice"] = tool_choice
     url = f"{str(agent_row['base_url']).rstrip('/')}/chat/completions"
     timeout = _timeout(agent_row)
     try:
@@ -359,26 +404,33 @@ def call_completion(
                 del payload["response_format"]
                 response = client.post(url, headers=headers, json=payload)
     except httpx.TimeoutException:
-        return {"ok": False, "error": timeout_error(timeout), "text": ""}
+        return _failed(timeout_error(timeout))
     except Exception as exc:  # noqa: BLE001 - surfaced as an agent failure
-        return {"ok": False, "error": f"{type(exc).__name__}", "text": ""}
+        return _failed(type(exc).__name__)
     if response.status_code >= 400:
-        return {
-            "ok": False,
-            "error": provider_error(response),
-            "text": "",
-        }
+        error = provider_error(response)
+        if "tools" in payload and refuses_tools(response):
+            error = f"{TOOLS_REFUSED}: {error}"
+        return _failed(error)
     try:
         answer: JsonValue = response.json()
-        text = completion_content(answer)
+        message = completion_message(answer)
+        tool_calls = read_tool_calls(message)
+        # An answer that only calls tools may carry no text at all: null, or no "content".
+        content = (
+            message.get("content")
+            if tool_calls and isinstance(message, dict)
+            else _member(message, "content")
+        )
     except (ValueError, KeyError, IndexError, TypeError):
-        return {"ok": False, "error": "malformed_response", "text": ""}
+        return _failed("malformed_response")
     # Only an object has "choices", so the answer is one here.
     reply = answer if _is_object(answer) else {}
     return {
         "ok": True,
         "error": None,
-        "text": str(text).strip(),
+        "text": "" if content is None else str(content).strip(),
+        "tool_calls": tool_calls,
         "model": reply.get("model") or payload["model"],
         "usage": reply.get("usage") or {},
     }

@@ -504,10 +504,24 @@ agent with the flag set, so the provider keeps the answer to the schema instead 
 catching it afterwards; a provider that refuses it after all (a `400` that names `response_format`)
 is asked once more without it, and the generation goes on as before.
 
+When that completion answers, the test makes **one more small call** to find out whether the model
+calls tools. It offers a single dummy tool, `report_ok` (no arguments), with `tool_choice: "auto"`
+and a message that asks the model to call it, within the same 30 s limit per call and with room for
+a model that reasons first (`max_tokens: 512`). Only an answer that calls `report_ok` counts: the
+result then says `supports_tools: true` (on the outcome and on `completion`), and testing a saved
+agent records it on the agent (`supports_tools` in `GET /agents/{id}`; Settings lists such an agent
+as "reads repositories with tools", a tested agent without it as "no tool calling"). A text answer,
+a refusal, an answer that is not a completion or no answer in time records `false` and never fails
+the test. Like `supports_json_schema`, every test writes the flag afresh, a duplicate starts
+without it, and an A2A agent never has it. Tools are only ever offered to a model whose agent has
+the flag set; a provider that refuses them after all (a `400` or `422` that names the tools) is not
+asked again, and the call's error starts with `tools_refused`.
+
 Both endpoints write a pair of structured log events per attempt — `agent_probe_started` and then
 `agent_probe_finished` or `agent_probe_failed` (a warning) — carrying the endpoint, the model, whether
-a key was used, the status, the latency, how many models were reported and, on failure, the reason cut
-to 200 characters. The key itself and the request body never appear.
+a key was used, the status, the latency, how many models were reported, whether the model calls
+tools and, on failure, the reason cut to 200 characters. The key itself and the request body never
+appear.
 
 **Role snapshot rule:** `role_templates` and `agents` are separate resources. Editing a template
 changes *future* work; every discussion persists `AgentService.role_snapshot(...)` (template id and

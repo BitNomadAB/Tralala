@@ -132,9 +132,11 @@ class AgentRepository(Protocol):
         message: str,
         now: str,
         supports_json_schema: bool,
+        supports_tools: bool,
     ) -> None:
         """The outcome of the last connection test, with whether it found that the provider takes
-        a JSON schema as the answer's format; ``updated_at`` stays."""
+        a JSON schema as the answer's format and whether the model answered a tool call;
+        ``updated_at`` stays."""
         ...
 
     def clear_role_template(self, role_id: str) -> None:

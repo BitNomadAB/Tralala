@@ -327,6 +327,7 @@ def agent_row(
     timeout_seconds: int = 30,
     enabled: bool = True,
     supports_json_schema: bool = False,
+    supports_tools: bool = False,
 ) -> AgentsRow:
     return AgentsRow(
         id=agent_id,
@@ -349,6 +350,7 @@ def agent_row(
         created_at=CREATED,
         updated_at=CREATED,
         supports_json_schema=1 if supports_json_schema else 0,
+        supports_tools=1 if supports_tools else 0,
     )
 
 
@@ -979,6 +981,7 @@ class FakeAgentRepository:
         message: str,
         now: str,
         supports_json_schema: bool,
+        supports_tools: bool,
     ) -> None:
         row = self._state.agents.get(agent_id)
         if row is not None:
@@ -987,6 +990,7 @@ class FakeAgentRepository:
                 last_test_message=message,
                 last_tested_at=now,
                 supports_json_schema=1 if supports_json_schema else 0,
+                supports_tools=1 if supports_tools else 0,
             )
 
     def clear_role_template(self, role_id: str) -> None:

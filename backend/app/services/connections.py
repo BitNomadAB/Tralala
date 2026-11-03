@@ -27,6 +27,7 @@ import httpx
 from pydantic import JsonValue
 
 from ..core.errors import ValidationFailure
+from .runtime_tools import ToolDefinition, answer_message, read_tool_calls, tool_definitions
 
 logger = logging.getLogger("tralala.connections")
 
@@ -58,6 +59,8 @@ class CompletionProbe(TypedDict):
 
     ``supports_json_schema`` is true when the model answered a call that asked for a JSON schema
     as the answer's format (``response_format``), false when it did not or was not reached.
+    ``supports_tools`` is true when the model answered a call that offered one tool with a call to
+    it (``probe_tool_call``), false when it did not or was not reached.
     """
 
     ok: bool
@@ -65,6 +68,7 @@ class CompletionProbe(TypedDict):
     message: str
     latency_ms: int
     supports_json_schema: bool
+    supports_tools: bool
 
 
 class ForbiddenAddressError(httpx.ConnectError):
@@ -407,6 +411,7 @@ def probe_completion(
     answers it takes one (``supports_json_schema``), and a generation then sends the purpose's
     schema. A provider that refuses that request (any 4xx) is asked once more without it, so the
     test still says whether the model call itself works; only the plain call's answer decides that.
+    Once it does, one more call finds out whether the model calls tools (``probe_tool_call``).
     """
     from .runtime import completion_content, provider_error
 
@@ -441,6 +446,7 @@ def probe_completion(
             ),
             "latency_ms": int((time.monotonic() - started) * 1000),
             "supports_json_schema": False,
+            "supports_tools": False,
         }
     except Exception as exc:  # noqa: BLE001 - network failures are reported, not raised
         return {
@@ -449,6 +455,7 @@ def probe_completion(
             "message": unreachable("The model call did not reach the endpoint", base_url, exc),
             "latency_ms": int((time.monotonic() - started) * 1000),
             "supports_json_schema": False,
+            "supports_tools": False,
         }
     latency = int((time.monotonic() - started) * 1000)
     if response.status_code >= 400:
@@ -458,6 +465,7 @@ def probe_completion(
             "message": f"The model call was refused: {provider_error(response)}",
             "latency_ms": latency,
             "supports_json_schema": False,
+            "supports_tools": False,
         }
     try:
         answer = completion_content(response.json())
@@ -468,15 +476,61 @@ def probe_completion(
             "message": "The model call answered, but not with a chat completion",
             "latency_ms": latency,
             "supports_json_schema": False,
+            "supports_tools": False,
         }
     preview = " ".join(str(answer or "").split())[:60]
+    supports_tools = probe_tool_call(
+        url, headers=headers, model=model, timeout=timeout, allow_private=allow_private
+    )
     return {
         "ok": True,
         "status": "completed",
         "message": f"Model {model} answered" + (f": {preview}" if preview else ""),
         "latency_ms": latency,
         "supports_json_schema": supports_json_schema,
+        "supports_tools": supports_tools,
     }
+
+
+# The connection test's dummy tool: the smallest call a model that takes tools can make.
+PROBE_TOOL: ToolDefinition = {
+    "name": "report_ok",
+    "description": "Report that the connection test reached you.",
+    "parameters": {"type": "object", "properties": {}},
+}
+# Room for a model that reasons before it answers: a thinking model spends tokens before the call.
+PROBE_TOOL_MAX_TOKENS = 512
+
+
+def probe_tool_call(
+    url: str, *, headers: dict[str, str], model: str, timeout: float, allow_private: bool
+) -> bool:
+    """Whether the model answers a call that offers one tool with a call to that tool.
+
+    A generation run lets a model that calls tools read the repository itself
+    (``agents.supports_tools``). The test offers the dummy ``report_ok`` and asks for a call to it;
+    only an answer that calls it counts. A refusal, a text answer, no answer within ``timeout`` or
+    anything else unexpected is false and never fails the test: the agent then works without tools.
+    """
+    payload: dict[str, JsonValue] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Call the report_ok tool. Do not answer with text."},
+            {"role": "user", "content": "ping"},
+        ],
+        "tools": tool_definitions([PROBE_TOOL]),
+        "tool_choice": "auto",
+        "max_tokens": PROBE_TOOL_MAX_TOKENS,
+    }
+    try:
+        with endpoint_client(timeout=timeout, allow_private=allow_private) as client:
+            response = client.post(url, headers=headers, json=payload)
+        if response.status_code >= 400:
+            return False
+        calls = read_tool_calls(answer_message(response.json()))
+    except Exception:  # noqa: BLE001 - a test that cannot tell says no
+        return False
+    return any(call["name"] == PROBE_TOOL["name"] for call in calls)
 
 
 def probe_a2a(
