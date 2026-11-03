@@ -7,6 +7,11 @@ export interface AuthContextValue {
   login: (username: string, password: string) => Promise<Actor>;
   logout: () => Promise<void>;
   refresh: () => Promise<Actor | null>;
+  /**
+   * Forget the session in this tab, so the login page shows, without asking the server. Logout, a
+   * password change and every 401 end here.
+   */
+  signOutLocally: () => void;
 }
 
 /** Shared by `AuthProvider` and `useAuth`; a component file exports only components. */

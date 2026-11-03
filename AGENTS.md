@@ -150,6 +150,13 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 - API: JSON envelope `{success, data, request_id, meta}`; errors `{success:false, error, request_id}`.
   Unknown request fields are rejected (`extra="forbid"`). Timestamps are ISO 8601 UTC.
 - Frontend state: TanStack Query for server state; no global store for board data.
+- Signing out has one path, `signOutLocally()` from `useAuth()`
+  (`src/features/auth/AuthProvider.tsx`): logout, a password change and every 401
+  (`tralala:unauthorized`) end there. It sets `me` to null while AuthProvider observes it, so
+  `RequireAuth` redirects to the login page, then removes every other query; once `me` is null it does
+  nothing, so a burst of 401s signs out once. ESLint's `no-restricted-syntax` forbids clearing the
+  query cache anywhere in `src/`: `clear()` drops `me` from under its observer and leaves a dead
+  session on screen.
 - Every level of the route tree in `src/app/App.tsx` renders inside `RouteErrorBoundary`
   (`src/app/RouteErrorBoundary.tsx`): a page that throws shows a fallback inside the layout, with the
   request id of an `ApiError`, "Try again" and "Reload page". Add a route inside the existing levels,

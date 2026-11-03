@@ -122,6 +122,19 @@ export default allErrors(
         "jsx-a11y-x/no-autofocus": "off",
         // On: the browser console is not the app's log; the one reporter is allowed below.
         "no-console": "error",
+        // On: one sign-out path, AuthProvider's signOutLocally(), with no file exempt. Clearing the
+        // query cache drops `me` from under AuthProvider's observer, which then keeps a dead session
+        // on screen while the pages keep asking with it. A later block that sets this rule replaces
+        // the list instead of adding to it, so further restrictions go into this list.
+        "no-restricted-syntax": [
+          "error",
+          {
+            selector:
+              "CallExpression[callee.property.name='clear']:matches([callee.object.name=/[Qq]ueryClient$/], [callee.object.callee.name='useQueryClient'], [callee.object.callee.property.name='getQueryCache'])",
+            message:
+              "Sign out with useAuth().signOutLocally(); clearing the query cache detaches the session's observer and leaves a dead session on screen.",
+          },
+        ],
       },
     },
     {

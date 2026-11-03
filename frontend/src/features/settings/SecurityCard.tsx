@@ -1,13 +1,14 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
+import { useAuth } from "@/features/auth/useAuth";
 import { ApiError, api } from "@/lib/api";
 
 export function SecurityCard() {
-  const queryClient = useQueryClient();
+  const { signOutLocally } = useAuth();
   const toast = useToast();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -21,8 +22,8 @@ export function SecurityCard() {
         description: "Every session was signed out. Sign in again with the new password.",
         variant: "success",
       });
-      queryClient.clear();
-      queryClient.setQueryData(["me"], null);
+      // The server ended every session, this one included.
+      signOutLocally();
     },
     onError: (error) => {
       toast.push({
