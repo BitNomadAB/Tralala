@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from ..core.context import ActorContext
 from ..core.errors import ApiError, Conflict, NotFound, ValidationFailure, VersionConflict
+from ..repositories.sql.board import SqlBoardRepositories
 from ..schemas.loops import (
     GenerationRequest,
     ImplementationAcceptance,
@@ -335,7 +336,7 @@ class LoopQaService:
                     },
                 )
                 return self.history.finalize(
-                    conn,
+                    SqlBoardRepositories(conn),
                     loop_id,
                     board_id=board_id,
                     actor=actor,
@@ -751,7 +752,7 @@ class LoopQaService:
                 changes={"cycle_id": cycle["id"], "approval_id": approval_id},
             )
             finalized = self.history.finalize(
-                conn,
+                SqlBoardRepositories(conn),
                 loop_id,
                 board_id=board_id,
                 actor=actor,

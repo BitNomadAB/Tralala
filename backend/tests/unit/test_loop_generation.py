@@ -13,6 +13,7 @@ import pytest
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from app.core.errors import ValidationFailure
+from app.db.generated.board import LoopGenerationRunsRow
 from app.services.loop_generation import (
     MAX_OUTPUT_CHARS,
     PURPOSE_PROMPTS,
@@ -34,25 +35,63 @@ def _analysis_json() -> str:
     )
 
 
+def generation_run(
+    run_id: str,
+    *,
+    purpose: str,
+    status: str,
+    agent_id: str | None,
+    agent_name: str | None,
+    model: str | None,
+    role_snapshot_json: str,
+    usage_json: str,
+    finished_at: str | None,
+    error_code: str | None,
+) -> LoopGenerationRunsRow:
+    return LoopGenerationRunsRow(
+        id=run_id,
+        loop_id="loop-1",
+        purpose=purpose,
+        status=status,
+        input_json="{}",
+        input_hash="",
+        source_revisions_json="{}",
+        output_json="{}",
+        error_code=error_code,
+        error_message=None,
+        attempts=1,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        model=model,
+        role_snapshot_json=role_snapshot_json,
+        usage_json=usage_json,
+        created_by_actor_id="actor-1",
+        created_by_actor_type="user",
+        created_at="2026-01-01T00:00:00Z",
+        started_at=None,
+        finished_at=finished_at,
+        phase=None,
+    )
+
+
 def test_history_provenance_hashes_the_prompt_instead_of_copying_it() -> None:
     prompt = "You are the technical analysis agent for a software change initiative."
     provenance = generation_provenance(
         [
-            {
-                "id": "run-1",
-                "purpose": "analysis",
-                "status": "completed",
-                "agent_id": "agent-1",
-                "agent_name": "planner",
-                "model": "test-model",
-                "role_snapshot_json": json.dumps(
+            generation_run(
+                "run-1",
+                purpose="analysis",
+                status="completed",
+                agent_id="agent-1",
+                agent_name="planner",
+                model="test-model",
+                role_snapshot_json=json.dumps(
                     {"system_prompt": prompt, "agent_name": "planner", "purpose": "analysis"}
                 ),
-                "usage_json": json.dumps({"total_tokens": 12}),
-                "created_at": "2026-01-01T00:00:00Z",
-                "finished_at": "2026-01-01T00:00:01Z",
-                "error_code": None,
-            }
+                usage_json=json.dumps({"total_tokens": 12}),
+                finished_at="2026-01-01T00:00:01Z",
+                error_code=None,
+            )
         ]
     )
     assert set(provenance[0]) == {
@@ -74,20 +113,19 @@ def test_history_provenance_hashes_the_prompt_instead_of_copying_it() -> None:
 
 
 def test_a_run_without_a_readable_prompt_records_no_digest() -> None:
-    run = {
-        "id": "run-2",
-        "purpose": "qa",
-        "status": "failed",
-        "agent_id": None,
-        "agent_name": None,
-        "model": None,
-        "role_snapshot_json": "not json",
-        "usage_json": None,
-        "created_at": "2026-01-01T00:00:00Z",
-        "finished_at": None,
-        "error_code": "provider_error",
-    }
-    provenance = generation_provenance([run, {**run, "role_snapshot_json": "{}"}])
+    run = generation_run(
+        "run-2",
+        purpose="qa",
+        status="failed",
+        agent_id=None,
+        agent_name=None,
+        model=None,
+        role_snapshot_json="not json",
+        usage_json="",
+        finished_at=None,
+        error_code="provider_error",
+    )
+    provenance = generation_provenance([run, run.__replace__(role_snapshot_json="{}")])
     assert [entry["system_prompt_sha256"] for entry in provenance] == [None, None]
     assert provenance[0]["usage"] == {}
 

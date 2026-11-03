@@ -32,7 +32,6 @@ NOT_YET_ON_REPOSITORIES = frozenset(
         "common.py",  # SQL helpers the unconverted callers below still use
         "loop_bridge.py",  # transitional; deleted when loop_qa and loop_generation are converted
         "loop_generation.py",
-        "loop_history.py",
         "loop_qa.py",
     }
 )
