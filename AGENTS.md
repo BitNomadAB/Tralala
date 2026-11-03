@@ -156,6 +156,10 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   never beside them. A query that wants its error on that fallback sets `throwOnError`; "Try again"
   resets it so it fetches again. Only the root's `onCaughtError` (`src/app/errorReporting.ts`)
   writes to the console, once per caught error; ESLint's `no-console` holds the rest of `src/`.
+- A page is declared in `src/app/App.tsx` with `lazyPage` (`src/app/chunkLoading.ts`), so it is
+  its own chunk; layouts stay eager, so a URL renders one lazy page. A page chunk that cannot be
+  loaded (a tab left open across an upgrade) reloads the tab once; a sessionStorage flag set before
+  the reload and cleared by the next page that loads makes a reload loop impossible.
 - Card content is untrusted: Markdown is rendered by `src/lib/markdown.tsx`, which never injects HTML.
 
 ## Verification contract

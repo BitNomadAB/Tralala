@@ -28,6 +28,10 @@ Worth knowing when you look at the dashboard:
 - **The web tier is Caddy**, not nginx: TLS, HTTP/2 and the body limit come from
   `frontend/Caddyfile`, and `TRALALA_SITE_ADDRESS` decides whether Caddy serves plain HTTP on `:80`
   or gets a certificate.
+- **An open tab reloads itself once after an upgrade.** Each page is downloaded when it is first
+  opened, so a tab left open across an upgrade asks for files the new version no longer has. It
+  reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it
+  shows an error with a Reload page button rather than reloading again.
 - **A held file no longer half-deletes a board.** Host filesystem behaviour follows
   `TRALALA_PLATFORM_PROFILE`, and a board delete that cannot remove its files answers
   `409 board_files_busy` with the leftover directory.
