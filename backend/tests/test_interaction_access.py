@@ -1,4 +1,4 @@
-﻿"""Interaction agent access: a person's own token, owned, limited and revocable by an admin."""
+"""Interaction agent access: a person's own token, owned, limited and revocable by an admin."""
 
 from __future__ import annotations
 

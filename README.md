@@ -1,4 +1,4 @@
-﻿# Tralala (Work in progress, if you care about your data dont use this just yet.)
+# Tralala (Work in progress, if you care about your data dont use this just yet.)
 
 Tralala is a self-hosted, AI-native planning and delivery application. Humans work with Loops inside
 Boards; agents get the same capabilities through a documented REST API and a curated MCP surface.

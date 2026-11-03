@@ -1,4 +1,4 @@
-﻿export type BoardStatus =
+export type BoardStatus =
   | "active"
   | "archived"
   | "maintenance"

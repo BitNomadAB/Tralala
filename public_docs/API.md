@@ -1,4 +1,4 @@
-﻿# REST API
+# REST API
 
 Base path `/api/v1`. Interactive documentation: `/docs`, machine description: `/openapi.json`.
 Both require a session by default (`TRALALA_DOCS_REQUIRE_AUTH`) and disappear entirely when

@@ -1,4 +1,4 @@
-﻿import { expect, test, type Page } from "playwright/test";
+import { expect, test, type Page } from "playwright/test";
 import { boardWithLoop, createBoard, createLoop, listRegion, login, uniqueName } from "./support";
 
 function templateRow(page: Page, name: string) {

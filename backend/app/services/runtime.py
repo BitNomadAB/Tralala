@@ -1,4 +1,4 @@
-﻿"""Agent runtime: call an OpenAI-compatible endpoint and extract a structured position."""
+"""Agent runtime: call an OpenAI-compatible endpoint and extract a structured position."""
 
 from __future__ import annotations
 

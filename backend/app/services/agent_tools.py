@@ -1,4 +1,4 @@
-﻿"""One curated catalogue of what an external worker may do against a Board.
+"""One curated catalogue of what an external worker may do against a Board.
 
 The catalogue is the single description of the worker surface. ``/mcp`` serves it as MCP tools and
 ``/llms.txt`` summarises it for anyone who only speaks REST. The browser WebMCP adapter is a
