@@ -19,6 +19,7 @@ from app.db.generated.board import (
     CardsRow,
     ChecklistItemsRow,
     ChecklistsRow,
+    CommentMentionJobsRow,
     CommentsRow,
     DiscussionEventsRow,
     DiscussionMessagesRow,
@@ -86,6 +87,7 @@ from app.repositories.loop_plans import (
 )
 from app.repositories.loop_qa import LoopQaRepository
 from app.repositories.loops import ApprovalColumn, LoopChanges, LoopRepository
+from app.repositories.mention_jobs import MentionJobRepository
 from app.repositories.search import CardSearch, CardSearchRepository
 from tests.unit.fakes.discussions import (
     FakeDiscussionMessageRepository,
@@ -95,6 +97,7 @@ from tests.unit.fakes.discussions import (
     FakeDiscussionRunRepository,
     FakeDiscussionThreadRepository,
     FakeDiscussionVoteRepository,
+    FakeMentionJobRepository,
 )
 from tests.unit.fakes.registry import ConstraintError, like
 
@@ -149,6 +152,9 @@ class BoardState:
     runs: dict[str, DiscussionRunsRow] = field(default_factory=dict[str, DiscussionRunsRow])
     rounds: list[DiscussionRoundsRow] = field(default_factory=list[DiscussionRoundsRow])
     outcomes: list[DiscussionOutcomesRow] = field(default_factory=list[DiscussionOutcomesRow])
+    mention_jobs: dict[str, CommentMentionJobsRow] = field(
+        default_factory=dict[str, CommentMentionJobsRow]
+    )
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -182,6 +188,7 @@ class BoardState:
             runs=dict(self.runs),
             rounds=list(self.rounds),
             outcomes=list(self.outcomes),
+            mention_jobs=dict(self.mention_jobs),
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -215,6 +222,7 @@ class BoardState:
         self.runs = snapshot.runs
         self.rounds = snapshot.rounds
         self.outcomes = snapshot.outcomes
+        self.mention_jobs = snapshot.mention_jobs
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -1799,6 +1807,7 @@ class FakeBoardRepositories:
         self.runs: DiscussionRunRepository = FakeDiscussionRunRepository(state)
         self.rounds: DiscussionRoundRepository = FakeDiscussionRoundRepository(state)
         self.outcomes: DiscussionOutcomeRepository = FakeDiscussionOutcomeRepository(state)
+        self.mention_jobs: MentionJobRepository = FakeMentionJobRepository(state)
         self.savepoints = 0
 
     @contextmanager

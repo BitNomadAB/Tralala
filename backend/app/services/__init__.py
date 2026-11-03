@@ -164,7 +164,13 @@ class Services:
         self.discussion.runs = self.run
         self.discussion.events = self.event
         self.mention = MentionService(
-            settings, self.board, self.agent, self.event, boards=self.boards, registry=self.registry
+            settings,
+            self.board,
+            self.agent,
+            self.board_store,
+            self.registry_store,
+            self.boards,
+            self.event,
         )
         self.comment.mentions = self.mention
         self.data_lock = DataDirectoryLock(settings.data_dir)

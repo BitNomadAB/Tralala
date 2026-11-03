@@ -41,6 +41,7 @@ from ..loop_plans import (
 )
 from ..loop_qa import LoopQaRepository
 from ..loops import LoopRepository
+from ..mention_jobs import MentionJobRepository
 from ..search import CardSearchRepository, FullTextIndex
 from .activity import SqlActivityRepository
 from .attachments import SqlAttachmentRepository
@@ -72,6 +73,7 @@ from .loop_plans import (
 )
 from .loop_qa import SqlLoopQaRepository
 from .loops import SqlLoopRepository
+from .mention_jobs import SqlMentionJobRepository
 from .search import SqlCardSearchRepository
 
 
@@ -114,6 +116,7 @@ class SqlBoardRepositories:
         self.runs: DiscussionRunRepository = SqlDiscussionRunRepository(connection)
         self.rounds: DiscussionRoundRepository = SqlDiscussionRoundRepository(connection)
         self.outcomes: DiscussionOutcomeRepository = SqlDiscussionOutcomeRepository(connection)
+        self.mention_jobs: MentionJobRepository = SqlMentionJobRepository(connection)
 
     @contextmanager
     def savepoint(self) -> Generator[None]:

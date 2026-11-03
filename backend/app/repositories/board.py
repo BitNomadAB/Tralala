@@ -41,6 +41,7 @@ from .loop_plans import (
 )
 from .loop_qa import LoopQaRepository
 from .loops import LoopRepository
+from .mention_jobs import MentionJobRepository
 from .search import CardSearchRepository
 
 
@@ -136,6 +137,9 @@ class BoardRepositories(Protocol):
 
     @property
     def outcomes(self) -> DiscussionOutcomeRepository: ...
+
+    @property
+    def mention_jobs(self) -> MentionJobRepository: ...
 
     def savepoint(self) -> AbstractContextManager[None]:
         """A nested transaction inside a writer: it keeps its writes when the block ends normally

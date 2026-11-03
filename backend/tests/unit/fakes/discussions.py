@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.db.generated.board import (
+    CommentMentionJobsRow,
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
@@ -304,6 +305,79 @@ class FakeDiscussionRoundRepository:
 
     def add(self, row: DiscussionRoundsRow) -> None:
         self._state.rounds.append(row)
+
+
+class FakeMentionJobRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def for_card(self, card_id: str) -> list[CommentMentionJobsRow]:
+        rows = [row for row in self._state.mention_jobs.values() if row.card_id == card_id]
+        return sorted(rows, key=lambda row: row.created_at)
+
+    def get(self, job_id: str) -> CommentMentionJobsRow | None:
+        return self._state.mention_jobs.get(job_id)
+
+    def add_once(self, row: CommentMentionJobsRow) -> bool:
+        # uq_comment_mentions_once: one job per comment and agent.
+        if any(
+            job.comment_id == row.comment_id and job.agent_id == row.agent_id
+            for job in self._state.mention_jobs.values()
+        ):
+            return False
+        self._state.mention_jobs[row.id] = row
+        return True
+
+    def queued_ids(self) -> list[str]:
+        rows = [row for row in self._state.mention_jobs.values() if row.status == "queued"]
+        return [row.id for row in sorted(rows, key=lambda row: row.created_at)]
+
+    def requeue(self, job_id: str) -> None:
+        row = self._state.mention_jobs.get(job_id)
+        if row is not None:
+            self._state.mention_jobs[job_id] = row.__replace__(
+                status="queued", error=None, started_at=None, finished_at=None
+            )
+
+    def start(self, job_id: str, *, now: str) -> None:
+        row = self._state.mention_jobs.get(job_id)
+        if row is not None:
+            self._state.mention_jobs[job_id] = row.__replace__(
+                status="running", attempts=row.attempts + 1, error=None, started_at=now
+            )
+
+    def complete(self, job_id: str, *, tokens: int, now: str) -> bool:
+        row = self._state.mention_jobs.get(job_id)
+        if row is None or row.status != "running" or row.response_comment_id is not None:
+            return False
+        self._state.mention_jobs[job_id] = row.__replace__(
+            status="completed", tokens_used=tokens, error=None, finished_at=now
+        )
+        return True
+
+    def set_response(self, job_id: str, comment_id: str) -> None:
+        row = self._state.mention_jobs.get(job_id)
+        if row is not None:
+            self._state.mention_jobs[job_id] = row.__replace__(response_comment_id=comment_id)
+
+    def fail(self, job_id: str, *, error: str, now: str) -> bool:
+        row = self._state.mention_jobs.get(job_id)
+        if row is None or row.status != "running":
+            return False
+        self._state.mention_jobs[job_id] = row.__replace__(
+            status="failed", error=error, finished_at=now
+        )
+        return True
+
+    def fail_running(self, *, now: str) -> int:
+        failed = 0
+        for job_id, row in list(self._state.mention_jobs.items()):
+            if row.status == "running":
+                self._state.mention_jobs[job_id] = row.__replace__(
+                    status="failed", error="process_restart", finished_at=now
+                )
+                failed += 1
+        return failed
 
 
 class FakeDiscussionOutcomeRepository:

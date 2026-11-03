@@ -34,7 +34,6 @@ NOT_YET_ON_REPOSITORIES = frozenset(
         "loop_generation.py",
         "loop_history.py",
         "loop_qa.py",
-        "mentions.py",
     }
 )
 
