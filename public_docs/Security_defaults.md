@@ -11,14 +11,16 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
 | Serve over HTTPS and set `TRALALA_COOKIE_SECURE=true` | Otherwise the session cookie can travel in clear text. With the bundled Caddy, set `TRALALA_SITE_ADDRESS` to a hostname. |
 | Keep `TRALALA_TRUST_PROXY_HEADERS=true` behind the bundled Caddy, `false` if the backend is directly reachable | It decides whether `X-Forwarded-For` is believed, and therefore whether the sign-in throttle sees clients or the proxy. |
 | Set `TRALALA_TRUSTED_PROXIES` when another proxy sits in front of Caddy | Otherwise Caddy replaces the client address with that proxy's, and every visitor shares one sign-in throttle. See [Client addresses behind a proxy](#client-addresses-behind-a-proxy). |
-| Change the administrator password, then delete `<data>/.bootstrap-password` | The generated password is a delivery mechanism, not a long-term credential. |
+| Change the administrator password | The generated password is a delivery mechanism, not a long-term credential. The bootstrap account's password change deletes `<data>/.bootstrap-password`; until then Settings reminds every administrator. |
 | Keep backups of `<data>` and test one restore | A backup you never restored is a hypothesis. Restoring a snapshot restores the database **and** the uploaded files. |
 | Decide about `/docs` and `/openapi.json` | They require a session by default. `TRALALA_ENABLE_DOCS=false` removes them entirely. |
 
 ## Administrator and people
 
 - There is **no shared or published password**. The first administrator is created on first start
-  with a unique generated password, written owner-only to `<data>/.bootstrap-password`.
+  with a unique generated password, written owner-only to `<data>/.bootstrap-password`. When that
+  account changes its password, the file is deleted; while it exists, Settings shows administrators
+  a banner, and `/meta` reports `bootstrap_password_file_present` to administrators only.
 - A password configured as `admin`, `password`, `change-me`, `changeme`, `tralala-dev-1` or empty is
   treated as "no password chosen", so a generated one is used. Copying an old `.env` cannot restore a
   known password.

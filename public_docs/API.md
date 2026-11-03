@@ -86,7 +86,7 @@ keys. API tokens may hold every scope except `credentials:admin` and `users:admi
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/health` | Liveness |
-| GET | `/meta` | API version, `scopes`, `token_scopes` (the subset a token may hold), `member_token_scopes` and `member_token_limits` (what a person may grant themselves), feature flags (authenticated) |
+| GET | `/meta` | API version, `scopes`, `token_scopes` (the subset a token may hold), `member_token_scopes` and `member_token_limits` (what a person may grant themselves), feature flags, and for an administrator only `bootstrap_password_file_present` (authenticated) |
 
 ### Auth and credentials
 

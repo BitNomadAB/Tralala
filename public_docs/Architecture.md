@@ -97,8 +97,8 @@ planning groups, not Kanban columns.
 - `data/exports/` is reserved for generated exports; the export endpoint streams the archive instead.
 - `data/.session-secret` holds the generated per-install session secret when `TRALALA_SECRET_KEY` is
   unset (owner-only permissions); `data/.bootstrap-password` holds a generated first-administrator
-  password until it is deleted; `data/.process.lock` proves that one backend process owns the
-  directory.
+  password until that account changes its password, which deletes it; `data/.process.lock` proves
+  that one backend process owns the directory.
 
 Board ids are UUIDs validated before any path is constructed, so user input never reaches the
 filesystem. Each board engine is created with `NullPool`, `foreign_keys=ON`, WAL journaling, a

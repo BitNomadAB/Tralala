@@ -15,11 +15,8 @@ repository, then run one Loop end to end. Each section is short on purpose; the 
 
 **Settings → Your password.** Enter the current password (from `<data>/.bootstrap-password` on a
 fresh install) and a new one of at least 8 characters. Every other session is signed out, including
-yours, so sign in again. Then delete the file — it is a delivery mechanism, not a credential:
-
-```bash
-rm data/.bootstrap-password            # Windows: Remove-Item data\.bootstrap-password
-```
+yours, so sign in again. The change also deletes `<data>/.bootstrap-password`: it is a delivery
+mechanism, not a credential, and Settings tells an administrator as long as it is still there.
 
 Nothing else on this page is required to start working. The theme kits, backups and appearance
 settings can wait.

@@ -5,6 +5,7 @@ import { THEME_KITS, type ThemeKit, type ThemeMode } from "@/themes/theme";
 import { useTheme } from "@/themes/useTheme";
 import { AgentsCard } from "./AgentsCard";
 import { BoardTemplatesCard } from "./BoardTemplatesCard";
+import { BootstrapPasswordBanner } from "./BootstrapPasswordBanner";
 import { InteractionAccessCard } from "./InteractionAccessCard";
 import { RoleTemplatesCard } from "./RoleTemplatesCard";
 import { SecurityCard } from "./SecurityCard";
@@ -34,6 +35,8 @@ export function SettingsPage() {
           Local appearance, accounts and agent access for this installation.
         </p>
       </div>
+
+      {isAdmin ? <BootstrapPasswordBanner /> : null}
 
       <div className="card-surface p-5">
         <h2 className="text-sm font-semibold">Appearance</h2>

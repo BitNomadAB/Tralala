@@ -217,6 +217,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from .schemas.auth import Scope
 
         settings = request.app.state.settings
+        # Only an administrator is told whether the generated password is still on disk.
+        bootstrap_file = request.app.state.services.auth.bootstrap_password_file_present(ctx.actor)
         return {
             "success": True,
             "data": {
@@ -240,6 +242,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "optimistic_concurrency": True,
                 },
                 "migrations": request.app.state.services.migrations.status(),
+                **(
+                    {}
+                    if bootstrap_file is None
+                    else {"bootstrap_password_file_present": bootstrap_file}
+                ),
             },
         }
 

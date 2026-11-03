@@ -12,6 +12,7 @@ from ..repositories.sql.board import (
 )
 from ..repositories.sql.registry import SqlRegistryUnitOfWork
 from ..storage.board_db import BoardDatabaseManager
+from ..storage.data_files import BootstrapPasswordFileOnDisk
 from ..storage.migration_manager import MigrationManager, MigrationReport
 from ..storage.process_lock import DataDirectoryLock
 from ..storage.registry import Registry
@@ -151,7 +152,13 @@ class Services:
         self.attachment = AttachmentService(
             settings, self.board, self.board_store, board_files(self.boards)
         )
-        self.auth = AuthService(settings, self.registry_store)
+        self.auth = AuthService(
+            settings,
+            self.registry_store,
+            bootstrap_password_file=BootstrapPasswordFileOnDisk(
+                settings.data_dir, profile=settings.file_profile
+            ),
+        )
         self.discussion = DiscussionService(
             self.board, self.agent, self.board_store, self.registry_store
         )

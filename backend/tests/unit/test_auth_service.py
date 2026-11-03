@@ -9,6 +9,7 @@ for scrypt; one test proves the defaults are the real primitives.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,6 +29,7 @@ from app.core.security import (
 from app.repositories.registry import RegistryUnitOfWork
 from app.schemas.auth import CredentialCreate, PreferencesUpdate
 from app.services.auth import AuthService, stored_scopes
+from tests.unit.fakes.data_files import FakeBootstrapPasswordFile
 from tests.unit.fakes.registry import (
     CREATED,
     FakeRegistryUnitOfWork,
@@ -39,6 +41,7 @@ from tests.unit.fakes.registry import (
     session_row,
     sign_in_row,
 )
+from tests.unit.log_lines import events, lines
 
 # A clock with a fraction of a second: stored times are whole seconds, truncated.
 NOW = datetime(2026, 11, 3, 10, 0, 0, 700_000, tzinfo=UTC)
@@ -106,6 +109,7 @@ class Registry:
     store: FakeRegistryUnitOfWork
     service: AuthService
     verifier: Verifier
+    bootstrap_file: FakeBootstrapPasswordFile
 
     def session_value(self, session_id: str) -> str:
         value, _ = create_session_value(self.service.secret_key, session_id, 3600)
@@ -130,15 +134,17 @@ def make_registry(settings: Settings, *, clock: datetime = NOW) -> Registry:
         state.sign_ins[actor_id] = sign_in_row(actor_id, password_hash=hashed(password), role=role)
     store = FakeRegistryUnitOfWork(state)
     verifier = Verifier()
+    bootstrap_file = FakeBootstrapPasswordFile()
     service = AuthService(
         settings,
         store,
+        bootstrap_password_file=bootstrap_file,
         clock=lambda: clock,
         new_id=Ids(),
         password_hasher=hashed,
         password_verifier=verifier,
     )
-    return Registry(state, store, service, verifier)
+    return Registry(state, store, service, verifier, bootstrap_file)
 
 
 @pytest.fixture
@@ -185,7 +191,11 @@ def test_the_service_hashes_with_the_real_primitives_unless_told_otherwise(
 ) -> None:
     configured = settings.model_copy(update={"data_dir": tmp_path})
     state = RegistryState()
-    service = AuthService(configured, FakeRegistryUnitOfWork(state))
+    service = AuthService(
+        configured,
+        FakeRegistryUnitOfWork(state),
+        bootstrap_password_file=FakeBootstrapPasswordFile(),
+    )
     service.bootstrap_admin()  # the shipped placeholder: a generated password, hashed for real
 
     (sign_in,) = state.sign_ins.values()
@@ -603,6 +613,110 @@ def test_an_administrator_resets_a_password_and_the_sessions_go(registry: Regist
         registry.service.reset_password(ADMIN, "nobody", "set-by-the-admin-1")
     with pytest.raises(Forbidden):
         registry.service.reset_password(MEMBER, ADMIN_ID, "set-by-the-admin-1")
+
+
+# --- the generated bootstrap password ------------------------------------------------------------
+
+
+def bootstrap_registry(settings: Settings, *, file_present: bool = True) -> Registry:
+    """Ada is the account the first start created, and its generated password file is on disk."""
+    registry = make_registry(settings.model_copy(update={"bootstrap_username": "Ada"}))
+    registry.bootstrap_file.exists = file_present
+    return registry
+
+
+def test_the_bootstrap_account_changing_its_password_removes_the_generated_file(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    registry = bootstrap_registry(settings)
+
+    with caplog.at_level(logging.INFO, logger="tralala.registry"):
+        result = registry.service.change_password(ADMIN, ADMIN_PASSWORD, "a-brand-new-secret")
+
+    assert result == {"changed": True, "revoked_sessions": 0}
+    assert not registry.bootstrap_file.exists
+    assert registry.service.bootstrap_password_file_present(ADMIN) is False
+    assert events(caplog.records) == [
+        {"event": "bootstrap_password_file_removed", "actor_id": ADMIN_ID}
+    ]
+    written = json.dumps(lines(caplog.records))
+    assert ADMIN_PASSWORD not in written
+    assert "a-brand-new-secret" not in written
+
+
+@pytest.mark.parametrize(
+    ("bootstrap_username", "actor", "password"),
+    [("Ada", MEMBER, MEMBER_PASSWORD), ("admin", ADMIN, ADMIN_PASSWORD)],
+    ids=["a member", "an administrator the first start did not create"],
+)
+def test_another_account_changing_its_password_leaves_the_file(
+    settings: Settings, bootstrap_username: str, actor: ActorContext, password: str
+) -> None:
+    registry = make_registry(settings.model_copy(update={"bootstrap_username": bootstrap_username}))
+    registry.bootstrap_file.exists = True
+
+    registry.service.change_password(actor, password, "a-brand-new-secret")
+
+    assert registry.bootstrap_file.exists
+    assert registry.bootstrap_file.removals == 0
+
+
+def test_a_bootstrap_password_file_that_is_already_gone_is_fine(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    registry = bootstrap_registry(settings, file_present=False)
+
+    with caplog.at_level(logging.INFO, logger="tralala.registry"):
+        result = registry.service.change_password(ADMIN, ADMIN_PASSWORD, "a-brand-new-secret")
+
+    assert result == {"changed": True, "revoked_sessions": 0}
+    assert registry.bootstrap_file.removals == 1
+    assert caplog.records == []
+
+
+def test_a_file_the_host_will_not_release_leaves_the_new_password_in_place(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    registry = bootstrap_registry(settings)
+    registry.bootstrap_file.refusal = PermissionError("held open by another program")
+
+    with caplog.at_level(logging.INFO, logger="tralala.registry"):
+        result = registry.service.change_password(ADMIN, ADMIN_PASSWORD, "a-brand-new-secret")
+
+    assert result == {"changed": True, "revoked_sessions": 0}
+    assert registry.state.sign_ins[ADMIN_ID].password_hash == hashed("a-brand-new-secret")
+    assert registry.service.bootstrap_password_file_present(ADMIN) is True
+    assert events(caplog.records) == [
+        {
+            "event": "bootstrap_password_file_not_removed",
+            "actor_id": ADMIN_ID,
+            "error_type": "PermissionError",
+        }
+    ]
+
+
+def test_a_refused_password_change_keeps_the_file(settings: Settings) -> None:
+    registry = bootstrap_registry(settings)
+
+    with pytest.raises(ValidationFailure):
+        registry.service.change_password(ADMIN, "not-my-password", "a-brand-new-secret")
+    with pytest.raises(ValidationFailure):
+        registry.service.change_password(ADMIN, ADMIN_PASSWORD, "short")
+
+    assert registry.bootstrap_file.exists
+    assert registry.bootstrap_file.removals == 0
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_only_an_administrator_is_told_whether_the_file_is_there(
+    settings: Settings, present: bool
+) -> None:
+    registry = bootstrap_registry(settings, file_present=present)
+    admins_token = AGENT.__replace__(scopes=scopes_for_role("admin"), role="admin")
+
+    assert registry.service.bootstrap_password_file_present(ADMIN) is present
+    assert registry.service.bootstrap_password_file_present(MEMBER) is None
+    assert registry.service.bootstrap_password_file_present(admins_token) is None
 
 
 # --- accounts ------------------------------------------------------------------------------------

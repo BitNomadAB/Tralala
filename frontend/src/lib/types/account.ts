@@ -35,6 +35,8 @@ export interface ApiMeta {
   member_token_limits: { live: number; default_days: number; max_days: number };
   can_issue_tokens: boolean;
   features: Record<string, unknown>;
+  /** Sent to an administrator only: the generated first password is still in the data directory. */
+  bootstrap_password_file_present?: boolean | undefined;
 }
 
 export interface PageMeta {

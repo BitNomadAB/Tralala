@@ -38,6 +38,7 @@ from ..core.security import (
     write_private_file,
 )
 from ..db.generated.registry import ActorsRow, UserCredentialsRow, UserInvitesRow
+from ..repositories.data_files import BootstrapPasswordFile
 from ..repositories.registry import RegistryRepositories, RegistryUnitOfWork
 from ..schemas.auth import CredentialCreate, PreferencesUpdate
 from . import auth_sessions, auth_tokens
@@ -137,6 +138,7 @@ class AuthService:
         settings: Settings,
         store: RegistryUnitOfWork,
         *,
+        bootstrap_password_file: BootstrapPasswordFile,
         clock: Callable[[], datetime] = _now,
         new_id: Callable[[], str] = _new_id,
         password_hasher: Callable[[str], str] = hash_password,
@@ -144,6 +146,7 @@ class AuthService:
     ) -> None:
         self.settings = settings
         self.store = store
+        self.bootstrap_password_file = bootstrap_password_file
         self.secret_key = resolve_secret_key(settings)
         self._clock = clock
         self._new_id = new_id
@@ -182,9 +185,38 @@ class AuthService:
             write_private_file(path, f"{password}\n")
             logger.warning(
                 "TRALALA_BOOTSTRAP_PASSWORD was unset or a published placeholder; generated a "
-                "one-time administrator password in %s (delete the file after first sign-in)",
+                "one-time administrator password in %s (changing that password deletes the file)",
                 path,
             )
+
+    def bootstrap_password_file_present(self, actor: ActorContext) -> bool | None:
+        """Whether the generated first administrator password is still in the data directory.
+
+        Only an administrator is told: ``None`` for anyone else, who can neither act on the file
+        nor needs to know that it exists.
+        """
+        if not actor.is_admin:
+            return None
+        return self.bootstrap_password_file.present()
+
+    def _forget_bootstrap_password(self, actor_id: str, name: str) -> None:
+        """Remove the generated password file once the bootstrap account has replaced it.
+
+        The password has already changed by then, so a file the host will not let go of is logged
+        instead of failing the request; the administrator keeps being told until it is gone.
+        """
+        if name != self.settings.bootstrap_username:
+            return
+        try:
+            removed = self.bootstrap_password_file.remove()
+        except OSError as exc:
+            logger.warning(
+                "bootstrap_password_file_not_removed",
+                extra={"actor_id": actor_id, "error_type": type(exc).__name__},
+            )
+            return
+        if removed:
+            logger.info("bootstrap_password_file_removed", extra={"actor_id": actor_id})
 
     def purge_expired_sessions(self) -> int:
         """Delete expired and revoked sessions; run at startup."""
@@ -251,6 +283,7 @@ class AuthService:
             now = self._stamp()
             repos.users.set_password(actor.actor_id, password_hash, now=now)
             revoked = repos.sessions.revoke_for_actor(actor.actor_id, now=now)
+        self._forget_bootstrap_password(actor.actor_id, user.actor.name)
         return {"changed": True, "revoked_sessions": revoked}
 
     def list_users(self, actor: ActorContext) -> list[UserEntry]:

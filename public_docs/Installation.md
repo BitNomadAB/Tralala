@@ -313,7 +313,7 @@ already exists and only downloads Chromium when no browser build is present
 | `<data>/backups/<board>/` | snapshots; each `backup-<UTC>.sqlite` may have a `-attachments.zip` partner |
 | `<data>/exports/` | reserved for generated exports |
 | `<data>/.session-secret` | generated session secret when `TRALALA_SECRET_KEY` is unset |
-| `<data>/.bootstrap-password` | generated first-administrator password; delete after sign-in |
+| `<data>/.bootstrap-password` | generated first-administrator password; deleted when that account changes its password |
 | `<data>/.process.lock` | OS file lock proving one backend process owns this directory |
 
 A board is its directory: deleting a board removes its database and its files together, duplicating
