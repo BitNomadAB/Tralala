@@ -8,24 +8,25 @@ execution projection of the active plan.
 repositories of that unit of work, so a plan is registered, published and read in the caller's
 transaction. It is the ``PlanViews`` the Loop, Ticket and search services read, and it takes the
 clock and the id source as arguments, so every rule here runs in a unit test without a database.
+
+The canonical plan lives in ``loop_plans_canonical``, validation in ``loop_plans_validation`` and
+readiness in ``loop_plans_readiness``; this module keeps ``LoopPlanService`` and re-exports their
+names, so every caller imports them from here.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TypedDict
 from uuid import uuid4
 
-from pydantic import JsonValue, TypeAdapter
+from pydantic import TypeAdapter
 
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..core.errors import Conflict, NotFound, ValidationFailure
+from ..core.errors import Conflict, NotFound
 from ..db.generated.board import (
     CardsRow,
     LoopDependenciesRow,
@@ -35,88 +36,31 @@ from ..db.generated.board import (
     LoopsRow,
 )
 from ..repositories.board import BoardRepositories
-from ..repositories.loop_plans import PlannedItem
-from ..schemas.loops import PlanPayload, PlanPhase, PlanTicket
+from ..schemas.loops import PlanPayload
 from .activity import activity_entry
 from .loop_identifiers import format_ticket_key, phase_prefix
-from .loops import EXECUTION_STAGES
-from .plan_views import (
-    BlockedReason,
-    Blocker,
-    PhaseView,
-    PlanView,
-    PlanViews,
-    Readiness,
-    ReadinessItem,
+from .loop_plans_canonical import (
+    CanonicalPhase,
+    CanonicalPlan,
+    CanonicalTicket,
+    PlanDraft,
+    Publication,
+    PublishedTicket,
+    canonical_phase,
+    canonical_ticket,
+    plan_hash,
 )
-
-# --- the canonical plan --------------------------------------------------------------------------
-
-
-class CanonicalTicket(TypedDict):
-    """A planned Ticket as the plan revision stores it: the model's fields in their declared
-    order, then the server-allocated key, sequence and Phase number."""
-
-    id: str
-    title: str
-    objective: str
-    instructions: str
-    required_actor: str
-    execution_mode: str
-    prerequisite_phase_ids: list[str]
-    prerequisite_ticket_ids: list[str]
-    acceptance_criteria: list[str]
-    expected_evidence: list[str]
-    human_action_reason: str
-    human_instructions: str
-    note: str
-    priority: str
-    key: str
-    sequence: int
-    phase_number: int
-
-
-class CanonicalPhase(TypedDict):
-    """A Phase as the plan revision stores it: the model's fields in their declared order."""
-
-    id: str
-    number: int
-    name: str
-    objective: str
-    entry_conditions: list[str]
-    exit_conditions: list[str]
-    prerequisite_phase_ids: list[str]
-    prerequisite_ticket_ids: list[str]
-    narrative: str
-    tickets: list[CanonicalTicket]
-
-
-class CanonicalPlan(TypedDict):
-    """The plan revision's payload: the model's structure with the server's keys and numbers."""
-
-    schema_version: int
-    summary: str
-    loop_id: str
-    loop_key: str
-    plan_id: str
-    revision_number: int
-    phases: list[CanonicalPhase]
-
-
-class PlanDraft(TypedDict):
-    plan_id: str
-    revision_number: int
-    payload: CanonicalPlan
-
-
-class PublishedTicket(TypedDict):
-    id: str
-    key: str
-
-
-class Publication(TypedDict):
-    plan_id: str
-    tickets: list[PublishedTicket]
+from .loop_plans_readiness import (
+    Dependencies,
+    Prerequisites,
+    dependencies,
+    downstream_phase_numbers,
+    items_by_phase,
+    phase_views,
+)
+from .loop_plans_validation import validate_plan
+from .loops import EXECUTION_STAGES
+from .plan_views import BlockedReason, PhaseView, PlanView, PlanViews, Readiness
 
 
 # What publishing reads back from a stored payload; any other key is left alone.
@@ -142,461 +86,6 @@ class _StoredPlan(TypedDict):
 
 
 _STORED_PLAN = TypeAdapter(_StoredPlan)
-
-
-def canonical_ticket(
-    ticket: PlanTicket, *, key: str, sequence: int, phase_number: int
-) -> CanonicalTicket:
-    return {
-        "id": ticket.id,
-        "title": ticket.title,
-        "objective": ticket.objective,
-        "instructions": ticket.instructions,
-        "required_actor": ticket.required_actor,
-        "execution_mode": ticket.execution_mode,
-        "prerequisite_phase_ids": list(ticket.prerequisite_phase_ids),
-        "prerequisite_ticket_ids": list(ticket.prerequisite_ticket_ids),
-        "acceptance_criteria": list(ticket.acceptance_criteria),
-        "expected_evidence": list(ticket.expected_evidence),
-        "human_action_reason": ticket.human_action_reason,
-        "human_instructions": ticket.human_instructions,
-        "note": ticket.note,
-        "priority": ticket.priority,
-        "key": key,
-        "sequence": sequence,
-        "phase_number": phase_number,
-    }
-
-
-def canonical_phase(phase: PlanPhase, tickets: list[CanonicalTicket]) -> CanonicalPhase:
-    return {
-        "id": phase.id,
-        "number": phase.number,
-        "name": phase.name,
-        "objective": phase.objective,
-        "entry_conditions": list(phase.entry_conditions),
-        "exit_conditions": list(phase.exit_conditions),
-        "prerequisite_phase_ids": list(phase.prerequisite_phase_ids),
-        "prerequisite_ticket_ids": list(phase.prerequisite_ticket_ids),
-        "narrative": phase.narrative,
-        "tickets": tickets,
-    }
-
-
-def plan_hash(payload: CanonicalPlan) -> str:
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-# --- validation ----------------------------------------------------------------------------------
-
-
-def _is_uuid(value: str) -> bool:
-    try:
-        uuid.UUID(value)
-    except (TypeError, ValueError):
-        return False
-    return True
-
-
-def validate_plan(payload: PlanPayload) -> None:
-    """Reject malformed identities, broken references and dependency cycles early."""
-    phase_ids: set[str] = set()
-    numbers: set[int] = set()
-    ticket_ids: set[str] = set()
-    for phase in payload.phases:
-        if not _is_uuid(phase.id):
-            raise ValidationFailure(
-                "Phase ids must be UUIDs so identities survive replanning",
-                code="invalid_dependency_graph",
-                details={"phase_id": phase.id},
-            )
-        if phase.id in phase_ids:
-            raise ValidationFailure(
-                "Duplicate phase id",
-                code="invalid_dependency_graph",
-                details={"phase_id": phase.id},
-            )
-        if phase.number in numbers:
-            raise ValidationFailure(
-                "Duplicate phase number",
-                code="invalid_dependency_graph",
-                details={"phase_number": phase.number},
-            )
-        phase_ids.add(phase.id)
-        numbers.add(phase.number)
-        for ticket in phase.tickets:
-            if not _is_uuid(ticket.id):
-                raise ValidationFailure(
-                    "Ticket ids must be UUIDs so identities survive replanning",
-                    code="invalid_dependency_graph",
-                    details={"ticket_id": ticket.id},
-                )
-            if ticket.id in ticket_ids:
-                raise ValidationFailure(
-                    "Duplicate ticket id",
-                    code="invalid_dependency_graph",
-                    details={"ticket_id": ticket.id},
-                )
-            ticket_ids.add(ticket.id)
-
-    tickets: dict[str, PlanTicket] = {
-        ticket.id: ticket for phase in payload.phases for ticket in phase.tickets
-    }
-    phase_of_ticket: dict[str, str] = {
-        ticket.id: phase.id for phase in payload.phases for ticket in phase.tickets
-    }
-    if not tickets:
-        raise ValidationFailure(
-            "A RoadMap must contain at least one planned Ticket",
-            code="invalid_dependency_graph",
-        )
-
-    for phase in payload.phases:
-        for reference in (*phase.prerequisite_phase_ids, *phase.prerequisite_ticket_ids):
-            if reference == phase.id:
-                raise ValidationFailure(
-                    "A Phase cannot depend on itself",
-                    code="invalid_dependency_graph",
-                    details={"phase_id": phase.id},
-                )
-        for reference in phase.prerequisite_phase_ids:
-            if reference not in phase_ids:
-                raise ValidationFailure(
-                    "Phase dependency references an unknown Phase",
-                    code="invalid_dependency_graph",
-                    details={"phase_id": phase.id, "missing": reference},
-                )
-        for reference in phase.prerequisite_ticket_ids:
-            if reference not in ticket_ids:
-                raise ValidationFailure(
-                    "Phase dependency references an unknown Ticket",
-                    code="invalid_dependency_graph",
-                    details={"phase_id": phase.id, "missing": reference},
-                )
-        for ticket in phase.tickets:
-            _validate_ticket(ticket, phase_ids, ticket_ids)
-
-    _reject_cycles(payload, tickets, phase_of_ticket)
-
-
-def _validate_ticket(ticket: PlanTicket, phase_ids: set[str], ticket_ids: set[str]) -> None:
-    if ticket.id in ticket.prerequisite_ticket_ids:
-        raise ValidationFailure(
-            "A Ticket cannot depend on itself",
-            code="invalid_dependency_graph",
-            details={"ticket_id": ticket.id},
-        )
-    for reference in ticket.prerequisite_phase_ids:
-        if reference not in phase_ids:
-            raise ValidationFailure(
-                "Ticket dependency references an unknown Phase",
-                code="invalid_dependency_graph",
-                details={"ticket_id": ticket.id, "missing": reference},
-            )
-    for reference in ticket.prerequisite_ticket_ids:
-        if reference not in ticket_ids:
-            raise ValidationFailure(
-                "Ticket dependency references an unknown Ticket",
-                code="invalid_dependency_graph",
-                details={"ticket_id": ticket.id, "missing": reference},
-            )
-    if ticket.required_actor == "human" and (
-        not ticket.human_action_reason.strip() or not ticket.human_instructions.strip()
-    ):
-        raise ValidationFailure(
-            "A human-only Ticket needs a reason and instructions",
-            code="invalid_dependency_graph",
-            details={"ticket_id": ticket.id},
-        )
-
-
-def _reject_cycles(
-    payload: PlanPayload,
-    tickets: dict[str, PlanTicket],
-    phase_of_ticket: dict[str, str],
-) -> None:
-    """Cycle detection that includes implicit ordinary-Ticket-to-Phase relationships."""
-    graph: dict[str, set[str]] = {}
-    for phase in payload.phases:
-        node = f"phase:{phase.id}"
-        graph.setdefault(node, set())
-        graph[node].update(f"phase:{other}" for other in phase.prerequisite_phase_ids)
-        graph[node].update(f"ticket:{other}" for other in phase.prerequisite_ticket_ids)
-    for ticket in tickets.values():
-        node = f"ticket:{ticket.id}"
-        graph.setdefault(node, set())
-        graph[node].update(f"ticket:{other}" for other in ticket.prerequisite_ticket_ids)
-        graph[node].update(f"phase:{other}" for other in ticket.prerequisite_phase_ids)
-        if ticket.execution_mode == "normal":
-            graph[node].add(f"phase:{phase_of_ticket[ticket.id]}")
-
-    state: dict[str, int] = {}
-
-    def visit(node: str, path: list[str]) -> None:
-        if state.get(node) == 1:
-            raise ValidationFailure(
-                "Plan dependency graph contains a cycle",
-                code="invalid_dependency_graph",
-                details={"cycle": [*path, node]},
-            )
-        if state.get(node) == 2:
-            return
-        state[node] = 1
-        for target in sorted(graph.get(node, ())):
-            visit(target, [*path, node])
-        state[node] = 2
-
-    for node in sorted(graph):
-        visit(node, [])
-
-
-# --- readiness -----------------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class Prerequisites:
-    """What a Phase or a Ticket waits for, as its edges name them, in the order they were added."""
-
-    phases: list[str] = field(default_factory=list[str])
-    tickets: list[str] = field(default_factory=list[str])
-
-
-type Dependencies = dict[str, Prerequisites]
-"""Each source's prerequisites, keyed ``phase:<id>`` or ``ticket:<id>``; a node without edges is
-absent."""
-
-
-def dependencies(edges: list[LoopDependenciesRow]) -> Dependencies:
-    result: Dependencies = {}
-    for edge in edges:
-        bucket = result.setdefault(f"{edge.source_type}:{edge.source_id}", Prerequisites())
-        if edge.target_type == "phase":
-            bucket.phases.append(edge.target_id)
-        else:
-            bucket.tickets.append(edge.target_id)
-    return result
-
-
-def items_by_phase(entries: list[PlannedItem]) -> dict[str, list[PlannedItem]]:
-    grouped: dict[str, list[PlannedItem]] = {}
-    for entry in entries:
-        grouped.setdefault(entry.item.phase_id, []).append(entry)
-    return grouped
-
-
-def _json(raw: str) -> JsonValue:
-    """A stored criteria or conditions list; an empty column reads as no entries."""
-    value: JsonValue = json.loads(raw or "[]")
-    return value
-
-
-def phase_views(
-    phases: list[LoopPhasesRow],
-    grouped: dict[str, list[PlannedItem]],
-    edges: Dependencies,
-) -> list[PhaseView]:
-    """Each Phase's state and entry blockers and each planned Ticket's readiness."""
-    phase_by_id = {phase.id: phase for phase in phases}
-    item_lookup = {entry.item.id: entry for entries in grouped.values() for entry in entries}
-    completed_items = {
-        item_id for item_id, entry in item_lookup.items() if entry.completed_at is not None
-    }
-    phase_complete: dict[str, bool] = {}
-
-    def phase_prerequisites(phase_id: str) -> Prerequisites:
-        return edges.get(f"phase:{phase_id}", Prerequisites())
-
-    def item_prerequisites(item_id: str) -> Prerequisites:
-        return edges.get(f"ticket:{item_id}", Prerequisites())
-
-    def gates_in(phase_id: str) -> list[PlannedItem]:
-        return [
-            entry
-            for entry in grouped.get(phase_id, [])
-            if entry.item.execution_mode == "pre_phase_gate"
-        ]
-
-    def compute_phase_complete(phase_id: str) -> bool:
-        entries = grouped.get(phase_id, [])
-        if not entries:
-            return all(
-                phase_complete.get(reference, False)
-                for reference in phase_prerequisites(phase_id).phases
-            )
-        return all(entry.completed_at is not None for entry in entries)
-
-    def blockers_for(
-        phase_ids: list[str], ticket_ids: list[str], *, include_gates_of: str | None
-    ) -> list[Blocker]:
-        blockers: list[Blocker] = []
-        for reference in phase_ids:
-            if not phase_complete.get(reference, False):
-                phase = phase_by_id.get(reference)
-                blockers.append(
-                    {
-                        "type": "phase",
-                        "id": reference,
-                        "reason": "prerequisite_phase_incomplete",
-                        "phase_number": None if phase is None else phase.number,
-                        "name": "" if phase is None else phase.name,
-                    }
-                )
-        for reference in ticket_ids:
-            if reference not in completed_items:
-                entry = item_lookup.get(reference)
-                blockers.append(
-                    {
-                        "type": "ticket",
-                        "id": reference,
-                        "key": None if entry is None else entry.item.key,
-                        "title": "" if entry is None else entry.item.title,
-                        "reason": "prerequisite_ticket_incomplete",
-                    }
-                )
-        if include_gates_of is not None:
-            blockers.extend(
-                {
-                    "type": "ticket",
-                    "id": gate.item.id,
-                    "key": gate.item.key,
-                    "title": gate.item.title,
-                    "reason": "pre_phase_gate_incomplete",
-                }
-                for gate in gates_in(include_gates_of)
-                if gate.completed_at is None
-            )
-        return blockers
-
-    # Phases are evaluated in dependency order; validation guarantees the graph is acyclic.
-    remaining = list(phases)
-    while remaining:
-        progressed = False
-        for phase in list(remaining):
-            waits_for = phase_prerequisites(phase.id).phases
-            if all(reference in phase_complete for reference in waits_for):
-                phase_complete[phase.id] = compute_phase_complete(phase.id)
-                remaining.remove(phase)
-                progressed = True
-        if not progressed:  # pragma: no cover - defensive, validation rejects cycles
-            for phase in remaining:
-                phase_complete[phase.id] = compute_phase_complete(phase.id)
-            break
-
-    downstream = downstream_phase_numbers(phases, grouped, edges)
-
-    views: list[PhaseView] = []
-    for phase in phases:
-        prerequisites = phase_prerequisites(phase.id)
-        entry_blockers = blockers_for(
-            prerequisites.phases, prerequisites.tickets, include_gates_of=phase.id
-        )
-        entered = not entry_blockers
-        if compute_phase_complete(phase.id):
-            state = "complete"
-        elif entered:
-            state = "active"
-        else:
-            state = "pending"
-        tickets: list[ReadinessItem] = []
-        for entry in grouped.get(phase.id, []):
-            item = entry.item
-            explicit = item_prerequisites(item.id)
-            blockers = blockers_for(explicit.phases, explicit.tickets, include_gates_of=None)
-            if item.execution_mode == "normal" and not entered:
-                blockers.extend(
-                    [blocker for blocker in entry_blockers if blocker not in blockers]
-                )
-            tickets.append(
-                {
-                    "id": item.id,
-                    "key": item.key,
-                    "title": item.title,
-                    "phase_id": item.phase_id,
-                    "phase_number": item.phase_number,
-                    "objective": item.objective,
-                    "instructions": item.instructions,
-                    "required_actor": item.required_actor,
-                    "execution_mode": item.execution_mode,
-                    "acceptance_criteria": _json(item.acceptance_criteria_json),
-                    "expected_evidence": _json(item.expected_evidence_json),
-                    "human_action_reason": item.human_action_reason,
-                    "human_instructions": item.human_instructions,
-                    "prerequisite_ticket_ids": explicit.tickets,
-                    "prerequisite_phase_ids": explicit.phases,
-                    "card_id": entry.card_id,
-                    "completed_at": entry.completed_at,
-                    "ready": not blockers,
-                    "blockers": blockers,
-                    "human_action_required": (
-                        item.required_actor == "human" and entry.completed_at is None
-                    ),
-                    "downstream_phase_numbers": sorted(
-                        downstream.get(f"ticket:{item.id}", set[int]())
-                    ),
-                }
-            )
-        views.append(
-            {
-                "id": phase.id,
-                "number": phase.number,
-                "name": phase.name,
-                "objective": phase.objective,
-                "entry_conditions": _json(phase.entry_conditions_json),
-                "exit_conditions": _json(phase.exit_conditions_json),
-                "prerequisite_phase_ids": prerequisites.phases,
-                "prerequisite_ticket_ids": prerequisites.tickets,
-                "state": state,
-                "blocked_by": entry_blockers,
-                "tickets": tickets,
-            }
-        )
-    return views
-
-
-def downstream_phase_numbers(
-    phases: list[LoopPhasesRow],
-    grouped: dict[str, list[PlannedItem]],
-    edges: Dependencies,
-) -> dict[str, set[int]]:
-    """Phase numbers whose entry depends, directly or transitively, on a node."""
-    phase_numbers = {phase.id: phase.number for phase in phases}
-    prerequisites_of: dict[str, set[str]] = {}
-    for phase in phases:
-        node = f"phase:{phase.id}"
-        prerequisites_of.setdefault(node, set())
-        entry = edges.get(node, Prerequisites())
-        prerequisites_of[node].update(f"phase:{reference}" for reference in entry.phases)
-        prerequisites_of[node].update(f"ticket:{reference}" for reference in entry.tickets)
-    for phase_id, entries in grouped.items():
-        for planned in entries:
-            node = f"ticket:{planned.item.id}"
-            prerequisites_of.setdefault(node, set())
-            entry = edges.get(node, Prerequisites())
-            prerequisites_of[node].update(f"ticket:{reference}" for reference in entry.tickets)
-            prerequisites_of[node].update(f"phase:{reference}" for reference in entry.phases)
-            if planned.item.execution_mode == "normal":
-                prerequisites_of[node].add(f"phase:{phase_id}")
-    dependents: dict[str, set[str]] = {node: set() for node in prerequisites_of}
-    for node, prerequisites in prerequisites_of.items():
-        for prerequisite in prerequisites:
-            dependents.setdefault(prerequisite, set()).add(node)
-    result: dict[str, set[int]] = {}
-    for node in prerequisites_of:
-        seen: set[str] = set()
-        stack = [node]
-        numbers: set[int] = set()
-        while stack:
-            current = stack.pop()
-            if current in seen:
-                continue
-            seen.add(current)
-            kind, _, identifier = current.partition(":")
-            if kind == "phase" and current != node and identifier in phase_numbers:
-                numbers.add(phase_numbers[identifier])
-            stack.extend(dependents.get(current, ()))
-        result[node] = numbers
-    return result
 
 
 # --- the service ---------------------------------------------------------------------------------
@@ -1015,8 +504,18 @@ __all__ = [
     "CanonicalPhase",
     "CanonicalPlan",
     "CanonicalTicket",
+    "Dependencies",
     "LoopPlanService",
     "PlanDraft",
+    "Prerequisites",
     "Publication",
+    "PublishedTicket",
+    "canonical_phase",
+    "canonical_ticket",
+    "dependencies",
+    "downstream_phase_numbers",
+    "items_by_phase",
+    "phase_views",
+    "plan_hash",
     "validate_plan",
 ]
