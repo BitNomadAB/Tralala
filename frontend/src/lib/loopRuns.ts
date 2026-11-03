@@ -12,7 +12,7 @@ export function runRepositories(run: GenerationRun): GenerationRunRepository[] {
  * The run record is the only place this lives: the prompt showed the model file contents, but the
  * person needs the commit and the count, not the files.
  */
-/** How much file text a repository sent: what its files took of the run's context. */
+/** How much a repository sent: what its files and its manifest took of the run's context. */
 function sentSize(repository: GenerationRunRepository): string {
   if (repository.content_omitted) return ", no room for file content";
   const chars = repository.snapshot_chars_included;

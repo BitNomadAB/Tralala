@@ -1177,6 +1177,29 @@ def test_a_repository_snapshot_reaches_the_model_but_its_paths_stay_in_the_run()
     assert "src/app.py" not in json.dumps(entry)
 
 
+def test_the_manifest_reaches_the_model_but_never_the_runs_sources_or_its_answer() -> None:
+    manifest: list[JsonValue] = [
+        {"path": "src/app.py", "bytes": 14, "sent": True},
+        {"path": "public_docs/Onboarding.md", "bytes": 9_000, "sent": False},
+    ]
+    entry: dict[str, JsonValue] = {**REPOSITORIES[0], "manifest": manifest, "manifest_omitted": 2}
+    w = make(repositories=[entry])
+    start(w)
+    run = w.run()
+    # The model is told which files exist, the ones it was not sent included.
+    match w.provider.context()["repositories"]:
+        case [{"manifest": listed, "manifest_omitted": 2}]:
+            assert listed == manifest
+        case other:
+            pytest.fail(f"no manifest in {other!r}")
+    # The run's sources keep the paths of the files sent, not the manifest; the answer neither.
+    (recorded,) = json.loads(run.source_revisions_json)["repositories"]
+    assert "manifest" not in recorded and "manifest_omitted" not in recorded
+    assert recorded["files"] == ["src/app.py"]
+    answer = json.dumps(w.service.get(BOARD_ID, LOOP, "id-1"))
+    assert "manifest" not in answer and "Onboarding.md" not in answer and "src/app.py" not in answer
+
+
 def test_a_board_without_a_repository_tells_the_model_so() -> None:
     w = make(repositories=[])
     start(w)

@@ -18,10 +18,14 @@ from app.repositories.code_repositories import MirrorRecord
 from app.services import repo_snapshot
 from app.services.repo_archive_cache import ArchiveCache
 from app.services.repo_snapshot import (
+    MAX_MANIFEST_ENTRIES,
+    ManifestEntry,
     RepositorySnapshotService,
+    Snapshot,
     SnapshotError,
     fetch_archive,
     file_chars,
+    manifest_entry_chars,
     path_selected,
     read_snapshot,
     resolve_commit,
@@ -85,12 +89,28 @@ def test_the_same_archive_gives_the_same_snapshot_whatever_the_member_order() ->
     assert read_snapshot(_tarball(reordered)) == first
 
 
-def test_too_many_files_stop_at_the_cap() -> None:
+def _sent(snapshot: Snapshot) -> list[tuple[str, bool]]:
+    return [(entry["path"], entry["sent"]) for entry in snapshot["manifest"]]
+
+
+def _unsent_chars(manifest: list[ManifestEntry]) -> int:
+    """The room a manifest is given: each entry counted in its longer, not-sent form."""
+    return sum(
+        manifest_entry_chars({"path": entry["path"], "bytes": entry["bytes"], "sent": False})
+        for entry in manifest
+    )
+
+
+def test_too_many_files_stop_at_the_cap_and_the_manifest_still_lists_them_all() -> None:
     snapshot = read_snapshot(
         _tarball({f"src/file_{index:03d}.py": b"x = 1\n" for index in range(250)})
     )
     assert len(snapshot["files"]) == repo_snapshot.MAX_FILES
     assert snapshot["truncated"] is True
+    assert _sent(snapshot) == [
+        (f"src/file_{index:03d}.py", index < repo_snapshot.MAX_FILES) for index in range(250)
+    ]
+    assert snapshot["manifest_omitted"] == 0
 
 
 def test_too_much_text_stops_at_the_cap() -> None:
@@ -100,16 +120,87 @@ def test_too_much_text_stops_at_the_cap() -> None:
     assert snapshot["text_bytes"] <= repo_snapshot.MAX_TEXT_BYTES
 
 
-def test_a_budget_cuts_the_snapshot_where_the_next_file_would_not_fit() -> None:
+def test_a_file_over_the_text_cap_is_skipped_and_the_smaller_files_after_it_still_come() -> None:
+    # The fixed snapshot used to end at the first file that did not fit, so every file after it
+    # was never sent, and an analysis reported them as missing.
+    huge = b"x" * (repo_snapshot.MAX_TEXT_BYTES + 1)
+    snapshot = read_snapshot(
+        _tarball(
+            {
+                "README.md": b"# App\n",
+                "docs/a_huge.md": huge,
+                "docs/guide.md": b"# Guide\n",
+                "src/app.py": b"x = 1\n",
+            }
+        )
+    )
+    assert [file["path"] for file in snapshot["files"]] == [
+        "README.md",
+        "docs/guide.md",
+        "src/app.py",
+    ]
+    assert snapshot["truncated"] is True
+    # The manifest names every file in the same order, the skipped one with its size.
+    assert snapshot["manifest"] == [
+        {"path": "README.md", "bytes": 6, "sent": True},
+        {"path": "docs/a_huge.md", "bytes": len(huge), "sent": False},
+        {"path": "docs/guide.md", "bytes": 8, "sent": True},
+        {"path": "src/app.py", "bytes": 6, "sent": True},
+    ]
+
+
+def test_a_file_over_the_budget_is_skipped_and_a_smaller_one_after_it_still_fits() -> None:
+    archive = _tarball({"README.md": b"r" * 5_000, "src/app.py": b"x = 1\n"})
+    whole = read_snapshot(archive)
+    _readme, app = whole["files"]
+    room = _unsent_chars(whole["manifest"]) + file_chars(app)
+    cut = read_snapshot(archive, budget_chars=room)
+    assert [file["path"] for file in cut["files"]] == ["src/app.py"]
+    assert _sent(cut) == [("README.md", False), ("src/app.py", True)]
+    assert cut["truncated"] is True
+    assert cut["chars"] <= room
+
+
+def test_the_budget_holds_the_manifest_first_and_the_files_share_what_it_leaves() -> None:
     archive = _tarball({"README.md": b"r" * 1000, "src/a.py": b"a" * 1000, "src/b.py": b"b" * 1000})
     whole = read_snapshot(archive)
     first, second, third = whole["files"]
-    budget = file_chars(first) + file_chars(second)
+    files = file_chars(first) + file_chars(second)
+    budget = _unsent_chars(whole["manifest"]) + files
     cut = read_snapshot(archive, budget_chars=budget)
-    # The same order as without a budget, stopped before the file that would not fit.
+    # The same order as without a budget; the third file did not fit beside the manifest.
     assert [file["path"] for file in cut["files"]] == ["README.md", "src/a.py"]
-    assert (cut["truncated"], cut["chars"], cut["text_bytes"]) == (True, budget, 2000)
-    assert (whole["truncated"], whole["chars"]) == (False, budget + file_chars(third))
+    assert _sent(cut) == [("README.md", True), ("src/a.py", True), ("src/b.py", False)]
+    manifest = sum(manifest_entry_chars(entry) for entry in cut["manifest"])
+    assert (cut["truncated"], cut["chars"], cut["text_bytes"]) == (True, files + manifest, 2000)
+    assert cut["chars"] <= budget
+    whole_manifest = sum(manifest_entry_chars(entry) for entry in whole["manifest"])
+    assert (whole["truncated"], whole["chars"]) == (
+        False,
+        files + file_chars(third) + whole_manifest,
+    )
+    # The files alone would have fitted two; the manifest's room leaves one.
+    alone = read_snapshot(archive, budget_chars=files)
+    assert [file["path"] for file in alone["files"]] == ["README.md"]
+
+
+def test_the_manifest_is_bounded_and_counts_the_files_beyond_it() -> None:
+    count = MAX_MANIFEST_ENTRIES + 3
+    snapshot = read_snapshot(_tarball({f"src/m{index:04d}.py": b"x" for index in range(count)}))
+    assert len(snapshot["manifest"]) == MAX_MANIFEST_ENTRIES
+    assert snapshot["manifest_omitted"] == 3
+    assert snapshot["manifest"][-1]["path"] == f"src/m{MAX_MANIFEST_ENTRIES - 1:04d}.py"
+
+
+def test_a_budget_too_small_for_the_whole_manifest_lists_what_fits_and_counts_the_rest() -> None:
+    archive = _tarball({f"src/m{index}.py": b"x = 1\n" for index in range(10)})
+    whole = read_snapshot(archive)
+    budget = _unsent_chars(whole["manifest"][:4])
+    cut = read_snapshot(archive, budget_chars=budget)
+    listed = [entry["path"] for entry in cut["manifest"]]
+    assert listed == [f"src/m{index}.py" for index in range(4)]
+    assert (cut["manifest_omitted"], cut["files"], cut["truncated"]) == (6, [], True)
+    assert cut["chars"] <= budget
 
 
 def test_text_that_is_not_utf8_is_kept_readable() -> None:
@@ -414,7 +505,9 @@ def test_two_repositories_share_the_budget_and_what_one_leaves_carries_over(
     github(_github_serving({"docs": small, "app": large}))
     service = RepositorySnapshotService(Repositories("docs", "app"))
     entries = service.for_board("board-1", budget_chars=10_000)
-    used = file_chars(read_snapshot(small)["files"][0])
+    # What a snapshot uses of its share is its file and its manifest.
+    alone = read_snapshot(small)
+    used = file_chars(alone["files"][0]) + manifest_entry_chars(alone["manifest"][0])
     # Link order: docs gets half and uses one file; app gets everything docs left.
     assert _budgets(entries) == [
         ("docs", 5_000, used),
@@ -453,6 +546,8 @@ def test_the_snapshot_reads_each_repository_through_its_links_globs(github: GitH
     docs["exclude_paths"] = ["docs/api/*"]
     steered, whole = RepositorySnapshotService(repositories).for_board("board-1")
     assert [file["path"] for file in _files(steered)] == ["docs/guide.md"]
+    # The manifest lists what the globs keep, never what they leave out.
+    assert steered.get("manifest") == [{"path": "docs/guide.md", "bytes": 8, "sent": True}]
     assert (steered.get("focus_paths"), steered.get("exclude_paths")) == (
         ["docs/**"],
         ["docs/api/*"],
@@ -466,6 +561,21 @@ def _files(entry: dict[str, JsonValue]) -> list[dict[str, JsonValue]]:
     files = entry.get("files")
     assert isinstance(files, list)
     return [file for file in files if isinstance(file, dict)]
+
+
+def test_a_github_entry_carries_the_manifest_of_every_file_sent_or_not(github: GitHub) -> None:
+    huge = b"x" * (repo_snapshot.MAX_TEXT_BYTES + 1)
+    archive = _tarball({"README.md": b"# App\n", "docs/a_huge.md": huge, "src/app.py": b"x = 1\n"})
+    github(_github_serving({"app": archive}))
+    (entry,) = RepositorySnapshotService(Repositories("app")).for_board("board-1")
+    assert entry.get("manifest") == [
+        {"path": "README.md", "bytes": 6, "sent": True},
+        {"path": "docs/a_huge.md", "bytes": len(huge), "sent": False},
+        {"path": "src/app.py", "bytes": 6, "sent": True},
+    ]
+    assert "manifest_omitted" not in entry
+    assert [file["path"] for file in _files(entry)] == ["README.md", "src/app.py"]
+    assert (entry.get("file_count"), entry.get("truncated")) == (2, True)
 
 
 def test_an_archive_over_the_limit_is_refused(github: GitHub) -> None:

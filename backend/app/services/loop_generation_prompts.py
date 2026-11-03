@@ -27,7 +27,8 @@ DEFAULT_CONTEXT_CHARS = 400_000
 MIN_SNAPSHOT_CHARS = 20_000
 """Below this much room for the repositories, a run sends the previous AI drafts without content."""
 REPOSITORY_OVERHEAD_CHARS = 2_000
-"""Room kept for what the repositories' entries say besides their files (names, commits, flags)."""
+"""Room kept for what the repositories' entries say besides their files and manifest entries
+(names, commits, flags)."""
 # The previous AI drafts a purpose can go without when the documents leave the repositories too
 # little room: the run's own earlier output and what was derived from it. Never the Info, and never
 # an approved input of the purpose (a RoadMap keeps the analysis it is planned from).
@@ -52,8 +53,18 @@ SCHEMAS = {
 
 SNAPSHOT_CAPS = (
     "At most 2 MB of archive, 200 files and 200 KB of text per repository are included, less "
-    "when the documents leave less room; build output, dependencies, lock files, binaries and "
-    "images are skipped."
+    "when the documents leave less room; a file that does not fit is left out and the next one "
+    "is read; build output, dependencies, lock files, binaries and images are skipped."
+)
+# What the manifest of a snapshot entry means. Without it a model takes a file it was not sent for a
+# file that does not exist, and builds findings on that.
+SNAPSHOT_MANIFEST = (
+    "Each repository entry's manifest lists every file in the repository at that commit, apart "
+    "from the skipped kinds and paths outside the board's focus and exclude globs, with its size "
+    "and sent: true when its content is under files or sent: false when it was not sent; "
+    "manifest_omitted counts files beyond the list. A file in the manifest exists even when its "
+    "content was not sent: never report it as missing, and name the unsent files you needed "
+    "under open_questions."
 )
 
 
@@ -69,6 +80,7 @@ PURPOSE_PROMPTS = {
         "repository, a tool or a legal review, say so explicitly instead of claiming you "
         "inspected it. A repository snapshot arrives with the request when the board links one; "
         f"it is bounded and filtered ({SNAPSHOT_CAPS}) and the commit it came from is named. "
+        f"{SNAPSHOT_MANIFEST} "
         "Cite paths exactly as they appear, never invent one, state the caps whenever a finding "
         "depends on the snapshot, and put files you would have needed but did not get under "
         "open_questions. Every material finding needs plain_language written for a project "
@@ -85,7 +97,7 @@ PURPOSE_PROMPTS = {
         "human_action_reason and human_instructions. Model a human check that gates a later "
         f"Phase as execution_mode='pre_phase_gate'. The same bounded snapshot is supplied "
         f"({SNAPSHOT_CAPS}); cite paths exactly as given, never invent one, and name files the "
-        "plan depends on that the snapshot did not include. "
+        f"plan depends on that the snapshot did not include. {SNAPSHOT_MANIFEST} "
         # The plan rules validate_plan holds every answer to, one sentence each; an answer that
         # breaks one is sent back for repair with the rule's message.
         "Every id in prerequisite_phase_ids or prerequisite_ticket_ids must be the id of a "
@@ -150,6 +162,18 @@ def without_drafts(context: JsonObject, purpose: str) -> JsonObject:
     return {**context, "documents": kept}
 
 
+def _unsent(manifest: JsonValue) -> JsonObject:
+    """A manifest whose files' content was dropped, each file marked as not sent; nothing for an
+    entry without one."""
+    if not isinstance(manifest, list):
+        return {}
+    return {
+        "manifest": [
+            {**item, "sent": False} if isinstance(item, dict) else item for item in manifest
+        ]
+    }
+
+
 def user_message(
     captured: Mapping[str, JsonValue], *, budget_chars: int = DEFAULT_CONTEXT_CHARS
 ) -> str:
@@ -165,7 +189,7 @@ def user_message(
         # first: dropping them keeps the JSON valid, where a raw cut would hand the model broken
         # input in the middle of a file.
         trimmed: list[JsonValue] = [
-            {**entry, "files": [], "content_omitted": True}
+            {**entry, **_unsent(entry.get("manifest")), "files": [], "content_omitted": True}
             if isinstance(entry, dict) and entry.get("files")
             else entry
             for entry in repositories
@@ -188,6 +212,8 @@ def user_message(
             "when you claim anything about the code, cite paths exactly as they appear, and "
             "list files you would have needed but did not get under open_questions. "
             + _snapshot_caps()
+            + " "
+            + SNAPSHOT_MANIFEST
         )
     elif isinstance(repositories, str):
         lines.append("Repository snapshot: no enabled repository is linked to this board.")

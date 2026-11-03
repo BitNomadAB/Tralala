@@ -23,9 +23,10 @@ export function GenerationRunPanel({ scope, run, onDismiss }: RunPanelProps) {
 export function GenerationRunAside({ scope, run, onDismiss }: RunPanelProps) {
   return createPortal(
     // Outside the dialog content on purpose: that element scrolls, so a panel positioned
-    // beside it would be clipped. This one sits at the right edge of the window instead, and
-    // it takes pointer events because a modal dialog sets `pointer-events: none` on the body.
-    <aside className="pointer-events-auto fixed right-6 top-1/2 z-50 hidden w-60 -translate-y-1/2 2xl:block">
+    // beside it would be clipped. This one is fixed 24 px right of the centred 960 px dialog
+    // (half of 960 plus 24 from the middle of the window), and it takes pointer events because
+    // a modal dialog sets `pointer-events: none` on the body.
+    <aside className="pointer-events-auto fixed left-[calc(50%+504px)] top-1/2 z-50 hidden w-60 -translate-y-1/2 2xl:block">
       <RunPhases purpose={scope} run={run} onDismiss={onDismiss} />
     </aside>,
     document.body,

@@ -136,6 +136,12 @@ def test_a_mirrored_repository_goes_through_the_same_reader_and_budget() -> None
         "budget_chars": budget,
         "snapshot_chars_included": expected["chars"],
         "content_omitted": False,
+        # Every file the snapshot considered, the one that did not fit marked as not sent.
+        "manifest": [
+            {"path": "README.md", "bytes": 6, "sent": True},
+            {"path": "docs/guide.md", "bytes": 8, "sent": True},
+            {"path": "src/app.py", "bytes": 1_200, "sent": False},
+        ],
     }
     assert board.rows.fetches == {
         "app": MirrorRecord(

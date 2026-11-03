@@ -329,7 +329,11 @@ to the board, Tralala resolves the commit at the configured branch, reads the ta
 and places a bounded, filtered set of files in the prompt as data — never as instructions. The
 documents come first; the repositories share what remains of `TRALALA_GENERATION_CONTEXT_CHARS`
 (default 400 000 characters), in link order with carry-over, and each snapshot is cut to its share.
-The fixed caps still apply: at most 200 files and 200 KB of text per repository. A `github`
+The fixed caps still apply: at most 200 files and 200 KB of text per repository; a file that does
+not fit is left out and the next one is read. Each entry also carries `manifest`, every file the
+snapshot considered in the order it read them as `{path, bytes, sent}` (at most 5 000, with
+`manifest_omitted` counting the rest), so the model knows that a file it was not sent exists; the
+manifest takes its room of the repository's share before the files do. A `github`
 repository is downloaded from `api.github.com`/`codeload.github.com` (at most 2 MB of archive, 15 s
 timeout); a `git_https` repository is fetched into its Tralala-managed mirror first and archived
 there (see [Repositories.md](Repositories.md)). Build output, dependencies, lock files, binaries and
@@ -341,7 +345,8 @@ A repository that cannot be read does not fail the run: it appears in the snapsh
 keeps the commit and the file paths (`source_revisions.repositories`); the file contents stay in the
 run's own input, and `GET …/generation-runs/{run_id}` returns only the name, branch, commit,
 file count and `truncated` flag, plus `budget_chars` (the repository's share),
-`snapshot_chars_included` (what its files took) and `content_omitted` (not even one file fitted). A
+`snapshot_chars_included` (what its manifest and files took) and `content_omitted` (not even one
+file fitted); the manifest stays in the run's own input as well. A
 `git_https` entry also carries `provider`, `fetched_at` (when its mirror was last brought up to date)
 and `stale_mirror`: `true` when this run's fetch failed and it read the last good mirror from
 `fetched_at`. No token, path or content ever appears in a log line or an error.

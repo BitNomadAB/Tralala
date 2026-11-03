@@ -7,9 +7,10 @@ prompt as data. Nothing is written back to a repository.
 A repository comes as a tarball of one commit, from one of two providers: ``github`` downloads it
 through the GitHub API, ``git_https`` fetches the latest main branch into the Tralala-managed
 mirror and archives it there (``repo_mirror.py``). Everything after the tarball is shared, so
-filters, the board link's focus and exclude globs, caps, order and budget are the same for both.
+filters, the board link's focus and exclude globs, caps, order and budget are the same for both
+(``repo_snapshot_select.py`` decides which files are considered and in which order).
 
-Two rules shape the code below.
+Three rules shape the code below.
 
 - **The archive is untrusted.** A tarball can expand to gigabytes, carry path traversal, or hide
   instructions addressed at the model. It is read into memory with a byte cap while streaming, the
@@ -17,6 +18,9 @@ Two rules shape the code below.
   result as material to analyse.
 - **Failure is per repository.** A repository that cannot be read must not fail the run: it appears
   in the context as an error entry, so the analysis can say which part of the code it did not see.
+- **What was not sent still exists.** A file that does not fit the caps or the budget is skipped
+  and the next one is read, and the entry's ``manifest`` lists every file considered, marked sent
+  or not, so the model never takes a file it was not given for a file that is missing.
 """
 
 from __future__ import annotations
@@ -27,7 +31,6 @@ import logging
 import tarfile
 import time
 from collections.abc import Sequence
-from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Protocol, TypedDict
 from urllib.parse import urlsplit
 
@@ -38,10 +41,38 @@ from ..repositories.code_repositories import MirrorRecord
 from .repo_archive_cache import ArchiveCache
 from .repo_mirror import MirrorRequest, MirrorSnapshot
 from .repo_mirror_git import MirrorError
+from .repo_snapshot_select import (
+    MAX_MANIFEST_ENTRIES,
+    ManifestEntry,
+    manifest_entry_chars,
+    manifest_of,
+    manifest_room,
+    path_selected,
+    select_members,
+)
 from .repositories import API_BASE, RepositoryEntry, RepositoryService
 
 if TYPE_CHECKING:  # httpx is imported where a client is built
     import httpx
+
+__all__ = [
+    "ARCHIVE_MAX_BYTES",
+    "MAX_FILES",
+    "MAX_MANIFEST_ENTRIES",
+    "MAX_TEXT_BYTES",
+    "ManifestEntry",
+    "RepositorySnapshotService",
+    "Snapshot",
+    "SnapshotError",
+    "SnapshotFile",
+    "fetch_archive",
+    "file_chars",
+    "manifest_entry_chars",
+    "path_selected",
+    "read_snapshot",
+    "resolve_commit",
+    "select_members",
+]
 
 logger = logging.getLogger("tralala.repo_snapshot")
 
@@ -51,79 +82,6 @@ MAX_TEXT_BYTES = 200 * 1024
 TIMEOUT_SECONDS = 15.0
 CODELOAD_HOSTS = frozenset({"codeload.github.com"})
 
-# Directories that never inform an analysis: build output, dependencies, caches.
-SKIPPED_DIRECTORIES = frozenset(
-    {
-        ".git",
-        ".mypy_cache",
-        ".next",
-        ".nuxt",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".tox",
-        ".venv",
-        "venv",
-        "node_modules",
-        "dist",
-        "build",
-        "coverage",
-        "htmlcov",
-        "__pycache__",
-        "target",
-        "vendor",
-    }
-)
-# Lock files are generated, huge, and say nothing an analysis can use.
-SKIPPED_NAMES = frozenset(
-    {
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "poetry.lock",
-        "uv.lock",
-        "Pipfile.lock",
-        "Cargo.lock",
-        "composer.lock",
-        "Gemfile.lock",
-        "go.sum",
-    }
-)
-SKIPPED_SUFFIXES = frozenset(
-    {
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".tif", ".tiff", ".svgz",
-        ".pdf", ".zip", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".jar", ".war", ".whl",
-        ".so", ".dll", ".exe", ".dylib", ".bin", ".o", ".a", ".class", ".pyc", ".pyo",
-        ".mp3", ".mp4", ".mov", ".wav", ".woff", ".woff2", ".ttf", ".otf",
-        ".sqlite", ".sqlite3", ".db", ".parquet", ".pkl", ".onnx", ".pt", ".safetensors",
-    }
-)
-# What an analysis asks first: the request, the rules, the documentation, then the entry points.
-ROOT_DOC_PRIORITY = 0
-DOCS_PRIORITY = 1
-CONFIG_PRIORITY = 2
-SOURCE_PRIORITY = 3
-CONFIG_NAMES = frozenset(
-    {
-        "package.json",
-        "pyproject.toml",
-        "setup.cfg",
-        "requirements.txt",
-        "requirements-dev.txt",
-        "Cargo.toml",
-        "go.mod",
-        "Dockerfile",
-        "docker-compose.yml",
-        "docker-compose.yaml",
-        "compose.yml",
-        "compose.yaml",
-        "Makefile",
-        "tsconfig.json",
-        "vite.config.ts",
-        "vite.config.js",
-        "alembic.ini",
-        ".env.example",
-    }
-)
 
 type JsonObject = dict[str, JsonValue]
 
@@ -140,13 +98,15 @@ class SnapshotFile(TypedDict):
 
 
 class Snapshot(TypedDict):
-    """The bounded file set read from one archive; ``chars`` is what its files take in a run's
-    context JSON."""
+    """The bounded file set read from one archive and the manifest of every file considered;
+    ``chars`` is what its files and its manifest take in a run's context JSON."""
 
     files: list[SnapshotFile]
     truncated: bool
     text_bytes: int
     chars: int
+    manifest: list[ManifestEntry]
+    manifest_omitted: int
 
 
 def file_chars(file: SnapshotFile) -> int:
@@ -272,62 +232,25 @@ def _is_text(payload: bytes) -> bool:
     return b"\x00" not in payload
 
 
-def _priority(relative: str, depth: int) -> tuple[int, int, str]:
-    name = relative.rsplit("/", 1)[-1]
-    if depth == 1 and (name.upper().startswith("README") or name == "AGENTS.md"):
-        return (ROOT_DOC_PRIORITY, 0, relative)
-    if relative.startswith("docs/"):
-        return (DOCS_PRIORITY, depth, relative)
-    if depth == 1 and (name in CONFIG_NAMES or name.endswith((".toml", ".json", ".yml", ".yaml"))):
-        return (CONFIG_PRIORITY, depth, relative)
-    return (SOURCE_PRIORITY, depth, relative)
+def _least_chars(relative: str, size: int) -> int:
+    """The fewest characters a file of ``size`` bytes can take in the context JSON: UTF-8 spends at
+    most four bytes on a character and JSON never shortens one, so a file whose least does not fit
+    is skipped without being extracted."""
+    return file_chars({"path": relative, "bytes": size, "content": ""}) + -(-size // 4)
 
 
-def path_selected(relative: str, focus: Sequence[str], exclude: Sequence[str]) -> bool:
-    """Whether a board link's globs keep a file: one an exclude glob matches is dropped, and when
-    there are focus globs only a file one of them matches is kept.
-
-    ``relative`` is the POSIX path below the repository root. The match is ``fnmatchcase``: case
-    sensitive on every platform, and its ``*`` matches ``/`` too, so ``docs/*`` covers every file
-    below ``docs/`` and ``*.md`` every Markdown file at any depth.
-    """
-    if any(fnmatchcase(relative, glob) for glob in exclude):
-        return False
-    return not focus or any(fnmatchcase(relative, glob) for glob in focus)
-
-
-def select_members(
-    archive: tarfile.TarFile,
-    *,
-    focus: Sequence[str] = (),
-    exclude: Sequence[str] = (),
-) -> list[tuple[tuple[int, int, str], tarfile.TarInfo, str]]:
-    """Everything worth reading, ordered so the same SHA always yields the same prompt.
-
-    Noise (build output, dependencies, lock files, binaries) is skipped first, then the link's
-    globs choose among the rest (``path_selected``), and only then is the result put in priority
-    order, so the caps fall on the files the globs kept.
-    """
-    selected: list[tuple[tuple[int, int, str], tarfile.TarInfo, str]] = []
-    for member in archive.getmembers():
-        if not member.isfile() or member.size <= 0:
-            continue
-        parts = [segment for segment in member.name.split("/") if segment]
-        if len(parts) < 2:
-            continue
-        # GitHub wraps everything in `<owner>-<repository>-<sha>/`; drop that first segment.
-        relative_parts = parts[1:]
-        if any(part in SKIPPED_DIRECTORIES for part in relative_parts[:-1]):
-            continue
-        name = relative_parts[-1]
-        if name in SKIPPED_NAMES or name.lower().endswith(tuple(SKIPPED_SUFFIXES)):
-            continue
-        relative = "/".join(relative_parts)
-        if not path_selected(relative, focus, exclude):
-            continue
-        selected.append((_priority(relative, len(relative_parts)), member, relative))
-    selected.sort(key=lambda entry: entry[0])
-    return selected
+def _text(archive: tarfile.TarFile, member: tarfile.TarInfo) -> tuple[str, int] | None:
+    """A member's text and its size in bytes; ``None`` for one that cannot be read or is binary."""
+    handle = archive.extractfile(member)
+    if handle is None:
+        return None
+    payload = handle.read()
+    if not _is_text(payload):
+        return None
+    try:
+        return payload.decode("utf-8"), len(payload)
+    except UnicodeDecodeError:
+        return payload.decode("utf-8", errors="replace"), len(payload)
 
 
 def read_snapshot(
@@ -337,47 +260,61 @@ def read_snapshot(
     focus: Sequence[str] = (),
     exclude: Sequence[str] = (),
 ) -> Snapshot:
-    """Extract the bounded, ordered file set from one tarball; with ``budget_chars``, the files
-    also stop where the next one would not fit in that many characters of context. ``focus`` and
-    ``exclude`` are the board link's globs (``select_members``)."""
-    files: list[SnapshotFile] = []
-    used_bytes = 0
-    used_chars = 0
-    truncated = False
+    """Extract the bounded, ordered file set from one tarball, with the manifest of every file
+    considered. ``focus`` and ``exclude`` are the board link's globs (``select_members``).
+
+    The manifest takes its room of ``budget_chars`` first (``manifest_room``), and the files share
+    what it leaves. A file that would take the text past ``MAX_TEXT_BYTES`` or the files past that
+    room is skipped and reading goes on with the next, so one large file no longer hides every
+    file after it; only ``MAX_FILES`` ends the reading. ``truncated`` says that a file was left
+    out either way.
+    """
     try:
         # Opened apart from the `with` below, so only a failed open is malformed_archive.
         archive = tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz")  # noqa: SIM115 - see above
     except (tarfile.TarError, OSError) as exc:
         raise SnapshotError("malformed_archive") from exc
+    files: list[SnapshotFile] = []
+    sent: set[int] = set()
+    used_bytes = 0
+    used_chars = 0
+    truncated = False
     with archive:
-        for _priority_key, member, relative in select_members(
-            archive, focus=focus, exclude=exclude
-        ):
+        selected = select_members(archive, focus=focus, exclude=exclude)
+        listed, manifest_chars = manifest_room(selected, budget_chars)
+        room = None if budget_chars is None else budget_chars - manifest_chars
+        for index, (_key, member, relative) in enumerate(selected):
             if len(files) >= MAX_FILES:
                 truncated = True
                 break
-            if used_bytes + member.size > MAX_TEXT_BYTES:
+            least = _least_chars(relative, member.size)
+            if used_bytes + member.size > MAX_TEXT_BYTES or (
+                room is not None and used_chars + least > room
+            ):
                 truncated = True
-                break
-            handle = archive.extractfile(member)
-            if handle is None:
                 continue
-            payload = handle.read()
-            if not _is_text(payload):
+            text = _text(archive, member)
+            if text is None:
                 continue
-            try:
-                content = payload.decode("utf-8")
-            except UnicodeDecodeError:
-                content = payload.decode("utf-8", errors="replace")
-            file: SnapshotFile = {"path": relative, "bytes": len(payload), "content": content}
+            content, size = text
+            file: SnapshotFile = {"path": relative, "bytes": size, "content": content}
             cost = file_chars(file)
-            if budget_chars is not None and used_chars + cost > budget_chars:
+            if room is not None and used_chars + cost > room:
                 truncated = True
-                break
+                continue
             files.append(file)
-            used_bytes += len(payload)
+            sent.add(index)
+            used_bytes += size
             used_chars += cost
-    return {"files": files, "truncated": truncated, "text_bytes": used_bytes, "chars": used_chars}
+    manifest = manifest_of(selected, listed, sent)
+    return {
+        "files": files,
+        "truncated": truncated,
+        "text_bytes": used_bytes,
+        "chars": used_chars + sum(manifest_entry_chars(entry) for entry in manifest),
+        "manifest": manifest,
+        "manifest_omitted": len(selected) - listed,
+    }
 
 
 def _log_captured(repository_id: str, sha: str, snapshot: Snapshot, started: float) -> None:
@@ -395,7 +332,8 @@ def _log_captured(repository_id: str, sha: str, snapshot: Snapshot, started: flo
 
 
 def _contents(snapshot: Snapshot, budget: int | None) -> JsonObject:
-    """The snapshot's part of an entry: the files, and with a budget what it allowed and used."""
+    """The snapshot's part of an entry: the manifest and the files, and with a budget what it
+    allowed and what the two used of it."""
     budgeted: JsonObject = (
         {}
         if budget is None
@@ -406,10 +344,17 @@ def _contents(snapshot: Snapshot, budget: int | None) -> JsonObject:
             "content_omitted": not snapshot["files"] and snapshot["truncated"],
         }
     )
+    omitted = snapshot["manifest_omitted"]
     return {
         "file_count": len(snapshot["files"]),
         "truncated": snapshot["truncated"],
         **budgeted,
+        # Every file considered, sent or not: what was not sent still exists.
+        "manifest": [
+            {"path": entry["path"], "bytes": entry["bytes"], "sent": entry["sent"]}
+            for entry in snapshot["manifest"]
+        ],
+        **({"manifest_omitted": omitted} if omitted else {}),
         "files": [
             {"path": file["path"], "bytes": file["bytes"], "content": file["content"]}
             for file in snapshot["files"]

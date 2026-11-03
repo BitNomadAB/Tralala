@@ -78,6 +78,18 @@ describe("the planning dialog's run panel", () => {
     expect(within(compact).getByText("Generating analysis")).toBeInTheDocument();
   });
 
+  it("places the wide-screen panel 24 px right of the 960 px dialog, not at the window edge", async () => {
+    await startAnalysis();
+    const { from2xl } = await runPanels();
+    const aside = from2xl[0]?.parentElement;
+    expect(aside?.tagName).toBe("ASIDE");
+    // Half the dialog's 960 px plus 24 px from the middle of the window, centred vertically.
+    expect(aside).toHaveClass("fixed", "left-[calc(50%+504px)]", "top-1/2", "-translate-y-1/2");
+    expect(aside).not.toHaveClass("right-6");
+    const dialog = screen.getByRole("dialog", { name: /planning documents/ });
+    expect(dialog).toHaveClass("w-[min(960px,96vw)]");
+  });
+
   it("announces the started run with an ellipsis, not a question mark", async () => {
     await startAnalysis();
 

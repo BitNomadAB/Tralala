@@ -38,8 +38,11 @@ than the API path accepts.
 
 Either way, a run reads at most 200 files and 200 KB of text per repository, skips build output,
 dependencies, lock files, binaries and images, puts the README, `AGENTS.md` and `docs/` first, and
-shares `TRALALA_GENERATION_CONTEXT_CHARS` with the Loop's documents (the documents come first). The
-GitHub download is capped at 2 MB of archive; the mirror's archive of one commit at 128 MB.
+shares `TRALALA_GENERATION_CONTEXT_CHARS` with the Loop's documents (the documents come first). A
+file that does not fit is left out and the next one is read, and the model also gets a manifest of
+every file it could have read, each marked as sent or not, so a file it was not sent is never taken
+for a missing one. The GitHub download is capped at 2 MB of archive; the mirror's archive of one
+commit at 128 MB.
 
 ## Add a repository
 
