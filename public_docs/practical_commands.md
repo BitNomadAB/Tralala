@@ -62,11 +62,12 @@ Run these from `frontend/`.
 | `pnpm install` | Install and update the lockfile if `package.json` changed. |
 | `pnpm dev` | Development server with hot reload on `:5173`. |
 | `pnpm typecheck` | `tsc --noEmit`: types only, no output. |
-| `pnpm test` | Vitest unit and component tests (37 of them), one run. |
+| `pnpm test` | Vitest unit and component tests, one run. |
 | `pnpm exec vitest` | The same tests in watch mode while you edit. |
 | `pnpm exec vitest run src/tests/theme.test.ts` | Only one test file. |
 | `pnpm build` | Typecheck, production build and the client build guard (no source maps, no server-only strings). |
 | `pnpm preview` | Serve the built bundle locally to check a production build. |
+| `pnpm lint:md` | markdownlint on `README.md`, `AGENTS.md`, `docs/` and `public_docs/`; what CI runs. |
 
 ### Playwright journeys
 

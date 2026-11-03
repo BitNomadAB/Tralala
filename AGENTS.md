@@ -68,9 +68,10 @@ message broker.
     transport with its own rules — and a tool may be narrower than a scope, never wider. The local
     role agents stay readers: a run invokes them, they never authenticate, and they never change a
     Ticket.
+
 ## Repository layout
 
-```
+```text
 backend/app/{api,core,models,repositories,schemas,services,storage,security,migrations}
 frontend/src/{app,components,features,lib,webmcp,themes,tests}
 public_docs/     everything a user or operator follows: installation, onboarding, commands,
@@ -105,6 +106,7 @@ pnpm typecheck      # tsc --noEmit
 pnpm build          # production build (includes typecheck)
 pnpm dev            # dev server on :5173, proxies /api to :8000
 pnpm test:e2e       # Playwright journeys against an isolated stack (:8077 + :5273)
+pnpm lint:md        # markdownlint on README.md, AGENTS.md, docs/ and public_docs/
 ```
 
 Use pnpm for frontend work. `pnpm test:e2e` reuses a locally installed Playwright (no vendored
@@ -117,6 +119,9 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   virtual environment all run it, so a local run means what CI means. CI also runs 3.14, and
   `requires-python` allows it; anything newer is untested and needs a CI leg before it is claimed.
   Typed, ruff-clean (line length 100), no blocking work in async paths.
+- Text files are UTF-8 without a byte-order mark and use LF line endings (`.gitattributes`,
+  `.editorconfig`). Backend code writes text with `newline=""` or writes bytes, so a file written on
+  Windows is byte-identical to one written on Linux; `tests/test_text_files.py` enforces both.
 - TypeScript: strict, no `any` unless justified, semantic CSS variables from `src/index.css`.
 - API: JSON envelope `{success, data, request_id, meta}`; errors `{success:false, error, request_id}`.
   Unknown request fields are rejected (`extra="forbid"`). Timestamps are ISO 8601 UTC.
@@ -174,4 +179,3 @@ log (`docs/decisions/0009`, untracked).
   The current set is MIT, ISC, BSD, 0BSD, Apache-2.0, PSF, MIT-0, MPL-2.0 and CC-BY-4.0 (the last
   only for `caniuse-lite`, which is data with an attribution notice and no code). Nothing copyleft.
 - Never publish signed contributor agreements in the repository.
-

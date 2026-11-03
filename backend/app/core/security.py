@@ -136,7 +136,8 @@ def write_private_file(path: Path, value: str) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     fd = os.open(path, flags, 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        # newline="" keeps "\n" as written: the file is byte-identical on Windows and Linux.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.write(value)
     except Exception:
         try:

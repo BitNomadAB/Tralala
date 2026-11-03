@@ -4,7 +4,7 @@ A Loop is one feature or coherent change initiative inside a Board. It owns its 
 columns, its Tickets and its planning documents. A Board is the container; the Board's SQLite
 database is the storage boundary.
 
-```
+```text
 Board
   Loop: Email verification
     Draft -> Analysis review -> Planning -> RoadMap review -> Ready -> In progress

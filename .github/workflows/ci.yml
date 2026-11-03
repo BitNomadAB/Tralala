@@ -40,7 +40,7 @@ jobs:
         run: python -m pytest
 
   frontend:
-    name: Frontend (types, unit tests, build)
+    name: Frontend (types, unit tests, build, Markdown)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -64,6 +64,10 @@ jobs:
       # Includes `tsc --noEmit` and the client build guard (no source maps, no server-only strings).
       - name: Production build
         run: pnpm build
+      # The shipped documentation (README.md, AGENTS.md, docs/, public_docs/). markdownlint-cli2 is
+      # a pinned dev dependency, so this is the same check `pnpm lint:md` runs locally.
+      - name: Markdown lint
+        run: pnpm lint:md
 
   images:
     name: Container images

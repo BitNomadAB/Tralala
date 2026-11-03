@@ -1,0 +1,10 @@
+// Markdown rules for the shipped documentation. Every markdownlint rule is on unless named here.
+// Rule reference: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+{
+  "default": true,
+  // Prose is wrapped at about 100 columns by convention, but tables, URLs and commands cannot be
+  // wrapped without breaking them, so line length is not a lint error.
+  "MD013": false,
+  // No inline HTML, except a line break inside a table cell where Markdown has no other way.
+  "MD033": { "allowed_elements": ["br"] }
+}

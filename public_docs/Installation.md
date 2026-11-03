@@ -237,7 +237,8 @@ cd ../frontend
 pnpm typecheck
 pnpm test
 pnpm build          # also runs the client build guard
-pnpm test:e2e       # 30 browser journeys against an isolated stack
+pnpm lint:md        # Markdown lint on the documentation
+pnpm test:e2e       # the browser journeys against an isolated stack
 ```
 
 `pnpm test:e2e` starts its own backend on `:8077` with `frontend/e2e/.data` and Vite on `:5273`, from

@@ -549,7 +549,7 @@ lists render without a cross-database join; every change is written to the activ
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/boards/{board_id}/cards` with `list_id|q|label|priority|due_before|overdue|completed|include_archived|sort|order|limit|offset` | `cards:read` |
+| GET | `/boards/{board_id}/cards` with `list_id\|q\|label\|priority\|due_before\|overdue\|completed\|include_archived\|sort\|order\|limit\|offset` | `cards:read` |
 | POST | `/boards/{board_id}/cards` (`Idempotency-Key`) | `cards:write` |
 | POST | `/boards/{board_id}/cards/bulk` (`{"cards": [...]}`, max 100, partial failures, `Idempotency-Key`) | `cards:write` |
 | GET | `/boards/{board_id}/cards/{card_id}?include=checklists,comments` | `cards:read` |
@@ -670,7 +670,6 @@ Content-Type: application/json
 `413` payload too large · `422` validation failure · `429` rate limited · `503` temporarily
 unavailable.
 
-
 ## Cost of the board list
 
 `loop_count`, `list_count` and `card_count` live inside each board's own database, so measuring them
@@ -705,7 +704,6 @@ There is no transfer endpoint. Moving a Ticket between Loops or Boards would byp
 plan it belongs to, so the operation is refused rather than implemented: a caller that reaches the
 service directly gets `409 plan_change_required` with the reason. The supported path is a new Loop
 with its own Info, analysis and RoadMap — or a person recreating the Ticket deliberately.
-
 
 ## Board schema state
 

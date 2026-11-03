@@ -14,7 +14,7 @@ live in [Loops.md](Loops.md) and the endpoint reference in [API.md](API.md).
 
 ## Overview
 
-```
+```text
 browser ── Caddy ──┬── React UI (built SPA)
                    │      │
                    │      ├── WebMCP adapter (in-page tools)
@@ -39,7 +39,7 @@ WebMCP adapter stays a separate, UI-contextual surface for a person's own sessio
 
 ### Authoritative hierarchy
 
-```
+```text
 App (Tralala shell, Board overview)
   Board (a project, application or defined part of one)
     Loop (one feature or coherent change initiative)
