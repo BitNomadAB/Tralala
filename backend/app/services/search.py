@@ -8,7 +8,7 @@ passed in (the overdue filter), so every rule here runs in a unit test without a
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from typing import NotRequired, TypedDict
 
@@ -59,12 +59,26 @@ class GlobalSearch(TypedDict):
     board_count: int
     loop_count: int
     query: str
+    engine: str
+    """``fts5`` when every Loop searched was matched by its index, ``like`` when none was,
+    ``mixed`` otherwise (see ``search_engine``)."""
 
 
 def fts_query(value: str) -> str:
     """A safe FTS5 MATCH expression: every token is quoted and prefix-matched."""
     tokens = [token.replace('"', " ") for token in value.split() if token.strip()]
     return " AND ".join(f'"{token}"*' for token in tokens)
+
+
+def search_engine(engines: Iterable[str]) -> str:
+    """One word for the engines several searches used: ``fts5`` when every one was the index,
+    ``like`` when none was (or nothing was searched), ``mixed`` otherwise."""
+    used = set(engines)
+    if used == {"fts5"}:
+        return "fts5"
+    if used <= {"like"}:
+        return "like"
+    return "mixed"
 
 
 def search_hit(
@@ -185,6 +199,7 @@ class SearchService:
         with self.accounts.reader() as registry:
             boards = registry.boards.most_recent(status="active", limit=max_boards)
         results: list[SearchHit] = []
+        engines: list[str] = []
         loop_count = 0
         for board in boards:
             try:
@@ -202,6 +217,7 @@ class SearchService:
                     )
                 except NotFound:
                     continue
+                engines.append(found["engine"])
                 for item in found["items"]:
                     item["board_name"] = board.name
                     results.append(item)
@@ -210,6 +226,7 @@ class SearchService:
             "board_count": len(boards),
             "loop_count": loop_count,
             "query": q,
+            "engine": search_engine(engines),
         }
 
 

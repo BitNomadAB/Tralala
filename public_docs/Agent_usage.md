@@ -74,13 +74,15 @@ In a client that speaks MCP:
 `"type": "http"` names the transport, not the scheme: `https` is what you use over a tunnel or with a
 certificate. `/llms.txt` is plain text at the same origin.
 
-## 3. The thirteen tools
+## 3. The fifteen tools
 
 | Tool | Scope | What it does |
 | --- | --- | --- |
-| `read_board` | `boards:read`, `loops:read` | boards and their Loops, the people you may assign, the agents you may ask |
+| `list_boards` | `boards:read` | the boards you may read, by name, with status and Loop count: the way in |
+| `read_board` | `boards:read`, `loops:read` | a board's Loops, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | a Loop's documents, plan, columns, readiness and Tickets |
 | `read_ticket` | `cards:read` | one Ticket with its blockers and what you may do next |
+| `search_tickets` | `cards:read` | find Tickets by words: in one Loop, a board's open Loops or every active board |
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |
 | `comment_ticket` | `comments:write` | add a comment: progress, findings, a blocker |
@@ -98,8 +100,10 @@ Tools are filtered by the key's scopes, so a key without `loops:generate` does n
 ## 4. A session that works
 
 ```text
-read_board                      -> pick the board and the Loop
+list_boards                     -> pick the board; its id comes from here, never from a prompt
+read_board                      -> pick the Loop
 read_loop                       -> understand the intent, the approved plan, the blockers
+search_tickets                  -> find a Ticket by words when you know what, not where
 read_ticket                     -> read the one you are about to touch, including its version
   ... do the work ...
 comment_ticket                  -> what you found or what you changed

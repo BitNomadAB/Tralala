@@ -127,7 +127,6 @@ _ON_SERVICES = (
 UNTESTED_TOOLS: Mapping[str, str] = MappingProxyType(
     dict.fromkeys(
         (
-            "read_ticket",
             "assign_ticket",
             "move_ticket",
             "comment_ticket",

@@ -791,9 +791,11 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 
 | Tool | Scope | What it does |
 | --- | --- | --- |
+| `list_boards` | `boards:read` | The boards the token may read, by name, with status and Loop count; a board id comes from here |
 | `read_board` | `boards:read`, `loops:read` | Loops with stage, `execution_allowed` and `blocked_reason`, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | Goal, Info/Analysis/RoadMap documents, plan with per-Ticket readiness, Kanban columns and the Loop's Tickets |
 | `read_ticket` | `cards:read` | Acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
+| `search_tickets` | `cards:read` | Tickets by words in one Loop, a board's open Loops or every active board, each with board, Loop key, key and column |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
 | `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
 | `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |

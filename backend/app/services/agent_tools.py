@@ -8,9 +8,9 @@ authorization, version checks and workflow gates are exactly the ones REST alrea
 can be narrower than a scope, never wider.
 
 Deliberately absent: board and list structure changes, Ticket creation, archiving and every human
-decision. A worker agrees an intent, creates the Loop, writes the Info while it is still
-speculative, asks for the Analysis and tracks the Tickets; a person still approves the analysis and
-the RoadMap, confirms human work and accepts QA.
+decision. A worker lists the boards and finds its Ticket, agrees an intent, creates the Loop, writes
+the Info while it is still speculative, asks for the Analysis and tracks the Tickets; a person still
+approves the analysis and the RoadMap, confirms human work and accepts QA.
 
 The handlers live beside this module, in ``agent_tools_read`` and ``agent_tools_write``; this
 module holds the catalogue and the dispatch and re-exports them.
@@ -36,6 +36,8 @@ from .agent_tools_read import (
     _text,
     _thread_view,
     _ticket_location,
+    list_boards,
+    search_tickets,
 )
 from .agent_tools_write import (
     DEDUPE_WINDOW_SECONDS,
@@ -101,18 +103,39 @@ def _object(
     }
 
 
-_BOARD_ID = _string("Board identifier from read_board")
-_CARD_ID = _string("Ticket identifier from read_board or read_loop")
+_BOARD_ID = _string("Board identifier from list_boards")
+_CARD_ID = _string("Ticket identifier from read_loop or search_tickets")
 
 
 def tool_catalog() -> dict[str, AgentTool]:
-    """The worker surface: how to read a task, start one, track it and ask for advice."""
+    """The worker surface: how to find a task, read it, start one, track it and ask for advice."""
     tools = [
+        AgentTool(
+            name="list_boards",
+            description=(
+                "List the boards you may read, by name, with their status and Loop count. Start "
+                "here: a board id comes from this list, never from a prompt or a guess."
+            ),
+            scopes=("boards:read",),
+            input_schema=_object(
+                {
+                    "query": _string("Optional text in the board's name or description"),
+                    "status": _string(
+                        "Optional: active, archived, maintenance, error or migration_failed"
+                    ),
+                    "include_archived": {
+                        "type": "boolean",
+                        "description": "Also list archived boards; off unless status is archived",
+                    },
+                }
+            ),
+            handler=list_boards,
+        ),
         AgentTool(
             name="read_board",
             description=(
                 "List the Loops of a board with their stage, whether execution is allowed, the "
-                "people you can assign, and the agents you can ask. Start here."
+                "people you can assign, and the agents you can ask."
             ),
             scopes=("boards:read", "loops:read"),
             input_schema=_object(
@@ -161,6 +184,34 @@ def tool_catalog() -> dict[str, AgentTool]:
                 required=["board_id", "card_id"],
             ),
             handler=_read_ticket,
+        ),
+        AgentTool(
+            name="search_tickets",
+            description=(
+                "Find Tickets by words in their title or description: in one Loop, in a board's "
+                "open Loops, or across every active board. Each hit names its board, Loop, key "
+                "and column."
+            ),
+            scopes=("cards:read",),
+            input_schema=_object(
+                {
+                    "query": _string("The words to look for"),
+                    "board_id": _string("Optional: only this board"),
+                    "loop_id": _string("Optional: only this Loop; needs board_id"),
+                    "include_completed": {
+                        "type": "boolean",
+                        "description": "With board_id alone: also search its completed Loops",
+                    },
+                    "limit": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "description": "At most this many hits; 25 unless given",
+                    },
+                },
+                required=["query"],
+            ),
+            handler=search_tickets,
         ),
         AgentTool(
             name="assign_ticket",
@@ -439,7 +490,9 @@ __all__ = [
     "_ticket_location",
     "_write_info",
     "describe_scope",
+    "list_boards",
     "missing_scopes",
     "run_tool",
+    "search_tickets",
     "tool_catalog",
 ]

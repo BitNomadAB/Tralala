@@ -34,9 +34,10 @@ SERVER_NAME = "tralala"
 SERVER_VERSION = "1.0.0"
 
 INSTRUCTIONS = (
-    "Tralala tracks planning documents and Tickets per Loop inside a Board. Start with read_board, "
-    "then read_loop to understand the task, then read_ticket before you change anything. A Ticket "
-    "is in progress when it sits in the column you moved it to. Approving plans, confirming human "
+    "Tralala tracks planning documents and Tickets per Loop inside a Board. Start with "
+    "list_boards to find a board id, then read_board, then read_loop to understand the task, then "
+    "read_ticket before you change anything; search_tickets finds a Ticket by words. A Ticket is "
+    "in progress when it sits in the column you moved it to. Approving plans, confirming human "
     "work and accepting QA are human decisions that no token can perform."
 )
 
@@ -204,6 +205,11 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "## 3. Understand the work before you touch it",
         "",
+        "Start with `list_boards`: a board id comes from that list, never from a prompt, a",
+        "message or a guess. Then `read_board` for the board's Loops, `read_loop` for the",
+        "documents and the plan, and `read_ticket` before you touch a Ticket; `search_tickets`",
+        "finds a Ticket by words when you know what you look for but not where it sits.",
+        "",
         "A Loop moves through stages: `draft`, `analysis_review`, `planning`, `roadmap_review`,",
         "`ready`, `in_progress`, `awaiting_qa`, `completed`, plus `replanning` when a new Info",
         "revision invalidated the plan. Tickets may only move while execution is allowed;",
@@ -251,6 +257,7 @@ def render_bootstrap(settings: Settings) -> str:
         "- `GET /api/v1/boards`, `GET /api/v1/boards/{board_id}`",
         "- `GET /api/v1/boards/{board_id}/loops`, `.../loops/{loop_id}/readiness`, `.../lists`",
         "- `GET /api/v1/boards/{board_id}/loops/{loop_id}/cards`",
+        "- `GET /api/v1/search?q=`, `GET /api/v1/boards/{board_id}/loops/{loop_id}/search?q=`",
         "- `GET /api/v1/boards/{board_id}/loops/{loop_id}/context` (documents plus plan)",
         "- `PATCH /api/v1/boards/{board_id}/loops/{loop_id}/cards/{card_id}` (assignee, version)",
         "- `POST /api/v1/boards/{board_id}/loops/{loop_id}/cards/{card_id}/move`",

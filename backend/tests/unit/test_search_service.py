@@ -24,7 +24,7 @@ from app.db.generated.board import (
     LabelsRow,
 )
 from app.repositories.search import FullTextIndex
-from app.services.search import SearchService, fts_query
+from app.services.search import SearchService, fts_query, search_engine
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
@@ -357,11 +357,21 @@ def test_the_app_wide_search_reads_the_open_loops_of_the_newest_active_boards(
         ("Second", "open"),
     ]
     assert (result["board_count"], result["loop_count"], result["query"]) == (3, 3, "docs")
+    # First has the index and Second does not, so the answer came from both engines.
+    assert result["engine"] == "mixed"
     assert index.asked == [FIRST, FIRST, SECOND]
     everything = service.global_search(q="docs", max_boards=25)
     assert [hit["loop_id"] for hit in everything["items"]][-1] == "third"
     assert (everything["board_count"], everything["loop_count"]) == (4, 4)
     assert len(everything["items"]) == 5
+    assert everything["engine"] == "mixed"
+
+
+def test_the_engine_of_several_searches_is_one_word() -> None:
+    assert search_engine([]) == "like"
+    assert search_engine(["like", "like"]) == "like"
+    assert search_engine(["fts5", "fts5"]) == "fts5"
+    assert search_engine(["fts5", "like"]) == "mixed"
 
 
 def test_the_app_wide_search_refuses_blank_text_before_it_reads_a_board(tmp_path: Path) -> None:
@@ -404,3 +414,4 @@ def test_the_app_wide_search_takes_at_most_its_limit_from_each_loop(tmp_path: Pa
     result = service.global_search(q="docs", limit_per_loop=1)
     assert [hit["id"] for hit in result["items"]] == ["a-2"]
     assert result["items"][0]["board_id"] == FIRST
+    assert result["engine"] == "like"
