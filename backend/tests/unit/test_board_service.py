@@ -578,7 +578,7 @@ def _pending(boards: Boards, board_id: str) -> None:
 
 
 def _fingerprint(payload: BoardCreate) -> str:
-    from app.services.common import request_fingerprint
+    from app.services.idempotency import request_fingerprint
 
     return request_fingerprint({"op": "board.create", "payload": payload.model_dump()})
 

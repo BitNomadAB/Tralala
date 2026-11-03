@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
-from collections.abc import Callable, Collection, Generator, Sequence
+from collections.abc import Callable, Collection, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from app.core.errors import BoardUnreadable, Conflict, NotFound, ServiceUnavailable
 from app.db.generated.board import (
     ActivityLogRow,
+    AttachmentsRow,
     BoardLoopDefaultsRow,
     BoardMetadataRow,
     CardLabelsRow,
@@ -29,6 +31,7 @@ from app.db.generated.board import (
     LoopsRow,
 )
 from app.repositories.activity import ActivityQuery, ActivityRepository
+from app.repositories.attachments import AttachmentRepository
 from app.repositories.board import BoardUnitOfWork
 from app.repositories.board_metadata import BoardMetadataRepository, LoopDefaultsRepository
 from app.repositories.cards import (
@@ -40,14 +43,21 @@ from app.repositories.cards import (
     CardSort,
     TicketProgress,
 )
+from app.repositories.checklists import (
+    ChecklistItemChanges,
+    ChecklistItemRepository,
+    ChecklistRepository,
+)
+from app.repositories.comments import CommentRepository
 from app.repositories.counters import BoardCounts, CounterRepository
 from app.repositories.idempotency import BoardIdempotencyRepository
-from app.repositories.labels import LabelRepository
+from app.repositories.labels import LabelChanges, LabelRepository
 from app.repositories.lists import ListRepository
 from app.repositories.loop_documents import LoopApprovalRepository, LoopDocumentRepository
 from app.repositories.loop_plans import LoopPlanRepository, PlanTotals
 from app.repositories.loop_qa import LoopQaRepository
 from app.repositories.loops import LoopChanges, LoopRepository
+from app.repositories.search import CardSearch, CardSearchRepository
 from tests.unit.fakes.registry import ConstraintError, like
 
 BOARD_ID = "0b6f3c1e-7a52-4d8e-9c41-2f5a6b7c8d9e"
@@ -81,6 +91,7 @@ class BoardState:
     idempotency: dict[tuple[str, str], IdempotencyRecordsRow] = field(
         default_factory=dict[tuple[str, str], IdempotencyRecordsRow]
     )
+    attachments: dict[str, AttachmentsRow] = field(default_factory=dict[str, AttachmentsRow])
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -102,6 +113,7 @@ class BoardState:
             checklist_items=dict(self.checklist_items),
             comments=dict(self.comments),
             idempotency=dict(self.idempotency),
+            attachments=dict(self.attachments),
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -123,6 +135,7 @@ class BoardState:
         self.checklist_items = snapshot.checklist_items
         self.comments = snapshot.comments
         self.idempotency = snapshot.idempotency
+        self.attachments = snapshot.attachments
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -892,17 +905,296 @@ class FakeLabelRepository:
     def all(self) -> list[LabelsRow]:
         return sorted(self._state.labels.values(), key=lambda row: row.name)
 
+    def get(self, label_id: str) -> LabelsRow | None:
+        return self._state.labels.get(label_id)
+
     def find(self, reference: str) -> LabelsRow | None:
         return next(
             (row for row in self._state.labels.values() if reference in {row.id, row.name}), None
         )
 
+    def by_name(self, name: str) -> LabelsRow | None:
+        return next((row for row in self._state.labels.values() if row.name == name), None)
+
+    def _name_taken(self, name: str, *, other_than: str) -> bool:
+        return any(
+            label.name == name and label.id != other_than for label in self._state.labels.values()
+        )
+
     def add(self, row: LabelsRow) -> None:
         if row.id in self._state.labels:
             raise ConstraintError(f"labels.id {row.id} exists")
-        if any(label.name == row.name for label in self._state.labels.values()):
+        if self._name_taken(row.name, other_than=row.id):
             raise ConstraintError(f"labels.name {row.name} exists")
         self._state.labels[row.id] = row
+
+    def update(self, label_id: str, changes: LabelChanges) -> None:
+        if not changes:
+            raise ConstraintError("an update without a column is not SQL")
+        row = self._state.labels.get(label_id)
+        if row is None:
+            return
+        if "name" in changes and self._name_taken(changes["name"], other_than=label_id):
+            raise ConstraintError(f"labels.name {changes['name']} exists")
+        self._state.labels[label_id] = row.__replace__(**changes)
+
+    def delete(self, label_id: str) -> None:
+        self._state.labels.pop(label_id, None)
+        # ON DELETE CASCADE: the cards that carried the label lose it.
+        self._state.card_labels = [
+            link for link in self._state.card_labels if link.label_id != label_id
+        ]
+
+
+def _by_position(rows: Iterable[ChecklistsRow]) -> list[ChecklistsRow]:
+    return sorted(rows, key=lambda row: (row.position, row.id))
+
+
+def _items_by_position(rows: Iterable[ChecklistItemsRow]) -> list[ChecklistItemsRow]:
+    return sorted(rows, key=lambda row: (row.position, row.id))
+
+
+class FakeChecklistRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def get(self, checklist_id: str) -> ChecklistsRow | None:
+        return self._state.checklists.get(checklist_id)
+
+    def for_card(self, card_id: str) -> list[ChecklistsRow]:
+        return _by_position(
+            row for row in self._state.checklists.values() if row.card_id == card_id
+        )
+
+    def renumber(self, positions: Sequence[tuple[str, int]]) -> None:
+        for checklist_id, position in positions:
+            row = self._state.checklists.get(checklist_id)
+            if row is not None:
+                self._state.checklists[checklist_id] = row.__replace__(position=position)
+
+    def add(self, row: ChecklistsRow) -> None:
+        if row.id in self._state.checklists:
+            raise ConstraintError(f"checklists.id {row.id} exists")
+        if row.card_id not in self._state.cards:
+            raise ConstraintError(f"checklists.card_id {row.card_id} does not exist")
+        self._state.checklists[row.id] = row
+
+    def rename(self, checklist_id: str, title: str) -> None:
+        row = self._state.checklists.get(checklist_id)
+        if row is not None:
+            self._state.checklists[checklist_id] = row.__replace__(title=title)
+
+    def delete(self, checklist_id: str) -> None:
+        self._state.checklists.pop(checklist_id, None)
+        # ON DELETE CASCADE: the items go with their checklist.
+        self._state.checklist_items = {
+            item_id: item
+            for item_id, item in self._state.checklist_items.items()
+            if item.checklist_id != checklist_id
+        }
+
+
+class FakeChecklistItemRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def get(self, item_id: str) -> ChecklistItemsRow | None:
+        return self._state.checklist_items.get(item_id)
+
+    def for_card(self, card_id: str) -> list[ChecklistItemsRow]:
+        # The JOIN: items whose checklist belongs to the card.
+        checklists = {
+            row.id for row in self._state.checklists.values() if row.card_id == card_id
+        }
+        return _items_by_position(
+            item
+            for item in self._state.checklist_items.values()
+            if item.checklist_id in checklists
+        )
+
+    def for_checklist(self, checklist_id: str) -> list[ChecklistItemsRow]:
+        return _items_by_position(
+            item
+            for item in self._state.checklist_items.values()
+            if item.checklist_id == checklist_id
+        )
+
+    def renumber(self, positions: Sequence[tuple[str, int]]) -> None:
+        for item_id, position in positions:
+            row = self._state.checklist_items.get(item_id)
+            if row is not None:
+                self._state.checklist_items[item_id] = row.__replace__(position=position)
+
+    def add(self, row: ChecklistItemsRow) -> None:
+        if row.id in self._state.checklist_items:
+            raise ConstraintError(f"checklist_items.id {row.id} exists")
+        if row.checklist_id not in self._state.checklists:
+            raise ConstraintError(
+                f"checklist_items.checklist_id {row.checklist_id} does not exist"
+            )
+        self._state.checklist_items[row.id] = row
+
+    def update(self, item_id: str, changes: ChecklistItemChanges) -> None:
+        if not changes:
+            raise ConstraintError("an update without a column is not SQL")
+        row = self._state.checklist_items.get(item_id)
+        if row is not None:
+            self._state.checklist_items[item_id] = row.__replace__(**changes)
+
+    def delete(self, item_id: str) -> None:
+        self._state.checklist_items.pop(item_id, None)
+
+
+class FakeCommentRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def get(self, comment_id: str) -> CommentsRow | None:
+        return self._state.comments.get(comment_id)
+
+    def for_card(self, card_id: str) -> list[CommentsRow]:
+        # ORDER BY created_at, rowid: a stable sort over the insertion (rowid) order.
+        return sorted(
+            (row for row in self._state.comments.values() if row.card_id == card_id),
+            key=lambda row: row.created_at,
+        )
+
+    def add(self, row: CommentsRow) -> None:
+        if row.id in self._state.comments:
+            raise ConstraintError(f"comments.id {row.id} exists")
+        if row.card_id not in self._state.cards:
+            raise ConstraintError(f"comments.card_id {row.card_id} does not exist")
+        self._state.comments[row.id] = row
+
+    def edit(self, comment_id: str, content: str, *, now: str) -> None:
+        row = self._state.comments.get(comment_id)
+        if row is not None:
+            self._state.comments[comment_id] = row.__replace__(content=content, updated_at=now)
+
+    def delete(self, comment_id: str) -> None:
+        self._state.comments.pop(comment_id, None)
+
+
+class FakeAttachmentRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def live(self, *, card_id: str | None) -> list[AttachmentsRow]:
+        # ORDER BY created_at; equal times keep the insertion (rowid) order.
+        return sorted(
+            (
+                row
+                for row in self._state.attachments.values()
+                if row.deleted_at is None and (card_id is None or row.card_id == card_id)
+            ),
+            key=lambda row: row.created_at,
+        )
+
+    def get_live(self, attachment_id: str) -> AttachmentsRow | None:
+        row = self._state.attachments.get(attachment_id)
+        return row if row is not None and row.deleted_at is None else None
+
+    def live_size(self) -> int:
+        return sum(
+            row.size_bytes for row in self._state.attachments.values() if row.deleted_at is None
+        )
+
+    def add(self, row: AttachmentsRow) -> None:
+        if row.id in self._state.attachments:
+            raise ConstraintError(f"attachments.id {row.id} exists")
+        if any(
+            other.stored_filename == row.stored_filename
+            for other in self._state.attachments.values()
+        ):
+            raise ConstraintError(f"attachments.stored_filename {row.stored_filename} exists")
+        if row.card_id is not None and row.card_id not in self._state.cards:
+            raise ConstraintError(f"attachments.card_id {row.card_id} does not exist")
+        self._state.attachments[row.id] = row
+
+    def mark_deleted(self, attachment_id: str, *, now: str) -> None:
+        row = self._state.attachments.get(attachment_id)
+        if row is not None:
+            self._state.attachments[attachment_id] = row.__replace__(deleted_at=now)
+
+
+_FTS_PHRASE = re.compile(r'"([^"]*)"\*')
+_FTS_TOKEN = re.compile(r"[^\W_]+")
+
+
+def _fts_tokens(text: str) -> list[str]:
+    """FTS5's unicode61 tokenizer, closely enough: runs of letters and digits, case-folded."""
+    return [token.casefold() for token in _FTS_TOKEN.findall(text)]
+
+
+def fts_matches(expression: str, card: CardsRow) -> bool:
+    """FTS5 ``MATCH`` for the expressions ``search.fts_query`` writes: prefix phrases joined by
+    AND. A phrase matches consecutive tokens of the title or of the description, the last one by
+    prefix; a phrase without a token matches nothing, and an expression without a phrase is a
+    syntax error, as SQLite answers."""
+    phrases = _FTS_PHRASE.findall(expression)
+    if not phrases:
+        raise ValueError('fts5: syntax error near ""')
+    columns = [_fts_tokens(card.title), _fts_tokens(card.description)]
+    return all(_phrase_in(_fts_tokens(phrase), columns) for phrase in phrases)
+
+
+def _phrase_in(phrase: list[str], columns: list[list[str]]) -> bool:
+    if not phrase:
+        return False
+    *exact, prefix = phrase
+    for tokens in columns:
+        for start in range(len(tokens) - len(phrase) + 1):
+            window = tokens[start : start + len(phrase)]
+            if window[:-1] == exact and window[-1].startswith(prefix):
+                return True
+    return False
+
+
+class FakeCardSearchRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def _label_matches(self, card_id: str, label: str) -> bool:
+        for link in self._state.card_labels:
+            row = self._state.labels.get(link.label_id)
+            if link.card_id == card_id and row is not None and label in {row.id, row.name}:
+                return True
+        return False
+
+    def _matches(self, card: CardsRow, search: CardSearch) -> bool:
+        if search.match is not None:
+            text_matches = fts_matches(search.match, card)
+        elif search.contains is not None:
+            pattern = f"%{search.contains}%"
+            text_matches = like(card.title, pattern) or like(card.description, pattern)
+        else:
+            text_matches = True
+        checks = (
+            card.loop_id == search.loop_id,
+            text_matches,
+            search.include_archived or card.archived_at is None,
+            search.priority is None or card.priority == search.priority,
+            search.label is None or self._label_matches(card.id, search.label),
+            search.completed is None or (card.completed_at is not None) == search.completed,
+            search.overdue_at is None
+            or (
+                card.due_at is not None
+                and card.due_at < search.overdue_at
+                and card.completed_at is None
+            ),
+            search.list_id is None or card.list_id == search.list_id,
+        )
+        return all(checks)
+
+    def count(self, search: CardSearch) -> int:
+        return sum(1 for card in self._state.cards.values() if self._matches(card, search))
+
+    def page(self, search: CardSearch, *, limit: int, offset: int) -> list[CardsRow]:
+        found = [card for card in self._state.cards.values() if self._matches(card, search)]
+        # ORDER BY updated_at DESC, id: the tie-break first, then the stable descending sort.
+        found.sort(key=lambda card: card.id)
+        found.sort(key=lambda card: card.updated_at, reverse=True)
+        return found[offset : offset + limit]
 
 
 class FakeBoardMetadataRepository:
@@ -962,6 +1254,11 @@ class FakeBoardRepositories:
         self.plans: LoopPlanRepository = FakeLoopPlanRepository(state)
         self.qa: LoopQaRepository = FakeLoopQaRepository(state)
         self.idempotency: BoardIdempotencyRepository = FakeBoardIdempotencyRepository(state)
+        self.checklists: ChecklistRepository = FakeChecklistRepository(state)
+        self.checklist_items: ChecklistItemRepository = FakeChecklistItemRepository(state)
+        self.comments: CommentRepository = FakeCommentRepository(state)
+        self.attachments: AttachmentRepository = FakeAttachmentRepository(state)
+        self.search: CardSearchRepository = FakeCardSearchRepository(state)
         self.savepoints = 0
 
     @contextmanager

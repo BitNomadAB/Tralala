@@ -27,7 +27,7 @@ from app.core.security import (
     verify_password,
 )
 from app.services.auth import check_password
-from app.services.common import request_fingerprint
+from app.services.idempotency import request_fingerprint
 
 PASSWORD = "correct horse battery staple"
 SESSION_SECRET = "session-signing-secret-" + "k" * 24

@@ -49,7 +49,6 @@ from ..schemas.loops import (
 )
 from . import idempotency
 from .activity import activity_entry
-from .common import request_fingerprint
 from .lists import BoardChecks
 from .loop_identifiers import format_loop_key, loop_prefix
 from .plan_views import PlanView, PlanViews, Readiness, ReadinessItem
@@ -562,6 +561,25 @@ def ensure_writable(loop: LoopsRow) -> None:
         )
 
 
+def ensure_ticket_writable(repos: BoardRepositories, card_id: str) -> None:
+    """A Ticket's comments, checklists and attachments follow its Loop: a completed, archived or
+    cancelled Loop refuses them (``409 loop_read_only``). A Ticket or Loop that does not exist
+    passes; the caller answers its own 404."""
+    card = repos.cards.get(card_id)
+    loop = None if card is None else repos.loops.get(card.loop_id)
+    if loop is None:
+        return
+    if (
+        loop.completed_at is not None
+        or loop.stage == "completed"
+        or loop.archived_at is not None
+        or loop.cancelled_at is not None
+    ):
+        raise Conflict(
+            "This Loop is read-only", code="loop_read_only", details={"card_id": card_id}
+        )
+
+
 def ensure_execution_allowed(loop: LoopsRow) -> None:
     """Delivery work starts and completes only while the Loop executes an approved plan."""
     stage = loop.stage
@@ -777,7 +795,7 @@ class LoopService:
         """The new Loop and False, or the answer stored for a replayed key and True."""
         actor.require("loops:write")
         self.boards.ensure_active(board_id)
-        fingerprint = request_fingerprint(
+        fingerprint = idempotency.request_fingerprint(
             {"op": "loop.create", "board_id": board_id, "payload": payload.model_dump()}
         )
         loop_id = self._new_id()

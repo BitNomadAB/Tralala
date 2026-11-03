@@ -10,10 +10,13 @@ from sqlalchemy.engine import Connection
 from ...storage.board_db import BoardDatabaseManager
 from ...storage.migration_manager import MigrationManager
 from ..activity import ActivityRepository
+from ..attachments import AttachmentRepository
 from ..board import BoardUnitOfWork
 from ..board_files import BoardFiles, BoardMigrator
 from ..board_metadata import BoardMetadataRepository, LoopDefaultsRepository
 from ..cards import CardRepository
+from ..checklists import ChecklistItemRepository, ChecklistRepository
+from ..comments import CommentRepository
 from ..counters import CounterRepository
 from ..idempotency import BoardIdempotencyRepository
 from ..labels import LabelRepository
@@ -22,9 +25,13 @@ from ..loop_documents import LoopApprovalRepository, LoopDocumentRepository
 from ..loop_plans import LoopPlanRepository
 from ..loop_qa import LoopQaRepository
 from ..loops import LoopRepository
+from ..search import CardSearchRepository, FullTextIndex
 from .activity import SqlActivityRepository
+from .attachments import SqlAttachmentRepository
 from .board_metadata import SqlBoardMetadataRepository, SqlLoopDefaultsRepository
 from .cards import SqlCardRepository
+from .checklists import SqlChecklistItemRepository, SqlChecklistRepository
+from .comments import SqlCommentRepository
 from .counters import SqlCounterRepository
 from .idempotency import SqlBoardIdempotencyRepository
 from .labels import SqlLabelRepository
@@ -33,6 +40,7 @@ from .loop_documents import SqlLoopApprovalRepository, SqlLoopDocumentRepository
 from .loop_plans import SqlLoopPlanRepository
 from .loop_qa import SqlLoopQaRepository
 from .loops import SqlLoopRepository
+from .search import SqlCardSearchRepository
 
 
 class SqlBoardRepositories:
@@ -54,6 +62,11 @@ class SqlBoardRepositories:
         self.plans: LoopPlanRepository = SqlLoopPlanRepository(connection)
         self.qa: LoopQaRepository = SqlLoopQaRepository(connection)
         self.idempotency: BoardIdempotencyRepository = SqlBoardIdempotencyRepository(connection)
+        self.checklists: ChecklistRepository = SqlChecklistRepository(connection)
+        self.checklist_items: ChecklistItemRepository = SqlChecklistItemRepository(connection)
+        self.comments: CommentRepository = SqlCommentRepository(connection)
+        self.attachments: AttachmentRepository = SqlAttachmentRepository(connection)
+        self.search: CardSearchRepository = SqlCardSearchRepository(connection)
 
     @contextmanager
     def savepoint(self) -> Generator[None]:
@@ -89,3 +102,8 @@ def board_files(boards: BoardDatabaseManager) -> BoardFiles:
 def board_migrator(migrations: MigrationManager) -> BoardMigrator:
     """The Migration Manager migrates a board; pyright proves the Protocol here."""
     return migrations
+
+
+def full_text_index(boards: BoardDatabaseManager) -> FullTextIndex:
+    """The manager knows which boards have the FTS5 card index; pyright proves the Protocol here."""
+    return boards

@@ -7,7 +7,9 @@ joined one under a prefix (``sql.column_list(..., prefix=...)``), read back thro
 
 from __future__ import annotations
 
-from sqlalchemy import text
+from collections.abc import Collection
+
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection, RowMapping
 
 from ...core import sql
@@ -38,6 +40,10 @@ _ENABLED_ACTOR = text(
     f"SELECT {sql.column_list(ACTORS_COLUMNS)}"  # noqa: S608 - from generated columns
     " FROM actors WHERE id = :id AND disabled_at IS NULL"
 )
+_MANY_ACTORS = text(
+    f"SELECT {sql.column_list(ACTORS_COLUMNS)}"  # noqa: S608 - from generated columns
+    " FROM actors WHERE id IN :ids"
+).bindparams(bindparam("ids", expanding=True))
 _ADD_ACTOR = text(
     "INSERT INTO actors (id, type, name, created_at, disabled_at)"
     " VALUES (:id, :type, :name, :created_at, :disabled_at)"
@@ -189,6 +195,13 @@ class SqlActorRepository:
     def enabled(self, actor_id: str) -> ActorsRow | None:
         row = self._connection.execute(_ENABLED_ACTOR, {"id": actor_id}).mappings().first()
         return None if row is None else ActorsRow.from_mapping(row)
+
+    def many(self, actor_ids: Collection[str]) -> dict[str, ActorsRow]:
+        if not actor_ids:
+            return {}
+        result = self._connection.execute(_MANY_ACTORS, {"ids": list(actor_ids)}).mappings()
+        rows = [ActorsRow.from_mapping(row) for row in result]
+        return {row.id: row for row in rows}
 
     def add(self, row: ActorsRow) -> None:
         self._connection.execute(

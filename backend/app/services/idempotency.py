@@ -4,11 +4,12 @@ A board keeps one record per actor and key: the request's fingerprint and the an
 retried request with the same fingerprint is answered from the record until it expires; the same
 key with another fingerprint is refused. The rule runs on ``BoardIdempotencyRepository``, so it is
 unit-tested on a fake; ``common.run_idempotent`` applies it for the services that still hold a
-connection.
+connection. A request's fingerprint is ``request_fingerprint`` of what it asks for.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from datetime import datetime, timedelta
@@ -26,6 +27,12 @@ type JsonObject = dict[str, JsonValue]
 
 def _is_object(value: JsonValue) -> TypeIs[JsonObject]:
     return isinstance(value, dict)
+
+
+def request_fingerprint(payload: object) -> str:
+    """SHA-256 of the payload's canonical JSON: keys sorted, no spaces, anything else as text."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def stored_answer(

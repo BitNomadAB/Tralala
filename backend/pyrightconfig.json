@@ -4,6 +4,7 @@
     "app/repositories",
     "app/services/activity.py",
     "app/services/agents.py",
+    "app/services/attachments.py",
     "app/services/auth.py",
     "app/services/board_stats.py",
     "app/services/boards.py",
@@ -15,6 +16,8 @@
     "app/services/plan_views.py",
     "app/services/recovery.py",
     "app/services/repositories.py",
+    "app/services/search.py",
+    "app/services/subresources.py",
     "app/services/templates.py",
     "tests/unit",
     "tools"
@@ -24,6 +27,7 @@
     "app/repositories",
     "app/services/activity.py",
     "app/services/agents.py",
+    "app/services/attachments.py",
     "app/services/auth.py",
     "app/services/board_stats.py",
     "app/services/boards.py",
@@ -35,6 +39,8 @@
     "app/services/plan_views.py",
     "app/services/recovery.py",
     "app/services/repositories.py",
+    "app/services/search.py",
+    "app/services/subresources.py",
     "app/services/templates.py",
     "tests/unit",
     "tools"

@@ -8,6 +8,7 @@ side by side in a small frozen value, never a merged dictionary.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -69,6 +70,10 @@ class ActorRepository(Protocol):
 
     def enabled(self, actor_id: str) -> ActorsRow | None:
         """The actor (a person or a token's agent actor) unless it is disabled."""
+        ...
+
+    def many(self, actor_ids: Collection[str]) -> dict[str, ActorsRow]:
+        """The actors among ``actor_ids``, enabled or disabled, by id; an unknown id is absent."""
         ...
 
     def add(self, row: ActorsRow) -> None: ...

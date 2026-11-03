@@ -1,15 +1,36 @@
+"""A board's labels and a Ticket's checklists and comments.
+
+Labels belong to the board. Checklists and comments belong to a Ticket and follow its Loop: a
+completed, archived or cancelled Loop refuses them with ``409 loop_read_only``
+(``loops.ensure_ticket_writable``). The services reach the board database only through the board
+unit of work, the registry (who wrote a comment) only through the registry unit of work and the
+board's registry row through ``BoardChecks``; the clock and the id source are passed in, so every
+rule here runs in a unit test without a database. A comment that mentions someone is handed to
+``MentionQueue``, best effort.
+"""
+
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any
+from collections.abc import Callable, Collection, Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Protocol, TypedDict
 from uuid import uuid4
 
-from sqlalchemy import bindparam, text
-
-from ..core import sql
 from ..core.context import ActorContext
+from ..core.dates import iso_utc
 from ..core.errors import Forbidden, NotFound, ValidationFailure
+from ..db.generated.board import (
+    CardsRow,
+    ChecklistItemsRow,
+    ChecklistsRow,
+    CommentsRow,
+    LabelsRow,
+)
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..repositories.checklists import ChecklistItemChanges
+from ..repositories.labels import LabelChanges
+from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.subresources import (
     ChecklistCreate,
     ChecklistItemCreate,
@@ -19,233 +40,325 @@ from ..schemas.subresources import (
     LabelCreate,
     LabelUpdate,
 )
-from ..storage.board_db import BoardDatabaseManager
-from ..storage.registry import Registry
-from ..storage.sqlite import utcnow
-from .activity import log_activity
-from .boards import BoardService
-from .common import (
-    one,
-    position_for_index,
-    require_mutable_card,
-    require_mutable_checklist_item,
-    rows,
-)
+from .activity import activity_entry
+from .lists import BoardChecks
+from .loops import ensure_ticket_writable
+from .ordering import place
 
 logger = logging.getLogger(__name__)
 
-# What these services format into SQL text (see core/sql.py).
-_LABEL_EDITABLE = ("name", "color")
-_CHECKLIST_ITEM_EDITABLE = ("text", "completed", "position")
-_ACTOR_NAMES = text("SELECT id, name, type FROM actors WHERE id IN :ids").bindparams(
-    bindparam("ids", expanding=True)
-)
-_AGENT_NAMES = text("SELECT id, name FROM agents WHERE id IN :ids").bindparams(
-    bindparam("ids", expanding=True)
-)
+
+class LabelEntry(TypedDict):
+    id: str
+    name: str
+    color: str
 
 
-class LabelService:
-    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
-        self.board_service = board_service
+class ChecklistItemEntry(TypedDict):
+    id: str
+    checklist_id: str
+    text: str
+    completed: bool
+    position: int
+
+
+class ChecklistEntry(TypedDict):
+    """A checklist as the API returns it: its row and its items in display order."""
+
+    id: str
+    card_id: str
+    title: str
+    position: int
+    items: list[ChecklistItemEntry]
+
+
+class CommentEntry(TypedDict):
+    """A comment as the API returns it: its row and who wrote it (None when nobody is known)."""
+
+    id: str
+    card_id: str
+    actor_id: str
+    content: str
+    created_at: str
+    updated_at: str
+    actor_name: str | None
+    actor_type: str | None
+
+
+class MentionQueue(Protocol):
+    """Where a comment that mentions an agent asks for an answer (``MentionService``)."""
+
+    def queue(
+        self, actor: ActorContext, board_id: str, card_id: str, comment_id: str, content: str
+    ) -> object: ...
+
+
+def label_entry(row: LabelsRow) -> LabelEntry:
+    return {"id": row.id, "name": row.name, "color": row.color}
+
+
+def label_entries(rows: Sequence[LabelsRow]) -> list[LabelEntry]:
+    return [label_entry(row) for row in rows]
+
+
+def checklist_item_entry(row: ChecklistItemsRow) -> ChecklistItemEntry:
+    return {
+        "id": row.id,
+        "checklist_id": row.checklist_id,
+        "text": row.text,
+        "completed": bool(row.completed),
+        "position": row.position,
+    }
+
+
+def checklist_entries(
+    checklists: Sequence[ChecklistsRow], items: Sequence[ChecklistItemsRow]
+) -> list[ChecklistEntry]:
+    """Each checklist with its own items, both in the order given."""
+    return [
+        {
+            "id": checklist.id,
+            "card_id": checklist.card_id,
+            "title": checklist.title,
+            "position": checklist.position,
+            "items": [
+                checklist_item_entry(item) for item in items if item.checklist_id == checklist.id
+            ],
+        }
+        for checklist in checklists
+    ]
+
+
+def _position(
+    siblings: Sequence[tuple[str, int]],
+    index: int | None,
+    renumber: Callable[[Sequence[tuple[str, int]]], None],
+) -> int:
+    """``ordering.place`` among ``siblings``, renumbering them first when it asks for that."""
+    placement = place(siblings, index)
+    if placement.renumbered:
+        renumber(placement.renumbered)
+    return placement.position
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _new_id() -> str:
+    return str(uuid4())
+
+
+class _BoardParts:
+    """What the three services share: the board checks, the store, the clock and the id source."""
+
+    def __init__(
+        self,
+        boards: BoardChecks,
+        store: BoardUnitOfWork,
+        *,
+        clock: Callable[[], datetime] = _now,
+        new_id: Callable[[], str] = _new_id,
+    ) -> None:
         self.boards = boards
+        self.store = store
+        self._clock = clock
+        self._new_id = new_id
 
-    def list(self, board_id: str) -> list[dict[str, Any]]:
-        self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            return rows(conn, "SELECT id, name, color FROM labels ORDER BY name")
+    def _now(self) -> str:
+        return iso_utc(self._clock())
 
-    def create(self, actor: ActorContext, board_id: str, payload: LabelCreate) -> dict[str, Any]:
-        actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        label_id = str(uuid4())
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT id FROM labels WHERE name = :name", {"name": payload.name})
-            if existing:
-                raise ValidationFailure("A label with that name already exists")
-            conn.execute(
-                text("INSERT INTO labels (id, name, color) VALUES (:id, :name, :color)"),
-                {"id": label_id, "name": payload.name, "color": payload.color},
+    def _log(
+        self,
+        repos: BoardRepositories,
+        actor: ActorContext,
+        *,
+        action: str,
+        entity_type: str,
+        entity_id: str,
+        changes: Mapping[str, object],
+    ) -> None:
+        repos.activity.add(
+            activity_entry(
+                actor,
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                changes=changes,
+                entry_id=self._new_id(),
+                timestamp=self._now(),
             )
-            log_activity(
-                conn,
+        )
+
+
+class LabelService(_BoardParts):
+    def list(self, board_id: str) -> list[LabelEntry]:
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            return label_entries(repos.labels.all())
+
+    def create(self, actor: ActorContext, board_id: str, payload: LabelCreate) -> LabelEntry:
+        actor.require("cards:write")
+        self.boards.ensure_active(board_id)
+        row = LabelsRow(id=self._new_id(), name=payload.name, color=payload.color)
+        with self.store.writer(board_id) as repos:
+            if repos.labels.by_name(payload.name) is not None:
+                raise ValidationFailure("A label with that name already exists")
+            repos.labels.add(row)
+            self._log(
+                repos,
                 actor,
                 action="label.created",
                 entity_type="label",
-                entity_id=label_id,
+                entity_id=row.id,
                 changes={"name": payload.name, "color": payload.color},
             )
-        return {"id": label_id, "name": payload.name, "color": payload.color}
+        return label_entry(row)
 
     def update(
         self, actor: ActorContext, board_id: str, label_id: str, payload: LabelUpdate
-    ) -> dict[str, Any]:
+    ) -> LabelEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT * FROM labels WHERE id = :id", {"id": label_id})
+        self.boards.ensure_active(board_id)
+        changes: LabelChanges = {}
+        if payload.name is not None:
+            changes["name"] = payload.name
+        if payload.color is not None:
+            changes["color"] = payload.color
+        with self.store.writer(board_id) as repos:
+            existing = repos.labels.get(label_id)
             if existing is None:
                 raise NotFound("Label not found")
-            updates = payload.model_dump(exclude_none=True)
-            if updates:
-                assignments = sql.assignments(updates, _LABEL_EDITABLE)
-                conn.execute(
-                    text(
-                        "UPDATE labels"  # noqa: S608 - from _LABEL_EDITABLE
-                        f" SET {assignments} WHERE id = :id"
-                    ),
-                    {**updates, "id": label_id},
-                )
-                log_activity(
-                    conn,
+            if changes:
+                repos.labels.update(label_id, changes)
+                self._log(
+                    repos,
                     actor,
                     action="label.updated",
                     entity_type="label",
                     entity_id=label_id,
-                    changes={"before": existing, "after": updates},
+                    changes={"before": label_entry(existing), "after": changes},
                 )
-            row = one(conn, "SELECT id, name, color FROM labels WHERE id = :id", {"id": label_id})
-        return row or {}
+        return label_entry(existing.__replace__(**changes))
 
     def delete(self, actor: ActorContext, board_id: str, label_id: str) -> None:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT * FROM labels WHERE id = :id", {"id": label_id})
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            existing = repos.labels.get(label_id)
             if existing is None:
                 raise NotFound("Label not found")
-            conn.execute(text("DELETE FROM labels WHERE id = :id"), {"id": label_id})
-            log_activity(
-                conn,
+            repos.labels.delete(label_id)
+            self._log(
+                repos,
                 actor,
                 action="label.deleted",
                 entity_type="label",
                 entity_id=label_id,
-                changes={"name": existing["name"]},
+                changes={"name": existing.name},
             )
 
 
-class ChecklistService:
-    def __init__(self, board_service: BoardService, *, boards: BoardDatabaseManager) -> None:
-        self.board_service = board_service
-        self.boards = boards
-
-    def _card(self, conn: Any, card_id: str) -> dict[str, Any]:
-        card = one(conn, "SELECT * FROM cards WHERE id = :id", {"id": card_id})
+class ChecklistService(_BoardParts):
+    @staticmethod
+    def _card(repos: BoardRepositories, card_id: str) -> CardsRow:
+        card = repos.cards.get(card_id)
         if card is None:
             raise NotFound("Card not found")
         return card
 
-    def list(self, board_id: str, card_id: str) -> list[dict[str, Any]]:
-        self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            self._card(conn, card_id)
-            checklists = rows(
-                conn,
-                "SELECT * FROM checklists WHERE card_id = :id ORDER BY position, id",
-                {"id": card_id},
+    @staticmethod
+    def _checklist(repos: BoardRepositories, checklist_id: str) -> ChecklistsRow:
+        checklist = repos.checklists.get(checklist_id)
+        if checklist is None:
+            raise NotFound("Checklist not found")
+        return checklist
+
+    @staticmethod
+    def _item(repos: BoardRepositories, item_id: str) -> ChecklistItemsRow:
+        item = repos.checklist_items.get(item_id)
+        if item is None:
+            raise NotFound("Checklist item not found")
+        ChecklistService._ensure_item_writable(repos, item)
+        return item
+
+    @staticmethod
+    def _ensure_item_writable(repos: BoardRepositories, item: ChecklistItemsRow) -> None:
+        checklist = repos.checklists.get(item.checklist_id)
+        if checklist is not None:
+            ensure_ticket_writable(repos, checklist.card_id)
+
+    def list(self, board_id: str, card_id: str) -> list[ChecklistEntry]:
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            self._card(repos, card_id)
+            return checklist_entries(
+                repos.checklists.for_card(card_id), repos.checklist_items.for_card(card_id)
             )
-            items = rows(
-                conn,
-                "SELECT i.* FROM checklist_items i JOIN checklists ch ON ch.id = i.checklist_id"
-                " WHERE ch.card_id = :id ORDER BY i.position, i.id",
-                {"id": card_id},
-            )
-        for checklist in checklists:
-            checklist["items"] = [
-                {
-                    "id": item["id"],
-                    "checklist_id": item["checklist_id"],
-                    "text": item["text"],
-                    "completed": bool(item["completed"]),
-                    "position": item["position"],
-                }
-                for item in items
-                if item["checklist_id"] == checklist["id"]
-            ]
-        return checklists
 
     def create(
         self, actor: ActorContext, board_id: str, card_id: str, payload: ChecklistCreate
-    ) -> dict[str, Any]:
+    ) -> ChecklistEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        checklist_id = str(uuid4())
-        with self.boards.session(board_id) as conn:
-            self._card(conn, card_id)
-            require_mutable_card(conn, card_id)
-            position = position_for_index(conn, "checklists", {"card_id": card_id}, None)
-            conn.execute(
-                text(
-                    "INSERT INTO checklists (id, card_id, title, position)"
-                    " VALUES (:id, :card_id, :title, :position)"
-                ),
-                {
-                    "id": checklist_id,
-                    "card_id": card_id,
-                    "title": payload.title,
-                    "position": position,
-                },
+        self.boards.ensure_active(board_id)
+        checklist_id = self._new_id()
+        with self.store.writer(board_id) as repos:
+            self._card(repos, card_id)
+            ensure_ticket_writable(repos, card_id)
+            siblings = [(row.id, row.position) for row in repos.checklists.for_card(card_id)]
+            row = ChecklistsRow(
+                id=checklist_id,
+                card_id=card_id,
+                title=payload.title,
+                position=_position(siblings, None, repos.checklists.renumber),
             )
-            log_activity(
-                conn,
+            repos.checklists.add(row)
+            self._log(
+                repos,
                 actor,
                 action="checklist.created",
                 entity_type="checklist",
                 entity_id=checklist_id,
                 changes={"card_id": card_id, "title": payload.title},
             )
-        return {
-            "id": checklist_id,
-            "card_id": card_id,
-            "title": payload.title,
-            "position": position,
-            "items": [],
-        }
+        return checklist_entries([row], [])[0]
 
     def update(
         self, actor: ActorContext, board_id: str, checklist_id: str, payload: ChecklistUpdate
-    ) -> dict[str, Any]:
+    ) -> ChecklistEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT * FROM checklists WHERE id = :id", {"id": checklist_id})
-            if existing is None:
-                raise NotFound("Checklist not found")
-            require_mutable_card(conn, existing["card_id"])
-            if payload.title is not None and payload.title != existing["title"]:
-                conn.execute(
-                    text("UPDATE checklists SET title = :title WHERE id = :id"),
-                    {"title": payload.title, "id": checklist_id},
-                )
-                log_activity(
-                    conn,
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            checklist = self._checklist(repos, checklist_id)
+            ensure_ticket_writable(repos, checklist.card_id)
+            if payload.title is not None and payload.title != checklist.title:
+                repos.checklists.rename(checklist_id, payload.title)
+                self._log(
+                    repos,
                     actor,
                     action="checklist.updated",
                     entity_type="checklist",
                     entity_id=checklist_id,
-                    changes={"before": existing["title"], "after": payload.title},
+                    changes={"before": checklist.title, "after": payload.title},
                 )
-                existing["title"] = payload.title
-        checklists = self.list(board_id, existing["card_id"])
-        return next((c for c in checklists if c["id"] == checklist_id), existing)
+                checklist = checklist.__replace__(title=payload.title)
+            items = repos.checklist_items.for_checklist(checklist_id)
+        return checklist_entries([checklist], items)[0]
 
     def delete(self, actor: ActorContext, board_id: str, checklist_id: str) -> None:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT * FROM checklists WHERE id = :id", {"id": checklist_id})
-            if existing is None:
-                raise NotFound("Checklist not found")
-            require_mutable_card(conn, existing["card_id"])
-            conn.execute(text("DELETE FROM checklists WHERE id = :id"), {"id": checklist_id})
-            log_activity(
-                conn,
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            checklist = self._checklist(repos, checklist_id)
+            ensure_ticket_writable(repos, checklist.card_id)
+            repos.checklists.delete(checklist_id)
+            self._log(
+                repos,
                 actor,
                 action="checklist.deleted",
                 entity_type="checklist",
                 entity_id=checklist_id,
-                changes={"card_id": existing["card_id"]},
+                changes={"card_id": checklist.card_id},
             )
 
     def add_item(
@@ -254,46 +367,34 @@ class ChecklistService:
         board_id: str,
         checklist_id: str,
         payload: ChecklistItemCreate,
-    ) -> dict[str, Any]:
+    ) -> ChecklistItemEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        item_id = str(uuid4())
-        with self.boards.session(board_id) as conn:
-            checklist = one(conn, "SELECT * FROM checklists WHERE id = :id", {"id": checklist_id})
-            if checklist is None:
-                raise NotFound("Checklist not found")
-            require_mutable_card(conn, checklist["card_id"])
-            position = position_for_index(
-                conn, "checklist_items", {"checklist_id": checklist_id}, payload.position
+        self.boards.ensure_active(board_id)
+        item_id = self._new_id()
+        with self.store.writer(board_id) as repos:
+            checklist = self._checklist(repos, checklist_id)
+            ensure_ticket_writable(repos, checklist.card_id)
+            siblings = [
+                (item.id, item.position)
+                for item in repos.checklist_items.for_checklist(checklist_id)
+            ]
+            row = ChecklistItemsRow(
+                id=item_id,
+                checklist_id=checklist_id,
+                text=payload.text,
+                completed=0,
+                position=_position(siblings, payload.position, repos.checklist_items.renumber),
             )
-            conn.execute(
-                text(
-                    "INSERT INTO checklist_items"
-                    " (id, checklist_id, text, completed, position)"
-                    " VALUES (:id, :checklist_id, :text, 0, :position)"
-                ),
-                {
-                    "id": item_id,
-                    "checklist_id": checklist_id,
-                    "text": payload.text,
-                    "position": position,
-                },
-            )
-            log_activity(
-                conn,
+            repos.checklist_items.add(row)
+            self._log(
+                repos,
                 actor,
                 action="checklist.item_added",
                 entity_type="checklist_item",
                 entity_id=item_id,
                 changes={"checklist_id": checklist_id, "text": payload.text},
             )
-        return {
-            "id": item_id,
-            "checklist_id": checklist_id,
-            "text": payload.text,
-            "completed": False,
-            "position": position,
-        }
+        return checklist_item_entry(row)
 
     def update_item(
         self,
@@ -301,149 +402,137 @@ class ChecklistService:
         board_id: str,
         item_id: str,
         payload: ChecklistItemUpdate,
-    ) -> dict[str, Any]:
+    ) -> ChecklistItemEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT * FROM checklist_items WHERE id = :id", {"id": item_id})
-            if existing is None:
-                raise NotFound("Checklist item not found")
-            require_mutable_checklist_item(conn, item_id)
-            updates: dict[str, Any] = {}
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            item = self._item(repos, item_id)
+            changes: ChecklistItemChanges = {}
             if payload.text is not None:
-                updates["text"] = payload.text
+                changes["text"] = payload.text
             if payload.completed is not None:
-                updates["completed"] = 1 if payload.completed else 0
+                changes["completed"] = 1 if payload.completed else 0
             if payload.position is not None:
-                updates["position"] = position_for_index(
-                    conn,
-                    "checklist_items",
-                    {"checklist_id": existing["checklist_id"]},
-                    payload.position,
-                    exclude=item_id,
+                siblings = [
+                    (sibling.id, sibling.position)
+                    for sibling in repos.checklist_items.for_checklist(item.checklist_id)
+                    if sibling.id != item_id
+                ]
+                changes["position"] = _position(
+                    siblings, payload.position, repos.checklist_items.renumber
                 )
-            if updates:
-                assignments = sql.assignments(updates, _CHECKLIST_ITEM_EDITABLE)
-                conn.execute(
-                    text(
-                        "UPDATE checklist_items"  # noqa: S608 - from _CHECKLIST_ITEM_EDITABLE
-                        f" SET {assignments} WHERE id = :id"
-                    ),
-                    {**updates, "id": item_id},
-                )
-                log_activity(
-                    conn,
+            if changes:
+                repos.checklist_items.update(item_id, changes)
+                self._log(
+                    repos,
                     actor,
                     action="checklist.item_updated",
                     entity_type="checklist_item",
                     entity_id=item_id,
-                    changes=dict(updates),
+                    changes=changes,
                 )
-            row = one(conn, "SELECT * FROM checklist_items WHERE id = :id", {"id": item_id})
-        if row is None:
-            raise NotFound("Checklist item not found")
-        return {
-            "id": row["id"],
-            "checklist_id": row["checklist_id"],
-            "text": row["text"],
-            "completed": bool(row["completed"]),
-            "position": row["position"],
-        }
+        return checklist_item_entry(item.__replace__(**changes))
 
     def delete_item(self, actor: ActorContext, board_id: str, item_id: str) -> None:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT * FROM checklist_items WHERE id = :id", {"id": item_id})
-            if existing is None:
-                raise NotFound("Checklist item not found")
-            require_mutable_checklist_item(conn, item_id)
-            conn.execute(text("DELETE FROM checklist_items WHERE id = :id"), {"id": item_id})
-            log_activity(
-                conn,
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            item = self._item(repos, item_id)
+            repos.checklist_items.delete(item_id)
+            self._log(
+                repos,
                 actor,
                 action="checklist.item_deleted",
                 entity_type="checklist_item",
                 entity_id=item_id,
-                changes={"checklist_id": existing["checklist_id"], "text": existing["text"]},
+                changes={"checklist_id": item.checklist_id, "text": item.text},
             )
 
 
-class CommentService:
+class CommentService(_BoardParts):
     def __init__(
-        self, board_service: BoardService, *, boards: BoardDatabaseManager, registry: Registry
+        self,
+        boards: BoardChecks,
+        store: BoardUnitOfWork,
+        accounts: RegistryUnitOfWork,
+        *,
+        clock: Callable[[], datetime] = _now,
+        new_id: Callable[[], str] = _new_id,
     ) -> None:
-        self.board_service = board_service
-        self.boards = boards
-        self.registry = registry
-        self.mentions: Any = None
+        super().__init__(boards, store, clock=clock, new_id=new_id)
+        self.accounts = accounts
+        # Set by the composition root once the mention service exists.
+        self.mentions: MentionQueue | None = None
 
-    def _decorate(self, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        actor_ids = {comment["actor_id"] for comment in comments}
-        actors = (
+    def _decorate(self, comments: Sequence[CommentsRow]) -> list[CommentEntry]:
+        """Each comment with its author's name and type: a person or token actor by its actor
+        row, otherwise an agent profile of that id; unknown when neither exists."""
+        authors = self._authors({comment.actor_id for comment in comments})
+        return [
             {
-                actor["id"]: actor
-                for actor in self.registry.read(_ACTOR_NAMES, {"ids": list(actor_ids)})
+                "id": comment.id,
+                "card_id": comment.card_id,
+                "actor_id": comment.actor_id,
+                "content": comment.content,
+                "created_at": comment.created_at,
+                "updated_at": comment.updated_at,
+                "actor_name": authors.get(comment.actor_id, (None, None))[0],
+                "actor_type": authors.get(comment.actor_id, (None, None))[1],
             }
-            if actor_ids
-            else {}
-        )
-        for comment in comments:
-            actor = actors.get(comment["actor_id"])
-            comment["actor_name"] = actor["name"] if actor else None
-            comment["actor_type"] = actor["type"] if actor else None
-        missing = {
-            comment["actor_id"] for comment in comments if comment["actor_name"] is None
-        }
-        if missing:
-            agents = {
-                row["id"]: row
-                for row in self.registry.read(_AGENT_NAMES, {"ids": list(missing)})
-            }
-            for comment in comments:
-                agent = agents.get(comment["actor_id"])
-                if agent is not None:
-                    comment["actor_name"] = agent["name"]
-                    comment["actor_type"] = "agent"
-        return comments
+            for comment in comments
+        ]
 
-    def list(self, board_id: str, card_id: str) -> list[dict[str, Any]]:
-        self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            comments = rows(
-                conn,
-                "SELECT * FROM comments WHERE card_id = :id ORDER BY created_at, rowid",
-                {"id": card_id},
-            )
+    def _authors(self, actor_ids: Collection[str]) -> dict[str, tuple[str, str]]:
+        if not actor_ids:
+            return {}
+        with self.accounts.reader() as registry:
+            actors = registry.actors.many(actor_ids)
+            missing = [actor_id for actor_id in actor_ids if actor_id not in actors]
+            agents = registry.agents.names(missing) if missing else {}
+        found = {actor_id: (actor.name, actor.type) for actor_id, actor in actors.items()}
+        found.update((agent_id, (name, "agent")) for agent_id, name in agents.items())
+        return found
+
+    @staticmethod
+    def _comment(repos: BoardRepositories, actor: ActorContext, comment_id: str) -> CommentsRow:
+        """The comment the actor may change: a person any, an agent only its own, and only while
+        the Ticket's Loop is writable."""
+        comment = repos.comments.get(comment_id)
+        if comment is None:
+            raise NotFound("Comment not found")
+        if not actor.is_user and comment.actor_id != actor.actor_id:
+            raise Forbidden("Agents may only modify their own comments")
+        ensure_ticket_writable(repos, comment.card_id)
+        return comment
+
+    def list(self, board_id: str, card_id: str) -> list[CommentEntry]:
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            comments = repos.comments.for_card(card_id)
         return self._decorate(comments)
 
     def create(
         self, actor: ActorContext, board_id: str, card_id: str, payload: CommentCreate
-    ) -> dict[str, Any]:
+    ) -> CommentEntry:
         actor.require("comments:write")
-        self.board_service.ensure_active(board_id)
-        comment_id = str(uuid4())
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            card = one(conn, "SELECT id FROM cards WHERE id = :id", {"id": card_id})
-            if card is None:
+        self.boards.ensure_active(board_id)
+        comment_id = self._new_id()
+        now = self._now()
+        row = CommentsRow(
+            id=comment_id,
+            card_id=card_id,
+            actor_id=actor.actor_id,
+            content=payload.content,
+            created_at=now,
+            updated_at=now,
+        )
+        with self.store.writer(board_id) as repos:
+            if repos.cards.get(card_id) is None:
                 raise NotFound("Card not found")
-            require_mutable_card(conn, card_id)
-            conn.execute(
-                text(
-                    "INSERT INTO comments (id, card_id, actor_id, content, created_at, updated_at)"
-                    " VALUES (:id, :card_id, :actor_id, :content, :now, :now)"
-                ),
-                {
-                    "id": comment_id,
-                    "card_id": card_id,
-                    "actor_id": actor.actor_id,
-                    "content": payload.content,
-                    "now": now,
-                },
-            )
-            log_activity(
-                conn,
+            ensure_ticket_writable(repos, card_id)
+            repos.comments.add(row)
+            self._log(
+                repos,
                 actor,
                 action="comment.created",
                 entity_type="comment",
@@ -455,73 +544,38 @@ class CommentService:
                 self.mentions.queue(actor, board_id, card_id, comment_id, payload.content)
             except Exception:  # the comment is saved; mentions are best effort
                 logger.exception("Could not queue mentions for comment %s", comment_id)
-        return self._decorate(
-            [
-                {
-                    "id": comment_id,
-                    "card_id": card_id,
-                    "actor_id": actor.actor_id,
-                    "content": payload.content,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            ]
-        )[0]
-
-    def _require_owner(self, actor: ActorContext, comment: dict[str, Any]) -> None:
-        if not actor.is_user and comment["actor_id"] != actor.actor_id:
-            raise Forbidden("Agents may only modify their own comments")
+        return self._decorate([row])[0]
 
     def update(
         self, actor: ActorContext, board_id: str, comment_id: str, payload: CommentCreate
-    ) -> dict[str, Any]:
+    ) -> CommentEntry:
         actor.require("comments:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT * FROM comments WHERE id = :id", {"id": comment_id})
-            if existing is None:
-                raise NotFound("Comment not found")
-            self._require_owner(actor, existing)
-            require_mutable_card(conn, existing["card_id"])
-            conn.execute(
-                text("UPDATE comments SET content = :content, updated_at = :now WHERE id = :id"),
-                {"content": payload.content, "now": utcnow(), "id": comment_id},
-            )
-            log_activity(
-                conn,
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            comment = self._comment(repos, actor, comment_id)
+            now = self._now()
+            repos.comments.edit(comment_id, payload.content, now=now)
+            self._log(
+                repos,
                 actor,
                 action="comment.updated",
                 entity_type="comment",
                 entity_id=comment_id,
-                changes={"card_id": existing["card_id"]},
+                changes={"card_id": comment.card_id},
             )
-            row = one(conn, "SELECT * FROM comments WHERE id = :id", {"id": comment_id})
-        if row is None:
-            raise NotFound("Comment not found")
-        return self._decorate([row])[0]
+        return self._decorate([comment.__replace__(content=payload.content, updated_at=now)])[0]
 
     def delete(self, actor: ActorContext, board_id: str, comment_id: str) -> None:
         actor.require("comments:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            existing = one(conn, "SELECT * FROM comments WHERE id = :id", {"id": comment_id})
-            if existing is None:
-                raise NotFound("Comment not found")
-            self._require_owner(actor, existing)
-            require_mutable_card(conn, existing["card_id"])
-            conn.execute(text("DELETE FROM comments WHERE id = :id"), {"id": comment_id})
-            log_activity(
-                conn,
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            comment = self._comment(repos, actor, comment_id)
+            repos.comments.delete(comment_id)
+            self._log(
+                repos,
                 actor,
                 action="comment.deleted",
                 entity_type="comment",
                 entity_id=comment_id,
-                changes={"card_id": existing["card_id"]},
+                changes={"card_id": comment.card_id},
             )
-
-
-def parse_changes(raw: str | None) -> dict[str, Any]:
-    try:
-        return json.loads(raw or "{}")
-    except (TypeError, ValueError):
-        return {}

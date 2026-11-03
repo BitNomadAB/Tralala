@@ -12,8 +12,11 @@ from contextlib import AbstractContextManager
 from typing import Protocol
 
 from .activity import ActivityRepository
+from .attachments import AttachmentRepository
 from .board_metadata import BoardMetadataRepository, LoopDefaultsRepository
 from .cards import CardRepository
+from .checklists import ChecklistItemRepository, ChecklistRepository
+from .comments import CommentRepository
 from .counters import CounterRepository
 from .idempotency import BoardIdempotencyRepository
 from .labels import LabelRepository
@@ -22,6 +25,7 @@ from .loop_documents import LoopApprovalRepository, LoopDocumentRepository
 from .loop_plans import LoopPlanRepository
 from .loop_qa import LoopQaRepository
 from .loops import LoopRepository
+from .search import CardSearchRepository
 
 
 class BoardRepositories(Protocol):
@@ -65,6 +69,21 @@ class BoardRepositories(Protocol):
 
     @property
     def idempotency(self) -> BoardIdempotencyRepository: ...
+
+    @property
+    def checklists(self) -> ChecklistRepository: ...
+
+    @property
+    def checklist_items(self) -> ChecklistItemRepository: ...
+
+    @property
+    def comments(self) -> CommentRepository: ...
+
+    @property
+    def attachments(self) -> AttachmentRepository: ...
+
+    @property
+    def search(self) -> CardSearchRepository: ...
 
     def savepoint(self) -> AbstractContextManager[None]:
         """A nested transaction inside a writer: it keeps its writes when the block ends normally

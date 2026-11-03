@@ -490,7 +490,7 @@ class LoopHistoryService:
         self, conn: Any, history_id: str, board_id: str, loop_id: str, envelope: dict[str, Any]
     ) -> None:
         """Bounded, self-contained evidence bytes; anything not embedded is disclosed."""
-        from .attachments import AttachmentService
+        from .attachments import attachment_path
 
         attachments = rows(
             conn,
@@ -500,14 +500,13 @@ class LoopHistoryService:
         )
         if not attachments:
             return
-        service = AttachmentService(self.board_service, boards=self.boards)
         total = 0
         for attachment in attachments:
             included = False
             data: bytes | None = None
             if attachment["size_bytes"] <= MAX_ARTIFACT_BYTES and total < MAX_ARTIFACT_TOTAL:
                 try:
-                    path = service.file_path(board_id, attachment["stored_filename"])
+                    path = attachment_path(self.boards, board_id, attachment["stored_filename"])
                     data = path.read_bytes()
                     if hashlib.sha256(data).hexdigest() != attachment["sha256"]:
                         data = None

@@ -6,6 +6,7 @@ override), and a board's choice of agents is a row per agent in ``board_agents``
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Protocol, TypedDict
 
 from ..db.generated.registry import AgentsRow, BoardAgentsRow, RoleTemplatesRow
@@ -87,6 +88,10 @@ class RoleTemplateRepository(Protocol):
 
 class AgentRepository(Protocol):
     def get(self, agent_id: str) -> AgentsRow | None: ...
+
+    def names(self, agent_ids: Collection[str]) -> dict[str, str]:
+        """The names of the agents among ``agent_ids``, by id; an unknown id is absent."""
+        ...
 
     def listing(self, *, contains: str | None, enabled: bool | None) -> list[AgentsRow]:
         """By name. ``contains`` keeps the agents whose name or description contains it, as SQL

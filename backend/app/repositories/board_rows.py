@@ -63,6 +63,11 @@ class BoardRowRepository(Protocol):
         """Every board in that status, in the table's own order."""
         ...
 
+    def most_recent(self, *, status: str, limit: int) -> list[BoardsRow]:
+        """At most ``limit`` boards in that status, the most recently updated first (boards
+        updated at the same moment in SQLite's own order)."""
+        ...
+
     def add(self, row: BoardsRow) -> None: ...
 
     def update(self, board_id: str, changes: BoardChanges, *, now: str) -> None:

@@ -24,6 +24,9 @@ _SELECT_BOARDS = (
 )
 _BOARD = text(f"{_SELECT_BOARDS} WHERE id = :id")
 _WITH_STATUS = text(f"{_SELECT_BOARDS} WHERE status = :status")
+_MOST_RECENT = text(
+    f"{_SELECT_BOARDS} WHERE status = :status ORDER BY updated_at DESC LIMIT :limit"
+)
 _ADD_BOARD = text(
     "INSERT INTO boards"
     " (id, name, description, status, created_at, updated_at, archived_at, schema_version,"
@@ -100,6 +103,11 @@ class SqlBoardRowRepository:
 
     def with_status(self, status: str) -> list[BoardsRow]:
         result = self._connection.execute(_WITH_STATUS, {"status": status}).mappings()
+        return [BoardsRow.from_mapping(row) for row in result]
+
+    def most_recent(self, *, status: str, limit: int) -> list[BoardsRow]:
+        parameters = {"status": status, "limit": limit}
+        result = self._connection.execute(_MOST_RECENT, parameters).mappings()
         return [BoardsRow.from_mapping(row) for row in result]
 
     def add(self, row: BoardsRow) -> None:

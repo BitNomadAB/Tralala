@@ -4,7 +4,12 @@ import json
 import logging
 
 from ..core.config import Settings
-from ..repositories.sql.board import SqlBoardUnitOfWork, board_files, board_migrator
+from ..repositories.sql.board import (
+    SqlBoardUnitOfWork,
+    board_files,
+    board_migrator,
+    full_text_index,
+)
 from ..repositories.sql.registry import SqlRegistryUnitOfWork
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.migration_manager import MigrationManager, MigrationReport
@@ -120,11 +125,15 @@ class Services:
             apply_qa_instructions=self.loop_qa.apply_instructions,
         )
         self.list = ListService(self.board, self.board_store)
-        self.label = LabelService(self.board, boards=self.boards)
-        self.checklist = ChecklistService(self.board, boards=self.boards)
-        self.comment = CommentService(self.board, boards=self.boards, registry=self.registry)
+        self.label = LabelService(self.board, self.board_store)
+        self.checklist = ChecklistService(self.board, self.board_store)
+        self.comment = CommentService(self.board, self.board_store, self.registry_store)
         self.search = SearchService(
-            self.board, self.loop_plan, boards=self.boards, registry=self.registry
+            self.board,
+            self.board_store,
+            self.registry_store,
+            plans=self.loop_plan_views,
+            index=full_text_index(self.boards),
         )
         self.backup = BackupService(self.board, boards=self.boards)
         self.backup_scheduler = BackupScheduler(
@@ -133,7 +142,9 @@ class Services:
             interval_hours=settings.backup_interval_hours,
             keep=settings.backup_keep,
         )
-        self.attachment = AttachmentService(self.board, boards=self.boards)
+        self.attachment = AttachmentService(
+            settings, self.board, self.board_store, board_files(self.boards)
+        )
         self.auth = AuthService(settings, self.registry_store)
         self.discussion = DiscussionService(
             self.board, self.agent, boards=self.boards, registry=self.registry

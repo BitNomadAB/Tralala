@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import text
+from collections.abc import Collection
+
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
@@ -49,6 +51,9 @@ _AGENT = (
     " FROM agents"
 )
 _AGENT_BY_ID = text(f"{_AGENT} WHERE id = :id")
+_AGENT_NAMES = text("SELECT id, name FROM agents WHERE id IN :ids").bindparams(
+    bindparam("ids", expanding=True)
+)
 _COUNT_BY_ROLE_TEMPLATE = text(
     "SELECT role_template_id, COUNT(*) AS total FROM agents"
     " WHERE role_template_id IS NOT NULL GROUP BY role_template_id"
@@ -148,6 +153,12 @@ class SqlAgentRepository:
     def get(self, agent_id: str) -> AgentsRow | None:
         row = self._connection.execute(_AGENT_BY_ID, {"id": agent_id}).mappings().first()
         return None if row is None else AgentsRow.from_mapping(row)
+
+    def names(self, agent_ids: Collection[str]) -> dict[str, str]:
+        if not agent_ids:
+            return {}
+        result = self._connection.execute(_AGENT_NAMES, {"ids": list(agent_ids)}).mappings()
+        return {values.text(row, "id"): values.text(row, "name") for row in result}
 
     def listing(self, *, contains: str | None, enabled: bool | None) -> list[AgentsRow]:
         parameters: dict[str, object] = {}

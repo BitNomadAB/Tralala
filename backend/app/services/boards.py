@@ -36,7 +36,8 @@ from ..repositories.board_rows import BOARD_SORTS, BoardChanges
 from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.boards import BoardCreate, BoardUpdate
 from .activity import activity_entry
-from .common import archive_file_name, request_fingerprint
+from .common import archive_file_name
+from .idempotency import request_fingerprint
 from .templates import TemplateEntry
 
 logger = logging.getLogger("tralala")

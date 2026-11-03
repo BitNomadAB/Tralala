@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import string
-from collections.abc import Generator, Sequence
+from collections.abc import Collection, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -408,6 +408,13 @@ class FakeActorRepository:
         actor = self._state.actors.get(actor_id)
         return actor if actor is not None and actor.disabled_at is None else None
 
+    def many(self, actor_ids: Collection[str]) -> dict[str, ActorsRow]:
+        return {
+            actor_id: actor
+            for actor_id, actor in self._state.actors.items()
+            if actor_id in actor_ids
+        }
+
     def add(self, row: ActorsRow) -> None:
         if row.id in self._state.actors:
             raise ConstraintError(f"actors.id {row.id} exists")
@@ -711,6 +718,13 @@ class FakeBoardRowRepository:
     def with_status(self, status: str) -> list[BoardsRow]:
         return [row for row in self._state.boards.values() if row.status == status]
 
+    def most_recent(self, *, status: str, limit: int) -> list[BoardsRow]:
+        # ORDER BY updated_at DESC: a stable sort, so equal times keep the table's own order.
+        rows = sorted(
+            self.with_status(status), key=lambda row: row.updated_at, reverse=True
+        )
+        return rows[:limit]
+
     def add(self, row: BoardsRow) -> None:
         if row.id in self._state.boards:
             raise ConstraintError(f"boards.id {row.id} exists")
@@ -853,6 +867,13 @@ class FakeAgentRepository:
 
     def get(self, agent_id: str) -> AgentsRow | None:
         return self._state.agents.get(agent_id)
+
+    def names(self, agent_ids: Collection[str]) -> dict[str, str]:
+        return {
+            agent_id: agent.name
+            for agent_id, agent in self._state.agents.items()
+            if agent_id in agent_ids
+        }
 
     def listing(self, *, contains: str | None, enabled: bool | None) -> list[AgentsRow]:
         pattern = None if contains is None else f"%{contains}%"

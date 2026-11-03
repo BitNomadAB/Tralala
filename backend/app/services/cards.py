@@ -33,23 +33,17 @@ from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.cards import BulkCardCreate, CardCreate, CardMove, CardUpdate
 from . import idempotency
 from .activity import activity_entry
-from .common import request_fingerprint
 from .lists import BoardChecks
 from .loops import ensure_execution_allowed, readiness_item, refresh_stage, require_loop
 from .ordering import place
 from .plan_views import Blocker, PlanViews, ReadinessItem
+from .subresources import ChecklistEntry, CommentEntry, LabelEntry, label_entries
 
 logger = logging.getLogger("tralala.cards")
 
 PLAN_CHANGE_CODE = "plan_change_required"
 NEW_LABEL_COLOR = "#64748b"
 SYSTEM_ACTOR = ActorContext(actor_id="system", actor_type="system", actor_name="Tralala")
-
-
-class LabelEntry(TypedDict):
-    id: str
-    name: str
-    color: str
 
 
 class CardRecord(TypedDict):
@@ -102,8 +96,8 @@ class CardEntry(CardRecord):
     expected_evidence: JsonValue
     phase_number: int | None
     # The card route adds these when the request asks for them (``?include=``).
-    checklists: NotRequired[list[dict[str, JsonValue]]]
-    comments: NotRequired[list[dict[str, JsonValue]]]
+    checklists: NotRequired[list[ChecklistEntry]]
+    comments: NotRequired[list[CommentEntry]]
 
 
 class BoardTicketEntry(CardRecord):
@@ -171,10 +165,6 @@ def card_record(row: CardsRow) -> CardRecord:
     }
 
 
-def _labels(rows: list[LabelsRow]) -> list[LabelEntry]:
-    return [{"id": row.id, "name": row.name, "color": row.color} for row in rows]
-
-
 def card_entry(
     board_id: str,
     row: CardsRow,
@@ -190,7 +180,7 @@ def card_entry(
     return {
         **card_record(row),
         "board_id": board_id,
-        "labels": _labels(labels),
+        "labels": label_entries(labels),
         "checklist_total": counts.checklist_total,
         "checklist_completed": counts.checklist_completed,
         "comment_count": counts.comment_count,
@@ -433,7 +423,7 @@ class CardService:
                 "loop_name": ticket.loop_name,
                 "loop_stage": ticket.loop_stage,
                 "board_id": board_id,
-                "labels": _labels(labels[ticket.card.id]),
+                "labels": label_entries(labels[ticket.card.id]),
                 "checklist_total": counts[ticket.card.id].checklist_total,
                 "checklist_completed": counts[ticket.card.id].checklist_completed,
                 "comment_count": counts[ticket.card.id].comment_count,
@@ -550,7 +540,7 @@ class CardService:
         """The new Ticket and False, or the answer stored for a replayed key and True."""
         actor.require("cards:write")
         self.boards.ensure_active(board_id)
-        fingerprint = request_fingerprint(
+        fingerprint = idempotency.request_fingerprint(
             {
                 "op": "card.create",
                 "board_id": board_id,
@@ -587,7 +577,7 @@ class CardService:
                 "Bulk request exceeds the configured limit",
                 details={"limit": self.settings.bulk_limit},
             )
-        fingerprint = request_fingerprint(
+        fingerprint = idempotency.request_fingerprint(
             {
                 "op": "card.bulk_create",
                 "board_id": board_id,

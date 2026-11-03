@@ -23,20 +23,15 @@ from app.db.generated.registry import AGENTS_COLUMNS, REPOSITORIES_COLUMNS
 from app.repositories import agents as agent_repositories
 from app.repositories import board_rows, code_repositories
 from app.repositories import cards as card_repositories
+from app.repositories import checklists as checklist_repositories
+from app.repositories import labels as label_repositories
 from app.repositories import loops as loop_repositories
 from app.schemas.agents import AgentCreate, AgentUpdate, RoleTemplateUpdate
 from app.schemas.cards import CardUpdate
 from app.schemas.loops import LoopUpdate
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
 from app.schemas.subresources import ChecklistItemUpdate, LabelUpdate
-from app.services import (
-    common,
-    discussions,
-    events,
-    loop_documents,
-    search,
-    subresources,
-)
+from app.services import discussions, events, loop_documents
 
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 FILTERS: sql.Filters = (("a", "a = :a"), ("b", "b IS NULL"), ("c", "(c LIKE :c OR d LIKE :c)"))
@@ -154,7 +149,9 @@ def test_every_allowlist_holds_plain_identifiers_and_every_filter_list_unique_na
                             pytest.fail(f"{module.__name__}.{name}: {entry!r} is not a pair")
                 assert len(set(names)) == len(names), (module, name)
                 checked += 1
-    assert checked >= 20
+    # A floor, so a scan that silently finds nothing fails; allowlists that moved into
+    # app/repositories/sql are compiled by the build instead (GCS-T00e).
+    assert checked >= 15
 
 
 def test_the_update_allowlists_cover_every_field_a_request_can_change() -> None:
@@ -164,8 +161,8 @@ def test_the_update_allowlists_cover_every_field_a_request_can_change() -> None:
         agent_repositories.AGENT_EDITABLE
     )
     assert _fields(AgentCreate, "api_key") | credentials <= set(AGENTS_COLUMNS)
-    assert _fields(LabelUpdate) <= set(subresources._LABEL_EDITABLE)
-    assert _fields(ChecklistItemUpdate) <= set(subresources._CHECKLIST_ITEM_EDITABLE)
+    assert _fields(LabelUpdate) <= set(label_repositories.LABEL_EDITABLE)
+    assert _fields(ChecklistItemUpdate) <= set(checklist_repositories.CHECKLIST_ITEM_EDITABLE)
     assert _fields(LoopUpdate) | {"updated_at"} <= set(loop_repositories.LOOP_EDITABLE)
     card_fields = _fields(
         CardUpdate, "clear_due_at", "completed", "labels", "assignee_actor_id", "clear_assignee"
@@ -230,6 +227,20 @@ def test_each_change_type_names_exactly_the_columns_its_update_may_format() -> N
             ),
             card_repositories.CARD_EDITABLE,
         ),
+        (
+            _keys(
+                label_repositories.LabelChanges.__required_keys__,
+                label_repositories.LabelChanges.__optional_keys__,
+            ),
+            label_repositories.LABEL_EDITABLE,
+        ),
+        (
+            _keys(
+                checklist_repositories.ChecklistItemChanges.__required_keys__,
+                checklist_repositories.ChecklistItemChanges.__optional_keys__,
+            ),
+            checklist_repositories.CHECKLIST_ITEM_EDITABLE,
+        ),
     ]
     for keys, allowed in pairs:
         assert keys == sorted(allowed)
@@ -238,33 +249,14 @@ def test_each_change_type_names_exactly_the_columns_its_update_may_format() -> N
 # --- the statements are the ones the services wrote before ---------------------------------------
 
 
-def test_sibling_scopes_are_the_clauses_the_callers_used_to_pass() -> None:
-    # Lists and cards are placed by their repositories (sql/lists.py, sql/cards.py).
-    expected = {
-        ("checklists",): " WHERE card_id = :card_id",
-        ("checklist_items",): " WHERE checklist_id = :checklist_id",
-        ("checklist_items", "other"): " WHERE checklist_id = :checklist_id AND id != :id",
-    }
-    for selected, clause in expected.items():
-        assert sql.where(common._SIBLING_FILTERS, selected) == clause
-    assert set(common._POSITIONED_TABLES) == {
-        name for name, _ in common._SIBLING_FILTERS if name != "other"
-    }
-
-
-def test_the_card_search_join_is_the_fixed_fragment() -> None:
-    # The card list's filters, sorts and label join moved into app/repositories/sql/cards.py
-    # (GCS-T00e); the build compiles them against the schema, and a unit test does not import the
-    # SQL repositories.
-    assert search._CARD_FTS_JOIN == " JOIN cards_fts f ON f.rowid = c.rowid"
-
-
 def test_thread_and_activity_filters_match_the_former_literals() -> None:
     # The list queries became fixed statements in app/repositories/sql/lists.py (GCS-T00c).
     assert sql.where(discussions._THREAD_FILTERS, ["status"]) == " WHERE status = :status"
     # The agent list's filters moved into app/repositories/sql/agents.py (GCS-T00d), the board
-    # list's and the activity feed's into sql/board_rows.py and sql/activity.py (GCS-T00e); the
-    # build compiles them against the schema, and a unit test does not import the SQL repositories.
+    # list's and the activity feed's into sql/board_rows.py and sql/activity.py, the card list's
+    # into sql/cards.py, the card search's filters and FTS5 join into sql/search.py and the
+    # checklist siblings into sql/checklists.py (GCS-T00e); the build compiles them against the
+    # schema, and a unit test does not import the SQL repositories.
 
 
 def test_event_and_approval_identifiers_are_the_fixed_names() -> None:

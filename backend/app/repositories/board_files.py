@@ -1,5 +1,5 @@
 """A board's files: its database and its uploaded attachments, as ``BoardService`` creates,
-copies, exports, imports, migrates and deletes them.
+copies, exports, imports, migrates and deletes them, and ``AttachmentService`` stores them.
 
 A board is a directory: ``board.sqlite`` plus ``attachments/``. The paths come from the board id
 only, which the implementation validates, so no caller builds a path from user text. The storage
@@ -26,6 +26,14 @@ class DatabaseProblem:
     reason: ProblemReason
     detail: str
     """What SQLite answered or what the check found, short and free of paths."""
+
+
+class AttachmentFiles(Protocol):
+    """Where a board's uploaded files are, as ``AttachmentService`` stores and reads them."""
+
+    def attachments_dir(self, board_id: str) -> Path:
+        """Where the board's uploaded files are (or would be)."""
+        ...
 
 
 class BoardFiles(Protocol):
