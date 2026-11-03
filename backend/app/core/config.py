@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     discussion_max_rounds: int = 4
     discussion_token_budget: int = 200_000
     discussion_time_budget_seconds: int = 900
+    # What one generation run sends the model, documents and repository snapshot together, in
+    # characters (about 100 k tokens by default). The documents come first; the snapshot gets the
+    # rest, cut to fit.
+    generation_context_chars: int = 400_000
     # A file cannot exceed the request body that carries it, so this tracks max_request_bytes
     # rather than promising a size the request ceiling would refuse.
     attachment_max_bytes: int = 8 * 1024 * 1024

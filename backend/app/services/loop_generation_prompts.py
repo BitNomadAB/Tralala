@@ -20,6 +20,21 @@ from .loop_plans_validation import validate_plan
 from .runtime import ResponseSchema
 
 MAX_OUTPUT_CHARS = 200_000
+"""The longest answer a run parses and stores; it no longer bounds what the model is sent."""
+DEFAULT_CONTEXT_CHARS = 400_000
+"""The context a run sends, documents and repository snapshot together
+(``TRALALA_GENERATION_CONTEXT_CHARS``)."""
+MIN_SNAPSHOT_CHARS = 20_000
+"""Below this much room for the repositories, a run sends the previous AI drafts without content."""
+REPOSITORY_OVERHEAD_CHARS = 2_000
+"""Room kept for what the repositories' entries say besides their files (names, commits, flags)."""
+# The previous AI drafts a purpose can go without when the documents leave the repositories too
+# little room: the run's own earlier output and what was derived from it. Never the Info, and never
+# an approved input of the purpose (a RoadMap keeps the analysis it is planned from).
+DROPPABLE_DRAFTS: dict[str, tuple[str, ...]] = {
+    "analysis": ("analysis_ai", "roadmap_ai"),
+    "roadmap": ("roadmap_ai",),
+}
 FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
 # The machine contract per purpose. Field order is the model's writing order: the schema is shown in
@@ -36,8 +51,9 @@ SCHEMAS = {
 }
 
 SNAPSHOT_CAPS = (
-    "At most 2 MB of archive, 200 files and 200 KB of text per repository are included; build "
-    "output, dependencies, lock files, binaries and images are skipped."
+    "At most 2 MB of archive, 200 files and 200 KB of text per repository are included, less "
+    "when the documents leave less room; build output, dependencies, lock files, binaries and "
+    "images are skipped."
 )
 
 
@@ -112,12 +128,39 @@ def compose_system_prompt(purpose: str, role: str) -> str:
     return f"{persona}{PURPOSE_PROMPTS[purpose]}\n\nJSON schema:\n{schema}"
 
 
-def user_message(captured: Mapping[str, JsonValue]) -> str:
+def context_size(context: Mapping[str, JsonValue]) -> int:
+    """The characters ``context`` takes in the message, as ``user_message`` writes it."""
+    return len(json.dumps(context, ensure_ascii=False))
+
+
+def without_drafts(context: JsonObject, purpose: str) -> JsonObject:
+    """``context`` with the purpose's previous AI drafts named but without their content."""
+    documents = context.get("documents")
+    if not isinstance(documents, dict):
+        return context
+    kept: JsonObject = dict(documents)
+    for kind in DROPPABLE_DRAFTS.get(purpose, ()):
+        document = kept.get(kind)
+        if isinstance(document, dict):
+            kept[kind] = {
+                "revision_id": document.get("revision_id"),
+                "revision_number": document.get("revision_number"),
+                "content_omitted": True,
+            }
+    return {**context, "documents": kept}
+
+
+def user_message(
+    captured: Mapping[str, JsonValue], *, budget_chars: int = DEFAULT_CONTEXT_CHARS
+) -> str:
+    """The run's request: purpose, Loop, board and the context JSON, at most ``budget_chars``
+    characters of context. ``attach_repositories`` already cut the snapshot to fit, so the two
+    fallbacks below only act on a context captured without a budget."""
     source = captured["context"]
     context: JsonObject = dict(source) if isinstance(source, dict) else {}
     repositories = context.get("repositories")
     context_json = json.dumps(context, ensure_ascii=False)
-    if len(context_json) > MAX_OUTPUT_CHARS and isinstance(repositories, list):
+    if len(context_json) > budget_chars and isinstance(repositories, list):
         # Repository contents are the only part that can be regenerated from the SHA, so they go
         # first: dropping them keeps the JSON valid, where a raw cut would hand the model broken
         # input in the middle of a file.
@@ -128,8 +171,8 @@ def user_message(captured: Mapping[str, JsonValue]) -> str:
             for entry in repositories
         ]
         context_json = json.dumps({**context, "repositories": trimmed}, ensure_ascii=False)
-    if len(context_json) > MAX_OUTPUT_CHARS:
-        context_json = context_json[:MAX_OUTPUT_CHARS] + "\n… (context truncated)"
+    if len(context_json) > budget_chars:
+        context_json = context_json[:budget_chars] + "\n… (context truncated)"
     board_name = captured.get("board_name") or "(unknown board)"
     lines = [
         f"Purpose: {captured['purpose']}",

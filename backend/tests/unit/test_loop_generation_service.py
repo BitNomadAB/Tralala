@@ -26,7 +26,8 @@ from app.services.agents import EffectiveRole
 from app.services.idempotency import request_fingerprint
 from app.services.loop_documents import LoopDocumentService
 from app.services.loop_generation import MAX_REPAIRS, PURPOSE_PROMPTS, LoopGenerationService
-from app.services.loop_generation_runs import MAX_EXCEPTION_TEXT
+from app.services.loop_generation_prompts import DEFAULT_CONTEXT_CHARS
+from app.services.loop_generation_report import MAX_EXCEPTION_TEXT
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_plans import LoopPlanService
 from app.services.runtime import ResponseSchema
@@ -280,17 +281,20 @@ class Preferences:
 
 @dataclass
 class Snapshots:
-    """The board's repositories; records the phase the run was in when they were fetched."""
+    """The board's repositories; records the phase the run was in when they were fetched and the
+    budget it handed over."""
 
     state: BoardState
     entries: list[dict[str, JsonValue]]
     phases: list[str | None] = field(default_factory=list[str | None])
+    budgets: list[int] = field(default_factory=list[int])
 
-    def for_board(self, board_id: str) -> Sequence[Mapping[str, JsonValue]]:
+    def for_board(self, board_id: str, *, budget_chars: int) -> Sequence[Mapping[str, JsonValue]]:
         del board_id
         self.phases += [
             row.phase for row in self.state.generation_runs.values() if row.status == "running"
         ]
+        self.budgets.append(budget_chars)
         return self.entries
 
 
@@ -390,6 +394,7 @@ def make(
     repositories: Sequence[dict[str, JsonValue]] | None = None,
     runs: Sequence[LoopGenerationRunsRow] = (),
     clock: Callable[[], datetime] = lambda: MOMENT,
+    context_chars: int = DEFAULT_CONTEXT_CHARS,
 ) -> World:
     state = BoardState()
     state.loops = {
@@ -427,6 +432,7 @@ def make(
         None if preferences is None else Preferences(dict(preferences)),
         None if repositories is None else snapshots,
         idempotency_ttl_seconds=3600,
+        context_chars=context_chars,
         call_completion=provider,
         clock=clock,
         new_id=ids,
@@ -1135,3 +1141,118 @@ def test_a_board_without_a_repository_tells_the_model_so() -> None:
     )
     assert json.loads(run.source_revisions_json)["repositories"] == []
     assert run.status == "completed"
+
+
+# --- the context budget --------------------------------------------------------------------------
+
+
+def snapshot_entry(content: str, *, sha: str = "abc123", included: int | None = None) -> JsonValue:
+    """One repository as the snapshot service answers under a budget, holding one file."""
+    return {
+        "id": "repo-1",
+        "name": "acme app",
+        "branch": "main",
+        "commit_sha": sha,
+        "file_count": 1,
+        "truncated": False,
+        "budget_chars": 0,
+        "snapshot_chars_included": len(content) + 60 if included is None else included,
+        "content_omitted": False,
+        "files": [{"path": "src/app.py", "bytes": len(content), "content": content}],
+    }
+
+
+def previous_analysis(w: World, chars: int) -> None:
+    """The Loop already holds an AI analysis of ``chars`` characters from an earlier run."""
+    w.state.documents.append(
+        document_row("ai-0", LOOP, "analysis_ai", info="info-1", content="a" * chars)
+    )
+
+
+def test_info_a_long_previous_analysis_and_a_large_snapshot_all_reach_the_model() -> None:
+    code = "x" * (196 * 1024)
+    entry = snapshot_entry(code)
+    assert isinstance(entry, dict)
+    w = make(repositories=[entry])
+    previous_analysis(w, 30_000)
+    start(w)
+    # The documents took their room first; the rest went to the repositories.
+    (budget,) = w.snapshots.budgets
+    assert 196 * 1024 < budget < DEFAULT_CONTEXT_CHARS - 30_000
+    context = w.provider.context()
+    match context:
+        case {
+            "repositories": [{"files": [{"content": sent}], **rest}],
+            "documents": {"info": {"content": info}, "analysis_ai": {"content": draft}},
+        }:
+            assert (sent, rest.get("content_omitted"), info, draft) == (
+                code,
+                False,
+                "Users must confirm.",
+                "a" * 30_000,
+            )
+        case other:
+            pytest.fail(f"unexpected context {other!r}")
+
+
+@pytest.mark.parametrize(("used", "dropped"), [(30_000, True), (0, False)], ids=["used", "unused"])
+def test_previous_drafts_go_before_any_repository_file_and_the_info_stays(
+    used: int, dropped: bool
+) -> None:
+    entry = snapshot_entry("y" * max(used - 60, 0), included=used)
+    assert isinstance(entry, dict)
+    w = make(repositories=[entry], context_chars=60_000)
+    previous_analysis(w, 50_000)
+    start(w)
+    # Too little room beside the drafts: the snapshot was offered the room without them.
+    (budget,) = w.snapshots.budgets
+    assert budget > 50_000
+    documents = w.provider.context()["documents"]
+    assert isinstance(documents, dict)
+    assert documents["info"] == {
+        "revision_id": "info-1",
+        "revision_number": 1,
+        "content": "Users must confirm.",
+        "payload": None,
+    }
+    # The drafts went only when the repositories used the room they left.
+    draft = documents["analysis_ai"]
+    assert isinstance(draft, dict)
+    if dropped:
+        assert draft == {"revision_id": "ai-0", "revision_number": 1, "content_omitted": True}
+    else:
+        assert draft["content"] == "a" * 50_000
+
+
+def test_the_run_names_each_repositorys_budget_and_what_it_used() -> None:
+    entry = snapshot_entry("print('hello')", included=75)
+    assert isinstance(entry, dict)
+    w = make(repositories=[{**entry, "budget_chars": 1_000}])
+    start(w)
+    sources = w.service.get(BOARD_ID, LOOP, "id-1")["source_revisions"]
+    assert isinstance(sources, dict)
+    assert sources["repositories"] == [
+        {
+            "id": "repo-1",
+            "name": "acme app",
+            "branch": "main",
+            "commit_sha": "abc123",
+            "file_count": 1,
+            "truncated": False,
+            "budget_chars": 1_000,
+            "snapshot_chars_included": 75,
+            "content_omitted": False,
+        }
+    ]
+
+
+def test_two_commits_of_the_same_repository_are_different_inputs() -> None:
+    hashes: list[str] = []
+    for sha in ("abc123", "def456"):
+        entry = snapshot_entry("print('hello')", sha=sha)
+        assert isinstance(entry, dict)
+        w = make(repositories=[entry])
+        start(w)
+        hashes.append(w.run().input_hash)
+    assert hashes[0] != hashes[1]
+

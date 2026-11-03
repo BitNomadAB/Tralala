@@ -305,8 +305,10 @@ contract and the JSON schema, and the whole composed text is what a run snapshot
 
 An analysis or RoadMap run also carries a **repository snapshot**: for every enabled repository linked
 to the board, Tralala resolves the commit at the configured branch, reads the tarball for that commit
-and places a bounded, filtered set of files in the prompt as data — never as instructions. The caps
-are fixed: at most 2 MB of archive, 200 files and 200 KB of text per repository, 15 s timeout,
+and places a bounded, filtered set of files in the prompt as data — never as instructions. The
+documents come first; the repositories share what remains of `TRALALA_GENERATION_CONTEXT_CHARS`
+(default 400 000 characters), in link order with carry-over, and each snapshot is cut to its share.
+The fixed caps still apply: at most 2 MB of archive, 200 files and 200 KB of text per repository, 15 s timeout,
 `github.com`/`api.github.com`/`codeload.github.com` only, no clone and no `git` binary. Build output,
 dependencies, lock files, binaries and images are skipped.
 
@@ -315,7 +317,8 @@ A repository that cannot be read does not fail the run: it appears in the snapsh
 `timeout`, and the analysis is expected to say which part of the code it did not see. The run record
 keeps the commit and the file paths (`source_revisions.repositories`); the file contents stay in the
 run's own input, and `GET …/generation-runs/{run_id}` returns only the name, branch, commit,
-file count and `truncated` flag. No token, path or content ever appears in a log line or an error.
+file count and `truncated` flag, plus `budget_chars` (the repository's share),
+`snapshot_chars_included` (what its files took) and `content_omitted` (not even one file fitted). No token, path or content ever appears in a log line or an error.
 
 Every run also reports `phase` — `reading_info`, `analysing_repository` or `generating` — the step it
 last reached, so a caller can show progress instead of one opaque wait. When a run fails, `phase`

@@ -28,7 +28,7 @@ _ALL_REPOSITORIES = text(f"{_REPOSITORY} ORDER BY name COLLATE NOCASE, id")
 _BOARD_REPOSITORIES = text(
     f"SELECT {sql.column_list(REPOSITORIES_COLUMNS, 'r')}"  # noqa: S608 - from generated columns
     " FROM repositories r JOIN board_repositories l ON l.repository_id = r.id"
-    " WHERE l.board_id = :board_id ORDER BY r.name COLLATE NOCASE, r.id"
+    " WHERE l.board_id = :board_id ORDER BY l.created_at, r.name COLLATE NOCASE, r.id"
 )
 _URL_TAKEN = text("SELECT id FROM repositories WHERE url = :url")
 _URL_TAKEN_BY_OTHER = text("SELECT id FROM repositories WHERE url = :url AND id != :id")

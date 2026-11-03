@@ -16,6 +16,7 @@ services:
       TRALALA_ENABLE_DOCS: ${TRALALA_ENABLE_DOCS:-true}
       TRALALA_DOCS_REQUIRE_AUTH: ${TRALALA_DOCS_REQUIRE_AUTH:-true}
       TRALALA_LOG_LEVEL: ${TRALALA_LOG_LEVEL:-INFO}
+      TRALALA_GENERATION_CONTEXT_CHARS: ${TRALALA_GENERATION_CONTEXT_CHARS:-400000}
     volumes:
       - tralala-data:/data
     # Inside the container 127.0.0.1 is the container itself; a model on the same machine is

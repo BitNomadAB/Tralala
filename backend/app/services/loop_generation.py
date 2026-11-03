@@ -47,6 +47,7 @@ from .loop_generation_agents import (
     role_prompt,
 )
 from .loop_generation_prompts import (
+    DEFAULT_CONTEXT_CHARS,
     FENCE,
     MAX_OUTPUT_CHARS,
     PURPOSE_PROMPTS,
@@ -59,6 +60,7 @@ from .loop_generation_prompts import (
     user_message,
 )
 from .loop_generation_prompts import strip_fences as _strip_fences
+from .loop_generation_report import failure_of, log_started
 from .loop_generation_runs import (
     MAX_REPAIRS,
     CompletionCall,
@@ -66,10 +68,8 @@ from .loop_generation_runs import (
     RepositorySnapshots,
     RunEntry,
     attach_repositories,
-    failure_of,
     finish,
     generate,
-    log_started,
     promote,
     record_phase,
     serialize_run,
@@ -144,6 +144,7 @@ class LoopGenerationService:
         snapshots: RepositorySnapshots | None = None,
         *,
         idempotency_ttl_seconds: int,
+        context_chars: int = DEFAULT_CONTEXT_CHARS,
         call_completion: CompletionCall = runtime.call_completion,
         clock: Callable[[], datetime] = _now,
         new_id: Callable[[], str] = _new_id,
@@ -161,6 +162,8 @@ class LoopGenerationService:
         # only exercise the document flow.
         self.snapshots = snapshots
         self.idempotency_ttl_seconds = idempotency_ttl_seconds
+        # Documents and repository snapshot together (TRALALA_GENERATION_CONTEXT_CHARS).
+        self.context_chars = context_chars
         self._call_completion = call_completion
         self._clock = clock
         self._new_id = new_id
@@ -412,6 +415,7 @@ class LoopGenerationService:
             system_prompt=self._system_prompt(purpose, agent),
             call_completion=self._call_completion,
             settings=self.settings,
+            context_chars=self.context_chars,
         )
 
     def _run(self, board_id: str, loop_id: str, run_id: str) -> None:
@@ -507,7 +511,13 @@ class LoopGenerationService:
     ) -> JsonObject:
         """Fetch the board's repositories into the captured context and record what was seen."""
         return attach_repositories(
-            board_id, loop_id, run_id, captured, store=self.store, snapshots=self.snapshots
+            board_id,
+            loop_id,
+            run_id,
+            captured,
+            store=self.store,
+            snapshots=self.snapshots,
+            budget_chars=self.context_chars,
         )
 
     def _promote(

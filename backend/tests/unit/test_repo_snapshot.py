@@ -12,9 +12,18 @@ from collections.abc import Callable
 
 import httpx
 import pytest
+from pydantic import JsonValue
 
 from app.services import repo_snapshot
-from app.services.repo_snapshot import SnapshotError, fetch_archive, read_snapshot, resolve_commit
+from app.services.repo_snapshot import (
+    RepositorySnapshotService,
+    SnapshotError,
+    fetch_archive,
+    file_chars,
+    read_snapshot,
+    resolve_commit,
+)
+from app.services.repositories import RepositoryEntry
 
 SHA = "abc123def456abc123def456abc123def456abcd"
 TOKEN = "ghp_repository_token_value"
@@ -84,6 +93,18 @@ def test_too_much_text_stops_at_the_cap() -> None:
     snapshot = read_snapshot(_tarball({f"src/big_{index}.py": chunk for index in range(4)}))
     assert snapshot["truncated"] is True
     assert snapshot["text_bytes"] <= repo_snapshot.MAX_TEXT_BYTES
+
+
+def test_a_budget_cuts_the_snapshot_where_the_next_file_would_not_fit() -> None:
+    archive = _tarball({"README.md": b"r" * 1000, "src/a.py": b"a" * 1000, "src/b.py": b"b" * 1000})
+    whole = read_snapshot(archive)
+    first, second, third = whole["files"]
+    budget = file_chars(first) + file_chars(second)
+    cut = read_snapshot(archive, budget_chars=budget)
+    # The same order as without a budget, stopped before the file that would not fit.
+    assert [file["path"] for file in cut["files"]] == ["README.md", "src/a.py"]
+    assert (cut["truncated"], cut["chars"], cut["text_bytes"]) == (True, budget, 2000)
+    assert (whole["truncated"], whole["chars"]) == (False, budget + file_chars(third))
 
 
 def test_text_that_is_not_utf8_is_kept_readable() -> None:
@@ -189,6 +210,104 @@ def test_a_redirect_away_from_codeload_is_refused(github: GitHub) -> None:
         fetch_archive("acme", "app", SHA, TOKEN)
     assert failure.value.code == "redirect_refused"
     assert len(seen) == 1
+
+
+# --- a board's repositories share the budget ------------------------------------------------------
+
+
+def _entry(name: str) -> RepositoryEntry:
+    return {
+        "id": f"repo-{name}",
+        "name": name,
+        "provider": "github",
+        "url": f"https://github.com/acme/{name}",
+        "branch": "main",
+        "enabled": True,
+        "created_at": "2026-11-03T10:00:00Z",
+        "updated_at": "2026-11-03T10:00:00Z",
+        "has_token": False,
+        "boards": [],
+    }
+
+
+class Repositories:
+    """RepositoryService as a snapshot reads it: the board's repositories in link order."""
+
+    def __init__(self, *names: str) -> None:
+        self.rows = [_entry(name) for name in names]
+
+    def for_board(self, board_id: str) -> list[RepositoryEntry]:
+        del board_id
+        return self.rows
+
+    def token(self, repository_id: str) -> str | None:
+        del repository_id
+        return None
+
+
+def _github_serving(archives: dict[str, bytes]) -> Callable[[httpx.Request], httpx.Response]:
+    """GitHub for the repositories of ``acme``: a commit for each, its archive through codeload;
+    a repository without an archive is not found."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.url.host == "codeload.github.com":  # /acme/<name>/legacy.tar.gz/<sha>
+            return httpx.Response(200, content=archives[path.split("/")[2]])
+        name = path.split("/")[3]  # /repos/acme/<name>/...
+        if name not in archives:
+            return httpx.Response(404)
+        if "/commits/" in path:
+            return httpx.Response(200, json={"sha": SHA})
+        location = f"https://codeload.github.com/acme/{name}/legacy.tar.gz/{SHA}"
+        return httpx.Response(302, headers={"location": location})
+
+    return handle
+
+
+def _budgets(entries: list[dict[str, JsonValue]]) -> list[tuple[JsonValue, JsonValue, JsonValue]]:
+    return [
+        (entry["name"], entry.get("budget_chars"), entry.get("snapshot_chars_included"))
+        for entry in entries
+    ]
+
+
+def test_two_repositories_share_the_budget_and_what_one_leaves_carries_over(
+    github: GitHub,
+) -> None:
+    small = _tarball({"README.md": b"s" * 1000})
+    large = _tarball({f"src/m{index}.py": b"x" * 1000 for index in range(20)})
+    github(_github_serving({"docs": small, "app": large}))
+    service = RepositorySnapshotService(Repositories("docs", "app"))
+    entries = service.for_board("board-1", budget_chars=10_000)
+    used = file_chars(read_snapshot(small)["files"][0])
+    # Link order: docs gets half and uses one file; app gets everything docs left.
+    assert _budgets(entries) == [
+        ("docs", 5_000, used),
+        ("app", 10_000 - used, entries[1]["snapshot_chars_included"]),
+    ]
+    included = entries[1]["snapshot_chars_included"]
+    assert isinstance(included, int) and 10_000 - used - 1_100 < included <= 10_000 - used
+    assert [entry.get("content_omitted") for entry in entries] == [False, False]
+
+
+def test_a_repository_that_fails_leaves_its_share_to_the_next(github: GitHub) -> None:
+    github(_github_serving({"app": _tarball({"README.md": b"r" * 100})}))
+    service = RepositorySnapshotService(Repositories("gone", "app"))
+    gone, app = service.for_board("board-1", budget_chars=8_000)
+    assert (gone.get("error"), gone.get("budget_chars")) == ("not_found", None)
+    assert app.get("budget_chars") == 8_000
+
+
+def test_a_repository_without_room_for_its_first_file_says_its_content_is_omitted(
+    github: GitHub,
+) -> None:
+    github(_github_serving({"app": _tarball({"README.md": b"r" * 1000})}))
+    (entry,) = RepositorySnapshotService(Repositories("app")).for_board("board-1", budget_chars=50)
+    assert (entry.get("files"), entry.get("content_omitted"), entry.get("truncated")) == (
+        [],
+        True,
+        True,
+    )
 
 
 def test_an_archive_over_the_limit_is_refused(github: GitHub) -> None:

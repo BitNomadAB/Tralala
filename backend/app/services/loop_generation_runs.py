@@ -6,8 +6,7 @@ repository snapshot, promote the result, or record why there is none. Each step 
 of work, the clock and the collaborators it needs as arguments; the service's private methods
 (``_generate``, ``_phase``, ``_attach_repositories``, ``_promote``, ``_finish``) hand them over.
 
-A run logs ``generation_run_started`` when it starts and ``generation_run_finished`` once when it
-ends, whichever way; neither line carries a prompt, a message or the model's answer.
+What a run reports about itself (its failure and its two log lines) is ``loop_generation_report``.
 """
 
 from __future__ import annotations
@@ -16,13 +15,12 @@ import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from typing import Protocol
 
 from pydantic import JsonValue, ValidationError
 
 from ..core.context import ActorContext
-from ..core.errors import ApiError, ValidationFailure
+from ..core.errors import ValidationFailure
 from ..db.generated.board import LoopGenerationRunsRow
 from ..db.generated.registry import AgentsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
@@ -31,11 +29,16 @@ from .idempotency import request_fingerprint
 from .loop_documents import LoopDocumentService
 from .loop_generation_prompts import (
     MAX_OUTPUT_CHARS,
+    MIN_SNAPSHOT_CHARS,
+    REPOSITORY_OVERHEAD_CHARS,
     JsonObject,
+    context_size,
     parse_output,
     response_schema_for,
     user_message,
+    without_drafts,
 )
+from .loop_generation_report import Ended, error_details, log_finished
 from .loop_links import LoopWorkflowLinks
 from .loops import ensure_writable, refresh_stage, require_loop
 from .runtime import ResponseSchema
@@ -43,15 +46,6 @@ from .runtime import ResponseSchema
 logger = logging.getLogger("tralala.loop_generation")
 
 MAX_REPAIRS = 2
-# A failed run keeps an error's details up to this many characters of JSON, and an unexpected
-# exception's text up to MAX_EXCEPTION_TEXT.
-MAX_ERROR_DETAILS_CHARS = 2000
-MAX_EXCEPTION_TEXT = 500
-# Keys an error's details never keep, at any depth: what the model was told and the credentials.
-_HIDDEN_DETAIL_KEYS = frozenset(
-    {"prompt", "system_prompt", "messages", "api_key", "token", "authorization", "password"}
-)
-
 type RunEntry = dict[str, object]
 
 # A run's answer leaves these out: the captured input and role stay in the run's own record, and
@@ -68,9 +62,12 @@ _RUN_HIDDEN = (
 
 
 class RepositorySnapshots(Protocol):
-    """``RepositorySnapshotService.for_board``: one entry per enabled repository on the board."""
+    """``RepositorySnapshotService.for_board``: one entry per enabled repository on the board, the
+    file content of all of them together at most ``budget_chars`` characters of context."""
 
-    def for_board(self, board_id: str) -> Sequence[Mapping[str, JsonValue]]: ...
+    def for_board(
+        self, board_id: str, *, budget_chars: int
+    ) -> Sequence[Mapping[str, JsonValue]]: ...
 
 
 class CompletionCall(Protocol):
@@ -103,114 +100,6 @@ class Outcome:
     retryable: bool = False
 
 
-@dataclass(frozen=True, slots=True)
-class Failure:
-    """Why a run failed, as ``finish`` records it."""
-
-    error_code: str
-    error_message: str
-    error_details: JsonValue = None
-
-
-@dataclass(frozen=True, slots=True)
-class _Ended:
-    """How ``promote`` left a run, for its finished line."""
-
-    status: str
-    error_code: str | None
-    now: str
-    usage_json: str = "{}"
-
-
-def _without_secrets(value: JsonValue) -> JsonValue:
-    if isinstance(value, dict):
-        return {
-            key: _without_secrets(item)
-            for key, item in value.items()
-            if key.lower() not in _HIDDEN_DETAIL_KEYS
-        }
-    if isinstance(value, list):
-        return [_without_secrets(item) for item in value]
-    return value
-
-
-def error_details(details: Mapping[str, object] | None) -> JsonValue:
-    """An error's details as a run keeps them: JSON without a key that names a prompt, the
-    messages or a credential at any depth, at most ``MAX_ERROR_DETAILS_CHARS`` characters; a
-    longer one is kept as its truncated text."""
-    if not details:
-        return None
-    loaded: JsonValue = json.loads(json.dumps(dict(details), default=str))
-    kept = _without_secrets(loaded)
-    text = json.dumps(kept)
-    return kept if len(text) <= MAX_ERROR_DETAILS_CHARS else text[:MAX_ERROR_DETAILS_CHARS]
-
-
-def failure_of(exc: Exception) -> Failure:
-    """An application error names itself (its code, message and details); anything else is its
-    class name and the start of its text."""
-    if isinstance(exc, ApiError):
-        return Failure(exc.code or "generation_failed", exc.message, error_details(exc.details))
-    name = type(exc).__name__
-    text = str(exc)[:MAX_EXCEPTION_TEXT]
-    return Failure("generation_failed", f"{name}: {text}" if text else name)
-
-
-def snapshot_chars(captured: JsonValue) -> int:
-    """The characters of repository file content a run's captured context holds."""
-    context = captured.get("context") if isinstance(captured, dict) else None
-    repositories = context.get("repositories") if isinstance(context, dict) else None
-    if not isinstance(repositories, list):
-        return 0
-    total = 0
-    for entry in repositories:
-        files = entry.get("files") if isinstance(entry, dict) else None
-        for item in files if isinstance(files, list) else []:
-            content = item.get("content") if isinstance(item, dict) else None
-            total += len(content) if isinstance(content, str) else 0
-    return total
-
-
-def _token_count(usage: JsonValue, name: str) -> int | None:
-    value = usage.get(name) if isinstance(usage, dict) else None
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def _duration_ms(started_at: str | None, finished_at: str) -> int | None:
-    if not started_at:
-        return None
-    try:
-        elapsed = datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)
-    except ValueError:
-        return None
-    return round(elapsed.total_seconds() * 1000)
-
-
-def log_started(row: LoopGenerationRunsRow) -> None:
-    logger.info(
-        "generation_run_started",
-        extra={"run_id": row.id, "purpose": row.purpose, "agent_id": row.agent_id},
-    )
-
-
-def _log_finished(row: LoopGenerationRunsRow, ended: _Ended, captured: JsonValue) -> None:
-    usage: JsonValue = json.loads(ended.usage_json)
-    logger.info(
-        "generation_run_finished",
-        extra={
-            "run_id": row.id,
-            "purpose": row.purpose,
-            "agent_id": row.agent_id,
-            "status": ended.status,
-            "error_code": ended.error_code,
-            "duration_ms": _duration_ms(row.started_at, ended.now),
-            "prompt_tokens": _token_count(usage, "prompt_tokens"),
-            "completion_tokens": _token_count(usage, "completion_tokens"),
-            "snapshot_chars": snapshot_chars(captured),
-        },
-    )
-
-
 def _loads(raw: str) -> JsonValue:
     value: JsonValue = json.loads(raw or "{}")
     return value
@@ -231,12 +120,24 @@ def _public_sources(sources: JsonValue) -> JsonValue:
                 "commit_sha": item.get("commit_sha"),
                 "file_count": item.get("file_count", 0),
                 "truncated": bool(item.get("truncated")),
+                **_budget_fields(item),
                 **({"error": item["error"]} if item.get("error") else {}),
             }
             for item in repositories
             if isinstance(item, dict)
         ]
     return sources
+
+
+def _budget_fields(entry: Mapping[str, JsonValue]) -> JsonObject:
+    """What a repository was allowed and what it used of the context budget, when it had one."""
+    if "budget_chars" not in entry:
+        return {}
+    return {
+        "budget_chars": entry.get("budget_chars"),
+        "snapshot_chars_included": entry.get("snapshot_chars_included", 0),
+        "content_omitted": bool(entry.get("content_omitted")),
+    }
 
 
 def serialize_run(row: LoopGenerationRunsRow) -> RunEntry:
@@ -311,8 +212,9 @@ def generate(
     system_prompt: str,
     call_completion: CompletionCall,
     settings: object,
+    context_chars: int,
 ) -> Outcome:
-    messages = [{"role": "user", "content": user_message(captured)}]
+    messages = [{"role": "user", "content": user_message(captured, budget_chars=context_chars)}]
     # The same schema the prompt shows; the runtime sends it only to a provider that takes one.
     response_schema = response_schema_for(purpose)
     outcome = call_completion(
@@ -380,18 +282,31 @@ def attach_repositories(
     *,
     store: BoardUnitOfWork,
     snapshots: RepositorySnapshots | None,
+    budget_chars: int,
 ) -> JsonObject:
     """Fetch the board's repositories into the captured context and record what was seen.
 
-    The context and the source revisions are written back to the run, so `input_json` holds the
-    same snapshot the model received and `source_revisions_json` carries the commit and the file
-    paths — never the file contents, which live only in the run's own input.
+    The documents come first; the repositories get what remains of ``budget_chars``, cut to fit.
+    When that is under ``MIN_SNAPSHOT_CHARS`` the previous AI drafts go without content, but only
+    if the repositories then used the room; the Info always stays. The context and the source
+    revisions are written back to the run, so `input_json` holds the same snapshot the model
+    received and `source_revisions_json` carries the commit, the file paths and the budget — never
+    the file contents, which live only in the run's own input.
     """
     if snapshots is None:
         return captured
-    entries = snapshots.for_board(board_id)
     source = captured.get("context")
     context: JsonObject = dict(source) if isinstance(source, dict) else {}
+    room = budget_chars - context_size(context) - REPOSITORY_OVERHEAD_CHARS
+    slim = context
+    if room < MIN_SNAPSHOT_CHARS:
+        slim = without_drafts(context, str(captured.get("purpose")))
+        room = budget_chars - context_size(slim) - REPOSITORY_OVERHEAD_CHARS
+    entries = snapshots.for_board(board_id, budget_chars=max(room, 0))
+    used = sum(_included(entry) for entry in entries)
+    if used <= budget_chars - context_size(context) - REPOSITORY_OVERHEAD_CHARS:
+        slim = context  # the drafts fit beside what the repositories used
+    context = slim
     repositories: list[JsonValue] = [dict(entry) for entry in entries]
     context["repositories"] = repositories or "no enabled repository is linked to this board"
     captured = {**captured, "context": context}
@@ -403,6 +318,7 @@ def attach_repositories(
             "commit_sha": entry.get("commit_sha"),
             "file_count": entry.get("file_count", 0),
             "truncated": bool(entry.get("truncated")),
+            **_budget_fields(entry),
             "files": _paths(entry.get("files", [])),
             **({"error": entry["error"]} if entry.get("error") else {}),
         }
@@ -425,6 +341,11 @@ def attach_repositories(
             source_revisions_json=json.dumps(sources),
         )
     return captured
+
+
+def _included(entry: Mapping[str, JsonValue]) -> int:
+    value = entry.get("snapshot_chars_included")
+    return value if isinstance(value, int) else 0
 
 
 def promote(
@@ -455,7 +376,7 @@ def promote(
             links=links,
             timestamp=timestamp,
         )
-    _log_finished(row, ended, captured)
+    log_finished(row, ended, captured)
 
 
 def _promote_run(
@@ -469,10 +390,10 @@ def _promote_run(
     documents: LoopDocumentService,
     links: LoopWorkflowLinks,
     timestamp: Callable[[], str],
-) -> _Ended:
+) -> Ended:
     run_id = row.id
     if row.status == "cancelled":
-        return _Ended("cancelled", None, timestamp())
+        return Ended("cancelled", None, timestamp())
     loop = require_loop(repos, loop_id)
     ensure_writable(loop)
     current = documents.collect_context(repos, loop)
@@ -487,7 +408,7 @@ def _promote_run(
             output_json=json.dumps({"stale_candidate": payload})[:MAX_OUTPUT_CHARS],
             now=now,
         )
-        return _Ended("failed", "generation_input_changed", now)
+        return Ended("failed", "generation_input_changed", now)
     provenance = {
         "generation_run_id": run_id,
         "agent_id": row.agent_id,
@@ -531,7 +452,7 @@ def _promote_run(
         now=now,
     )
     refresh_stage(repos, loop_id, now=now)
-    return _Ended("completed", None, now, usage_json)
+    return Ended("completed", None, now, usage_json)
 
 
 def finish(
@@ -573,4 +494,4 @@ def finish(
         logger.exception("could not record generation failure", extra={"run_id": run_id})
         return
     if row is not None:
-        _log_finished(row, _Ended(status, error_code, now), _loads(row.input_json))
+        log_finished(row, Ended(status, error_code, now), _loads(row.input_json))

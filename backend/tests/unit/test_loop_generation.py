@@ -287,9 +287,10 @@ def test_a_board_without_a_repository_says_so() -> None:
 
 
 def test_oversized_repository_content_is_dropped_before_the_json_is_cut() -> None:
-    big: list[JsonValue] = [{"path": "src/big.py", "content": "x" * (MAX_OUTPUT_CHARS + 10)}]
+    """A context captured without a budget is still cut safely: repository content goes first."""
+    big: list[JsonValue] = [{"path": "src/big.py", "content": "x" * 1_010}]
     message = LoopGenerationService._user_message(
-        _captured([{"name": "acme app", "commit_sha": "abc123", "files": big}])
+        _captured([{"name": "acme app", "commit_sha": "abc123", "files": big}]), budget_chars=1_000
     )
     assert _context(message)["repositories"] == [
         {"name": "acme app", "commit_sha": "abc123", "files": [], "content_omitted": True}

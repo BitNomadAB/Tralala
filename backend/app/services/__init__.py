@@ -111,6 +111,7 @@ class Services:
             self.loop_agents,
             snapshots=self.repo_snapshot,
             idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+            context_chars=settings.generation_context_chars,
         )
         self.loop_qa = LoopQaService(
             self.board,

@@ -130,6 +130,16 @@ connection test says the endpoint speaks plain HTTP. When Tralala runs from sour
 Docker, `127.0.0.1` is your machine again and the presets' host name does not resolve: use
 `http://127.0.0.1:<port>/v1`.
 
+### How much a generation sends the model
+
+`TRALALA_GENERATION_CONTEXT_CHARS` (default 400 000 characters, about 100 k tokens) is what one
+analysis or RoadMap run sends: the Loop's documents first, then the repository snapshot cut to what
+remains. With several repositories each gets an even share of what is left, and what one does not use
+carries over to the next. When the documents leave less than 20 000 characters, the previous AI drafts
+are sent without their content so the code fits; the Info is always sent whole. Raise the value for a
+model with a larger context window, lower it for a small one. The run shows what it sent: "based on
+`<repository>` @ `<commit>`, N files, M KB".
+
 ## From source
 
 Use this when you want to change the code, run the test suites, or work offline. The commands below

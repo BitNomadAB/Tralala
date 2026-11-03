@@ -18,10 +18,11 @@ Two rules shape the code below.
 from __future__ import annotations
 
 import io
+import json
 import logging
 import tarfile
 import time
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Protocol, TypedDict
 from urllib.parse import urlsplit
 
 from pydantic import JsonValue
@@ -129,11 +130,18 @@ class SnapshotFile(TypedDict):
 
 
 class Snapshot(TypedDict):
-    """The bounded file set read from one archive."""
+    """The bounded file set read from one archive; ``chars`` is what its files take in a run's
+    context JSON."""
 
     files: list[SnapshotFile]
     truncated: bool
     text_bytes: int
+    chars: int
+
+
+def file_chars(file: SnapshotFile) -> int:
+    """What one file takes in the context JSON, with the separator before it."""
+    return len(json.dumps(file, ensure_ascii=False)) + 2
 
 
 def _client() -> httpx.Client:
@@ -289,10 +297,12 @@ def select_members(
     return selected
 
 
-def read_snapshot(archive_bytes: bytes) -> Snapshot:
-    """Extract the bounded, ordered file set from one tarball."""
+def read_snapshot(archive_bytes: bytes, *, budget_chars: int | None = None) -> Snapshot:
+    """Extract the bounded, ordered file set from one tarball; with ``budget_chars``, the files
+    also stop where the next one would not fit in that many characters of context."""
     files: list[SnapshotFile] = []
     used_bytes = 0
+    used_chars = 0
     truncated = False
     try:
         # Opened apart from the `with` below, so only a failed open is malformed_archive.
@@ -317,27 +327,56 @@ def read_snapshot(archive_bytes: bytes) -> Snapshot:
                 content = payload.decode("utf-8")
             except UnicodeDecodeError:
                 content = payload.decode("utf-8", errors="replace")
-            files.append({"path": relative, "bytes": len(payload), "content": content})
+            file: SnapshotFile = {"path": relative, "bytes": len(payload), "content": content}
+            cost = file_chars(file)
+            if budget_chars is not None and used_chars + cost > budget_chars:
+                truncated = True
+                break
+            files.append(file)
             used_bytes += len(payload)
-    return {"files": files, "truncated": truncated, "text_bytes": used_bytes}
+            used_chars += cost
+    return {"files": files, "truncated": truncated, "text_bytes": used_bytes, "chars": used_chars}
+
+
+class RepositorySource(Protocol):
+    """What a snapshot needs of ``RepositoryService``: the board's enabled repositories in link
+    order, and a repository's token."""
+
+    def for_board(self, board_id: str) -> list[RepositoryEntry]: ...
+
+    def token(self, repository_id: str) -> str | None: ...
 
 
 class RepositorySnapshotService:
     """Turn a board's repository links into the snapshot one generation run may see."""
 
-    def __init__(self, repositories: RepositoryService) -> None:
+    def __init__(self, repositories: RepositorySource) -> None:
         self.repositories = repositories
 
-    def for_board(self, board_id: str) -> list[JsonObject]:
-        """One entry per enabled repository on the board; failures are entries, not exceptions."""
+    def for_board(self, board_id: str, *, budget_chars: int | None = None) -> list[JsonObject]:
+        """One entry per enabled repository on the board; failures are entries, not exceptions.
+
+        With ``budget_chars`` the repositories share it in link order: each gets an even share of
+        what is left, so what one does not use (a small repository, a failed fetch) carries over to
+        the next.
+        """
         rows = self.repositories.for_board(board_id)
         if not rows:
             # Silent here used to look like a successful fetch in the run panel: say so in the log.
             logger.info("repository_snapshot_none", extra={"board_id": board_id})
             return []
-        return [self._one(row) for row in rows]
+        if budget_chars is None:
+            return [self._one(row, None) for row in rows]
+        entries: list[JsonObject] = []
+        remaining = budget_chars
+        for index, row in enumerate(rows):
+            entry = self._one(row, remaining // (len(rows) - index))
+            included = entry.get("snapshot_chars_included")
+            remaining -= included if isinstance(included, int) else 0
+            entries.append(entry)
+        return entries
 
-    def _one(self, row: RepositoryEntry) -> JsonObject:
+    def _one(self, row: RepositoryEntry, budget: int | None) -> JsonObject:
         entry: JsonObject = {
             "id": row["id"],
             "name": row["name"],
@@ -353,7 +392,7 @@ class RepositorySnapshotService:
         try:
             sha = resolve_commit(owner, name, row.get("branch"), token)
             archive = fetch_archive(owner, name, sha, token)
-            snapshot = read_snapshot(archive)
+            snapshot = read_snapshot(archive, budget_chars=budget)
         except SnapshotError as exc:
             logger.warning(
                 "repository_snapshot_failed",
@@ -375,11 +414,22 @@ class RepositorySnapshotService:
                 "duration_ms": int((time.monotonic() - started) * 1000),
             },
         )
+        budgeted: JsonObject = (
+            {}
+            if budget is None
+            else {
+                "budget_chars": budget,
+                "snapshot_chars_included": snapshot["chars"],
+                # Not even the first file fitted in this repository's share.
+                "content_omitted": not snapshot["files"] and snapshot["truncated"],
+            }
+        )
         return {
             **entry,
             "commit_sha": sha,
             "file_count": len(snapshot["files"]),
             "truncated": snapshot["truncated"],
+            **budgeted,
             "files": [
                 {"path": file["path"], "bytes": file["bytes"], "content": file["content"]}
                 for file in snapshot["files"]
@@ -391,6 +441,6 @@ class RepositorySnapshotService:
         """The caps as a sentence, so the prompt states what it was given and what it was not."""
         return (
             f"At most {ARCHIVE_MAX_BYTES // (1024 * 1024)} MB of archive, {MAX_FILES} files and "
-            f"{MAX_TEXT_BYTES // 1024} KB of text are sent; build output, dependencies, lock "
-            "files, binaries and images are skipped."
+            f"{MAX_TEXT_BYTES // 1024} KB of text are sent, less when the documents leave less "
+            "room; build output, dependencies, lock files, binaries and images are skipped."
         )
