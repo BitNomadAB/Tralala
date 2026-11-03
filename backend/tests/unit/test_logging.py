@@ -27,6 +27,7 @@ from app.core.logging import (
     ROOT_LOGGER,
     JsonFormatter,
     bound_request_id,
+    carry_request_id,
     configure_logging,
 )
 
@@ -91,6 +92,42 @@ def test_the_request_id_is_the_one_bound_where_the_record_is_formatted() -> None
         assert _line(record)["request_id"] == "req-1"
     assert REQUEST_ID.get() is None
     assert _line(record)["request_id"] is None
+
+
+def test_work_handed_on_logs_under_the_request_that_handed_it_on() -> None:
+    def seen(label: str) -> tuple[str, str | None]:
+        return label, REQUEST_ID.get()
+
+    with bound_request_id("req-1"):
+        queued = carry_request_id(seen)
+    unbound = carry_request_id(seen)
+    assert REQUEST_ID.get() is None
+    assert queued("run") == ("run", "req-1")
+    assert REQUEST_ID.get() is None
+    assert unbound("startup") == ("startup", None)
+    with bound_request_id("req-2"):
+        assert queued("run") == ("run", "req-1")
+        assert REQUEST_ID.get() == "req-2"
+
+
+def test_every_executor_submission_carries_the_request_id() -> None:
+    found: list[str] = []
+    for path in sorted((APP / "services").glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "submit"
+            ):
+                first = node.args[0] if node.args else None
+                wrapped = (
+                    isinstance(first, ast.Call)
+                    and isinstance(first.func, ast.Name)
+                    and first.func.id == "carry_request_id"
+                )
+                if not wrapped:
+                    found.append(f"{path.name}:{node.lineno}")
+    assert not found, f"executor work without carry_request_id: {found}"
 
 
 def test_an_extra_cannot_replace_a_fixed_field() -> None:

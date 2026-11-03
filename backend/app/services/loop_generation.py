@@ -27,6 +27,7 @@ from uuid import uuid4
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
 from ..core.errors import ApiError, Conflict, NotFound
+from ..core.logging import carry_request_id
 from ..db.generated.board import LoopGenerationRunsRow, LoopsRow
 from ..db.generated.registry import AgentsRow, BoardsRow
 from ..repositories.board import BoardUnitOfWork
@@ -353,7 +354,7 @@ class LoopGenerationService:
         if self._executor is None:
             self._run(board_id, loop_id, run_id)
             return
-        future = self._executor.submit(self._run, board_id, loop_id, run_id)
+        future = self._executor.submit(carry_request_id(self._run), board_id, loop_id, run_id)
         self._futures.add(future)
         future.add_done_callback(self._futures.discard)
 

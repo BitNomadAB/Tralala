@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -56,13 +56,33 @@ def bound_request_id(request_id: str) -> Generator[None]:
     """Every line logged inside the block names the request.
 
     That covers the tasks the block starts and the worker threads anyio runs the routes in, which
-    copy the context; an executor the services own does not, so its lines say null.
+    copy the context. An executor the services own does not copy it, so work handed to one is
+    wrapped in ``carry_request_id``.
     """
     token = REQUEST_ID.set(request_id)
     try:
         yield
     finally:
         REQUEST_ID.reset(token)
+
+
+def carry_request_id[**P, R](work: Callable[P, R]) -> Callable[P, R]:
+    """``work`` as a call that logs under the request id current now, on whichever thread it runs.
+
+    A service submits background work (a generation run, a mention job, a discussion run) to its
+    own executor, whose threads start with an empty context; wrapped here at submission, the work's
+    lines name the request that started it. Work started without a request stays null.
+    """
+    request_id = REQUEST_ID.get()
+
+    def run(*args: P.args, **kwargs: P.kwargs) -> R:
+        token = REQUEST_ID.set(request_id)
+        try:
+            return work(*args, **kwargs)
+        finally:
+            REQUEST_ID.reset(token)
+
+    return run
 
 
 def _is_mapping(value: object) -> TypeGuard[Mapping[object, object]]:

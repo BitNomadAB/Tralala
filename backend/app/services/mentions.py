@@ -27,6 +27,7 @@ from weakref import WeakValueDictionary
 from ..core.context import ActorContext
 from ..core.dates import utcnow
 from ..core.errors import Conflict, NotFound
+from ..core.logging import carry_request_id
 from ..db.generated.board import CommentMentionJobsRow, CommentsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.board_files import AttachmentFiles
@@ -327,7 +328,7 @@ class MentionService:
             executor = self._executor
         if executor is None:
             return
-        executor.submit(self._worker, board_id, job_id)
+        executor.submit(carry_request_id(self._worker), board_id, job_id)
 
     def _worker(self, board_id: str, job_id: str) -> None:
         try:

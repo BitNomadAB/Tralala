@@ -132,8 +132,9 @@ exception adds its traceback as `exc_info`.
 
 - **Everything one request did** — every line written while a request is served carries its id, so
   the `X-Request-ID` of a response finds the `http_request` line and whatever else that request
-  logged: `docker compose logs backend | grep <id>`. Work outside a request (startup, scheduled
-  backups, queued agent runs) has `"request_id": null`.
+  logged: `docker compose logs backend | grep <id>`. Work a request queued (a generation run, a
+  mention job, a discussion run) logs under the id of that request; work outside a request
+  (startup, scheduled backups, recovery) has `"request_id": null`.
 - **More or less detail** — `TRALALA_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING` or `ERROR`; default
   `INFO`) is the lowest level written. `WARNING` drops the per-request lines.
 - **`[redacted]` in a line** — the value of a field named `token`, `api_key`, `authorization` or

@@ -21,6 +21,7 @@ from weakref import WeakValueDictionary
 from ..core.context import ActorContext
 from ..core.dates import utcnow
 from ..core.errors import Conflict, NotFound, ValidationFailure
+from ..core.logging import carry_request_id
 from ..db.generated.board import DiscussionRunsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from .events import RUN_FINISHED, RUN_STARTED, STATUS_CHANGED, Event, EventService
@@ -392,7 +393,7 @@ class RunService:
             executor = self._executor
         if executor is None:
             return
-        executor.submit(self._worker, board_id, discussion_id, run_id)
+        executor.submit(carry_request_id(self._worker), board_id, discussion_id, run_id)
 
     def _worker(self, board_id: str, discussion_id: str, run_id: str) -> None:
         try:
