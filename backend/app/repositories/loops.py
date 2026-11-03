@@ -52,6 +52,10 @@ class LoopRepository(Protocol):
 
     def update(self, loop_id: str, changes: LoopChanges) -> None: ...
 
+    def complete(self, loop_id: str, *, history_id: str, now: str) -> None:
+        """Stage ``completed`` with its time and history record, and the next version."""
+        ...
+
     def cancel(self, loop_id: str, *, now: str) -> None:
         """Stage ``cancelled``, the cancellation time, and the next version."""
         ...

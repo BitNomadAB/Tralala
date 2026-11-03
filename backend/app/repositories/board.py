@@ -33,6 +33,7 @@ from .labels import LabelRepository
 from .lists import ListRepository
 from .loop_agents import LoopAgentRepository
 from .loop_documents import LoopApprovalRepository, LoopDocumentRepository
+from .loop_history import LoopArchiveRepository, LoopHistoryRepository
 from .loop_plans import (
     LoopDependencyRepository,
     LoopPhaseRepository,
@@ -140,6 +141,12 @@ class BoardRepositories(Protocol):
 
     @property
     def mention_jobs(self) -> MentionJobRepository: ...
+
+    @property
+    def archive(self) -> LoopArchiveRepository: ...
+
+    @property
+    def history(self) -> LoopHistoryRepository: ...
 
     def savepoint(self) -> AbstractContextManager[None]:
         """A nested transaction inside a writer: it keeps its writes when the block ends normally

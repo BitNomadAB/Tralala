@@ -33,6 +33,10 @@ _ADD = text(
     " :created_by_actor_type, :created_by_name, :created_at, :updated_at, :archived_at,"
     " :cancelled_at, :completed_at)"
 )
+_COMPLETE = text(
+    "UPDATE loops SET stage = 'completed', completed_at = :now, history_id = :history,"
+    " version = version + 1, updated_at = :now WHERE id = :id"
+)
 _CANCEL = text(
     "UPDATE loops SET stage = 'cancelled', cancelled_at = :now, version = version + 1,"
     " updated_at = :now WHERE id = :id"
@@ -117,6 +121,10 @@ class SqlLoopRepository:
         columns = sql.assignments(changes, LOOP_EDITABLE)
         statement = text(f"UPDATE loops SET {columns} WHERE id = :id")  # noqa: S608 - from LOOP_EDITABLE
         self._connection.execute(statement, {**changes, "id": loop_id})
+
+    def complete(self, loop_id: str, *, history_id: str, now: str) -> None:
+        parameters = {"now": now, "history": history_id, "id": loop_id}
+        self._connection.execute(_COMPLETE, parameters)
 
     def cancel(self, loop_id: str, *, now: str) -> None:
         self._connection.execute(_CANCEL, {"now": now, "id": loop_id})

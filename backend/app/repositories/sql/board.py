@@ -33,6 +33,7 @@ from ..labels import LabelRepository
 from ..lists import ListRepository
 from ..loop_agents import LoopAgentRepository
 from ..loop_documents import LoopApprovalRepository, LoopDocumentRepository
+from ..loop_history import LoopArchiveRepository, LoopHistoryRepository
 from ..loop_plans import (
     LoopDependencyRepository,
     LoopPhaseRepository,
@@ -65,6 +66,7 @@ from .labels import SqlLabelRepository
 from .lists import SqlListRepository
 from .loop_agents import SqlLoopAgentRepository
 from .loop_documents import SqlLoopApprovalRepository, SqlLoopDocumentRepository
+from .loop_history import SqlLoopArchiveRepository, SqlLoopHistoryRepository
 from .loop_plans import (
     SqlLoopDependencyRepository,
     SqlLoopPhaseRepository,
@@ -117,6 +119,8 @@ class SqlBoardRepositories:
         self.rounds: DiscussionRoundRepository = SqlDiscussionRoundRepository(connection)
         self.outcomes: DiscussionOutcomeRepository = SqlDiscussionOutcomeRepository(connection)
         self.mention_jobs: MentionJobRepository = SqlMentionJobRepository(connection)
+        self.archive: LoopArchiveRepository = SqlLoopArchiveRepository(connection)
+        self.history: LoopHistoryRepository = SqlLoopHistoryRepository(connection)
 
     @contextmanager
     def savepoint(self) -> Generator[None]:

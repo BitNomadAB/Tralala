@@ -36,10 +36,14 @@ from app.db.generated.board import (
     LoopApprovalsRow,
     LoopDependenciesRow,
     LoopDocumentsRow,
+    LoopGenerationRunsRow,
+    LoopHistoryArtifactsRow,
+    LoopHistoryRow,
     LoopPhasesRow,
     LoopPlanItemsRow,
     LoopPlansRow,
     LoopQaCyclesRow,
+    LoopQaResultsRow,
     LoopsRow,
 )
 from app.repositories.activity import ActivityQuery, ActivityRepository
@@ -77,6 +81,7 @@ from app.repositories.labels import LabelChanges, LabelRepository
 from app.repositories.lists import ListRepository
 from app.repositories.loop_agents import LoopAgentRepository
 from app.repositories.loop_documents import LoopApprovalRepository, LoopDocumentRepository
+from app.repositories.loop_history import LoopArchiveRepository, LoopHistoryRepository
 from app.repositories.loop_plans import (
     LoopDependencyRepository,
     LoopPhaseRepository,
@@ -99,6 +104,7 @@ from tests.unit.fakes.discussions import (
     FakeDiscussionVoteRepository,
     FakeMentionJobRepository,
 )
+from tests.unit.fakes.history import FakeLoopArchiveRepository, FakeLoopHistoryRepository
 from tests.unit.fakes.registry import ConstraintError, like
 
 BOARD_ID = "0b6f3c1e-7a52-4d8e-9c41-2f5a6b7c8d9e"
@@ -155,6 +161,14 @@ class BoardState:
     mention_jobs: dict[str, CommentMentionJobsRow] = field(
         default_factory=dict[str, CommentMentionJobsRow]
     )
+    qa_results: list[LoopQaResultsRow] = field(default_factory=list[LoopQaResultsRow])
+    generation_runs: dict[str, LoopGenerationRunsRow] = field(
+        default_factory=dict[str, LoopGenerationRunsRow]
+    )
+    history: dict[str, LoopHistoryRow] = field(default_factory=dict[str, LoopHistoryRow])
+    artifacts: list[LoopHistoryArtifactsRow] = field(
+        default_factory=list[LoopHistoryArtifactsRow]
+    )
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -189,6 +203,10 @@ class BoardState:
             rounds=list(self.rounds),
             outcomes=list(self.outcomes),
             mention_jobs=dict(self.mention_jobs),
+            qa_results=list(self.qa_results),
+            generation_runs=dict(self.generation_runs),
+            history=dict(self.history),
+            artifacts=list(self.artifacts),
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -223,6 +241,10 @@ class BoardState:
         self.rounds = snapshot.rounds
         self.outcomes = snapshot.outcomes
         self.mention_jobs = snapshot.mention_jobs
+        self.qa_results = snapshot.qa_results
+        self.generation_runs = snapshot.generation_runs
+        self.history = snapshot.history
+        self.artifacts = snapshot.artifacts
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -622,6 +644,18 @@ class FakeLoopRepository:
         if not changes:
             raise ConstraintError("an update without a column is not SQL")
         self._change(loop_id, lambda loop: loop.__replace__(**changes))
+
+    def complete(self, loop_id: str, *, history_id: str, now: str) -> None:
+        self._change(
+            loop_id,
+            lambda loop: loop.__replace__(
+                stage="completed",
+                completed_at=now,
+                history_id=history_id,
+                version=loop.version + 1,
+                updated_at=now,
+            ),
+        )
 
     def cancel(self, loop_id: str, *, now: str) -> None:
         self._change(
@@ -1808,6 +1842,8 @@ class FakeBoardRepositories:
         self.rounds: DiscussionRoundRepository = FakeDiscussionRoundRepository(state)
         self.outcomes: DiscussionOutcomeRepository = FakeDiscussionOutcomeRepository(state)
         self.mention_jobs: MentionJobRepository = FakeMentionJobRepository(state)
+        self.archive: LoopArchiveRepository = FakeLoopArchiveRepository(state)
+        self.history: LoopHistoryRepository = FakeLoopHistoryRepository(state)
         self.savepoints = 0
 
     @contextmanager
