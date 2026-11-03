@@ -6,94 +6,54 @@ the real ones as defaults, so every rule here runs in a unit test without a data
 scrypt; tokens, session ids and CSRF values always come from ``core.security``. Each operation reads
 what it needs, hashes outside any transaction, and then writes in one writer, so a change that
 touches several rows (disabling a person and everything they issued) commits as a whole.
+
+This module is the public import path. ``AuthService`` keeps the first start, the accounts and the
+enrolment invitations here, and delegates sign-in, sessions and appearance preferences
+(``auth_sessions``) and API tokens (``auth_tokens``) to the modules beside it, whose names it
+re-exports.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TypedDict, TypeIs
+from typing import TypedDict
 from uuid import uuid4
 
 from ..core.config import Settings
-from ..core.context import (
-    MEMBER_TOKEN_SCOPES,
-    ROLE_ADMIN,
-    ROLES,
-    SCOPES,
-    ActorContext,
-    scopes_for_role,
-)
+from ..core.context import ROLE_ADMIN, ROLES, ActorContext
 from ..core.dates import iso_utc
 from ..core.errors import Conflict, Forbidden, NotFound, Unauthorized, ValidationFailure
 from ..core.security import (
     BOOTSTRAP_PASSWORD_FILE_NAME,
     INSECURE_BOOTSTRAP_PASSWORDS,
-    create_session_value,
     generate_token,
     hash_password,
     hash_token,
-    new_csrf_token,
-    new_session_id,
-    read_session_value,
     resolve_secret_key,
     verify_password,
     write_private_file,
 )
-from ..db.generated.registry import (
-    ActorsRow,
-    ApiCredentialsRow,
-    SessionsRow,
-    UserCredentialsRow,
-    UserInvitesRow,
-)
-from ..repositories.accounts import IssuedToken
+from ..db.generated.registry import ActorsRow, UserCredentialsRow, UserInvitesRow
 from ..repositories.registry import RegistryRepositories, RegistryUnitOfWork
 from ..schemas.auth import CredentialCreate, PreferencesUpdate
+from . import auth_sessions, auth_tokens
+from .auth_sessions import SESSION_TOUCH_INTERVAL_SECONDS, Preferences, SignedInActor, SignIn
+from .auth_tokens import CredentialEntry, CredentialIssued, stored_scopes
+from .auth_tokens import token_scopes as _token_scopes
 
 # The first administrator's warning keeps the logger operators have always seen it under.
 logger = logging.getLogger("tralala.registry")
-
-# Verified even when the user does not exist so both paths spend the same hashing work.
-_DUMMY_PASSWORD_HASH = hash_password("dummy-password-for-timing")
 
 # Reused placeholder passwords and a few obvious choices; the length rule does most of the work.
 WEAK_PASSWORDS = frozenset(
     {"admin", "password", "changeme", "change-me", "secret", "letmein", "qwerty", "12345678"}
 )
 
-# A session is marked as seen at most this often, so a busy client does not write on every call.
-SESSION_TOUCH_INTERVAL_SECONDS = 300
-
-_DAY = 24 * 60 * 60
 _HOUR = 60 * 60
-
-
-class Preferences(TypedDict):
-    theme_mode: str | None
-    theme_kit: str | None
-
-
-class SignedInActor(TypedDict):
-    id: str
-    type: str
-    name: str
-    role: str
-    scopes: list[str]
-    preferences: Preferences
-
-
-class SignIn(TypedDict):
-    """A new session: the cookie value, its expiry and the CSRF value the client repeats."""
-
-    actor: SignedInActor
-    session: str
-    expires_at: str
-    csrf_token: str
 
 
 class PasswordChanged(TypedDict):
@@ -148,60 +108,6 @@ class InviteIssued(TypedDict):
     expires_at: str
 
 
-class CredentialEntry(TypedDict):
-    """An API token as listed: never the token, never its hash."""
-
-    id: str
-    actor_id: str
-    owner_actor_id: str | None
-    actor_name: str
-    owner_name: str | None
-    name: str
-    scopes: list[str]
-    created_at: str
-    expires_at: str | None
-    last_used_at: str | None
-    revoked_at: str | None
-
-
-class CredentialIssued(TypedDict):
-    """A new API token: the one time ``token`` is returned; only its hash is stored."""
-
-    id: str
-    actor_id: str
-    owner_actor_id: str | None
-    name: str
-    scopes: list[str]
-    created_at: str
-    expires_at: str | None
-    revoked_at: str | None
-    last_used_at: str | None
-    actor_name: str
-    owner_name: str
-    token: str
-
-
-def _token_scopes() -> frozenset[str]:
-    """Scopes an API token may hold; administration scopes stay with user accounts."""
-    blocked = {"credentials:admin", "users:admin"}
-    return frozenset(scope for scope in SCOPES if scope not in blocked)
-
-
-def _is_list(value: object) -> TypeIs[list[object]]:
-    return isinstance(value, list)
-
-
-def stored_scopes(raw: str) -> list[str]:
-    """The scopes a token row holds: the names in its JSON list; anything else holds none."""
-    try:
-        parsed: object = json.loads(raw)
-    except ValueError:
-        return []
-    if not _is_list(parsed):
-        return []
-    return [scope for scope in parsed if isinstance(scope, str)]
-
-
 def check_password(password: str, *, minimum_length: int, username: str | None = None) -> None:
     """The password policy: at least eight characters (or the configured minimum, if higher),
     not a well-known password and not the username."""
@@ -223,29 +129,6 @@ def _now() -> datetime:
 
 def _new_id() -> str:
     return str(uuid4())
-
-
-def _preferences(record: UserCredentialsRow | None) -> Preferences:
-    if record is None:
-        return {"theme_mode": None, "theme_kit": None}
-    return {"theme_mode": record.theme_mode, "theme_kit": record.theme_kit}
-
-
-def _credential_entry(token: IssuedToken) -> CredentialEntry:
-    credential = token.credential
-    return {
-        "id": credential.id,
-        "actor_id": credential.actor_id,
-        "owner_actor_id": credential.owner_actor_id,
-        "actor_name": token.actor.name,
-        "owner_name": token.owner_name,
-        "name": credential.name,
-        "scopes": stored_scopes(credential.scopes),
-        "created_at": credential.created_at,
-        "expires_at": credential.expires_at,
-        "last_used_at": credential.last_used_at,
-        "revoked_at": credential.revoked_at,
-    }
 
 
 class AuthService:
@@ -311,126 +194,37 @@ class AuthService:
     # --- sessions ------------------------------------------------------------------------------
 
     def login(self, username: str, password: str) -> SignIn:
-        with self.store.reader() as repos:
-            user = repos.users.enabled_by_name(username)
-        stored = user.credentials.password_hash if user is not None else _DUMMY_PASSWORD_HASH
-        valid = self._verify_password(password, stored)
-        if user is None or not valid:
-            raise Unauthorized("Invalid credentials", code="invalid_credentials")
-        session_id = new_session_id()
-        value, _expires_epoch = create_session_value(
-            self.secret_key, session_id, self.settings.session_ttl_seconds
+        return auth_sessions.login(
+            self.store,
+            self.settings,
+            self.secret_key,
+            username,
+            password,
+            clock=self._clock,
+            new_id=self._new_id,
+            verify_password=self._verify_password,
         )
-        moment = self._clock()
-        now = iso_utc(moment)
-        expires_at = iso_utc(moment + timedelta(seconds=self.settings.session_ttl_seconds))
-        with self.store.writer() as repos:
-            repos.sessions.add(
-                SessionsRow(
-                    id=self._new_id(),
-                    token_hash=hash_token(session_id),
-                    actor_id=user.actor.id,
-                    created_at=now,
-                    expires_at=expires_at,
-                    last_seen_at=now,
-                    revoked_at=None,
-                )
-            )
-        role = user.credentials.role
-        return {
-            "actor": {
-                "id": user.actor.id,
-                "type": user.actor.type,
-                "name": user.actor.name,
-                "role": role,
-                "scopes": sorted(scopes_for_role(role)),
-                "preferences": _preferences(user.credentials),
-            },
-            "session": value,
-            "expires_at": expires_at,
-            "csrf_token": new_csrf_token(),
-        }
 
     def logout(self, session_value: str | None) -> bool:
-        if not session_value:
-            return False
-        parsed = read_session_value(self.secret_key, session_value)
-        if parsed is None:
-            return False
-        with self.store.writer() as repos:
-            return repos.sessions.revoke(hash_token(parsed[0]), now=self._stamp())
+        return auth_sessions.logout(self.store, self.secret_key, session_value, stamp=self._stamp)
 
     def actor_from_session(self, session_value: str) -> ActorContext:
-        parsed = read_session_value(self.secret_key, session_value)
-        if parsed is None:
-            raise Unauthorized("Session expired or invalid", code="invalid_session")
-        session_id, _expires = parsed
-        with self.store.reader() as repos:
-            found = repos.sessions.by_token_hash(hash_token(session_id))
-        moment = self._clock()
-        now = iso_utc(moment)
-        if (
-            found is None
-            or found.session.revoked_at is not None
-            or found.actor.disabled_at is not None
-            or found.session.expires_at < now
-        ):
-            raise Unauthorized("Session expired or invalid", code="invalid_session")
-        seen_before = iso_utc(moment - timedelta(seconds=SESSION_TOUCH_INTERVAL_SECONDS))
-        with self.store.writer() as repos:
-            repos.sessions.touch(found.session.id, now=now, seen_before=seen_before)
-        return ActorContext(
-            actor_id=found.session.actor_id,
-            actor_type=found.actor.type,
-            actor_name=found.actor.name,
-            scopes=scopes_for_role(found.role),
-            role=found.role,
+        return auth_sessions.actor_from_session(
+            self.store, self.secret_key, session_value, clock=self._clock
         )
 
     def actor_from_token(self, token: str) -> ActorContext:
-        with self.store.reader() as repos:
-            found = repos.credentials.by_token_hash(hash_token(token))
-        if found is None:
-            raise Unauthorized("Invalid API token", code="invalid_token")
-        credential = found.credential
-        if credential.revoked_at is not None or found.actor.disabled_at is not None:
-            raise Unauthorized("API token revoked", code="token_revoked")
-        now = self._stamp()
-        if credential.expires_at and credential.expires_at < now:
-            raise Unauthorized("API token expired", code="token_expired")
-        scopes = frozenset(stored_scopes(credential.scopes))
-        with self.store.writer() as repos:
-            repos.credentials.touch(credential.id, now=now)
-        return ActorContext(
-            actor_id=credential.actor_id,
-            actor_type=found.actor.type,
-            actor_name=found.actor.name,
-            scopes=scopes,
-        )
+        return auth_tokens.actor_from_token(self.store, token, stamp=self._stamp)
 
     # --- accounts ------------------------------------------------------------------------------
 
     def preferences(self, actor: ActorContext) -> Preferences:
         """Per-account appearance. Agents and tokens have no personal preferences."""
-        if not actor.is_user:
-            return {"theme_mode": None, "theme_kit": None}
-        with self.store.reader() as repos:
-            return _preferences(repos.users.credentials(actor.actor_id))
+        return auth_sessions.preferences(self.store, actor)
 
     def update_preferences(self, actor: ActorContext, payload: PreferencesUpdate) -> Preferences:
         """Change only the fields the request sent; a field sent as null clears it."""
-        if not actor.is_user:
-            raise Forbidden("Appearance preferences belong to a signed-in account")
-        sent = payload.model_fields_set
-        with self.store.writer() as repos:
-            current = _preferences(repos.users.credentials(actor.actor_id))
-            repos.users.set_preferences(
-                actor.actor_id,
-                theme_mode=payload.theme_mode if "theme_mode" in sent else current["theme_mode"],
-                theme_kit=payload.theme_kit if "theme_kit" in sent else current["theme_kit"],
-                now=self._stamp(),
-            )
-            return _preferences(repos.users.credentials(actor.actor_id))
+        return auth_sessions.update_preferences(self.store, actor, payload, stamp=self._stamp)
 
     def validate_password(self, password: str, *, username: str | None = None) -> None:
         check_password(
@@ -649,165 +443,46 @@ class AuthService:
 
     # --- API credentials -----------------------------------------------------------------------
 
-    def _credential_expiry(self, expires_in_days: int | None) -> str | None:
-        days = (
-            int(self.settings.credential_default_ttl_days)
-            if expires_in_days is None
-            else expires_in_days
-        )
-        if days <= 0:
-            return None
-        return self._stamp(days * _DAY)
-
-    def _issue(
-        self,
-        actor: ActorContext,
-        payload: CredentialCreate,
-        *,
-        owner_actor_id: str | None = None,
-        expires_at: str | None = None,
-    ) -> CredentialIssued:
-        allowed = _token_scopes()
-        unknown: list[str] = [scope for scope in payload.scopes if scope not in allowed]
-        if unknown:
-            raise ValidationFailure("Unknown scope requested", details={"unknown_scopes": unknown})
-        scopes: list[str] = list(payload.scopes)
-        token = generate_token()
-        now = self._stamp()
-        agent = ActorsRow(
-            id=self._new_id(), type="agent", name=payload.name, created_at=now, disabled_at=None
-        )
-        credential = ApiCredentialsRow(
-            id=self._new_id(),
-            actor_id=agent.id,
-            owner_actor_id=owner_actor_id if owner_actor_id is not None else actor.actor_id,
-            name=payload.name,
-            token_hash=hash_token(token),
-            scopes=json.dumps(scopes),
-            created_at=now,
-            expires_at=(
-                expires_at
-                if expires_at is not None
-                else self._credential_expiry(payload.expires_in_days)
-            ),
-            last_used_at=None,
-            revoked_at=None,
-        )
-        with self.store.writer() as repos:
-            repos.actors.add(agent)
-            repos.credentials.add(credential)
-        return {
-            "id": credential.id,
-            "actor_id": credential.actor_id,
-            "owner_actor_id": credential.owner_actor_id,
-            "name": credential.name,
-            "scopes": scopes,
-            "created_at": credential.created_at,
-            "expires_at": credential.expires_at,
-            "revoked_at": None,
-            "last_used_at": None,
-            "actor_name": agent.name,
-            # The issuer's name, also when an administrator issues a token another person owns.
-            "owner_name": actor.actor_name,
-            "token": token,
-        }
-
-    def _member_policy(self, actor: ActorContext, payload: CredentialCreate) -> int:
-        """A person's own agent access: within the member vocabulary, capped and time-boxed."""
-        outside: list[str] = [
-            scope for scope in payload.scopes if scope not in MEMBER_TOKEN_SCOPES
-        ]
-        if outside:
-            raise ValidationFailure(
-                "A personal agent access cannot hold these scopes; ask an administrator for a "
-                "wider token",
-                code="forbidden_scope",
-                details={"outside": outside, "allowed": list(MEMBER_TOKEN_SCOPES)},
-            )
-        with self.store.reader() as repos:
-            owned = repos.credentials.owner_counts().get(actor.actor_id)
-        live = owned.live if owned is not None else 0
-        limit = int(self.settings.member_token_limit)
-        if live >= limit:
-            raise Conflict(
-                f"You already have {live} agent accesses; revoke one before creating another",
-                code="agent_access_limit",
-                details={"limit": limit, "live": live},
-            )
-        if payload.expires_in_days is not None and payload.expires_in_days <= 0:
-            raise ValidationFailure(
-                "A personal agent access needs an expiry date",
-                code="expiry_required",
-                details={"max_days": int(self.settings.member_token_max_days)},
-            )
-        days = (
-            int(payload.expires_in_days)
-            if payload.expires_in_days is not None
-            else int(self.settings.member_token_default_days)
-        )
-        return min(days, int(self.settings.member_token_max_days))
-
     def create_credential(
         self, actor: ActorContext, payload: CredentialCreate
     ) -> CredentialIssued:
         """Any signed-in person may issue an agent access; only an admin may issue a wide one."""
-        if actor.is_admin:
-            return self._issue(actor, payload)
-        days = self._member_policy(actor, payload)
-        return self._issue(
-            actor, payload, owner_actor_id=actor.actor_id, expires_at=self._stamp(days * _DAY)
+        return auth_tokens.create_credential(
+            self.store, self.settings, actor, payload, stamp=self._stamp, new_id=self._new_id
         )
-
-    @staticmethod
-    def _owned_or_admin(
-        repos: RegistryRepositories, actor: ActorContext, credential_id: str
-    ) -> IssuedToken:
-        found = repos.credentials.get(credential_id)
-        if found is None or found.credential.revoked_at is not None:
-            raise NotFound("Credential not found or already revoked")
-        if not actor.is_admin and found.credential.owner_actor_id != actor.actor_id:
-            # A member must not learn whether somebody else's token exists.
-            raise NotFound("Credential not found or already revoked")
-        return found
 
     def rotate_credential(self, actor: ActorContext, credential_id: str) -> CredentialIssued:
-        with self.store.reader() as repos:
-            existing = self._owned_or_admin(repos, actor, credential_id).credential
-        replacement = CredentialCreate.model_validate(
-            {
-                "name": f"{existing.name[:180]} (rotated)",
-                "scopes": stored_scopes(existing.scopes),
-                "expires_in_days": None,
-            }
+        return auth_tokens.rotate_credential(
+            self.store, self.settings, actor, credential_id, stamp=self._stamp, new_id=self._new_id
         )
-        if actor.is_admin:
-            issued = self._issue(actor, replacement, owner_actor_id=existing.owner_actor_id)
-        else:
-            days = self._member_policy(actor, replacement)
-            issued = self._issue(
-                actor,
-                replacement,
-                owner_actor_id=actor.actor_id,
-                expires_at=self._stamp(int(days or 1) * _DAY),
-            )
-        self.revoke_credential(actor, credential_id)
-        return issued
 
     def list_credentials(
         self, actor: ActorContext, *, owner_id: str | None = None
     ) -> list[CredentialEntry]:
         """The caller's own agent access, or every token when an administrator asks."""
-        owner = (owner_id or None) if actor.is_admin else actor.actor_id
-        with self.store.reader() as repos:
-            tokens = repos.credentials.listing(owner)
-        return [_credential_entry(token) for token in tokens]
+        return auth_tokens.list_credentials(self.store, actor, owner_id=owner_id)
 
     def revoke_credential(self, actor: ActorContext, credential_id: str) -> bool:
         """Revoke the token and disable the agent actor it acted as."""
-        with self.store.writer() as repos:
-            found = self._owned_or_admin(repos, actor, credential_id)
-            now = self._stamp()
-            revoked = repos.credentials.revoke(credential_id, now=now)
-            if revoked:
-                repos.actors.disable(found.credential.actor_id, now=now)
-        return revoked
+        return auth_tokens.revoke_credential(self.store, actor, credential_id, stamp=self._stamp)
+
+
+__all__ = [
+    "SESSION_TOUCH_INTERVAL_SECONDS",
+    "WEAK_PASSWORDS",
+    "AuthService",
+    "CreatedUser",
+    "CredentialEntry",
+    "CredentialIssued",
+    "InviteIssued",
+    "PasswordChanged",
+    "PasswordReset",
+    "Preferences",
+    "SignIn",
+    "SignedInActor",
+    "UpdatedUser",
+    "UserEntry",
+    "_token_scopes",
+    "check_password",
+    "stored_scopes",
+]

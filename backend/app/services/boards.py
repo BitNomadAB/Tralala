@@ -5,93 +5,50 @@ its uploaded files. The service reaches the registry through the registry unit o
 database through the board unit of work (``app/repositories``) and its files through
 ``BoardFiles``; the clock, the id source and the schema head are passed in, so every rule here runs
 in a unit test without a database.
+
+This module is the public import path. ``BoardService`` keeps the queries, the lifecycle and the
+checks other services use, and delegates the use cases that live beside it: the registry entry and
+activity writes they share (``boards_registry``), replaying a creation (``boards_idempotency``) and
+export and import (``boards_archive``), whose names it re-exports.
 """
 
 from __future__ import annotations
 
-import io
 import json
 import logging
-import zipfile
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Final, Literal, Protocol, TypedDict, TypeIs
+from datetime import UTC, datetime
+from typing import Protocol
 from uuid import uuid4
-
-from pydantic import JsonValue
 
 from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
 from ..core.errors import Conflict, NotFound, ServiceUnavailable, ValidationFailure
 from ..core.identifiers import canonical_board_id
-from ..core.platform import copy_file, remove_file, remove_tree, retry_io
+from ..core.platform import remove_tree
 from ..db.generated.board import BoardLoopDefaultsRow, LabelsRow
-from ..db.generated.registry import BoardsRow, IdempotencyRecordsRow
+from ..db.generated.registry import BoardsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
-from ..repositories.board_files import BoardFiles, BoardMigrator, ProblemReason
+from ..repositories.board_files import BoardFiles, BoardMigrator
 from ..repositories.board_rows import BOARD_SORTS, BoardChanges
 from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.boards import BoardCreate, BoardUpdate
-from .activity import activity_entry
-from .common import archive_file_name
+from . import boards_archive, boards_idempotency, boards_registry
+from .boards_archive import (
+    EXPORT_FORMAT_VERSION,
+    IMPORT_REFUSALS,
+    MANIFEST_MAX_BYTES,
+    MAX_ARCHIVE_ATTACHMENTS,
+    ImportRefusal,
+)
+from .boards_registry import BoardEntry, BoardSchema, Counts, JsonObject
 from .idempotency import request_fingerprint
 from .templates import TemplateEntry
 
 logger = logging.getLogger("tralala")
 
-MANIFEST_MAX_BYTES = 1024 * 1024
-EXPORT_FORMAT_VERSION = 2
-MAX_ARCHIVE_ATTACHMENTS = 1000
 ALLOWED_STATUSES = {"active", "archived", "maintenance", "error", "migration_failed"}
-
-type Counts = tuple[int, int, int]
-"""Open Loops, unarchived lists and unarchived cards, in that order."""
-
-type JsonObject = dict[str, JsonValue]
-
-type ImportRefusal = ProblemReason | Literal["migration_failed"]
-"""Why an archive's database was refused: ``details.reason`` of ``422 board_import_invalid``."""
-
-IMPORT_REFUSALS: Final[Mapping[ImportRefusal, str]] = {
-    "not_a_database": "The archive's board.sqlite is not a database this installation can read",
-    "integrity_check_failed": "Imported database failed integrity check",
-    "not_a_board_database": "The archive's board.sqlite is not a board database",
-    "unknown_schema_revision": (
-        "The archive's board is at a schema revision this installation does not know"
-    ),
-    "migration_failed": "Imported board could not be migrated to the current schema",
-}
-
-
-class BoardEntry(TypedDict):
-    """A board as the API returns it: the registry row, its counters and its selections."""
-
-    id: str
-    name: str
-    description: str
-    status: str
-    created_at: str
-    updated_at: str
-    archived_at: str | None
-    schema_version: int
-    schema_revision: str | None
-    loop_count: int
-    list_count: int
-    card_count: int
-    repository_ids: list[str]
-    agent_ids: list[str]
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class BoardSchema:
-    """The head of the board migration chain, which a new board starts at."""
-
-    head_revision: str
-    version: int
-    """The number of revisions in the chain, which the human-facing ``schema_version`` shows."""
 
 
 class BoardCounters(Protocol):
@@ -135,57 +92,6 @@ def _now() -> datetime:
 
 def _new_id() -> str:
     return str(uuid4())
-
-
-def _is_object(value: object) -> TypeIs[JsonObject]:
-    """A parsed JSON value that is an object: its keys are strings and its values JSON."""
-    return isinstance(value, dict)
-
-
-def _json_object(value: object, what: str) -> JsonObject:
-    """``value`` as a JSON object. Anything else raises the ``AttributeError`` that reading a key
-    from it (``.get``) always raised, so a malformed archive fails exactly as before."""
-    if not _is_object(value):
-        raise AttributeError(f"{what} is not a JSON object")
-    return value
-
-
-def _as_int(value: JsonValue) -> int:
-    """``int()`` of a JSON scalar, as an archive manifest's numbers were always read."""
-    if value is None or isinstance(value, (list, dict)):
-        raise TypeError(f"not a number: {type(value).__name__}")
-    return int(value)
-
-
-def _archive_member(archive: zipfile.ZipFile, name: str, limit: int) -> bytes:
-    """Read one member, refusing to expand past ``limit``.
-
-    A zip's compression ratio is the attacker's choice: a few kilobytes can expand to gigabytes when
-    read. The declared size is checked first and the real read is bounded, because a header can lie.
-    """
-    info = archive.getinfo(name)
-    if info.file_size > limit:
-        raise ValidationFailure(
-            "Board archive member is larger than this installation accepts",
-            details={"entry": name, "bytes": info.file_size, "max_bytes": limit},
-        )
-    with archive.open(name) as handle:
-        payload = handle.read(limit + 1)
-    if len(payload) > limit:
-        raise ValidationFailure(
-            "Board archive member is larger than this installation accepts",
-            details={"entry": name, "max_bytes": limit},
-        )
-    return payload
-
-
-def _refused(reason: ImportRefusal, detail: str) -> ValidationFailure:
-    """The refusal of an archive whose database cannot become a board."""
-    return ValidationFailure(
-        IMPORT_REFUSALS[reason],
-        code="board_import_invalid",
-        details={"reason": reason, "detail": detail},
-    )
 
 
 class BoardService:
@@ -286,36 +192,14 @@ class BoardService:
 
     def _add_row(self, board_id: str, name: str, description: str) -> None:
         """A new board's registry row, in maintenance until its database is ready."""
-        now = self._now()
-        with self.store.writer() as repos:
-            repos.boards.add(
-                BoardsRow(
-                    id=board_id,
-                    name=name,
-                    description=description,
-                    status="maintenance",
-                    created_at=now,
-                    updated_at=now,
-                    archived_at=None,
-                    schema_version=self.schema.version,
-                    schema_revision=None,
-                )
-            )
+        boards_registry.add_row(self.store, self.schema, board_id, name, description, now=self._now)
 
     def _update_row(self, board_id: str, changes: BoardChanges) -> None:
-        with self.store.writer() as repos:
-            repos.boards.update(board_id, changes, now=self._now())
+        boards_registry.update_row(self.store, board_id, changes, now=self._now)
 
     def _activate(self, board_id: str) -> None:
         """The board's database is ready at the schema head, so the board takes requests."""
-        self._update_row(
-            board_id,
-            {
-                "status": "active",
-                "schema_version": self.schema.version,
-                "schema_revision": self.schema.head_revision,
-            },
-        )
+        boards_registry.activate(self.store, self.schema, board_id, now=self._now)
 
     def _log(
         self,
@@ -325,16 +209,8 @@ class BoardService:
         board_id: str,
         changes: Mapping[str, object] | None = None,
     ) -> None:
-        board.activity.add(
-            activity_entry(
-                actor,
-                action=action,
-                entity_type="board",
-                entity_id=board_id,
-                changes=changes,
-                entry_id=self._new_id(),
-                timestamp=self._now(),
-            )
+        boards_registry.log_activity(
+            board, actor, action, board_id, changes, new_id=self._new_id, now=self._now
         )
 
     # --- queries ---------------------------------------------------------------------------------
@@ -451,54 +327,15 @@ class BoardService:
     def _replay_or_reserve(
         self, actor: ActorContext, key: str, fingerprint: str, board_id: str
     ) -> BoardEntry | JsonObject | None:
-        """The answer a replayed key gets, or None after reserving the key for ``board_id``.
-
-        The key is reserved before the board exists, so a retry that arrives while the first
-        request is still creating it is told so instead of creating a second board.
-        """
-        with self.store.writer() as repos:
-            existing = repos.idempotency.get(actor.actor_id, key)
-            if existing is None:
-                pending = {"_pending": True, "board_id": board_id}
-                repos.idempotency.put(self._record(actor, key, fingerprint, pending))
-                return None
-            if existing.request_hash != fingerprint:
-                raise Conflict(
-                    "Idempotency key was already used with a different payload",
-                    code="idempotency_key_reused",
-                )
-            stored = _json_object(json.loads(existing.response_json), "a stored response")
-            if not stored.get("_pending"):
-                return stored
-            pending_id = str(stored.get("board_id") or "")
-            row = repos.boards.get(pending_id) if pending_id else None
-        if row is not None and row.status == "active":
-            return self.serialize(row)
-        if row is not None and row.status == "error":
-            raise Conflict(
-                "Board creation with this idempotency key failed; inspect the "
-                "board entry before retrying",
-                code="creation_failed",
-                details={"board_id": pending_id},
-            )
-        raise Conflict(
-            "Board creation is still in progress for this idempotency key",
-            code="creation_in_progress",
-            details={"board_id": pending_id},
-        )
-
-    def _record(
-        self, actor: ActorContext, key: str, fingerprint: str, response: Mapping[str, object]
-    ) -> IdempotencyRecordsRow:
-        moment = self._clock()
-        expires = moment + timedelta(seconds=self.settings.idempotency_ttl_seconds)
-        return IdempotencyRecordsRow(
-            actor_id=actor.actor_id,
-            idempotency_key=key,
-            request_hash=fingerprint,
-            response_json=json.dumps(response),
-            created_at=iso_utc(moment),
-            expires_at=iso_utc(expires),
+        return boards_idempotency.replay_or_reserve(
+            self.store,
+            self.settings,
+            actor,
+            key,
+            fingerprint,
+            board_id,
+            clock=self._clock,
+            serialize=self.serialize,
         )
 
     def _remember(
@@ -508,10 +345,9 @@ class BoardService:
         fingerprint: str,
         response: Mapping[str, object],
     ) -> None:
-        if not key:
-            return
-        with self.store.writer() as repos:
-            repos.idempotency.put(self._record(actor, key, fingerprint, response))
+        boards_idempotency.remember(
+            self.store, self.settings, actor, key, fingerprint, response, clock=self._clock
+        )
 
     def update(self, actor: ActorContext, board_id: str, payload: BoardUpdate) -> BoardEntry:
         actor.require("boards:write")
@@ -642,203 +478,29 @@ class BoardService:
         row = self.require_row(board_id)
         if not self.boards.exists(board_id):
             raise NotFound("Board database not found")
-        attachments = self._attachment_files(board_id)
-        manifest = {
-            "format_version": EXPORT_FORMAT_VERSION,
-            "exported_at": self._now(),
-            "board": {
-                "id": row.id,
-                "name": row.name,
-                "description": row.description,
-                "created_at": row.created_at,
-                "updated_at": row.updated_at,
-                "schema_version": row.schema_version,
-            },
-            "attachments": {
-                "files": len(attachments),
-                "bytes": sum(file.stat().st_size for file in attachments),
-            },
-        }
-        buffer = io.BytesIO()
-        snapshot = self.files.path(board_id).with_suffix(".export.sqlite")
-        profile = self.settings.file_profile
-        try:
-            self.files.snapshot(board_id, snapshot)
-            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr("manifest.json", json.dumps(manifest, indent=2))
-                archive.write(snapshot, "board.sqlite")
-                # The database and its uploaded files are one unit; an export without them is a
-                # board that cannot be restored in full.
-                for file in attachments:
-                    retry_io(
-                        "export_attachment",
-                        profile,
-                        lambda file=file: archive.write(file, f"attachments/{file.name}"),
-                    )
-        finally:
-            remove_file(snapshot, profile=profile)
-        return buffer.getvalue()
+        return boards_archive.export_archive(
+            self.files, self.settings, board_id, row, now=self._now
+        )
 
     def _copy_attachments(self, source_board_id: str, target_board_id: str) -> int:
-        """A duplicated board keeps its uploaded files, or every attachment row points nowhere."""
-        files = self._attachment_files(source_board_id)
-        if not files:
-            return 0
-        directory = self.files.attachments_dir(target_board_id)
-        directory.mkdir(parents=True, exist_ok=True)
-        profile = self.settings.file_profile
-        for file in files:
-            copy_file(file, directory / file.name, profile=profile)
-        return len(files)
-
-    def _attachment_files(self, board_id: str) -> list[Path]:
-        directory = self.files.attachments_dir(board_id)
-        if not directory.exists():
-            return []
-        return sorted(file for file in directory.glob("*") if file.is_file())
+        return boards_archive.copy_attachments(
+            self.files, self.settings, source_board_id, target_board_id
+        )
 
     def import_archive(self, actor: ActorContext, data: bytes) -> BoardEntry:
-        actor.require("boards:admin")
-        try:
-            archive = zipfile.ZipFile(io.BytesIO(data))
-        except zipfile.BadZipFile as exc:
-            raise ValidationFailure("Import payload is not a valid board archive") from exc
-        with archive:
-            names = set(archive.namelist())
-            if not {"manifest.json", "board.sqlite"} <= names:
-                raise ValidationFailure(
-                    "Board archive must contain manifest.json and board.sqlite",
-                    details={"found": sorted(names)},
-                )
-            manifest = _json_object(
-                json.loads(_archive_member(archive, "manifest.json", MANIFEST_MAX_BYTES)),
-                "the manifest",
-            )
-            if manifest.get("format_version") != EXPORT_FORMAT_VERSION:
-                raise ValidationFailure(
-                    "Unsupported board archive format",
-                    details={"supported": EXPORT_FORMAT_VERSION},
-                )
-            board_bytes = _archive_member(
-                archive, "board.sqlite", int(self.settings.board_import_max_bytes)
-            )
-            attachment_entries = [
-                entry
-                for entry in archive.namelist()
-                if entry.startswith("attachments/") and not entry.endswith("/")
-            ]
-            declared_files = _json_object(
-                manifest.get("attachments") or {}, "the manifest's attachments"
-            )
-            declared = _as_int(declared_files.get("bytes") or 0)
-            limit = int(self.settings.board_attachment_max_bytes)
-            if declared > limit or len(attachment_entries) > MAX_ARCHIVE_ATTACHMENTS:
-                raise ValidationFailure(
-                    "Board archive carries more attachments than this installation accepts",
-                    details={"bytes": declared, "files": len(attachment_entries)},
-                )
-            attachments: list[tuple[str, bytes]] = []
-            seen: set[str] = set()
-            total = 0
-            for entry in attachment_entries:
-                name = archive_file_name(entry)
-                if name in seen:
-                    raise ValidationFailure(
-                        "Board archive contains an invalid attachment entry",
-                        details={"entry": entry},
-                    )
-                seen.add(name)
-                # The manifest is written by the exporter, so the real entries are measured too:
-                # a hand-made archive could otherwise declare nothing and carry any amount.
-                total += archive.getinfo(entry).file_size
-                if total > limit:
-                    raise ValidationFailure(
-                        "Board archive carries more attachments than this installation accepts",
-                        details={"bytes": total, "files": len(attachment_entries)},
-                    )
-                attachments.append((name, archive.read(entry)))
-
-        new_id = self._new_id()
-        board = _json_object(manifest.get("board", {}), "the manifest's board")
-        name = str(board.get("name") or "Imported board")[:200]
-        description = str(board.get("description") or "")[:20_000]
-        try:
-            self._accept_import(
-                actor,
-                new_id,
-                name=name,
-                description=description,
-                database=board_bytes,
-                attachments=attachments,
-            )
-        except Exception:
-            self._discard_import(new_id)
-            raise
-        return self.get(new_id)
-
-    def _accept_import(
-        self,
-        actor: ActorContext,
-        board_id: str,
-        *,
-        name: str,
-        description: str,
-        database: bytes,
-        attachments: list[tuple[str, bytes]],
-    ) -> None:
-        destination = self.files.path(board_id)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(database)
-        # Judged before anything opens it, and before it has a row: a file that is not a sound
-        # board database is never listed, recovered, migrated or opened as a board.
-        problem = self.migrations.check_imported(board_id)
-        if problem is not None:
-            raise _refused(problem.reason, problem.detail)
-        if attachments:
-            directory = self.files.attachments_dir(board_id)
-            directory.mkdir(parents=True, exist_ok=True)
-            for file_name, payload in attachments:
-                (directory / file_name).write_bytes(payload)
-        self._add_row(board_id, name, description)
-        # Migrated before it is opened: opening checks the revision, so an archive from an older
-        # release is brought to the head first.
-        if self.migrations.migrate_board(board_id).status == "failed":
-            raise _refused("migration_failed", "the backend log names the cause")
-        with self.boards.writer(board_id) as imported:
-            imported.metadata.claim(board_id, now=self._now())
-            changes = {"source_format": EXPORT_FORMAT_VERSION}
-            self._log(imported, actor, "board.imported", board_id, changes)
-        self._activate(board_id)
-
-    def _discard_import(self, board_id: str) -> None:
-        """Take away what a refused or failed import wrote: its files and the pre-migration backup
-        the Migration Manager may have taken, then its row. An import is all or nothing.
-
-        Files go first, as in ``delete``: when the host will not let go of one, the row stays,
-        marked ``error``, so the leftover is visible and can be deleted later.
-        """
-        profile = self.settings.file_profile
-        with self.store.reader() as repos:
-            registered = repos.boards.get(board_id) is not None
-        try:
-            with self.files.locked(board_id):
-                self.files.delete_database(board_id)
-                remove_tree(self.settings.backups_dir / board_id, profile=profile)
-        except OSError as exc:
-            logger.warning(
-                "board_import_leftover",
-                extra={
-                    "board_id": board_id,
-                    "leftover": f"boards/{board_id}",
-                    "reason": type(exc).__name__,
-                },
-            )
-            if registered:
-                self._update_row(board_id, {"status": "error"})
-            return
-        if registered:
-            with self.store.writer() as repos:
-                repos.boards.delete(board_id)
+        board_id = boards_archive.import_archive(
+            actor,
+            data,
+            settings=self.settings,
+            store=self.store,
+            boards=self.boards,
+            files=self.files,
+            migrations=self.migrations,
+            schema=self.schema,
+            now=self._now,
+            new_id=self._new_id,
+        )
+        return self.get(board_id)
 
     # --- recovery --------------------------------------------------------------------------------
 
@@ -869,3 +531,22 @@ class BoardService:
         if not self.boards.exists(board_id):
             raise NotFound("Board database not found")
         return row
+
+
+__all__ = [
+    "ALLOWED_STATUSES",
+    "EXPORT_FORMAT_VERSION",
+    "IMPORT_REFUSALS",
+    "MANIFEST_MAX_BYTES",
+    "MAX_ARCHIVE_ATTACHMENTS",
+    "AgentSelection",
+    "BoardCounters",
+    "BoardEntry",
+    "BoardSchema",
+    "BoardService",
+    "Counts",
+    "ImportRefusal",
+    "JsonObject",
+    "RepositorySelection",
+    "TemplateResolver",
+]

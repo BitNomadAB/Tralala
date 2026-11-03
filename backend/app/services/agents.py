@@ -5,57 +5,34 @@ Both services reach the registry only through the repositories and the registry 
 (``services.connections``) are passed in, with the real ones as defaults, so every rule here runs in
 a unit test without a database or a network. Provider keys are sealed with ``core.secrets`` before
 they are stored; a response carries only ``has_api_key`` and the hint.
+
+This module is the public import path. It keeps ``AgentService`` and re-exports the use cases that
+live beside it: role templates (``agents_roles``), connection tests (``agents_probe``) and the
+sealing of provider keys (``agents_credentials``).
 """
 
 from __future__ import annotations
 
 import hashlib
-import logging
 from collections.abc import Callable, Mapping
-from typing import NotRequired, Protocol, TypedDict
+from typing import TypedDict
 from uuid import uuid4
 
 from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.dates import utcnow
 from ..core.errors import Conflict, NotFound, ValidationFailure
-from ..core.secrets import CredentialError, open_secret, open_secret_state, seal_secret, secret_hint
 from ..db.generated.registry import AgentsRow, BoardAgentsRow, RoleTemplatesRow
-from ..repositories.agents import AgentChanges, RoleTemplateChanges
+from ..repositories.agents import AgentChanges
 from ..repositories.errors import ConstraintViolationError
 from ..repositories.registry import RegistryRepositories, RegistryUnitOfWork
-from ..schemas.agents import (
-    AgentCreate,
-    AgentDuplicate,
-    AgentTestRequest,
-    AgentUpdate,
-    RoleTemplateCreate,
-    RoleTemplateDuplicate,
-    RoleTemplateUpdate,
-)
+from ..schemas.agents import AgentCreate, AgentDuplicate, AgentTestRequest, AgentUpdate
 from . import connections
-from .connections import CompletionProbe, EndpointProbe
-from .role_defaults import BUILTIN_ROLES
+from .agents_credentials import credential_changes, reseal_provider_keys
+from .agents_probe import AgentEndpoints, ProbeOutcome, probe_connection
+from .agents_roles import RoleTemplateEntry, RoleTemplateService
 
 ROLE_PROMPT_LIMIT = 20_000
-
-logger = logging.getLogger("tralala.agents")
-
-
-class RoleTemplateEntry(TypedDict):
-    """A role template as the API returns it: never its factory copy, only whether it differs."""
-
-    id: str
-    name: str
-    description: str
-    system_prompt: str
-    builtin_key: str | None
-    created_at: str
-    updated_at: str
-    scope: str
-    built_in: bool
-    customized: bool
-    agent_count: int
 
 
 class AgentEntry(TypedDict):
@@ -135,64 +112,8 @@ class RoleSnapshot(TypedDict):
     snapshot_at: str
 
 
-class ProbeOutcome(TypedDict):
-    """A connection test: the endpoint probe, plus the model call when a model was named.
-
-    ``supports_json_schema`` is what the model call found (``connections.probe_completion``), and
-    false when no model call was made or it failed.
-    """
-
-    ok: bool
-    status: str
-    message: str
-    latency_ms: int
-    models: list[str]
-    supports_json_schema: bool
-    completion: NotRequired[CompletionProbe]
-
-
-class AgentEndpoints(Protocol):
-    """The endpoint rule and the probes; ``services.connections`` is the real one."""
-
-    def validate_endpoint(self, url: str, *, allow_private: bool) -> str: ...
-
-    def probe_openai_compatible(
-        self, base_url: str, *, api_key: str | None, timeout: float, allow_private: bool
-    ) -> EndpointProbe: ...
-
-    def probe_a2a(
-        self, base_url: str, *, api_key: str | None, timeout: float, allow_private: bool
-    ) -> EndpointProbe: ...
-
-    def probe_completion(
-        self,
-        base_url: str,
-        *,
-        model: str,
-        api_key: str | None,
-        timeout: float,
-        allow_private: bool,
-    ) -> CompletionProbe: ...
-
-
 def _new_id() -> str:
     return str(uuid4())
-
-
-def _role_entry(row: RoleTemplatesRow, *, agent_count: int) -> RoleTemplateEntry:
-    return {
-        "id": row.id,
-        "name": row.name,
-        "description": row.description,
-        "system_prompt": row.system_prompt,
-        "builtin_key": row.builtin_key,
-        "created_at": row.created_at,
-        "updated_at": row.updated_at,
-        "scope": row.scope,
-        "built_in": bool(row.built_in),
-        "customized": row.system_prompt != row.default_system_prompt,
-        "agent_count": agent_count,
-    }
 
 
 def _agent_entry(row: AgentsRow, roles: Mapping[str, RoleTemplatesRow]) -> AgentEntry:
@@ -226,190 +147,6 @@ def _agent_entry(row: AgentsRow, roles: Mapping[str, RoleTemplatesRow]) -> Agent
 
 def _role_map(repos: RegistryRepositories) -> dict[str, RoleTemplatesRow]:
     return {row.id: row for row in repos.role_templates.all()}
-
-
-class RoleTemplateService:
-    """Central role definitions. Agents reference them; discussions snapshot them."""
-
-    def __init__(
-        self,
-        store: RegistryUnitOfWork,
-        *,
-        clock: Callable[[], str] = utcnow,
-        new_id: Callable[[], str] = _new_id,
-    ) -> None:
-        self.store = store
-        self._clock = clock
-        self._new_id = new_id
-
-    # --- seeding ---------------------------------------------------------------------------------
-
-    def seed_defaults(self) -> int:
-        """Insert missing built-ins and keep unedited ones in step with the seed.
-
-        A built-in the user has not touched follows the factory text, so a prompt rewrite reaches
-        an existing installation. A customized built-in keeps its own prompt; only its factory copy
-        moves, which is what "restore defaults" restores. Scope always follows the seed.
-        """
-        created = 0
-        now = self._clock()
-        with self.store.writer() as repos:
-            for role in BUILTIN_ROLES:
-                existing = repos.role_templates.by_builtin_key(role["key"])
-                if existing is not None:
-                    untouched = existing.system_prompt == existing.default_system_prompt
-                    prompt_moves = untouched and existing.system_prompt != role["prompt"]
-                    changes: RoleTemplateChanges = {
-                        "system_prompt": role["prompt"] if untouched else existing.system_prompt,
-                        "default_system_prompt": role["prompt"],
-                        "scope": role["scope"],
-                    }
-                    stamp = now if prompt_moves else existing.updated_at
-                    repos.role_templates.update(existing.id, changes, now=stamp)
-                    continue
-                repos.role_templates.add(
-                    RoleTemplatesRow(
-                        id=self._new_id(),
-                        name=role["name"],
-                        description=role["description"],
-                        system_prompt=role["prompt"],
-                        default_system_prompt=role["prompt"],
-                        built_in=1,
-                        builtin_key=role["key"],
-                        created_at=now,
-                        updated_at=now,
-                        scope=role["scope"],
-                    )
-                )
-                created += 1
-        return created
-
-    # --- queries ---------------------------------------------------------------------------------
-
-    def list(self) -> list[RoleTemplateEntry]:
-        with self.store.reader() as repos:
-            rows = repos.role_templates.all()
-            counts = repos.agents.count_by_role_template()
-        return [_role_entry(row, agent_count=counts.get(row.id, 0)) for row in rows]
-
-    def find(self, role_id: str) -> RoleTemplateEntry | None:
-        with self.store.reader() as repos:
-            row = repos.role_templates.get(role_id)
-            counts = repos.agents.count_by_role_template() if row is not None else {}
-        if row is None:
-            return None
-        return _role_entry(row, agent_count=counts.get(row.id, 0))
-
-    def get(self, role_id: str) -> RoleTemplateEntry:
-        role = self.find(role_id)
-        if role is None:
-            raise NotFound("Role template not found")
-        return role
-
-    # --- commands --------------------------------------------------------------------------------
-
-    def create(self, actor: ActorContext, payload: RoleTemplateCreate) -> RoleTemplateEntry:
-        actor.require("agents:write")
-        return self._insert(
-            name=payload.name,
-            description=payload.description,
-            system_prompt=payload.system_prompt,
-            scope="board",
-        )
-
-    def _insert(
-        self, *, name: str, description: str, system_prompt: str, scope: str
-    ) -> RoleTemplateEntry:
-        """A template a person made: never built-in, its own prompt is its factory copy."""
-        role_id = self._new_id()
-        now = self._clock()
-        row = RoleTemplatesRow(
-            id=role_id,
-            name=name,
-            description=description,
-            system_prompt=system_prompt,
-            default_system_prompt=system_prompt,
-            built_in=0,
-            builtin_key=None,
-            created_at=now,
-            updated_at=now,
-            scope=scope,
-        )
-        try:
-            with self.store.writer() as repos:
-                repos.role_templates.add(row)
-        except ConstraintViolationError as exc:
-            raise Conflict(
-                "A role template with this name already exists",
-                code="role_template_name_taken",
-                details={"name": name},
-            ) from exc
-        return self.get(role_id)
-
-    def update(
-        self, actor: ActorContext, role_id: str, payload: RoleTemplateUpdate
-    ) -> RoleTemplateEntry:
-        actor.require("agents:write")
-        current = self.get(role_id)
-        changes: RoleTemplateChanges = {}
-        if payload.name is not None:
-            changes["name"] = payload.name
-        if payload.description is not None:
-            changes["description"] = payload.description
-        if payload.system_prompt is not None:
-            changes["system_prompt"] = payload.system_prompt
-        if not changes:
-            return current
-        try:
-            with self.store.writer() as repos:
-                repos.role_templates.update(role_id, changes, now=self._clock())
-        except ConstraintViolationError as exc:
-            raise Conflict(
-                "A role template with this name already exists",
-                code="role_template_name_taken",
-                details={"name": changes.get("name", current["name"])},
-            ) from exc
-        return self.get(role_id)
-
-    def duplicate(
-        self, actor: ActorContext, role_id: str, payload: RoleTemplateDuplicate
-    ) -> RoleTemplateEntry:
-        actor.require("agents:write")
-        current = self.get(role_id)
-        name = (payload.name or f"{current['name']} (copy)").strip()
-        return self._insert(
-            name=name,
-            description=current["description"],
-            system_prompt=current["system_prompt"],
-            scope=current["scope"] or "board",
-        )
-
-    def restore_defaults(self, actor: ActorContext, role_id: str) -> RoleTemplateEntry:
-        actor.require("agents:admin")
-        current = self.get(role_id)
-        if not current["built_in"]:
-            raise Conflict(
-                "Only built-in role templates have factory defaults",
-                code="role_template_not_builtin",
-            )
-        with self.store.writer() as repos:
-            row = repos.role_templates.get(role_id)
-            if row is not None:
-                factory: RoleTemplateChanges = {"system_prompt": row.default_system_prompt}
-                repos.role_templates.update(role_id, factory, now=self._clock())
-        return self.get(role_id)
-
-    def delete(self, actor: ActorContext, role_id: str) -> None:
-        actor.require("agents:admin")
-        current = self.get(role_id)
-        if current["built_in"]:
-            raise Conflict(
-                "Built-in role templates can be customized or duplicated but not deleted",
-                code="role_template_builtin",
-            )
-        with self.store.writer() as repos:
-            repos.agents.clear_role_template(role_id)
-            repos.role_templates.delete(role_id)
 
 
 class AgentService:
@@ -564,15 +301,7 @@ class AgentService:
     # --- commands --------------------------------------------------------------------------------
 
     def _credential_changes(self, api_key: str | None) -> AgentChanges:
-        """``None`` leaves the stored key alone; an empty key removes it; any other is sealed."""
-        if api_key is None:
-            return {}
-        if not api_key:
-            return {"api_key_ciphertext": None, "api_key_hint": None}
-        return {
-            "api_key_ciphertext": seal_secret(self.settings, api_key),
-            "api_key_hint": secret_hint(api_key),
-        }
+        return credential_changes(self.settings, api_key)
 
     def _validate_endpoint(self, url: str) -> str:
         return self._endpoints.validate_endpoint(
@@ -760,24 +489,7 @@ class AgentService:
         Called once at startup: after a secret change every key moves to the new secret, so the
         previous one can be dropped from the environment afterwards.
         """
-        with self.store.reader() as repos:
-            sealed = repos.agents.sealed_keys()
-        resealed: dict[str, str] = {}
-        for agent_id, ciphertext in sealed.items():
-            try:
-                value, current = open_secret_state(self.settings, ciphertext)
-            except CredentialError:
-                logger.warning(
-                    "agent %s has a credential that no configured secret can open", agent_id
-                )
-                continue
-            if not current:
-                resealed[agent_id] = seal_secret(self.settings, value)
-        if resealed:
-            with self.store.writer() as repos:
-                for agent_id, ciphertext in resealed.items():
-                    repos.agents.reseal(agent_id, ciphertext)
-        return len(resealed)
+        return reseal_provider_keys(self.settings, self.store)
 
     # --- connection testing ----------------------------------------------------------------------
 
@@ -817,111 +529,20 @@ class AgentService:
         row: AgentsRow | None,
         agent_id: str | None,
     ) -> ProbeOutcome:
-        connection_type = payload.connection_type or (
-            row.connection_type if row else "openai_compatible"
-        )
-        base_url = payload.base_url or (row.base_url if row else "")
-        if not base_url:
-            raise ValidationFailure(
-                "An endpoint is required to test a connection",
-                details={"field": "base_url"},
-            )
-        api_key = payload.api_key
-        if payload.no_api_key:
-            # Explicit: this endpoint is called without a credential, stored one or not.
-            api_key = None
-        elif api_key is None and row is not None and row.api_key_ciphertext:
-            try:
-                api_key = open_secret(self.settings, row.api_key_ciphertext)
-            except CredentialError:
-                api_key = None
-        fallback_timeout = row.timeout_seconds if row else 30
-        timeout = float(payload.timeout_seconds or fallback_timeout)
-        fallback_model = row.model if row else ""
-        selected_model = (payload.model or fallback_model or "").strip()
-        allow_private = self.settings.agents_allow_private_endpoints
-        validated = self._validate_endpoint(base_url)
-
-        # One pair of events per attempt: an operator reading the log can tell a refused credential
-        # from a model the endpoint does not serve, without the request or the key ever appearing.
-        self._log_probe(
-            "agent_probe_started",
-            agent_id=agent_id,
-            connection_type=connection_type,
-            endpoint=validated,
-            model=selected_model,
-            has_api_key=bool(api_key),
-            timeout_seconds=timeout,
-        )
-        probe = (
-            self._endpoints.probe_openai_compatible
-            if connection_type == "openai_compatible"
-            else self._endpoints.probe_a2a
-        )
-        try:
-            found = probe(validated, api_key=api_key, timeout=timeout, allow_private=allow_private)
-        except Exception as exc:  # the probe reports, it does not raise
-            self._log_probe(
-                "agent_probe_failed",
-                agent_id=agent_id,
-                connection_type=connection_type,
-                endpoint=validated,
-                reason=type(exc).__name__,
-            )
-            raise
-        result: ProbeOutcome = {
-            "ok": found["ok"],
-            "status": found["status"],
-            "message": found["message"],
-            "latency_ms": found["latency_ms"],
-            "models": found["models"],
-            "supports_json_schema": False,
-        }
-
-        completion: CompletionProbe | None = None
-        if result["ok"] and connection_type == "openai_compatible" and selected_model:
-            completion = self._endpoints.probe_completion(
-                validated,
-                model=selected_model,
-                api_key=api_key,
-                timeout=timeout,
-                allow_private=allow_private,
-            )
-            result["completion"] = completion
-            if completion["ok"]:
-                result["supports_json_schema"] = completion["supports_json_schema"]
-                result["message"] = (
-                    f"{result['message']}; model {selected_model} answered "
-                    f"in {completion['latency_ms']} ms"
-                )
-            else:
-                # The list answered, the model call did not: say so, and keep the model list so the
-                # form can still offer what the endpoint knows.
-                result["ok"] = False
-                result["status"] = completion["status"]
-                result["message"] = (
-                    f"Endpoint answers, but the model call failed. {completion['message']}"
-                )
-
-        self._log_probe(
-            "agent_probe_finished" if result["ok"] else "agent_probe_failed",
-            agent_id=agent_id,
-            connection_type=connection_type,
-            endpoint=validated,
-            model=selected_model,
-            status=result["status"],
-            latency_ms=result["latency_ms"],
-            models=len(result["models"]),
-            completion_status=completion["status"] if completion else None,
-            reason=None if result["ok"] else result["message"][:200],
-        )
-        return result
-
-    @staticmethod
-    def _log_probe(event: str, **fields: object) -> None:
-        started_or_finished = event in {"agent_probe_started", "agent_probe_finished"}
-        level = logging.INFO if started_or_finished else logging.WARNING
-        logger.log(level, event, extra=fields)
+        return probe_connection(self.settings, self._endpoints, payload, row=row, agent_id=agent_id)
 
 
-__all__ = ["AgentService", "RoleTemplateService"]
+__all__ = [
+    "ROLE_PROMPT_LIMIT",
+    "AgentEndpoints",
+    "AgentEntry",
+    "AgentService",
+    "AskableAgent",
+    "AssignablePerson",
+    "DirectoryEntry",
+    "EffectiveRole",
+    "ProbeOutcome",
+    "RoleSnapshot",
+    "RoleTemplateEntry",
+    "RoleTemplateService",
+]
