@@ -140,6 +140,13 @@ tools. Approvals bind to exact document revision ids, so a changed input invalid
 - A mirror is bounded by `TRALALA_REPOSITORY_MIRROR_MAX_BYTES` and
   `TRALALA_REPOSITORY_FETCH_TIMEOUT_SECONDS`, is a cache that backups leave out, and is removed with
   its repository or its last board link. [Repositories.md](Repositories.md) has the details.
+- A model that reads the code through tools (an agent whose connection test found tool calling) gets
+  three read-only tools, `list_files`, `read_file` and `search`, answered from an index the run
+  builds in memory from the commit's archive: no path reaches the file system, the tools write
+  nothing, and a regular expression is bounded in length and refused when it nests repetition. The
+  archive is at most `TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES` (default 128 MiB), and the conversation
+  stays within the run's settings
+  ([How a run reads the code](Repositories.md#how-a-run-reads-the-code)).
 
 ## Requests, responses and errors
 

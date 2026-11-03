@@ -58,6 +58,11 @@ second if you want your own coding agent to drive Tralala.
    later. Nothing is stored until the test is green, the reported model names become suggestions in
    the model field, and the raw answer is shown as JSON so the same block serves every provider.
 
+   The test also finds out whether the model calls tools, and the agent list in Settings then says
+   *reads repositories with tools* or *no tool calling*. The first kind reads a board's repositories
+   itself during an analysis or RoadMap, as much as the request needs; the second gets a fixed
+   selection of files (see section 4). Test again after you change the model.
+
    A model on the machine that runs Tralala is `http://host.docker.internal:<port>/v1` from inside
    the container, not `127.0.0.1`; see
    [Reaching a model that runs on the host](Installation.md#reaching-a-model-that-runs-on-the-host).
@@ -113,13 +118,16 @@ A repository on another Git host (a closed network, a self-hosted server) uses t
 the operator has listed the host in `TRALALA_REPOSITORY_HOSTS`. [Repositories.md](Repositories.md)
 has the whole procedure, the token recipe for other hosts and a troubleshooting table.
 
-What an analysis can actually see is **bounded on purpose**: at most 200 files and 200 KB of text
-per repository (and 2 MB of archive from GitHub), with build output, dependencies, lock files,
-binaries and images skipped. A file the snapshot cut away is a file the analysis must
-list under *open questions* instead of guessing. After a run, the Loop's document dialog shows which
-commit each analysis was based on and how many files it read — "based on acme app @ abc123de, 12
-files" — and a repository that could not be read appears there with its reason (`unauthorized`,
-`not_found`, `rate_limited`, `too_large`, `timeout`).
+What an analysis can see depends on the agent. An agent that *reads repositories with tools* lists,
+reads and searches the repositories at the run's commit itself, as often as it needs, within limits
+the operator sets ([How a run reads the code](Repositories.md#how-a-run-reads-the-code)). Any other
+agent gets a fixed selection that is **bounded on purpose**: at most 200 files and 200 KB of text
+per repository, with build output, dependencies, lock files, binaries and images skipped, plus a
+list of every file so the model knows what exists. Either way, a file the model could not read is a
+file the analysis must list under *open questions* instead of guessing. After a run, the Loop's document dialog shows which commit each analysis was
+based on and how many files it covered — "based on acme app @ abc123de, 12 files" — and the run's
+steps say what the model read. A repository that could not be read appears there with its reason
+(`unauthorized`, `not_found`, `rate_limited`, `too_large`, `timeout`).
 
 ## 5. Run one Loop end to end
 

@@ -9,6 +9,12 @@ Tralala has two kinds of agent, and they are not the same thing:
 | What it can do | The curated tools below, within the key's scopes | Answer a prompt; it is a reader and a discussion partner |
 | What it cannot do | Change boards, approve plans, accept QA | Change a Ticket, run code, or touch the repository beyond reading it |
 
+A role agent whose connection test found tool calling (Settings lists it as *reads repositories
+with tools*) reads the board's repositories itself during an analysis or RoadMap run, through three
+read-only tools that Tralala answers from the run's commit. Those are not the worker tools below and
+need no key; any other role agent gets a fixed selection of files. See
+[How a run reads the code](Repositories.md#how-a-run-reads-the-code).
+
 This page is about the outside one.
 
 ## 1. Get a key

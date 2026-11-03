@@ -1,15 +1,16 @@
 # Repositories
 
 An analysis or RoadMap run can read the code a board is about. Tralala keeps one list of
-repositories; each board links the ones it concerns, and every run reads a bounded snapshot of each
-linked, enabled repository and puts it in the prompt as material to analyse. This page is the
-operator's guide: which way of reading a repository fits, how to add one, what Tralala keeps on disk,
-the settings, and what to do when a repository cannot be read.
+repositories; each board links the ones it concerns, and every analysis or RoadMap run reads each
+linked, enabled repository at one commit. A model that calls tools reads the code itself, as much as
+the request needs; any other model gets a bounded snapshot of it in the request. This page is the
+operator's guide: which way of reading a repository fits, how to add one, how a run reads the code,
+what Tralala keeps on disk, the settings, and what to do when a repository cannot be read.
 
 **Nothing from a repository is ever executed.** Tralala reads files as text and nothing else: no
-build, no install step, no script, no hook and no Git configuration from the repository runs, and the
-prompts tell the model that repository content is data, never instructions. The details are under
-[Nothing is executed](#nothing-is-executed).
+build, no install step, no script, no hook and no Git configuration from the repository runs, the
+tools a model reads with only read, and the prompts tell the model that repository content is data,
+never instructions. The details are under [Nothing is executed](#nothing-is-executed).
 
 ## Which way fits
 
@@ -22,7 +23,7 @@ A repository is read through one of two providers, chosen when it is added:
 
 | Scenario | What you need | Provider | What Tralala reads | How to see what a run used | How to narrow it |
 | --- | --- | --- | --- | --- | --- |
-| Public GitHub repository | The URL | GitHub | The branch head through the GitHub API, no token | The document dialog's "based on" line; `source_revisions.repositories` on the run | The *Branch* field; link it only to the boards it concerns; untick *Enabled for analysis* |
+| Public GitHub repository | The URL | GitHub | The branch head through the GitHub API, no token | The document dialog's "based on" line and the run's steps; `source_revisions.repositories` and `trace` on the run | The *Branch* field; the board link's focus and exclude globs; link it only to the boards it concerns; untick *Enabled for analysis* |
 | Private GitHub repository | The URL and a fine-grained token for that repository with *Contents: read* | GitHub | The same, with the token | The same | The same |
 | Any HTTPS Git host | The HTTPS URL, the host in `TRALALA_REPOSITORY_HOSTS`, and a read-only token if the host wants one | Git over HTTPS | The main branch, fetched into the mirror before every run | The same, plus when the mirror was fetched and whether it was stale | The same |
 
@@ -32,17 +33,13 @@ the check and the run say so (`rate_limited`), and a token raises it to 5 000 an
 token with *Contents: read* is enough, even for a public repository. The archive of a commit is
 downloaded once and kept (see the layout below), so a retry or a second Loop on the same commit costs
 only that one call. A token that passed an earlier check and is then rejected has most likely
-expired: the check says so, and you replace it under **Edit**. `github.com` is in `TRALALA_REPOSITORY_HOSTS` by default, so
-a GitHub repository can also be read through the mirror, for example one whose archive is larger
-than the API path accepts.
+expired: the check says so, and you replace it under **Edit**. `github.com` is in
+`TRALALA_REPOSITORY_HOSTS` by default, so a GitHub repository can also be read through the mirror.
 
-Either way, a run reads at most 200 files and 200 KB of text per repository, skips build output,
-dependencies, lock files, binaries and images, puts the README, `AGENTS.md` and `docs/` first, and
-shares `TRALALA_GENERATION_CONTEXT_CHARS` with the Loop's documents (the documents come first). A
-file that does not fit is left out and the next one is read, and the model also gets a manifest of
-every file it could have read, each marked as sent or not, so a file it was not sent is never taken
-for a missing one. The GitHub download is capped at 2 MB of archive; the mirror's archive of one
-commit at 128 MB.
+Either way, a run gets the archive of one commit. The GitHub download and the mirror's archive are
+both held to `TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES` (128 MiB by default), and a larger one fails as
+`too_large`. What the model then sees of it depends on the agent, not on the provider: see
+[How a run reads the code](#how-a-run-reads-the-code).
 
 ## Add a repository
 
@@ -86,7 +83,141 @@ the API call that does the same (`/api/v1`, an administrator's session or a toke
    repository may serve several boards.
 6. **Run an analysis.** The first run clones the mirror; every later run fetches the newest commit
    first. The document dialog then says what the run read: "based on app @ 1a2b3c4d, 42 files,
-   96 KB".
+   96 KB", and the run's steps say how it read it.
+
+## How a run reads the code
+
+An analysis or RoadMap run reads every linked, enabled repository at one commit, in one of two ways.
+The agent the run uses decides which, not the repository's provider. A QA run reads no repository.
+
+| The run's agent | How the model sees the code |
+| --- | --- |
+| OpenAI-compatible, and its last connection test found tool calling: Settings lists it as "reads repositories with tools" | It reads the repositories itself through three read-only tools, as much as the request needs |
+| OpenAI-compatible without it: "no tool calling", or never tested | A fixed snapshot of each repository in the request |
+| A2A | A fixed snapshot: an A2A agent is never offered tools |
+
+The flag comes from **Test connection** on the agent: after its completion the test offers the model
+a dummy tool and records whether the model called it. Every test writes the flag afresh; editing the
+agent does not, so test again after you change its model or endpoint.
+
+An agent that reads with tools still gets the snapshot in two cases, and the run's steps say which:
+
+- **No linked repository could be read.** Each repository's step names its error (see
+  [Troubleshooting](#troubleshooting)), and the run goes on without code, as a snapshot run would.
+- **The provider refuses the tools** on the run's first call although the test found them, for
+  example because another model now answers behind the endpoint. The run then sends the snapshot,
+  made from the archives it already fetched, so nothing is downloaded twice. A refusal after the
+  model has started reading fails the run as a provider error instead.
+
+### The model reads the code itself
+
+The run fetches each repository once, as described above, and holds its text files in memory as a
+read-only workspace. The request carries the Loop's documents, each repository's name, commit and
+file count, and the list of files the tools can read with their sizes. A list longer than 1 000
+paths (or `TRALALA_GENERATION_TOOL_RESULT_CHARS` characters) ends with how many more there are, and
+the model lists those itself. The model then has three tools:
+
+| Tool | What it answers |
+| --- | --- |
+| `list_files` (`path`, `glob`) | The files below a directory with their size in bytes, sorted by path, optionally only those a glob matches; at most 1 000 per answer |
+| `read_file` (`path`, `start_line`, `end_line`) | A file's text with line numbers. A file longer than one answer comes in parts, each ending with the line to continue from |
+| `search` (`pattern`, `glob`, `regex`) | Matching lines as `path:line: text`, at most 200 per answer. Literal and case-sensitive by default; a regular expression is at most 200 characters, and one that repeats a repeated group, such as `(a+)+`, is refused |
+
+Every path starts with the repository's name (`app/docs/setup.md`), so two repositories never mix.
+The model reads as often as it needs, and the run ends when it answers without a tool call. That
+answer is checked against the schema and, for a RoadMap, the plan rules, like any other; an answer
+that breaks one goes back to the model with what was wrong, at most twice, in the same conversation.
+A call that cannot be answered (an unknown path, a directory, a line range past the end, arguments
+that are not JSON) gets an answer that says what was wrong and what to call instead, and the run goes
+on.
+
+The tools see what the snapshot would: the same noise filter (build output, dependencies, lock files,
+binaries, images and empty files are not there), the board link's focus and exclude globs, and text
+files only. The workspace holds at most 20 000 files, 64 MiB of text and 8 MiB per file, filled in
+the snapshot's priority order. A file past those bounds is listed as *left out*, and reading it says
+that it exists but cannot be read. These bounds are fixed, not settings.
+
+### The limits
+
+Besides those fixed bounds, a run that reads with tools has two kinds of limit: security, and the
+model's context window. The run enforces both; neither is a rule the model is asked to keep.
+
+**Security** is not a setting. The tools read only the in-memory index of the commit's archive:
+nothing from the repository is unpacked to disk, run or changed, a path is a key in that index and
+never a file name, and the request tells the model that repository text is material to analyse,
+never instructions to follow.
+
+**The context window**, and the memory and time a run may take, are settings:
+
+| Setting | Default | What it protects |
+| --- | --- | --- |
+| `TRALALA_GENERATION_TOOL_STEPS` | `60` | The length of a run: after this many tool calls the model is asked for its answer from what it has read, with what it could not read under open questions |
+| `TRALALA_GENERATION_TOOL_RESULT_CHARS` | `60000` | One answer's share of the context: a tool answer is at most this many characters, so a long file comes in parts |
+| `TRALALA_GENERATION_CONTEXT_CHARS` | `400000` | The whole conversation: before every call, the oldest tool answers are replaced by a one-line note until it fits. The model can call the tool again to read one |
+| `TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES` | `134217728` (128 MiB) | The server's memory: the largest archive a run downloads from GitHub or a mirror writes, held in memory while the model reads it. A larger one fails as `too_large`, for the snapshot as well |
+
+Raise `TRALALA_GENERATION_CONTEXT_CHARS` for a model with a larger context window and lower it for a
+smaller one; the default is about 100 k tokens. A model that still calls tools after the last one
+allowed is told that no more calls are run and asked again; if it does it a second time, the run
+fails with "The model kept calling tools after this run's tool calls were used up".
+
+### The fixed snapshot
+
+Every other run gets a fixed snapshot of each repository in the request: at most 200 files and
+200 KB of text per repository, with build output, dependencies, lock files, binaries and images
+skipped and the README, `AGENTS.md` and `docs/` first. The snapshots share
+`TRALALA_GENERATION_CONTEXT_CHARS` with the Loop's documents, which come first. A file that does not
+fit is left out and the next one is read, and the model also gets a manifest of every file it could
+have read, each marked as sent or not (at most 5 000 entries), so a file it was not sent is never
+taken for a missing one. The model is asked once; the same schema check and up to two repairs
+follow.
+
+### What the run records
+
+- **The steps**, as `trace` on the run (`GET /boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}`
+  and the run list): one step for every event, written to the run as it happens. A step never holds
+  a file's content: for a tool call it keeps the tool, its arguments and what the answer held (its
+  one-sentence summary, its size, the files read, the line range, how many entries or matches,
+  whether it was cut, an error code). [API.md](API.md#generation-run-steps) has the fields.
+- **The repositories**, as `source_revisions.repositories`: each entry of a run that read with tools
+  carries `reading: "tools"`, the commit, `file_count` (the files the model could read) and
+  `left_out` (the files past the workspace's bounds). A snapshot entry carries the number of files
+  sent and its share of the budget instead. Neither holds content.
+- **The log line** `generation_run_finished` carries `tool_calls` (how many the model made) and
+  `files_read` (how many different files it read), beside the duration and the token counts.
+
+### Reading the steps
+
+The document dialog's run panel shows the steps while the run works and keeps them afterwards: a
+growing list of steps in plain words, grouped by stage. The stages come in this order, each one when
+the run reaches it:
+
+| Stage | What its steps say |
+| --- | --- |
+| Documents | Which of the Loop's documents the run read, by revision, and the plan's size |
+| Repository | Each repository opened (commit, files, text), or the fixed selection sent and why; then every tool call in one sentence, such as `Read app/README.md, lines 1–120 of 120` or `Searched *.py for 'Settings': 3 matches in 2 files` |
+| Writing | The model's answer: after how many tool calls, how long it is, and whether older tool answers were set aside |
+| Checking | Whether the answer follows the schema and the rules, and every repair round |
+| Saving | The draft saved for a person to review and approve, or why nothing was saved |
+
+Each step also has a kind. Most are plain steps; the others stand out:
+
+- **tool**: a tool call and the one-sentence summary of its answer;
+- **note**: what the model wrote beside a tool call, in its own words ("I'll read the installation
+  guide first");
+- **repair**: an answer that broke a rule and was sent back;
+- **limit**: a limit the run reached: the tool calls, the context window, or a provider that refused
+  the tools;
+- **error**: what failed, such as a provider call, and why nothing was saved.
+
+A run recorded before the steps existed has none (`trace` is `[]`).
+
+### Cost
+
+A run that reads with tools makes one provider call for every round of tool calls instead of one
+call for the whole answer, and each call sends the conversation so far. It takes longer, and on a
+hosted provider that bills by the token it costs more; `TRALALA_GENERATION_TOOL_STEPS` bounds both.
+The run's usage adds up the tokens of every call.
 
 ## What Tralala keeps
 
@@ -122,7 +253,10 @@ GitHub repositories keep nothing under `repos/`.
 | `TRALALA_REPOSITORY_HOSTS` | `github.com` | The hosts a mirror may fetch from, comma-separated. Checked when a repository is added or its URL changes, and before every fetch |
 | `TRALALA_REPOSITORY_MIRROR_MAX_BYTES` | `1073741824` (1 GiB) | A mirror still larger than this after its clean-up is removed, and the run reports `too_large` |
 | `TRALALA_REPOSITORY_FETCH_TIMEOUT_SECONDS` | `120` | How long one `git` command (ls-remote, clone, fetch, archive or a clean-up step) may take |
-| `TRALALA_GENERATION_CONTEXT_CHARS` | `400000` | What one run sends the model, documents and repository snapshots together. The documents come first; the repositories share the rest in link order, and what one does not use carries over to the next |
+| `TRALALA_GENERATION_CONTEXT_CHARS` | `400000` | What one run sends the model. With the snapshot: documents and repository snapshots together; the documents come first, the repositories share the rest in link order, and what one does not use carries over to the next. With tools: the whole conversation; the oldest tool answers are set aside first |
+| `TRALALA_GENERATION_TOOL_STEPS` | `60` | The tool calls one run answers; then the model is asked for its answer |
+| `TRALALA_GENERATION_TOOL_RESULT_CHARS` | `60000` | The characters of one tool answer; a longer file comes in parts |
+| `TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES` | `134217728` (128 MiB) | The largest archive of one commit a run downloads from GitHub or a mirror writes, held in memory while the run reads it; a larger one fails as `too_large` |
 | `TRALALA_REPOSITORY_ARCHIVE_CACHE_MAX_BYTES` | `268435456` (256 MiB) | GitHub archives kept per repository and commit, all together at most this many bytes, the oldest removed first; `0` keeps none |
 | `TRALALA_REPOSITORY_GIT_BINARY` | `git` | The `git` program the mirror runs. The backend image installs it; from source, `git` must be on `PATH` |
 
@@ -136,8 +270,8 @@ For each linked, enabled Git over HTTPS repository, before the model is called:
 3. The clean-up runs after every fetch: `git reflog expire --expire=now --all`, then
    `git gc --prune=now`, so the mirror stays about one commit in size. A mirror still larger than
    `TRALALA_REPOSITORY_MIRROR_MAX_BYTES` is removed.
-4. `git archive` of the branch is read like the GitHub archive: the same filters, caps, order and
-   budget.
+4. `git archive` of the branch, at most `TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES`, is read like the
+   GitHub archive: the same filters and order, by the model's tools or into the snapshot.
 
 One operation at a time runs per repository, so two runs never fetch the same mirror at once. The
 row in **Settings → Repositories** shows the default branch, when the mirror was last fetched and its
@@ -227,12 +361,26 @@ a short excerpt of what `git` said).
 | `not_found` | The repository or branch does not exist, or the token cannot see it | Check the URL and the *Branch* field; give the token read access to this repository |
 | `branch_missing` | *Test access* found the remote but not the branch in the *Branch* field | Correct the branch, or clear the field to read the main branch |
 | `timeout` | A `git` command ran longer than `TRALALA_REPOSITORY_FETCH_TIMEOUT_SECONDS` | Check that the backend reaches the host; raise the timeout for a large first clone |
-| `too_large` | The mirror is larger than `TRALALA_REPOSITORY_MIRROR_MAX_BYTES` after its clean-up (or a GitHub archive over 2 MB) | Raise the limit, or read a smaller branch |
+| `too_large` | The mirror is larger than `TRALALA_REPOSITORY_MIRROR_MAX_BYTES` after its clean-up, or the commit's archive (from GitHub or the mirror) is larger than `TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES` | Raise the limit, or read a smaller branch |
 | `git_missing` | The `git` program is not installed where the backend runs | Use the backend image, or install `git` (or set `TRALALA_REPOSITORY_GIT_BINARY`) |
 | `fetch_failed` | `git` could not read the repository for another reason | Read the `git_command_failed` log line; try *Rebuild mirror* |
 | `stale_mirror` | The last fetch failed; the run read the last good mirror | See [Stale mirror](#stale-mirror) |
 | `mirror_cleanup_failed` | The mirror's directory could not be removed: the host still holds a file in it | Close what holds it, then *Remove now* |
 | `unauthorized`, `forbidden`, `rate_limited`, `unreachable` | GitHub provider: the token was rejected, lacks access, the API's limit was reached, or GitHub did not answer | Check the token with the dialog's command; add a token to raise the limit; try again later |
+
+### When a run read the code differently than expected
+
+The run's steps say how it read the code (see [Reading the steps](#reading-the-steps)). These are the
+steps that need an operator:
+
+| The step says | What it means | What to do |
+| --- | --- | --- |
+| "Sent a fixed selection of app @ 1a2b3c4d: 42 of 412 files, the rest by name only (the agent's provider does not take tools; its connection test says so)" | The agent is not marked as calling tools, so the model got the snapshot | Run **Test connection** on the agent. If Settings still lists it as "no tool calling", the model or the server in front of it does not call tools: choose a model that supports tool calling, or switch it on in a local server (llama.cpp: `llama-server --jinja`; vLLM: `--enable-auto-tool-choice` with a `--tool-call-parser`), then test again |
+| "Sent a fixed selection of … (an A2A agent cannot be offered tools)" | An A2A agent always gets the snapshot | Run the analysis or RoadMap on an OpenAI-compatible agent if the model should read the code itself |
+| "Reached the 60 tool calls this run allows; asked the model for its answer now" | `TRALALA_GENERATION_TOOL_STEPS` ran out before the model finished reading. It answered from what it had read and should name the rest under open questions | Narrow what it has to read (the board link's focus and exclude globs, a more precise Info), or raise `TRALALA_GENERATION_TOOL_STEPS`. Every call costs time and, on a hosted provider, money |
+| "Older tool answers were set aside to stay within the model's context window; it can read them again" | The conversation passed `TRALALA_GENERATION_CONTEXT_CHARS`, so the oldest tool answers were replaced by a note. Not an error: the model can read them again | Raise `TRALALA_GENERATION_CONTEXT_CHARS` if the model's context window is larger, or lower `TRALALA_GENERATION_TOOL_RESULT_CHARS` so each answer takes less. If the provider answers instead that the context is too long, the setting is larger than the model's window: lower it |
+| "The provider refused tool calls, although the agent's connection test found them; sent a fixed selection of files instead (test the connection again)" | The provider refused the first call because of its tools (a `400` or `422` that names them), for example because another model now answers behind the endpoint. The run went on with the snapshot of what it had already fetched | Run **Test connection** again; it records the flag afresh. Test after every change of the agent's model or endpoint |
+| "The model kept calling tools after this run's tool calls were used up" | After the last allowed call the model was asked for its answer twice and called tools both times; the run failed with `invalid_output` | Retry the run; a model that keeps doing it is a poor fit for reading with tools |
 
 ## Nothing is executed
 
@@ -244,3 +392,7 @@ run, and the environment keeps the system's and the account's Git configuration 
 every prompt. The mirror is bare: nothing is checked out, so no file of the repository is ever on
 disk as a file to run. What a run reads goes into the prompt as text, and the prompts call it
 material to analyse, never instructions. The backend runs as the container's unprivileged user.
+
+A model that reads with tools reads an index the run builds in memory from the commit's archive:
+`list_files`, `read_file` and `search` look a path up in that index, never on disk, write nothing,
+and a search pattern is bounded in length and shape so it cannot hold the run.

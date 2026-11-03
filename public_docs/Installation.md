@@ -142,6 +142,21 @@ are sent without their content so the code fits; the Info is always sent whole. 
 model with a larger context window, lower it for a small one. The run shows what it sent: "based on
 `<repository>` @ `<commit>`, N files, M KB".
 
+An agent whose connection test found tool calling gets no snapshot: the model reads the repositories
+itself with three read-only tools, as often as it needs, and the whole conversation stays under
+`TRALALA_GENERATION_CONTEXT_CHARS` (the oldest tool answers are set aside first; the model can read
+them again). Three more settings bound such a run:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `TRALALA_GENERATION_TOOL_STEPS` | `60` | The tool calls one run answers; then the model is asked for its answer from what it has read |
+| `TRALALA_GENERATION_TOOL_RESULT_CHARS` | `60000` | The characters of one tool answer; a longer file comes in parts |
+| `TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES` | `134217728` (128 MiB) | The largest repository archive a run downloads from GitHub or a mirror writes, held in memory while the run reads it; it applies to the snapshot too |
+
+Such a run makes several provider calls instead of one, so it takes longer and, on a hosted provider,
+costs more. [Repositories.md](Repositories.md#how-a-run-reads-the-code) has the tools, the limits and
+the run's steps.
+
 ## From source
 
 Use this when you want to change the code, run the test suites, or work offline. The commands below

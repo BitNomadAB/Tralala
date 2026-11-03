@@ -1,3 +1,4 @@
+import { describeRunReading } from "@/lib/runTrace";
 import type { GenerationRun, GenerationRunRepository } from "@/lib/types";
 
 /** The repositories a run was based on, from its recorded source revisions. */
@@ -38,13 +39,23 @@ export function describeRunRepositories(run: GenerationRun): string | null {
   if (!Array.isArray(value)) return null;
   const repositories = value;
   if (repositories.length === 0) return "no enabled repository linked to this board";
-  return repositories
-    .map((repository) =>
-      repository.error
-        ? `${repository.name} (unavailable: ${REPOSITORY_ERROR_TEXT[repository.error] ?? repository.error})`
-        : `${repository.name} @ ${(repository.commit_sha ?? "").slice(0, 8)}, ${repository.file_count} files${sentSize(repository)}${repository.truncated ? ", truncated" : ""}${staleness(repository)}`,
-    )
-    .join("; ");
+  const described = repositories.map((repository) =>
+    repository.error
+      ? `${repository.name} (unavailable: ${REPOSITORY_ERROR_TEXT[repository.error] ?? repository.error})`
+      : `${repository.name} @ ${(repository.commit_sha ?? "").slice(0, 8)}, ${readSize(repository)}${staleness(repository)}`,
+  );
+  // A model that read through tools: what it actually read, not what it could have.
+  const reading = describeRunReading(run);
+  return described.join("; ") + (reading ? ` — ${reading}` : "");
+}
+
+/** What a repository offered the model: files sent in the snapshot, or files it could read. */
+function readSize(repository: GenerationRunRepository): string {
+  if (repository.reading === "tools") {
+    const left = repository.left_out ? `, ${repository.left_out} too large to read` : "";
+    return `${repository.file_count} files to read from${left}`;
+  }
+  return `${repository.file_count} files${sentSize(repository)}${repository.truncated ? ", truncated" : ""}`;
 }
 
 function count(value: unknown): number | null {

@@ -282,6 +282,29 @@ Ticket keys look like `AC004-DA02-003`: Loop prefix and Board-local Loop sequenc
 number, then the Ticket sequence within that Phase. They are allocated by the server, frozen after
 allocation and unique within the Board.
 
+#### Generation run steps
+
+Every generation run answers `trace`, its process tree: one step per event, written to the run as it
+happens (best effort, like `phase`), so a caller that polls `GET …/generation-runs/{run_id}` sees it
+grow. The run list and every other answer that carries a run include it; a run recorded before the
+trace existed answers `[]`. Each step is an object:
+
+| Field | Value |
+| --- | --- |
+| `stage` | `documents`, `repository`, `writing`, `checking` or `saving`, in the order a run reaches them; a QA run has no `repository` stage |
+| `kind` | `step`, `tool` (a tool call), `note` (the model's own words beside a call), `repair` (an answer sent back), `limit` (a limit the run reached) or `error` |
+| `text` | One plain-language sentence, at most 500 characters (a `note` at most 1 000) |
+| `at` | When the step happened, ISO 8601 UTC |
+| `tool` | A tool call only: `list_files`, `read_file` or `search` |
+| `arguments` | A tool call only: its scalar arguments, text cut to 200 characters |
+| `answer` | A tool call only: `summary` (one sentence), `chars` (the answer's size), `files_read`, `lines` (`[first, last]` or `null`), `entries`, `matches`, `truncated` and `error` (a code such as `not_found`, or `null`) |
+
+No step holds a file's content or the model's answer, and a run records at most 1 000 steps. The
+`generation_run_finished` log line carries `tool_calls` and `files_read` (the distinct files
+`read_file` returned) from the same steps. How a run reads the repositories, and so which steps it
+takes, is described under [Role templates](#role-templates) and in
+[Repositories.md](Repositories.md#how-a-run-reads-the-code).
+
 ### Board templates
 
 | Method | Path | Scope |
@@ -324,20 +347,42 @@ subject name.
 The agent's role prompt is the first part of every Loop generation prompt, followed by the purpose
 contract and the JSON schema, and the whole composed text is what a run snapshots.
 
-An analysis or RoadMap run also carries a **repository snapshot**: for every enabled repository linked
-to the board, Tralala resolves the commit at the configured branch, reads the tarball for that commit
-and places a bounded, filtered set of files in the prompt as data — never as instructions. The
-documents come first; the repositories share what remains of `TRALALA_GENERATION_CONTEXT_CHARS`
+An analysis or RoadMap run also reads the board's repositories: for every enabled repository linked
+to the board, Tralala resolves the commit at the configured branch and reads the tarball for that
+commit. A `github` repository is downloaded from `api.github.com`/`codeload.github.com` (15 s
+timeout); a `git_https` repository is fetched into its Tralala-managed mirror first and archived
+there (see [Repositories.md](Repositories.md)). Either archive is at most
+`TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES` (default 128 MiB); a larger one is `too_large`. How the model
+sees the code depends on the agent: an OpenAI-compatible agent whose last connection test found tool
+calling (`supports_tools`) reads it itself through read-only tools (below); every other agent, A2A
+included, gets a **repository snapshot**.
+
+The snapshot places a bounded, filtered set of files in the prompt as data — never as instructions.
+The documents come first; the repositories share what remains of `TRALALA_GENERATION_CONTEXT_CHARS`
 (default 400 000 characters), in link order with carry-over, and each snapshot is cut to its share.
 The fixed caps still apply: at most 200 files and 200 KB of text per repository; a file that does
 not fit is left out and the next one is read. Each entry also carries `manifest`, every file the
 snapshot considered in the order it read them as `{path, bytes, sent}` (at most 5 000, with
 `manifest_omitted` counting the rest), so the model knows that a file it was not sent exists; the
-manifest takes its room of the repository's share before the files do. A `github`
-repository is downloaded from `api.github.com`/`codeload.github.com` (at most 2 MB of archive, 15 s
-timeout); a `git_https` repository is fetched into its Tralala-managed mirror first and archived
-there (see [Repositories.md](Repositories.md)). Build output, dependencies, lock files, binaries and
-images are skipped.
+manifest takes its room of the repository's share before the files do. Build output, dependencies,
+lock files, binaries and images are skipped.
+
+A run whose agent reads with tools gets the Loop's documents, each repository's name, commit and file
+count, the list of files it can read, and three tools: `list_files(path?, glob?)`,
+`read_file(path, start_line?, end_line?)` and `search(pattern, glob?, regex?)`, answered from an
+in-memory index of the commit's archive with the same filters. Every path starts with the repository
+name. The model calls them as often as it needs, and the run ends when it answers without a tool
+call; that answer gets the same schema check and up to two repair rounds. `response_format` is not
+sent beside the tools, because a provider that holds the answer to a schema can no longer call a
+tool; the prompt and the repair rounds hold the answer to it instead. Three settings bound the
+conversation: `TRALALA_GENERATION_TOOL_STEPS` (default 60) tool calls per run, after which the model
+is asked for its answer with `tool_choice: "none"`; `TRALALA_GENERATION_TOOL_RESULT_CHARS` (default
+60 000) characters per tool answer, so a long file comes in parts; and
+`TRALALA_GENERATION_CONTEXT_CHARS` for the whole conversation, which sets the oldest tool answers
+aside first. A provider that refuses the tools on the first call (an error starting
+`tools_refused`) gets the snapshot of the archives the run already fetched instead, and so does a
+run in which no repository could be read. [Repositories.md](Repositories.md#how-a-run-reads-the-code)
+describes the tools, the workspace's bounds and the fallbacks.
 
 A repository that cannot be read does not fail the run: it appears in the snapshot as
 `{id, name, error}` with a class such as `unauthorized`, `not_found`, `rate_limited`, `too_large` or
@@ -349,7 +394,11 @@ file count and `truncated` flag, plus `budget_chars` (the repository's share),
 file fitted); the manifest stays in the run's own input as well. A
 `git_https` entry also carries `provider`, `fetched_at` (when its mirror was last brought up to date)
 and `stale_mirror`: `true` when this run's fetch failed and it read the last good mirror from
-`fetched_at`. No token, path or content ever appears in a log line or an error.
+`fetched_at`. An entry of a run whose model read through tools carries `reading: "tools"`,
+`file_count` (the files the model could read), `left_out` (the files past the workspace's bounds:
+too large, or beyond its 20 000 files or 64 MiB of text) and `truncated` (`left_out` above 0), and no
+budget fields; a snapshot entry has no `reading`. No token, path or content ever appears in a log
+line or an error.
 
 Every run also reports `phase` — `reading_info`, `analysing_repository` or `generating` — the step it
 last reached, so a caller can show progress instead of one opaque wait. When a run fails, `phase`
@@ -357,6 +406,8 @@ names the step that failed alongside `error_code` and `error_message`; the dialo
 with the error as JSON rather than a toast that scrolls away. `source_revisions.repositories` is
 written as soon as the repository step finishes, so a caller can tell "nothing is linked" (`[]`) from
 "the step has not run yet" (no key) — a fast run is then never mistaken for one that read the code.
+Beside `phase`, every run answers `trace`, the steps it took (see
+[Generation run steps](#generation-run-steps)).
 
 Resetting a scope (`POST …/reviews/{scope}/reset`, `{version}`) is the counterpart of approving and
 equally human-only. It clears the scope's documents — writing an empty draft revision chained to its
@@ -515,7 +566,10 @@ a refusal, an answer that is not a completion or no answer in time records `fals
 the test. Like `supports_json_schema`, every test writes the flag afresh, a duplicate starts
 without it, and an A2A agent never has it. Tools are only ever offered to a model whose agent has
 the flag set; a provider that refuses them after all (a `400` or `422` that names the tools) is not
-asked again, and the call's error starts with `tools_refused`.
+asked again, and the call's error starts with `tools_refused`. An analysis or RoadMap run on an
+agent with the flag lets the model read the board's repositories itself instead of sending a
+snapshot (see [Role templates](#role-templates)). Editing an agent leaves the flag as it is, so test
+again after changing its model or endpoint.
 
 Both endpoints write a pair of structured log events per attempt — `agent_probe_started` and then
 `agent_probe_finished` or `agent_probe_failed` (a warning) — carrying the endpoint, the model, whether

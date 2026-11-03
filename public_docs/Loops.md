@@ -88,19 +88,23 @@ Which code that agent may look at is decided on the same dialog: the repositorie
 **Settings -> Repositories** (`repository_ids`), read from GitHub or from a mirror of any allowed
 HTTPS Git host ([Repositories.md](Repositories.md)). A repository can serve several boards, and a
 board can list several. The token behind each repository is read-only and sealed, and an agent sees
-only the repositories of the boards it serves.
+only the repositories of the boards it serves. An agent whose connection test found tool calling
+reads that code itself during an analysis or RoadMap run; any other agent gets a fixed snapshot
+([How a run reads the code](Repositories.md#how-a-run-reads-the-code)).
 
-A run is one background call, so the document dialog shows the step it is on — *Reading Info data*,
-*Analysing repository*, *Generating analysis* (or *RoadMap*) — in a second panel beside the dialog
-(inline at the top of the dialog on a narrow screen). A step is only marked done when it produced what
-its name promises: the repository step is marked *skipped* when the board links no enabled repository
-("no code was sent to the model") and *warned* when a repository could not be read, while the line
-under it names the commit and file count it did get — `acme/app @ abc123de, 34 files`,
-`acme/app · unavailable (unauthorized)`, or *no enabled repository is linked to this board*. A green
-tick there used to claim the model had seen code it never received. The same panel is where a failure
-appears: the step that failed is marked, carries the provider's own answer as JSON, and stays on
-screen until it is dismissed. *Generate* is locked and glows for the duration, so the same document
-cannot be started twice by accident. The red *Reset* button at the bottom-left corner clears the
+A run works in the background, so the document dialog shows what it is doing in a second panel
+beside the dialog (inline at the top of the dialog on a narrow screen): the run's steps in plain
+words, grouped by stage — *Reading the Loop's documents*, *Reading the repository*, *Writing the
+analysis* (or *RoadMap*), *Checking the answer* and *Saving*. The list grows while the run works:
+which documents it read, which repository it opened or which fixed selection it sent, every file the
+model read and every search it made, the model's own notes beside them, each repair round ("The answer
+broke a rule: … — asked the model to fix it") and every limit the run reached. It stays on the run
+afterwards, so a person can read how an analysis was made. A stage is only ticked when it produced
+what its name promises: the repository stage is *skipped* when the board links no enabled repository
+("no code was read") and *warned* when a limit applied. The same panel is where a failure appears: the
+stage that failed is marked, the last step says what was not saved and why, the provider's own answer
+is shown as JSON, and the panel stays on screen until it is dismissed. *Generate* is locked and glows
+for the duration, so the same document cannot be started twice by accident. The red *Reset* button at the bottom-left corner clears the
 analysis or the RoadMap — an approved one as well as a draft — and asks first, because the text is
 retired rather than edited.
 

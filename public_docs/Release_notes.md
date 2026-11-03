@@ -78,22 +78,44 @@ Worth knowing when you look at the dashboard:
   makes one more small call that offers a dummy tool and records whether the model called it
   (`supports_tools`); Settings lists such an agent as "reads repositories with tools" and a tested
   agent without it as "no tool calling". A model that answers in text or a provider that refuses
-  tools never fails the test. Existing agents start without the flag: test the connection once.
+  tools never fails the test. Existing agents start without the flag: test the connection once, and
+  again after changing an agent's model. The flag decides how a run reads the code (next entry).
+- **A model that calls tools reads the code itself.** An analysis or RoadMap run on an agent with
+  the flag no longer gets a fixed selection of files: the model gets the list of files at the run's
+  commit and lists, reads and searches the board's repositories through three read-only tools, as
+  often as it needs; the run ends when it answers, and the answer gets the same schema check and
+  repair rounds. The limits are settings: `TRALALA_GENERATION_TOOL_STEPS` (60 tool calls per run),
+  `TRALALA_GENERATION_TOOL_RESULT_CHARS` (60 000 characters per answer, a longer file in parts) and
+  `TRALALA_GENERATION_CONTEXT_CHARS` for the whole conversation, within which the oldest answers
+  are set aside first. Nothing from a repository is run or written. Such a run makes several provider
+  calls instead of one, so it takes longer and costs more on a hosted provider. An A2A agent, an
+  agent without the flag and a provider that refuses the tools at run time still get the fixed
+  snapshot. See [Repositories.md](Repositories.md#how-a-run-reads-the-code).
+- **A run shows how it was made.** Every analysis, RoadMap and QA run records its steps in plain
+  words as they happen: the documents it read, each repository it opened or sent, every tool call
+  with a one-sentence summary, the model's answer, each repair round and every limit it reached. The
+  run panel shows them as a growing list grouped by stage, during the run and afterwards, and the
+  API answers them as `trace` on the run. No step holds a file's content.
 - **An analysis can read the code, within stated limits.** When a board links repositories, analysis
-  and RoadMap runs carry a snapshot of the branch head — at most 2 MB of archive, 200 files and
-  200 KB of text per repository, filtered for what informs a decision. The prompt names the caps and
-  the commit, and the Loop's document dialog line says which commit the last run used and how many
-  files it read. A repository that cannot be read is reported next to it, not hidden.
+  and RoadMap runs read the branch head's commit. A model without tools gets a snapshot — at most
+  200 files and 200 KB of text per repository, filtered for what informs a decision. A file that does
+  not fit is skipped and the next one read, where one large file early in the order used to end the
+  selection, and a manifest of every file, marked sent or not, keeps the model from reporting an
+  unsent file as missing. The prompt names the caps and the commit, and the Loop's document dialog
+  line says which commit the last run used and how many files it read. A repository that cannot be
+  read is reported next to it, not hidden. A commit's archive may be up to
+  `TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES` (default 128 MiB) from GitHub as from a mirror; the GitHub
+  download used to stop at 2 MB.
 - **A failed generation now says why.** A provider rejection used to read only "HTTP 400", and the
   message lived in a toast that disappeared; the Loop's document dialog shows the last run for the
   purpose, with the provider's own sentence, until it is retried.
-- **Generation shows which step it is on, and which one failed.** A second panel beside the documents
-  dialog lists *Reading Info data*, *Analysing repository* and *Generating analysis* (or *RoadMap*)
-  with the step reached marked. A step is only ticked when it produced what its name says: the
-  repository step is *skipped* when the board links no enabled repository — with the commit and file
-  count, or the reason, written under it — instead of claiming the model read code it never received.
-  A failure marks the step it died on and keeps the provider's answer there as JSON until it is
-  dismissed. *Generate* is locked and glows while a run is in flight.
+- **Generation shows where it is, and where it failed.** A second panel beside the documents dialog
+  lists the run's stages — *Reading the Loop's documents*, *Reading the repository*, *Writing the
+  analysis* (or *RoadMap*), *Checking the answer* and *Saving* — with its steps under each (see "A run
+  shows how it was made"). A stage is only ticked when it produced what its name says: the repository
+  stage is *skipped* when the board links no enabled repository, instead of claiming the model read
+  code it never received. A failure marks the stage it died on and keeps the provider's answer there
+  as JSON until it is dismissed. *Generate* is locked and glows while a run is in flight.
 - **A scope can be reset.** The red *Reset* button at the bottom-left of the Analysis and RoadMap tabs
   clears the document and any approval behind it — a draft as well as an approved one — so the work
   has to be generated again; it asks first, because the text is retired rather than edited. This is a

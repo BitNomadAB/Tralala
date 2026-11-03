@@ -6,7 +6,9 @@ import {
   runSteps,
   type RunStep,
 } from "@/lib/runPhases";
+import { hasTree } from "@/lib/runTrace";
 import type { GenerationRun } from "@/lib/types";
+import { RunTree } from "./RunTree";
 
 /** What the step achieved, not what it was supposed to do: a skipped step says so. */
 function stepCaption(step: RunStep): string {
@@ -18,10 +20,11 @@ function stepCaption(step: RunStep): string {
 }
 
 /**
- * The steps a generation run passes through, with the failing step's own JSON.
+ * What a generation run is doing, with the failing step's own JSON.
  *
- * Generation is one background call, so a person watching the dialog otherwise sees a disabled button
- * and nothing else. The server records the step it reached; this renders that step, the ones before it
+ * A person watching the dialog otherwise sees a disabled button and nothing else. A run records its
+ * process tree step by step (`RunTree`): every file the model read, every repair and every limit, in
+ * plain words. A run recorded before the tree existed shows the step it reached, the ones before it
  * as done, and — when it failed — the step it died on carrying the provider's answer verbatim.
  */
 export function RunPhases({
@@ -35,10 +38,7 @@ export function RunPhases({
   onDismiss?: (() => void) | undefined;
   compact?: boolean;
 }) {
-  const steps = runSteps(purpose, run);
-  const failedKey = failedStepKey(run);
   const failureJson = runFailureJson(run);
-  const repositories = repositoryOutcome(run);
   const running = run.status === "queued" || run.status === "running";
 
   return (
@@ -66,72 +66,96 @@ export function RunPhases({
           </button>
         ) : null}
       </div>
-      <ol
-        className={
-          compact ? "flex flex-row flex-wrap gap-2 text-[11px]" : "flex flex-col gap-2 text-xs"
-        }
-      >
-        {steps.map((step, index) => {
-          const tone =
-            step.state === "failed"
-              ? "text-[var(--destructive)]"
-              : step.state === "warning"
-                ? "text-[var(--warning)]"
-                : step.state === "active"
-                  ? "text-[var(--primary)]"
-                  : step.state === "done"
-                    ? "text-[var(--success)]"
-                    : "text-[var(--muted-foreground)]";
-          return (
-            <li key={step.key} className="flex flex-col gap-1">
-              <div className={`flex items-start gap-2 ${tone}`}>
-                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px]">
-                  {step.state === "done" ? (
-                    <Check size={10} />
-                  ) : step.state === "failed" ? (
-                    <X size={10} />
-                  ) : step.state === "warning" ? (
-                    <AlertTriangle size={10} />
-                  ) : step.state === "skipped" ? (
-                    <Minus size={10} />
-                  ) : step.state === "active" ? (
-                    <Loader2 size={10} className="animate-spin" />
-                  ) : (
-                    index + 1
-                  )}
-                </span>
-                <div className="flex flex-col">
-                  <span className="font-medium">{step.label}</span>
-                  {compact ? null : (
-                    <span className="text-[11px] text-[var(--muted-foreground)]">
-                      {stepCaption(step)}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {step.key === "analysing_repository" && repositories.kind !== "waiting" ? (
-                <p className="ml-6 text-[11px] text-[var(--muted-foreground)]">
-                  {repositories.kind === "none"
-                    ? "No enabled repository is linked to this board."
-                    : repositories.lines.join("; ")}
-                </p>
-              ) : null}
-              {step.key === "analysing_repository" &&
-              repositories.kind === "waiting" &&
-              step.state === "active" ? (
-                <p className="ml-6 text-[11px] italic text-[var(--muted-foreground)]">
-                  Fetching the linked repositories…
-                </p>
-              ) : null}
-              {failureJson && step.key === failedKey ? (
-                <pre className="ml-6 overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin">
-                  {failureJson}
-                </pre>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
+      {hasTree(run) ? (
+        <RunTree purpose={purpose} run={run} compact={compact} failureJson={failureJson} />
+      ) : (
+        <PhaseList purpose={purpose} run={run} compact={compact} failureJson={failureJson} />
+      )}
     </section>
+  );
+}
+
+/** The three fixed phases of a run recorded before the process tree existed. */
+function PhaseList({
+  purpose,
+  run,
+  compact,
+  failureJson,
+}: {
+  purpose: "analysis" | "roadmap";
+  run: GenerationRun;
+  compact: boolean;
+  failureJson: string | null;
+}) {
+  const steps = runSteps(purpose, run);
+  const failedKey = failedStepKey(run);
+  const repositories = repositoryOutcome(run);
+  return (
+    <ol
+      className={
+        compact ? "flex flex-row flex-wrap gap-2 text-[11px]" : "flex flex-col gap-2 text-xs"
+      }
+    >
+      {steps.map((step, index) => {
+        const tone =
+          step.state === "failed"
+            ? "text-[var(--destructive)]"
+            : step.state === "warning"
+              ? "text-[var(--warning)]"
+              : step.state === "active"
+                ? "text-[var(--primary)]"
+                : step.state === "done"
+                  ? "text-[var(--success)]"
+                  : "text-[var(--muted-foreground)]";
+        return (
+          <li key={step.key} className="flex flex-col gap-1">
+            <div className={`flex items-start gap-2 ${tone}`}>
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px]">
+                {step.state === "done" ? (
+                  <Check size={10} />
+                ) : step.state === "failed" ? (
+                  <X size={10} />
+                ) : step.state === "warning" ? (
+                  <AlertTriangle size={10} />
+                ) : step.state === "skipped" ? (
+                  <Minus size={10} />
+                ) : step.state === "active" ? (
+                  <Loader2 size={10} className="animate-spin" />
+                ) : (
+                  index + 1
+                )}
+              </span>
+              <div className="flex flex-col">
+                <span className="font-medium">{step.label}</span>
+                {compact ? null : (
+                  <span className="text-[11px] text-[var(--muted-foreground)]">
+                    {stepCaption(step)}
+                  </span>
+                )}
+              </div>
+            </div>
+            {step.key === "analysing_repository" && repositories.kind !== "waiting" ? (
+              <p className="ml-6 text-[11px] text-[var(--muted-foreground)]">
+                {repositories.kind === "none"
+                  ? "No enabled repository is linked to this board."
+                  : repositories.lines.join("; ")}
+              </p>
+            ) : null}
+            {step.key === "analysing_repository" &&
+            repositories.kind === "waiting" &&
+            step.state === "active" ? (
+              <p className="ml-6 text-[11px] italic text-[var(--muted-foreground)]">
+                Fetching the linked repositories…
+              </p>
+            ) : null}
+            {failureJson && step.key === failedKey ? (
+              <pre className="ml-6 overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin">
+                {failureJson}
+              </pre>
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
   );
 }

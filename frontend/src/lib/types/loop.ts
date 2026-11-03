@@ -219,7 +219,40 @@ export interface GenerationRunRepository {
   snapshot_chars_included?: number;
   /** Not even one file fitted in the share. */
   content_omitted?: boolean;
+  /** `tools` when the model read the repository itself; `file_count` is then what it could read.
+   * Absent on a repository sent as a snapshot. */
+  reading?: "tools";
+  /** Files too large for the workspace (a run that read through tools). */
+  left_out?: number;
   error?: string;
+}
+
+/** The stages of a run's process tree, in the order a run reaches them. */
+export type RunStage = "documents" | "repository" | "writing" | "checking" | "saving";
+
+/** What one step of the tree is: a stage's own line, a tool call, the model's note, a repair round,
+ * a limit the run reached, or why something failed. */
+export type RunTraceStepKind = "step" | "tool" | "note" | "repair" | "limit" | "error";
+
+/** One step of a run's process tree: a plain-language sentence, never a file's content. */
+export interface RunTraceStep {
+  stage: RunStage;
+  kind: RunTraceStepKind;
+  text: string;
+  at: string;
+  /** A tool call: the tool, its arguments, and what the answer held (sizes and counts). */
+  tool?: string;
+  arguments?: Record<string, unknown>;
+  answer?: {
+    summary?: string;
+    chars?: number;
+    files_read?: string[];
+    lines?: [number, number] | null;
+    entries?: number;
+    matches?: number;
+    truncated?: boolean;
+    error?: string | null;
+  };
 }
 
 export interface GenerationRun {
@@ -241,4 +274,6 @@ export interface GenerationRun {
   model: string | null;
   agent_name: string | null;
   usage: Record<string, unknown>;
+  /** The run's process tree, written step by step while it works (absent before revision 0013). */
+  trace?: RunTraceStep[] | undefined;
 }
