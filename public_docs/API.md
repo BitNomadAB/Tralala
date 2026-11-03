@@ -262,6 +262,7 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops/{loop_id}/agents` | The agent this Loop prefers per purpose |
 | PUT | `/boards/{board_id}/loops/{loop_id}/agents` | Sets that preference (`boards:write`; omitted field keeps its value, `null` clears) |
 | GET | `/boards/{board_id}/loops/{loop_id}/readiness` | Machine-readable blockers and human gates |
+| GET/POST | `/boards/{board_id}/loops/{loop_id}/notes` | The Loop's notes, oldest first (`limit` 1..200, `before` a note id); add one (`loops:write`, at most 20 000 characters, the same note from the same actor within five minutes answers the first) |
 | GET | `/boards/{board_id}/loops/{loop_id}/context` | Bounded, versioned context plus output schemas |
 | POST | `/boards/{board_id}/loops/{loop_id}/generation-runs` | Starts an analysis, RoadMap or QA run (`202`), or `analysis_human`: the analysis written for people from the current `analysis_ai` (`409 approval_exists` while the analysis is approved); `Idempotency-Key` supported |
 | GET | `/boards/{board_id}/loops/{loop_id}/generation-runs[/{run_id}]` | Durable run state and failures |
@@ -805,6 +806,8 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket; only a read-only Loop or board refuses it |
+| `write_note` | `loops:write` | Add a note to the Loop's log: what belongs to the Loop and to no single Ticket; refused on a completed Loop |
+| `read_notes` | `loops:read` | The Loop's notes, oldest first, a page at a time (`older` is the next `before`) |
 | `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`; `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id` |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the messages and positions |

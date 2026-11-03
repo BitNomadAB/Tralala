@@ -39,6 +39,7 @@ from app.db.generated.board import (
     LoopGenerationRunsRow,
     LoopHistoryArtifactsRow,
     LoopHistoryRow,
+    LoopNotesRow,
     LoopPhasesRow,
     LoopPlanItemsRow,
     LoopPlansRow,
@@ -83,6 +84,7 @@ from app.repositories.lists import ListRepository
 from app.repositories.loop_agents import LoopAgentRepository
 from app.repositories.loop_documents import LoopApprovalRepository, LoopDocumentRepository
 from app.repositories.loop_history import LoopArchiveRepository, LoopHistoryRepository
+from app.repositories.loop_notes import LoopNoteRepository
 from app.repositories.loop_plans import (
     LoopDependencyRepository,
     LoopPhaseRepository,
@@ -107,6 +109,7 @@ from tests.unit.fakes.discussions import (
 )
 from tests.unit.fakes.generation import FakeGenerationRunRepository
 from tests.unit.fakes.history import FakeLoopArchiveRepository, FakeLoopHistoryRepository
+from tests.unit.fakes.loop_notes import FakeLoopNoteRepository
 from tests.unit.fakes.registry import ConstraintError, like
 
 BOARD_ID = "0b6f3c1e-7a52-4d8e-9c41-2f5a6b7c8d9e"
@@ -171,6 +174,7 @@ class BoardState:
     artifacts: list[LoopHistoryArtifactsRow] = field(
         default_factory=list[LoopHistoryArtifactsRow]
     )
+    notes: list[LoopNotesRow] = field(default_factory=list[LoopNotesRow])
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -209,6 +213,7 @@ class BoardState:
             generation_runs=dict(self.generation_runs),
             history=dict(self.history),
             artifacts=list(self.artifacts),
+            notes=list(self.notes),
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -247,6 +252,7 @@ class BoardState:
         self.generation_runs = snapshot.generation_runs
         self.history = snapshot.history
         self.artifacts = snapshot.artifacts
+        self.notes = snapshot.notes
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -1938,6 +1944,7 @@ class FakeBoardRepositories:
         self.checklists: ChecklistRepository = FakeChecklistRepository(state)
         self.checklist_items: ChecklistItemRepository = FakeChecklistItemRepository(state)
         self.comments: CommentRepository = FakeCommentRepository(state)
+        self.notes: LoopNoteRepository = FakeLoopNoteRepository(state.notes)
         self.attachments: AttachmentRepository = FakeAttachmentRepository(state)
         self.search: CardSearchRepository = FakeCardSearchRepository(state)
         self.loop_agents: LoopAgentRepository = FakeLoopAgentRepository(state)

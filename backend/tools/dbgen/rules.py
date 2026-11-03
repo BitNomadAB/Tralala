@@ -194,6 +194,7 @@ CROSS_DATABASE: Final = _board(
         ("comments", "actor_id"): REGISTRY,
         ("discussion_events", "actor_id"): REGISTRY,
         ("discussion_messages", "author_actor_id"): REGISTRY,
+        ("loop_notes", "author_actor_id"): REGISTRY,
         ("discussion_participants", "participant_id"): REGISTRY,
         ("discussion_participants", "role_template_id"): REGISTRY,
         ("discussion_runs", "started_by_actor_id"): REGISTRY,

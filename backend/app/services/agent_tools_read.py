@@ -40,6 +40,8 @@ type ToolResult = dict[str, object]
 BOARD_LIST_LIMIT = 100
 SEARCH_LIMIT = 100
 SEARCH_DEFAULT = 25
+# read_loop carries the newest notes; read_notes pages through the rest.
+READ_LOOP_NOTES = 20
 
 
 class BoardListing(Protocol):
@@ -318,6 +320,7 @@ def _read_loop(
     loop_id = _require(args, "loop_id")
     context = services.loop_document.context(board_id, loop_id)
     readiness = services.loop.readiness(board_id, loop_id)
+    notes = services.loop_notes.list(actor, board_id, loop_id, limit=READ_LOOP_NOTES)
     kinds = args.get("document_kinds")
     wanted = [str(kind) for kind in kinds] if isinstance(kinds, list) and kinds else None
     documents = {
@@ -344,6 +347,8 @@ def _read_loop(
         "tickets": services.card.list(board_id, loop_id, limit=200)[0],
         # Work added outside the plan (create_ticket): it never blocks readiness or completion.
         "unplanned_tickets": readiness["unplanned"],
+        "notes": notes["notes"],
+        "note_count": notes["count"],
     }
 
 
@@ -452,6 +457,7 @@ __all__ = [
     "_text",
     "_thread_view",
     "_ticket_location",
+    "_whole_number",
     "allowed_actions",
     "list_boards",
     "search_tickets",

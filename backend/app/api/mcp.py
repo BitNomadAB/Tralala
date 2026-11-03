@@ -229,6 +229,8 @@ def render_bootstrap(settings: Settings) -> str:
         "- Your own analysis or RoadMap (`write_analysis`, `write_roadmap`) follows the same",
         "  schema, validation and review as one a board agent writes. You never replace an",
         "  approved one: the person requests changes or resets it first.",
+        "- What belongs to the Loop and to no single Ticket (a baseline, the checks that",
+        "  passed, a merge, a deploy, what is still open) is `write_note`.",
         "- A follow-up you discover is `create_ticket`: it is outside the plan, keyed",
         "  `<LoopKey>-UNP-<nnn>`, and never blocks the plan or the Loop's completion.",
         "- A Ticket is done through `complete_ticket`, which sets `completed_at` and comments your",

@@ -27,19 +27,15 @@ from typing import TYPE_CHECKING
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound
 from ..schemas.loops import AnalysisPayload, PlanPayload
+from .agent_tools_notes import read_notes, write_note
 from .agent_tools_plan import map_plan_ids, write_analysis, write_roadmap
 from .agent_tools_read import (
     ToolArguments,
     ToolResult,
-    _loop_lists,
     _read_board,
     _read_discussion,
     _read_loop,
     _read_ticket,
-    _require,
-    _text,
-    _thread_view,
-    _ticket_location,
     allowed_actions,
     list_boards,
     search_tickets,
@@ -50,16 +46,13 @@ from .agent_tools_schema import object_schema as _object
 from .agent_tools_schema import string_argument as _string
 from .agent_tools_tickets import comment_ticket, complete_ticket, create_ticket
 from .agent_tools_write import (
-    DEDUPE_WINDOW_SECONDS,
     _ask_agents,
     _assign_ticket,
     _create_loop,
     _move_ticket,
     _reply_discussion,
-    _resolve_list,
     _run_analysis,
     _run_roadmap,
-    _seconds_since,
     _write_info,
 )
 
@@ -80,6 +73,26 @@ class AgentTool:
 
 _BOARD_ID = _string("Board identifier from list_boards")
 _CARD_ID = _string("Ticket identifier from read_loop or search_tickets")
+_LOOP_ID = _string("Loop identifier from read_board")
+
+
+def _run_arguments() -> InputSchema:
+    """What run_analysis and run_roadmap take: a Loop, and optionally an agent and a wait."""
+    return _object(
+        {
+            "board_id": _BOARD_ID,
+            "loop_id": _string("Loop identifier"),
+            "agent_id": _string("Optional agent to run; defaults to the Loop's choice"),
+            "instructions": _string("Optional extra direction for this run"),
+            "wait_seconds": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 120,
+                "description": "Poll the run for up to this long before returning",
+            },
+        },
+        required=["board_id", "loop_id"],
+    )
 
 
 def tool_catalog() -> dict[str, AgentTool]:
@@ -352,6 +365,37 @@ def tool_catalog() -> dict[str, AgentTool]:
             handler=_write_info,
         ),
         AgentTool(
+            name="write_note",
+            description=(
+                "Add a note to a Loop's log: what belongs to the Loop and to no single Ticket, "
+                "such as the baseline, the checks that passed, a merge, a deploy or what is still "
+                "open. Notes are kept in order and never edited."
+            ),
+            scopes=("loops:write",),
+            input_schema=_object(
+                {"board_id": _BOARD_ID, "loop_id": _LOOP_ID, "content": _string("Markdown")},
+                required=["board_id", "loop_id", "content"],
+            ),
+            handler=write_note,
+        ),
+        AgentTool(
+            name="read_notes",
+            description=(
+                "Read a Loop's notes, oldest first: the newest page, or the one before a note."
+            ),
+            scopes=("loops:read",),
+            input_schema=_object(
+                {
+                    "board_id": _BOARD_ID,
+                    "loop_id": _LOOP_ID,
+                    "limit": {"type": "number", "minimum": 1, "maximum": 200},
+                    "before": _string("Optional note id; the answer's older value"),
+                },
+                required=["board_id", "loop_id"],
+            ),
+            handler=read_notes,
+        ),
+        AgentTool(
             name="run_analysis",
             description=(
                 "Ask a board agent for the Analysis candidate of a Loop that has Info. Returns the "
@@ -359,21 +403,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "person, never by an agent."
             ),
             scopes=("loops:generate",),
-            input_schema=_object(
-                {
-                    "board_id": _BOARD_ID,
-                    "loop_id": _string("Loop identifier"),
-                    "agent_id": _string("Optional agent to run; defaults to the Loop's choice"),
-                    "instructions": _string("Optional extra direction for this run"),
-                    "wait_seconds": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 120,
-                        "description": "Poll the run for up to this long before returning",
-                    },
-                },
-                required=["board_id", "loop_id"],
-            ),
+            input_schema=_run_arguments(),
             handler=_run_analysis,
         ),
         AgentTool(
@@ -409,21 +439,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "Approving the RoadMap is a person's decision and publishes the Tickets."
             ),
             scopes=("loops:generate",),
-            input_schema=_object(
-                {
-                    "board_id": _BOARD_ID,
-                    "loop_id": _string("Loop identifier"),
-                    "agent_id": _string("Optional agent to run; defaults to the Loop's choice"),
-                    "instructions": _string("Optional extra direction for this run"),
-                    "wait_seconds": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 120,
-                        "description": "Poll the run for up to this long before returning",
-                    },
-                },
-                required=["board_id", "loop_id"],
-            ),
+            input_schema=_run_arguments(),
             handler=_run_roadmap,
         ),
         AgentTool(
@@ -548,7 +564,6 @@ def run_tool(
 
 
 __all__ = [
-    "DEDUPE_WINDOW_SECONDS",
     "AgentTool",
     "ArgumentSchema",
     "InputSchema",
@@ -557,21 +572,14 @@ __all__ = [
     "_ask_agents",
     "_assign_ticket",
     "_create_loop",
-    "_loop_lists",
     "_move_ticket",
     "_read_board",
     "_read_discussion",
     "_read_loop",
     "_read_ticket",
     "_reply_discussion",
-    "_require",
-    "_resolve_list",
     "_run_analysis",
     "_run_roadmap",
-    "_seconds_since",
-    "_text",
-    "_thread_view",
-    "_ticket_location",
     "_write_info",
     "allowed_actions",
     "comment_ticket",
@@ -581,9 +589,11 @@ __all__ = [
     "list_boards",
     "map_plan_ids",
     "missing_scopes",
+    "read_notes",
     "run_tool",
     "search_tickets",
     "tool_catalog",
     "write_analysis",
+    "write_note",
     "write_roadmap",
 ]

@@ -13,7 +13,7 @@ import pytest
 
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound
-from app.db.generated.board import AttachmentsRow
+from app.db.generated.board import AttachmentsRow, LoopNotesRow
 from app.schemas.loops import LegacyImportRequest
 from app.services.loop_history import (
     LEGACY_LABEL,
@@ -120,6 +120,35 @@ def test_finalization_completes_the_loop_with_a_hashed_snapshot(tmp_path: Path) 
     assert "envelope_json" not in record
     assert "search_text" not in record
     assert [entry.action for entry in state.activity] == ["loop.completed"]
+
+
+def test_finalization_carries_the_loops_notes_and_searches_them(tmp_path: Path) -> None:
+    service, state, store = make(tmp_path)
+    state.notes.append(
+        LoopNotesRow(
+            id="note-1",
+            loop_id=LOOP,
+            author_actor_id="bot",
+            author_actor_type="agent",
+            author_name="Bot",
+            content="Merged as fe2a91; deployed to staging.",
+            content_sha256="0" * 64,
+            created_at=NOW,
+        )
+    )
+    finalize(service, store)
+    (stored,) = state.history.values()
+    assert json.loads(stored.envelope_json)["notes"] == [
+        {
+            "id": "note-1",
+            "author_actor_id": "bot",
+            "author_actor_type": "agent",
+            "author_name": "Bot",
+            "content": "Merged as fe2a91; deployed to staging.",
+            "created_at": NOW,
+        }
+    ]
+    assert "deployed to staging" in stored.search_text
 
 
 def test_a_second_finalization_returns_the_same_record(tmp_path: Path) -> None:

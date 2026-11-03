@@ -86,6 +86,8 @@ certificate. `/llms.txt` is plain text at the same origin.
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |
 | `comment_ticket` | `comments:write` | add a comment, done or not: progress, findings, a blocker |
+| `write_note` | `loops:write` | add a note to the Loop's log: baseline, checks, merge, deploy, what is open |
+| `read_notes` | `loops:read` | read the Loop's notes, a page at a time |
 | `create_ticket` | `cards:write`, `comments:write` | add a follow-up outside the plan while the Loop executes, keyed `<LoopKey>-UNP-<nnn>` |
 | `complete_ticket` | `cards:write`, `comments:write` | finish a Ticket: your summary and evidence as a comment, then completed |
 | `create_loop` | `loops:write` | open a Loop for an agreed intent (idempotent) |
@@ -114,6 +116,7 @@ comment_ticket                  -> what you found or what you changed
 assign_ticket / move_ticket     -> hand it on, or move it to the column that means "in progress"
 complete_ticket(summary)        -> done: the summary and evidence as a comment, completed_at set
 create_ticket(follow_up_of)     -> anything you found that is not this Ticket's work
+write_note                      -> what belongs to the Loop: baseline, checks, merge, deploy
 ```
 
 To start something new together:

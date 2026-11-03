@@ -35,6 +35,7 @@ from .lists import ListRepository
 from .loop_agents import LoopAgentRepository
 from .loop_documents import LoopApprovalRepository, LoopDocumentRepository
 from .loop_history import LoopArchiveRepository, LoopHistoryRepository
+from .loop_notes import LoopNoteRepository
 from .loop_plans import (
     LoopDependencyRepository,
     LoopPhaseRepository,
@@ -106,6 +107,9 @@ class BoardRepositories(Protocol):
 
     @property
     def comments(self) -> CommentRepository: ...
+
+    @property
+    def notes(self) -> LoopNoteRepository: ...
 
     @property
     def attachments(self) -> AttachmentRepository: ...

@@ -193,6 +193,15 @@ Scenario outcomes are `passed`, `failed`, `blocked`, `not_run` or `not_applicabl
 blocked or not-run scenario prevents acceptance; `not_applicable` needs an explicit human waiver.
 Finalization stores an immutable snapshot and returns the existing record on every retry.
 
+## Notes
+
+A Loop keeps a log of notes for what belongs to the Loop and to no single Ticket: the
+baseline the work started from, the checks that passed, a merge or a deploy, what is still
+open. A person writes one in the Loop page's **Notes** panel and a worker with `write_note`;
+`read_loop` carries the newest twenty and `read_notes` pages through the rest. Notes are
+appended and never edited, a completed Loop takes none, and finalizing a Loop copies every
+note into its history snapshot, where the history search finds them.
+
 ## History
 
 Completed Loops live in `loop_history` inside their Board database: envelope, documents, plan,

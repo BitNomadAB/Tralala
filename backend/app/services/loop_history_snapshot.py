@@ -82,6 +82,7 @@ def snapshot(
     runs = archive.generation_runs(loop_id)
     activity = archive.activity(loop_id)
     attachments = archive.attachments(loop_id)
+    notes = repos.notes.for_loop(loop_id)
     labels = repos.cards.labels([card.id for card in cards]) if cards else {}
 
     document_entries: list[dict[str, object]] = [
@@ -259,6 +260,17 @@ def snapshot(
                 for result in qa_results
             ],
         },
+        "notes": [
+            {
+                "id": note.id,
+                "author_actor_id": note.author_actor_id,
+                "author_actor_type": note.author_actor_type,
+                "author_name": note.author_name,
+                "content": note.content,
+                "created_at": note.created_at,
+            }
+            for note in notes
+        ],
         "generation_provenance": generation_provenance(runs),
         "activity": [
             {
@@ -290,6 +302,7 @@ def snapshot(
         )
     parts.extend(card.title for card in cards)
     parts.extend(comment.content for comment in comments)
+    parts.extend(note.content for note in notes)
     parts.extend(canonical(json.loads(cycle.ai_instructions_json or "{}")) for cycle in qa_cycles)
     for result in qa_results:
         parts.append(result.evidence)

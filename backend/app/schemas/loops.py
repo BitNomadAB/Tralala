@@ -533,3 +533,27 @@ class LegacyImportRequest(StrictModel):
     reported_qa_status: Annotated[str, Field(max_length=60)] | None = None
     raw_text: BodyText = ""
     idempotency_key: Annotated[str, Field(max_length=200)] | None = None
+
+
+class NoteWrite(StrictModel):
+    content: str = Field(
+        min_length=1,
+        max_length=20_000,
+        description="Markdown: what belongs to the Loop and to no single Ticket",
+    )
+
+
+class NoteOut(OutModel):
+    id: str
+    loop_id: str
+    author_actor_id: str
+    author_actor_type: str
+    author_name: str
+    content: str
+    created_at: str
+    deduplicated: bool = False
+
+
+class NotePageOut(OutModel):
+    notes: list[NoteOut] = Field(default_factory=list[NoteOut])
+    count: int

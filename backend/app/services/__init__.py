@@ -34,6 +34,7 @@ from .loop_documents import LoopDocumentService
 from .loop_generation import LoopGenerationService
 from .loop_history import LoopHistoryService
 from .loop_links import LoopWorkflowLinks
+from .loop_notes import LoopNoteService
 from .loop_plans import LoopPlanService
 from .loop_qa import LoopQaService
 from .loops import LoopService
@@ -122,6 +123,7 @@ class Services:
         self.loop_document = LoopDocumentService(self.board, self.board_store, self.loop_plan)
         self.loop_links = LoopWorkflowLinks()
         self.loop_agents = LoopAgentService(self.board_store, self.agent)
+        self.loop_notes = LoopNoteService(self.board, self.board_store)
         self.loop_history = LoopHistoryService(
             self.board, self.board_store, self.boards, self.boards
         )

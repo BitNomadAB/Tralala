@@ -35,6 +35,7 @@ from ..lists import ListRepository
 from ..loop_agents import LoopAgentRepository
 from ..loop_documents import LoopApprovalRepository, LoopDocumentRepository
 from ..loop_history import LoopArchiveRepository, LoopHistoryRepository
+from ..loop_notes import LoopNoteRepository
 from ..loop_plans import (
     LoopDependencyRepository,
     LoopPhaseRepository,
@@ -69,6 +70,7 @@ from .lists import SqlListRepository
 from .loop_agents import SqlLoopAgentRepository
 from .loop_documents import SqlLoopApprovalRepository, SqlLoopDocumentRepository
 from .loop_history import SqlLoopArchiveRepository, SqlLoopHistoryRepository
+from .loop_notes import SqlLoopNoteRepository
 from .loop_plans import (
     SqlLoopDependencyRepository,
     SqlLoopPhaseRepository,
@@ -107,6 +109,7 @@ class SqlBoardRepositories:
         self.checklists: ChecklistRepository = SqlChecklistRepository(connection)
         self.checklist_items: ChecklistItemRepository = SqlChecklistItemRepository(connection)
         self.comments: CommentRepository = SqlCommentRepository(connection)
+        self.notes: LoopNoteRepository = SqlLoopNoteRepository(connection)
         self.attachments: AttachmentRepository = SqlAttachmentRepository(connection)
         self.search: CardSearchRepository = SqlCardSearchRepository(connection)
         self.loop_agents: LoopAgentRepository = SqlLoopAgentRepository(connection)
