@@ -88,6 +88,22 @@ class LoopRepository(Protocol):
         """A review scope's approval, and the next version."""
         ...
 
+    def accept_delivery(
+        self, loop_id: str, *, implementation_approval_id: str, qa_approval_id: str, now: str
+    ) -> None:
+        """Implementation and an external QA accepted at once, and the next version."""
+        ...
+
+    def start_qa(
+        self, loop_id: str, *, implementation_approval_id: str, cycle_id: str, now: str
+    ) -> None:
+        """Implementation accepted and its QA cycle active, and the next version."""
+        ...
+
+    def set_active_qa_cycle(self, loop_id: str, cycle_id: str, *, now: str) -> None:
+        """The Loop's active QA cycle; it is not an edit, so the version stays."""
+        ...
+
     def bump_version(self, loop_id: str, *, now: str) -> None:
         """The next version, as a person's decision about the Loop's documents makes it."""
         ...

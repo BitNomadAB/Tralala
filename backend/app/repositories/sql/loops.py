@@ -46,6 +46,17 @@ _ARCHIVE = text(
 )
 _SET_STAGE = text("UPDATE loops SET stage = :stage, updated_at = :now WHERE id = :id")
 _BUMP_VERSION = text("UPDATE loops SET version = version + 1, updated_at = :now WHERE id = :id")
+_ACCEPT_DELIVERY = text(
+    "UPDATE loops SET implementation_approval_id = :implementation, qa_approval_id = :qa,"
+    " version = version + 1, updated_at = :now WHERE id = :id"
+)
+_START_QA = text(
+    "UPDATE loops SET implementation_approval_id = :approval, active_qa_cycle_id = :cycle,"
+    " version = version + 1, updated_at = :now WHERE id = :id"
+)
+_SET_ACTIVE_QA_CYCLE = text(
+    "UPDATE loops SET active_qa_cycle_id = :cycle, updated_at = :now WHERE id = :id"
+)
 _SET_CURRENT_PLAN = text(
     "UPDATE loops SET current_plan_id = :plan_id, updated_at = :now WHERE id = :id"
 )
@@ -161,6 +172,32 @@ class SqlLoopRepository:
         self._connection.execute(
             statement, {"approval_id": approval_id, "now": now, "id": loop_id}
         )
+
+    def accept_delivery(
+        self, loop_id: str, *, implementation_approval_id: str, qa_approval_id: str, now: str
+    ) -> None:
+        parameters = {
+            "implementation": implementation_approval_id,
+            "qa": qa_approval_id,
+            "now": now,
+            "id": loop_id,
+        }
+        self._connection.execute(_ACCEPT_DELIVERY, parameters)
+
+    def start_qa(
+        self, loop_id: str, *, implementation_approval_id: str, cycle_id: str, now: str
+    ) -> None:
+        parameters = {
+            "approval": implementation_approval_id,
+            "cycle": cycle_id,
+            "now": now,
+            "id": loop_id,
+        }
+        self._connection.execute(_START_QA, parameters)
+
+    def set_active_qa_cycle(self, loop_id: str, cycle_id: str, *, now: str) -> None:
+        parameters = {"cycle": cycle_id, "now": now, "id": loop_id}
+        self._connection.execute(_SET_ACTIVE_QA_CYCLE, parameters)
 
     def bump_version(self, loop_id: str, *, now: str) -> None:
         self._connection.execute(_BUMP_VERSION, {"now": now, "id": loop_id})

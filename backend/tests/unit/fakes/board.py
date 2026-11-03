@@ -723,6 +723,37 @@ class FakeLoopRepository:
             ),
         )
 
+    def accept_delivery(
+        self, loop_id: str, *, implementation_approval_id: str, qa_approval_id: str, now: str
+    ) -> None:
+        self._change(
+            loop_id,
+            lambda loop: loop.__replace__(
+                implementation_approval_id=implementation_approval_id,
+                qa_approval_id=qa_approval_id,
+                version=loop.version + 1,
+                updated_at=now,
+            ),
+        )
+
+    def start_qa(
+        self, loop_id: str, *, implementation_approval_id: str, cycle_id: str, now: str
+    ) -> None:
+        self._change(
+            loop_id,
+            lambda loop: loop.__replace__(
+                implementation_approval_id=implementation_approval_id,
+                active_qa_cycle_id=cycle_id,
+                version=loop.version + 1,
+                updated_at=now,
+            ),
+        )
+
+    def set_active_qa_cycle(self, loop_id: str, cycle_id: str, *, now: str) -> None:
+        self._change(
+            loop_id, lambda loop: loop.__replace__(active_qa_cycle_id=cycle_id, updated_at=now)
+        )
+
     def bump_version(self, loop_id: str, *, now: str) -> None:
         self._change(
             loop_id, lambda loop: loop.__replace__(version=loop.version + 1, updated_at=now)
@@ -1101,6 +1132,73 @@ class FakeLoopQaRepository:
                 self._state.qa_cycles[cycle.id] = cycle.__replace__(
                     status="superseded", updated_at=now
                 )
+
+    def add(self, row: LoopQaCyclesRow) -> None:
+        if row.id in self._state.qa_cycles:
+            raise ConstraintError(f"loop_qa_cycles.id {row.id} exists")
+        self._state.qa_cycles[row.id] = row
+
+    def set_instructions(
+        self,
+        cycle_id: str,
+        *,
+        ai_json: str,
+        human_json: str,
+        revision: int,
+        run_id: str,
+        baseline: str,
+        now: str,
+    ) -> None:
+        cycle = self._state.qa_cycles.get(cycle_id)
+        if cycle is not None:
+            self._state.qa_cycles[cycle_id] = cycle.__replace__(
+                status="instructions_ready",
+                ai_instructions_json=ai_json,
+                human_instructions_json=human_json,
+                instruction_revision=revision,
+                generation_run_id=run_id,
+                delivery_baseline=baseline,
+                updated_at=now,
+            )
+
+    def mark_in_progress(self, cycle_id: str, *, now: str) -> None:
+        cycle = self._state.qa_cycles.get(cycle_id)
+        if cycle is not None:
+            self._state.qa_cycles[cycle_id] = cycle.__replace__(
+                status="in_progress", updated_at=now
+            )
+
+    def decide(self, cycle_id: str, *, status: str, actor_id: str, note: str, now: str) -> None:
+        cycle = self._state.qa_cycles.get(cycle_id)
+        if cycle is not None:
+            self._state.qa_cycles[cycle_id] = cycle.__replace__(
+                status=status,
+                decided_at=now,
+                decided_by_actor_id=actor_id,
+                decision_note=note,
+                updated_at=now,
+            )
+
+    def results(self, cycle_id: str) -> list[LoopQaResultsRow]:
+        found = [row for row in self._state.qa_results if row.cycle_id == cycle_id]
+        return sorted(found, key=lambda row: row.created_at)
+
+    def add_result(self, row: LoopQaResultsRow) -> None:
+        if row.cycle_id not in self._state.qa_cycles:
+            raise ConstraintError("FOREIGN KEY constraint failed")
+        self._state.qa_results.append(row)
+
+    def approve_not_applicable(
+        self, cycle_id: str, scenario_id: str, *, actor_id: str, note: str
+    ) -> None:
+        self._state.qa_results = [
+            row.__replace__(disposition_approved_by_actor_id=actor_id, disposition_note=note)
+            if row.cycle_id == cycle_id
+            and row.scenario_id == scenario_id
+            and row.status == "not_applicable"
+            else row
+            for row in self._state.qa_results
+        ]
 
 
 def _sort_value(card: CardsRow, sort: CardSort) -> tuple[int, int | str]:
