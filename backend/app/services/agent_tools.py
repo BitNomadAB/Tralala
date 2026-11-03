@@ -9,21 +9,26 @@ can be narrower than a scope, never wider.
 
 Deliberately absent: board and list structure changes, Ticket creation, archiving and every human
 decision. A worker lists the boards and finds its Ticket, agrees an intent, creates the Loop, writes
-the Info while it is still speculative, asks for the Analysis and tracks the Tickets; a person still
-approves the analysis and the RoadMap, confirms human work and accepts QA.
+the Info while it is still speculative, writes its own analysis and RoadMap (or asks a board agent
+for them) and tracks the Tickets; a person still approves the analysis and the RoadMap, confirms
+human work and accepts QA.
 
-The handlers live beside this module, in ``agent_tools_read`` and ``agent_tools_write``; this
-module holds the catalogue and the dispatch and re-exports them.
+The handlers live beside this module, in ``agent_tools_read``, ``agent_tools_write`` and
+``agent_tools_plan``; this module holds the catalogue and the dispatch and re-exports them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Required, TypedDict
+from typing import TYPE_CHECKING, NotRequired, Required, TypedDict
+
+from pydantic import BaseModel
 
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound
+from ..schemas.loops import AnalysisPayload, PlanPayload
+from .agent_tools_plan import map_plan_ids, write_analysis, write_roadmap
 from .agent_tools_read import (
     ToolArguments,
     ToolResult,
@@ -59,22 +64,31 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
 
 
 class ArgumentSchema(TypedDict, total=False):
-    """The JSON schema of one argument: its type, and what a model is told about it."""
+    """The JSON schema of one argument; an ``object`` one is a schema model's, whose ``$ref``
+    targets live in the tool's ``$defs``."""
 
     type: Required[str]
     description: str
     items: ArgumentSchema
     minimum: int
     maximum: int
-
-
-class InputSchema(TypedDict):
-    """A tool's arguments as a closed JSON schema object."""
-
-    type: str
-    properties: dict[str, ArgumentSchema]
+    properties: dict[str, object]
     required: list[str]
     additionalProperties: bool
+
+
+# A tool's arguments as a closed JSON schema object, with the definitions its object arguments
+# refer to at the root, where ``#/$defs/...`` resolves (a ``$`` key needs the functional form).
+InputSchema = TypedDict(
+    "InputSchema",
+    {
+        "type": str,
+        "properties": dict[str, ArgumentSchema],
+        "required": list[str],
+        "additionalProperties": bool,
+        "$defs": NotRequired[dict[str, object]],
+    },
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,14 +107,35 @@ def _string(description: str) -> ArgumentSchema:
 
 
 def _object(
-    properties: dict[str, ArgumentSchema], *, required: list[str] | None = None
+    properties: dict[str, ArgumentSchema],
+    *,
+    required: list[str] | None = None,
+    definitions: dict[str, object] | None = None,
 ) -> InputSchema:
-    return {
+    schema: InputSchema = {
         "type": "object",
         "properties": properties,
         "required": required or [],
         "additionalProperties": False,
     }
+    if definitions:
+        schema["$defs"] = definitions
+    return schema
+
+
+def _model(model: type[BaseModel], description: str) -> tuple[ArgumentSchema, dict[str, object]]:
+    """A schema model as an object argument, in its field order (the order a model should write
+    it in), and the definitions its ``$ref``s name, for the tool's ``$defs``."""
+    schema = model.model_json_schema()
+    argument: ArgumentSchema = {
+        "type": "object",
+        "description": description,
+        "properties": schema["properties"],
+        "required": schema.get("required", []),
+        "additionalProperties": False,
+    }
+    definitions: dict[str, object] = schema.get("$defs", {})
+    return argument, definitions
 
 
 _BOARD_ID = _string("Board identifier from list_boards")
@@ -109,6 +144,16 @@ _CARD_ID = _string("Ticket identifier from read_loop or search_tickets")
 
 def tool_catalog() -> dict[str, AgentTool]:
     """The worker surface: how to find a task, read it, start one, track it and ask for advice."""
+    analysis, analysis_definitions = _model(
+        AnalysisPayload,
+        "The analysis as one JSON object, written in the order of its fields: outcome, "
+        "scope, findings with technical_detail and plain_language, recommendation and the rest",
+    )
+    plan, plan_definitions = _model(
+        PlanPayload,
+        "The RoadMap as one JSON object: a summary and the Phases in order with their Tickets; "
+        "a Ticket a person must do has required_actor human, a reason and instructions",
+    )
     tools = [
         AgentTool(
             name="list_boards",
@@ -343,6 +388,32 @@ def tool_catalog() -> dict[str, AgentTool]:
             handler=_run_analysis,
         ),
         AgentTool(
+            name="write_analysis",
+            description=(
+                "Hand in your own analysis of a Loop that has Info, in Tralala's structure: the "
+                "same schema, validation, rendering and review as an analysis a board agent "
+                "writes. technical_detail is for engineers; plain_language is for a project "
+                "manager and every risk, blocker, legal, security or question finding needs it. "
+                "A person approves it; an approved analysis is replaced only after that person "
+                "requests changes or resets it."
+            ),
+            scopes=("loops:generate",),
+            input_schema=_object(
+                {
+                    "board_id": _BOARD_ID,
+                    "loop_id": _string("Loop identifier from read_board or create_loop"),
+                    "analysis": analysis,
+                    "expected_info_revision_id": _string(
+                        "Optional Info revision id you wrote from (read_loop); a mismatch returns "
+                        "document_stale"
+                    ),
+                },
+                required=["board_id", "loop_id", "analysis"],
+                definitions=analysis_definitions,
+            ),
+            handler=write_analysis,
+        ),
+        AgentTool(
             name="run_roadmap",
             description=(
                 "Ask a board agent for the RoadMap candidate of a Loop whose analysis is approved. "
@@ -365,6 +436,31 @@ def tool_catalog() -> dict[str, AgentTool]:
                 required=["board_id", "loop_id"],
             ),
             handler=_run_roadmap,
+        ),
+        AgentTool(
+            name="write_roadmap",
+            description=(
+                "Hand in your own RoadMap for a Loop whose analysis is approved: the Phases in "
+                "order with their Tickets, in the same schema, validation and review as a "
+                "generated RoadMap. Ids may be short (p1, t1): they become stable UUIDs, listed "
+                "in id_map, so the same ids keep the same Tickets when you hand it in again. A "
+                "person approves it, and the approval publishes the Tickets with their keys."
+            ),
+            scopes=("loops:generate",),
+            input_schema=_object(
+                {
+                    "board_id": _BOARD_ID,
+                    "loop_id": _string("Loop identifier from read_board or create_loop"),
+                    "plan": plan,
+                    "expected_analysis_revision_id": _string(
+                        "Optional technical analysis (analysis_ai) revision id you planned from; "
+                        "a mismatch returns document_stale"
+                    ),
+                },
+                required=["board_id", "loop_id", "plan"],
+                definitions=plan_definitions,
+            ),
+            handler=write_roadmap,
         ),
         AgentTool(
             name="ask_agents",
@@ -491,8 +587,11 @@ __all__ = [
     "_write_info",
     "describe_scope",
     "list_boards",
+    "map_plan_ids",
     "missing_scopes",
     "run_tool",
     "search_tickets",
     "tool_catalog",
+    "write_analysis",
+    "write_roadmap",
 ]

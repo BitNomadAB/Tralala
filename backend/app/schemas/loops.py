@@ -182,6 +182,13 @@ class CandidateSubmission(StrictModel):
     source_info_revision_id: Id | None = None
     source_analysis_ai_revision_id: Id | None = None
     source_analysis_revision_id: Id | None = None
+    expected_info_revision_id: Id | None = Field(
+        default=None, description="Current Info revision the candidate was written from"
+    )
+    expected_analysis_revision_id: Id | None = Field(
+        default=None,
+        description="Current technical analysis (analysis_ai) revision a RoadMap was written from",
+    )
     provenance: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("provenance")

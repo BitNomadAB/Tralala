@@ -7,8 +7,8 @@ and of the service methods it calls, and holds each entry to five rules:
 
 1. **Handler.** The handler is a module-level function of the catalogue module taking
    ``(services, actor, args)``, so the guard can read it. The handlers are defined in
-   ``agent_tools_read.py`` and ``agent_tools_write.py`` and re-exported by ``agent_tools.py``, so
-   the guard reads those three files as the catalogue module's source.
+   ``agent_tools_read.py``, ``agent_tools_write.py`` and ``agent_tools_plan.py`` and re-exported by
+   ``agent_tools.py``, so the guard reads those four files as the catalogue module's source.
 2. **Documented.** ``/llms.txt`` has a ``### name (requires ...)`` section with exactly the entry's
    scopes and its description, and ``tools/list`` for an actor holding every scope carries the
    entry's name, description and input schema. Neither lists a tool the catalogue lacks, and both
@@ -55,7 +55,12 @@ BACKEND_ROOT = UNIT_ROOT.parents[1]
 SERVICES_ROOT = BACKEND_ROOT / "app" / "services"
 CATALOGUE_FILES = tuple(
     SERVICES_ROOT / name
-    for name in ("agent_tools.py", "agent_tools_read.py", "agent_tools_write.py")
+    for name in (
+        "agent_tools.py",
+        "agent_tools_read.py",
+        "agent_tools_write.py",
+        "agent_tools_plan.py",
+    )
 )
 COMPOSITION_ROOT = SERVICES_ROOT / "__init__.py"
 AGENTS_MD = BACKEND_ROOT.parent / "AGENTS.md"
@@ -116,6 +121,8 @@ GATED: Mapping[str, str] = MappingProxyType(
         "LoopDocumentService.save_info": "editing Info",
         # Completing a Ticket that requires a person is refused to a token.
         "CardService.update": "confirming a human-only Ticket",
+        # A token never hands in an analysis or a RoadMap over one a person approved.
+        "LoopDocumentService.submit_candidate": "approving analysis or a RoadMap",
     }
 )
 
@@ -746,6 +753,14 @@ class LoopDocumentService:
         actor.require("loops:write")
         if not actor.is_user:
             raise Forbidden("Info is a person's decision", code="human_action_required")
+
+    def submit_candidate(self, actor, board_id, loop_id, payload):
+        actor.require("loops:generate")
+        if not actor.is_user:
+            self._refuse_over_approval(loop_id)
+
+    def _refuse_over_approval(self, loop_id):
+        raise Forbidden("Approved by a person", code="human_action_required")
 """
 FIXTURE_LOOPS = """
 class LoopService:

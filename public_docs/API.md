@@ -254,7 +254,7 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops/{loop_id}/documents` | Current and approved revisions per kind |
 | GET | `/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions` | Revision history |
 | PUT | `/boards/{board_id}/loops/{loop_id}/documents/info` | Human-only; new immutable revision |
-| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval |
+| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval. `expected_info_revision_id` / `expected_analysis_revision_id` answer `409 document_stale` when that document changed; a token gets `403 human_action_required` while the scope's approval is current |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/roadmap` | Human-only; publishes the plan atomically |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/{scope}/reset` | Human-only; clears the scope's documents and supersedes any approval behind them |
@@ -800,6 +800,8 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
 | `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
 | `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
+| `write_analysis` | `loops:generate` | Hand in the worker's own analysis through the candidate route; schema errors answer one `loc: message` line each |
+| `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map` |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker |

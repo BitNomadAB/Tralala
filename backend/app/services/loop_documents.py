@@ -75,11 +75,13 @@ from .loop_documents_views import (
 from .loop_plans import LoopPlanService
 from .loops import (
     DOCUMENT_KINDS,
+    analysis_approved,
     document_slots,
     ensure_writable,
     latest_approvals,
     refresh_stage,
     require_loop,
+    roadmap_approved,
     stale_reasons,
 )
 
@@ -307,6 +309,9 @@ class LoopDocumentService:
         with self.store.writer(board_id) as repos:
             loop = require_loop(repos, loop_id)
             ensure_writable(loop)
+            if not actor.is_user:
+                self._refuse_over_approval(repos, loop, payload.kind)
+            self._check_expected(repos, loop_id, payload)
             if payload.kind == "analysis":
                 if payload.analysis is None:
                     raise ValidationFailure("An analysis candidate needs an analysis payload")
@@ -317,6 +322,50 @@ class LoopDocumentService:
                 self._store_roadmap(repos, loop, payload.plan, actor, payload)
             refresh_stage(repos, loop_id, now=self._now())
         return self.documents(board_id, loop_id)
+
+    @staticmethod
+    def _refuse_over_approval(repos: BoardRepositories, loop: LoopsRow, kind: str) -> None:
+        """A token never replaces what a person approved (the logic of WORKER_INFO_STAGES).
+
+        While the scope's approval is current and not stale, a new candidate would silently undo
+        it; the person requests changes or resets the scope first, and then the worker may write.
+        """
+        documents = document_slots(repos.documents.current_or_approved(loop.id))
+        approvals = latest_approvals(repos.approvals.newest_first(loop.id))
+        stale = stale_reasons(documents, approvals)
+        approved = analysis_approved if kind == "analysis" else roadmap_approved
+        if approved(documents, approvals, stale):
+            what = "analysis" if kind == "analysis" else "RoadMap"
+            raise Forbidden(
+                f"The {what} is approved; a person requests changes or resets it before an agent "
+                "hands in another",
+                code="human_action_required",
+                details={"stage": loop.stage, "action": f"Replacing an approved {what}"},
+            )
+
+    @staticmethod
+    def _check_expected(
+        repos: BoardRepositories, loop_id: str, payload: CandidateSubmission
+    ) -> None:
+        """A candidate written from an Info or an analysis that has changed since is refused."""
+        expected = (
+            ("info", payload.expected_info_revision_id),
+            ("analysis_ai", payload.expected_analysis_revision_id),
+        )
+        for kind, revision_id in expected:
+            if revision_id is None:
+                continue
+            current = repos.documents.current(loop_id, kind)
+            if current is None or current.id != revision_id:
+                raise VersionConflict(
+                    "The candidate was written from a revision that is no longer current",
+                    code="document_stale",
+                    details={
+                        "kind": kind,
+                        "expected_revision_id": revision_id,
+                        "current_revision_id": current.id if current else None,
+                    },
+                )
 
     def _store_analysis(
         self,

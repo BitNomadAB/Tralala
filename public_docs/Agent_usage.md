@@ -74,7 +74,7 @@ In a client that speaks MCP:
 `"type": "http"` names the transport, not the scheme: `https` is what you use over a tunnel or with a
 certificate. `/llms.txt` is plain text at the same origin.
 
-## 3. The fifteen tools
+## 3. The seventeen tools
 
 | Tool | Scope | What it does |
 | --- | --- | --- |
@@ -90,6 +90,8 @@ certificate. `/llms.txt` is plain text at the same origin.
 | `write_info` | `loops:write` | write the Info, only while the Loop is `draft` or `analysis_review` |
 | `run_analysis` | `loops:generate` | ask the analysis agent to produce a candidate |
 | `run_roadmap` | `loops:generate` | ask for the RoadMap candidate |
+| `write_analysis` | `loops:generate` | hand in your own analysis, in the same schema and review as a generated one |
+| `write_roadmap` | `loops:generate` | hand in your own RoadMap; short Phase and Ticket ids become stable UUIDs |
 | `ask_agents` | `discussions:write` | open a discussion on a Ticket and run one round |
 | `read_discussion` | `discussions:read` | read a thread and each agent's position |
 | `reply_discussion` | `discussions:write` | add to a thread |
@@ -116,11 +118,24 @@ To start something new together:
 create_loop(intent)             -> a Loop in draft
 write_info(content)             -> the agreement, written down while still speculative
 run_analysis()                  -> the analysis agent produces a candidate
+  or write_analysis(analysis)   -> you hand in your own, in the same structure
 ask_agents(question)            -> discuss it with the role agents meanwhile
 ```
 
-Then a person approves the analysis and the RoadMap. An agent can prepare everything and cannot take
-that step.
+Then a person approves the analysis, and after it the RoadMap (`run_roadmap`, or your own through
+`write_roadmap`). An agent can prepare everything and cannot take that step.
+
+Your own analysis and RoadMap are not a second kind of document. `write_analysis` and
+`write_roadmap` take the schemas `GET .../loops/{loop_id}/context` answers under `schemas` (and
+`tools/list` carries them), go through the same validation as a generated candidate, get the same
+rendered human view and wait for the same approval. `technical_detail` is written for engineers,
+`plain_language` for a project manager; every risk, blocker, legal, security or question finding
+needs the latter. In a RoadMap you may name Phases and Tickets `p1`, `t1`: they become UUIDs derived
+from the Loop and the id, listed in the answer's `id_map`, so the same ids keep the same Tickets and
+keys when you hand the RoadMap in again. Send `expected_info_revision_id` or
+`expected_analysis_revision_id` with what you read, and a document that changed meanwhile answers
+`409 document_stale`. While an analysis or a RoadMap is approved, a token cannot replace it
+(`403 human_action_required`): the person requests changes or resets it first.
 
 ## 5. What a worker cannot do, by design
 

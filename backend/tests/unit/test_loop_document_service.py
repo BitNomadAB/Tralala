@@ -513,6 +513,114 @@ def test_a_roadmap_candidate_registers_its_plan_and_links_both_revisions() -> No
     )
 
 
+def _as_agent(w: World, kind: str) -> None:
+    submission = (
+        CandidateSubmission(kind="analysis", analysis=ANALYSIS)
+        if kind == "analysis"
+        else CandidateSubmission(kind="roadmap", plan=PLAN)
+    )
+    w.service.submit_candidate(AGENT, BOARD_ID, LOOP, submission)
+
+
+def test_a_worker_never_replaces_an_approved_analysis_until_a_person_reopens_it() -> None:
+    w = world()
+    approved_analysis(w)
+    before = len(w.state.documents)
+    with pytest.raises(Forbidden) as refused:
+        _as_agent(w, "analysis")
+    assert (refused.value.code, refused.value.details) == (
+        "human_action_required",
+        {"stage": "planning", "action": "Replacing an approved analysis"},
+    )
+    assert len(w.state.documents) == before
+    # Requested changes reopen it for the worker.
+    review(w, "analysis", decision="changes_requested")
+    _as_agent(w, "analysis")
+    assert len(w.state.documents) == before + 2
+    # So does a reset of an approved one.
+    review(w, "analysis")
+    w.service.reset(HUMAN, BOARD_ID, LOOP, "analysis", ScopeResetRequest(version=w.loop.version))
+    _as_agent(w, "analysis")
+    technical = w.repos.documents.current(LOOP, "analysis_ai")
+    assert technical is not None
+    assert technical.author_actor_id == AGENT.actor_id
+
+
+def test_a_worker_may_replace_an_approval_that_changed_info_made_stale() -> None:
+    w = world()
+    approved_analysis(w)
+    info(w, "Users must confirm by e-mail.")
+    _as_agent(w, "analysis")
+    technical = w.repos.documents.current(LOOP, "analysis_ai")
+    assert technical is not None
+    assert (technical.author_actor_id, technical.source_info_revision_id) == (
+        AGENT.actor_id,
+        current(w, "info"),
+    )
+
+
+def test_a_worker_never_replaces_an_approved_roadmap_and_a_person_always_may() -> None:
+    w = world()
+    approved_analysis(w)
+    _as_agent(w, "roadmap")
+    review(w, "roadmap")
+    with pytest.raises(Forbidden) as refused:
+        _as_agent(w, "roadmap")
+    assert refused.value.details == {"stage": "ready", "action": "Replacing an approved RoadMap"}
+    with pytest.raises(Forbidden):
+        _as_agent(w, "analysis")
+    # The rule is about who decides, so a person is never refused on that ground.
+    roadmap(w)
+    analysis(w)
+    assert len(w.state.plans) == 2
+
+
+def test_a_candidate_written_from_an_older_revision_is_refused_as_stale() -> None:
+    w = world()
+    info(w)
+    first_info = current(w, "info")
+    info(w, "Users must confirm by e-mail.")
+    with pytest.raises(VersionConflict) as caught:
+        w.service.submit_candidate(
+            AGENT,
+            BOARD_ID,
+            LOOP,
+            CandidateSubmission(
+                kind="analysis", analysis=ANALYSIS, expected_info_revision_id=first_info
+            ),
+        )
+    assert (caught.value.code, caught.value.details) == (
+        "document_stale",
+        {
+            "kind": "info",
+            "expected_revision_id": first_info,
+            "current_revision_id": current(w, "info"),
+        },
+    )
+    w.service.submit_candidate(
+        AGENT,
+        BOARD_ID,
+        LOOP,
+        CandidateSubmission(
+            kind="analysis", analysis=ANALYSIS, expected_info_revision_id=current(w, "info")
+        ),
+    )
+    review(w, "analysis")
+    with pytest.raises(VersionConflict) as planned:
+        w.service.submit_candidate(
+            AGENT,
+            BOARD_ID,
+            LOOP,
+            CandidateSubmission(kind="roadmap", plan=PLAN, expected_analysis_revision_id="old"),
+        )
+    assert planned.value.details == {
+        "kind": "analysis_ai",
+        "expected_revision_id": "old",
+        "current_revision_id": current(w, "analysis_ai"),
+    }
+    assert w.state.plans == {}
+
+
 # --- reviews -------------------------------------------------------------------------------------
 
 
