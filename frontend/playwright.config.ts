@@ -44,7 +44,9 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `"${python}" -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port ${BACKEND_PORT}`,
+      // The app imports rows generated from the migrations; dbgen is cached, so an unchanged schema
+      // costs well under a second.
+      command: `"${python}" -m tools.dbgen && "${python}" -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port ${BACKEND_PORT}`,
       cwd: path.join(repoRoot, "backend"),
       url: `${BACKEND_URL}/api/v1/health`,
       timeout: 120_000,
