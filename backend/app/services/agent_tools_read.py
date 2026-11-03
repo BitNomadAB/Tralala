@@ -8,7 +8,10 @@ checks of the scopes its entry declares and calls the same services as the REST 
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, TypeIs
+
+from pydantic import JsonValue
 
 from ..core.context import ActorContext
 from ..core.errors import ValidationFailure
@@ -16,17 +19,23 @@ from ..core.errors import ValidationFailure
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
     from .cards import CardEntry
+    from .discussions import DiscussionEntry
     from .lists import ListEntry
 
+# A tool's arguments: the JSON object an MCP ``tools/call`` carried, untrusted.
+type ToolArguments = Mapping[str, JsonValue]
+# A tool's answer: an object built from the services' entries, sent back as JSON.
+type ToolResult = dict[str, object]
 
-def _text(value: Any) -> str | None:
+
+def _text(value: object) -> str | None:
     if value is None:
         return None
     cleaned = str(value).strip()
     return cleaned or None
 
 
-def _require(args: dict[str, Any], key: str) -> str:
+def _require(args: ToolArguments, key: str) -> str:
     value = _text(args.get(key))
     if value is None:
         raise ValidationFailure(f"{key} is required", details={"argument": key})
@@ -44,7 +53,22 @@ def _ticket_location(
     return loop_id, services.card.get(board_id, loop_id, card_id)
 
 
-def _thread_view(thread: dict[str, Any]) -> dict[str, Any]:
+def _is_list(value: object) -> TypeIs[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_rows(value: object) -> TypeIs[list[Mapping[str, object]]]:
+    return _is_list(value) and all(isinstance(row, Mapping) for row in value)
+
+
+def _rows(value: object) -> list[Mapping[str, object]]:
+    """A thread's ``messages`` or ``votes``: the rows the discussion service lists, by name."""
+    if not _is_rows(value):
+        raise TypeError(f"a thread lists rows, not {type(value).__name__}")
+    return value
+
+
+def _thread_view(thread: DiscussionEntry) -> ToolResult:
     return {
         "discussion_id": thread["id"],
         "title": thread["title"],
@@ -60,7 +84,7 @@ def _thread_view(thread: dict[str, Any]) -> dict[str, Any]:
                 "content": message["content"],
                 "created_at": message["created_at"],
             }
-            for message in thread.get("messages", [])
+            for message in _rows(thread.get("messages", []))
         ],
         "positions": [
             {
@@ -68,7 +92,7 @@ def _thread_view(thread: dict[str, Any]) -> dict[str, Any]:
                 "position": vote["position"],
                 "justification": vote["justification"],
             }
-            for vote in thread.get("votes", [])
+            for vote in _rows(thread.get("votes", []))
         ],
     }
 
@@ -77,8 +101,8 @@ def _thread_view(thread: dict[str, Any]) -> dict[str, Any]:
 
 
 def _read_board(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("boards:read")
     actor.require("loops:read")
     board_id = _require(args, "board_id")
@@ -88,7 +112,7 @@ def _read_board(
         include_completed=bool(args.get("include_completed", False)),
         include_archived=False,
     )
-    summaries = []
+    summaries: list[ToolResult] = []
     for entry in loops:
         readiness = services.loop.readiness(board_id, entry["id"])
         summaries.append(
@@ -119,8 +143,8 @@ def _read_board(
 
 
 def _read_loop(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("loops:read")
     board_id = _require(args, "board_id")
     loop_id = _require(args, "loop_id")
@@ -154,8 +178,8 @@ def _read_loop(
 
 
 def _read_ticket(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("cards:read")
     board_id = _require(args, "board_id")
     card_id = _require(args, "card_id")
@@ -218,8 +242,8 @@ def _read_ticket(
 
 
 def _read_discussion(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("discussions:read")
     board_id = _require(args, "board_id")
     discussion_id = _require(args, "discussion_id")
@@ -227,12 +251,15 @@ def _read_discussion(
 
 
 __all__ = [
+    "ToolArguments",
+    "ToolResult",
     "_loop_lists",
     "_read_board",
     "_read_discussion",
     "_read_loop",
     "_read_ticket",
     "_require",
+    "_rows",
     "_text",
     "_thread_view",
     "_ticket_location",

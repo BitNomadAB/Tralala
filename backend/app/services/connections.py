@@ -19,10 +19,11 @@ import logging
 import socket
 import time
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, TypedDict
+from typing import Literal, TypedDict
 from urllib.parse import urlsplit
 
 import httpx
+from pydantic import JsonValue
 
 from ..core.errors import ValidationFailure
 
@@ -267,11 +268,12 @@ def endpoint_client(
 
 def _request(
     url: str, *, headers: dict[str, str], timeout: float, allow_private: bool
-) -> tuple[int, Any]:
+) -> tuple[int, JsonValue]:
     with endpoint_client(timeout=timeout, allow_private=allow_private) as client:
         response = client.get(url, headers=headers)
+    payload: JsonValue
     try:
-        payload: Any = response.json()
+        payload = response.json()
     except ValueError:
         payload = None
     return response.status_code, payload
@@ -319,9 +321,9 @@ def probe_openai_compatible(
         data = payload.get("data")
         if isinstance(data, list):
             models.extend(
-                entry["id"]
+                model
                 for entry in data
-                if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+                if isinstance(entry, dict) and isinstance(model := entry.get("id"), str)
             )
     return {
         "ok": True,
@@ -362,7 +364,7 @@ def probe_completion(
     schema. A provider that refuses that request (any 4xx) is asked once more without it, so the
     test still says whether the model call itself works; only the plain call's answer decides that.
     """
-    from .runtime import provider_error
+    from .runtime import completion_content, provider_error
 
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if api_key:
@@ -404,7 +406,7 @@ def probe_completion(
             "supports_json_schema": False,
         }
     try:
-        answer = response.json()["choices"][0]["message"]["content"]
+        answer = completion_content(response.json())
     except (ValueError, KeyError, IndexError, TypeError):
         return {
             "ok": False,
@@ -463,9 +465,9 @@ def probe_a2a(
         }
     skills = payload.get("skills")
     names = [
-        entry.get("name")
+        name
         for entry in skills
-        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+        if isinstance(entry, dict) and isinstance(name := entry.get("name"), str)
     ] if isinstance(skills, list) else []
     return {
         "ok": True,

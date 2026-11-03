@@ -9,8 +9,11 @@ routes, so authorization, version checks and workflow gates are the ones REST al
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pydantic import JsonValue
 
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
@@ -18,7 +21,16 @@ from ..schemas.cards import CardMove, CardUpdate
 from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from ..schemas.loops import GenerationRequest, InfoRevisionWrite, LoopCreate
 from ..schemas.subresources import CommentCreate
-from .agent_tools_read import _loop_lists, _require, _text, _thread_view, _ticket_location
+from .agent_tools_read import (
+    ToolArguments,
+    ToolResult,
+    _loop_lists,
+    _require,
+    _rows,
+    _text,
+    _thread_view,
+    _ticket_location,
+)
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
@@ -36,6 +48,21 @@ def _seconds_since(timestamp: str) -> float:
     except ValueError:
         return float("inf")
     return (datetime.now(UTC) - moment).total_seconds()
+
+
+def _as_int(value: JsonValue) -> int:
+    """``int()`` of a JSON argument: a ``TypeError`` for nothing, a list or an object, as before."""
+    if value is None or isinstance(value, (list, dict)):
+        raise TypeError(f"int() argument must be a string or a number, not {type(value).__name__}")
+    return int(value)
+
+
+def _outcome(payload: JsonValue) -> JsonValue:
+    """``(payload or {}).get("outcome")``: anything but an object raises, as reading it did."""
+    document = payload or {}
+    if isinstance(document, dict):
+        return document.get("outcome")
+    raise AttributeError(f"'{type(document).__name__}' object has no attribute 'get'")
 
 
 def _resolve_list(services: Services, board_id: str, loop_id: str, wanted: str) -> ListEntry:
@@ -58,8 +85,8 @@ def _resolve_list(services: Services, board_id: str, loop_id: str, wanted: str) 
 
 
 def _assign_ticket(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("cards:write")
     board_id = _require(args, "board_id")
     card_id = _require(args, "card_id")
@@ -93,8 +120,8 @@ def _assign_ticket(
 
 
 def _move_ticket(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("cards:write")
     board_id = _require(args, "board_id")
     card_id = _require(args, "card_id")
@@ -102,11 +129,11 @@ def _move_ticket(
     loop_id, _ = services.card.locate(board_id, card_id)
     column = _resolve_list(services, board_id, loop_id, target)
     expected = args.get("version")
-    position = int(args.get("position") or 0)
+    position = _as_int(args.get("position") or 0)
     attempts = 1 if expected else 2
     for attempt in range(attempts):
         card = services.card.get(board_id, loop_id, card_id)
-        version = int(expected) if expected else card["version"]
+        version = _as_int(expected) if expected else card["version"]
         try:
             moved = services.card.move(
                 actor,
@@ -131,8 +158,8 @@ def _move_ticket(
 
 
 def _comment_ticket(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("comments:write")
     board_id = _require(args, "board_id")
     card_id = _require(args, "card_id")
@@ -164,8 +191,8 @@ def _comment_ticket(
 
 
 def _create_loop(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("loops:write")
     board_id = _require(args, "board_id")
     name = _require(args, "name")
@@ -197,8 +224,8 @@ def _create_loop(
 
 
 def _write_info(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("loops:write")
     board_id = _require(args, "board_id")
     loop_id = _require(args, "loop_id")
@@ -234,8 +261,8 @@ def _write_info(
 
 
 def _run_analysis(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("loops:generate")
     board_id = _require(args, "board_id")
     loop_id = _require(args, "loop_id")
@@ -250,7 +277,7 @@ def _run_analysis(
         ),
     )
     run_id = str(run["id"])
-    wait = max(0, min(int(args.get("wait_seconds") or 0), 120))
+    wait = max(0, min(_as_int(args.get("wait_seconds") or 0), 120))
     deadline = time.monotonic() + wait
     while wait and run["status"] in {"queued", "running"} and time.monotonic() < deadline:
         time.sleep(0.5)
@@ -269,7 +296,7 @@ def _run_analysis(
             "state": analysis["state"],
             "revision_number": analysis["current_revision_number"],
             "revision_id": analysis["current_revision_id"],
-            "summary": (analysis.get("current_payload") or {}).get("outcome"),
+            "summary": _outcome(analysis.get("current_payload")),
         },
         "next_step": (
             "The analysis is a candidate: a person reviews and approves it. Read it with "
@@ -279,8 +306,8 @@ def _run_analysis(
 
 
 def _run_roadmap(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("loops:generate")
     board_id = _require(args, "board_id")
     loop_id = _require(args, "loop_id")
@@ -295,7 +322,7 @@ def _run_roadmap(
         ),
     )
     run_id = str(run["id"])
-    wait = max(0, min(int(args.get("wait_seconds") or 0), 120))
+    wait = max(0, min(_as_int(args.get("wait_seconds") or 0), 120))
     deadline = time.monotonic() + wait
     while wait and run["status"] in {"queued", "running"} and time.monotonic() < deadline:
         time.sleep(0.5)
@@ -323,8 +350,8 @@ def _run_roadmap(
 
 
 def _reply_discussion(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("discussions:write")
     board_id = _require(args, "board_id")
     discussion_id = _require(args, "discussion_id")
@@ -337,7 +364,7 @@ def _reply_discussion(
             content=content, parent_message_id=_text(args.get("parent_message_id"))
         ),
     )
-    run: dict[str, Any] | None = None
+    run: Mapping[str, object] | None = None
     if bool(args.get("run", True)) and detail["status"] not in {"closed", "decided"}:
         try:
             run = services.run.start(
@@ -361,8 +388,8 @@ def _reply_discussion(
 
 
 def _ask_agents(
-    services: Services, actor: ActorContext, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
     actor.require("discussions:write")
     board_id = _require(args, "board_id")
     card_id = _require(args, "card_id")
@@ -387,9 +414,9 @@ def _ask_agents(
             existing.get("card_id") == card_id
             and existing.get("goal") == question
             and existing.get("created_by_actor_id") == actor.actor_id
-            and _seconds_since(existing["created_at"]) < DEDUPE_WINDOW_SECONDS
+            and _seconds_since(str(existing["created_at"])) < DEDUPE_WINDOW_SECONDS
         ):
-            view = _thread_view(services.discussion.get(board_id, existing["id"]))
+            view = _thread_view(services.discussion.get(board_id, str(existing["id"])))
             view["deduplicated"] = True
             return view
     rounds = args.get("rounds")
@@ -401,11 +428,11 @@ def _ask_agents(
             goal=question,
             mode="roundtable",
             participant_ids=participants[:12],
-            max_rounds=int(rounds or 1),
+            max_rounds=_as_int(rounds or 1),
         ),
     )
-    run = services.run.start(actor, board_id, thread["id"], rounds=1, autonomous=False)
-    thread = services.discussion.get(board_id, thread["id"])
+    run = services.run.start(actor, board_id, str(thread["id"]), rounds=1, autonomous=False)
+    thread = services.discussion.get(board_id, str(thread["id"]))
     return {
         "discussion_id": thread["id"],
         "title": thread["title"],
@@ -423,7 +450,7 @@ def _ask_agents(
                 "author_type": message["author_type"],
                 "content": message["content"],
             }
-            for message in thread["messages"]
+            for message in _rows(thread["messages"])
         ],
         "positions": [
             {
@@ -431,7 +458,7 @@ def _ask_agents(
                 "position": vote["position"],
                 "justification": vote["justification"],
             }
-            for vote in thread.get("votes", [])
+            for vote in _rows(thread.get("votes", []))
         ],
     }
 

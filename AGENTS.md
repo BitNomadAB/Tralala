@@ -200,11 +200,12 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   `tests/unit/test_sql.py` holds the two equal. A write SQLite may refuse for a constraint a request
   can break (a taken unique name) raises `ConstraintViolationError` from the SQL repository, and the
   service answers it, so no service imports a driver error.
-- Pyright runs strict on the scope in `backend/pyrightconfig.json`: `app/api`, `app/main.py`,
-  `app/dev_reset.py`, `app/core`, `app/schemas`, the generated rows, the repositories,
-  `app/storage`, every converted service, the unit tests and the build tools. In that scope there
-  is no `Any`, no `cast` and no `# type: ignore`. Each converted service joins the scope; the
-  unconverted services are not checked yet. A route is annotated with the envelope it builds,
+- Pyright runs strict on the scope in `backend/pyrightconfig.json`: all of `app/` (`app/api`,
+  `app/main.py`, `app/dev_reset.py`, `app/core`, `app/schemas`, the generated rows, the
+  repositories, `app/storage` and every service), the unit tests and the build tools. In that scope
+  there is no `Any`, no `cast` and no `# type: ignore`, and a new module of `app/` joins it with its
+  first line. Untrusted JSON (a provider's answer, a tool's arguments) is typed as `JsonValue` and
+  narrowed with `isinstance`. A route is annotated with the envelope it builds,
   `dict[str, object]`, while its `response_model` stays what the OpenAPI document describes.
   `tests/unit/test_strict_scope.py` enforces all of it, so the scope can only grow.
 - TypeScript: strict, plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,

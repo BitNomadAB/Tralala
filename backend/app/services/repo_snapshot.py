@@ -21,11 +21,16 @@ import io
 import logging
 import tarfile
 import time
-from typing import Any
+from typing import TYPE_CHECKING, TypedDict
 from urllib.parse import urlsplit
 
+from pydantic import JsonValue
+
 from ..core.errors import ValidationFailure
-from .repositories import API_BASE, RepositoryService
+from .repositories import API_BASE, RepositoryEntry, RepositoryService
+
+if TYPE_CHECKING:  # httpx is imported where a client is built
+    import httpx
 
 logger = logging.getLogger("tralala.repo_snapshot")
 
@@ -109,17 +114,33 @@ CONFIG_NAMES = frozenset(
     }
 )
 
+type JsonObject = dict[str, JsonValue]
+
 # Set by tests to run the whole path against httpx.MockTransport instead of the network.
-TRANSPORT: Any | None = None
+TRANSPORT: httpx.BaseTransport | None = None
 
 
-def _client() -> Any:
+class SnapshotFile(TypedDict):
+    """One file of the snapshot: its path below the repository root, its size and its text."""
+
+    path: str
+    bytes: int
+    content: str
+
+
+class Snapshot(TypedDict):
+    """The bounded file set read from one archive."""
+
+    files: list[SnapshotFile]
+    truncated: bool
+    text_bytes: int
+
+
+def _client() -> httpx.Client:
     import httpx
 
-    kwargs: dict[str, Any] = {"timeout": TIMEOUT_SECONDS, "follow_redirects": False}
-    if TRANSPORT is not None:
-        kwargs["transport"] = TRANSPORT
-    return httpx.Client(**kwargs)
+    # No transport is httpx's own default, exactly as if none were passed.
+    return httpx.Client(timeout=TIMEOUT_SECONDS, follow_redirects=False, transport=TRANSPORT)
 
 
 def _headers(token: str | None) -> dict[str, str]:
@@ -133,7 +154,7 @@ def _headers(token: str | None) -> dict[str, str]:
     return headers
 
 
-def _classify(status: int, headers: Any | None = None) -> str:
+def _classify(status: int, headers: httpx.Headers | None = None) -> str:
     """Name the failure the way an operator reads it, never with GitHub's body."""
     if status == 401:
         return "unauthorized"
@@ -145,6 +166,14 @@ def _classify(status: int, headers: Any | None = None) -> str:
             remaining = str(headers.get("x-ratelimit-remaining") or "")
         return "rate_limited" if status == 429 or remaining == "0" else "forbidden"
     return "unreachable"
+
+
+def _json_object(value: JsonValue) -> JsonObject:
+    """``value`` as a JSON object. Anything else raises the ``AttributeError`` that reading a key
+    from it (``.get``) always raised, so a malformed answer fails exactly as before."""
+    if isinstance(value, dict):
+        return value
+    raise AttributeError(f"'{type(value).__name__}' object has no attribute 'get'")
 
 
 def resolve_commit(owner: str, name: str, branch: str | None, token: str | None) -> str:
@@ -160,11 +189,12 @@ def resolve_commit(owner: str, name: str, branch: str | None, token: str | None)
         raise SnapshotError(code) from exc
     if response.status_code >= 400:
         raise SnapshotError(_classify(response.status_code, response.headers))
+    payload: JsonValue
     try:
         payload = response.json()
     except ValueError as exc:
         raise SnapshotError("malformed_response") from exc
-    sha = str((payload or {}).get("sha") or "")
+    sha = str(_json_object(payload or {}).get("sha") or "")
     if not sha:
         raise SnapshotError("malformed_response")
     return sha
@@ -196,7 +226,7 @@ def fetch_archive(owner: str, name: str, sha: str, token: str | None) -> bytes:
         raise SnapshotError(code) from exc
 
 
-def _download(client: Any, url: str, token: str | None) -> bytes:
+def _download(client: httpx.Client, url: str, token: str | None) -> bytes:
     """The archive request itself; every refusal is a SnapshotError with its code."""
     response = client.get(url, headers=_headers(token))
     if response.status_code in (301, 302, 303, 307, 308):
@@ -259,9 +289,9 @@ def select_members(
     return selected
 
 
-def read_snapshot(archive_bytes: bytes) -> dict[str, Any]:
+def read_snapshot(archive_bytes: bytes) -> Snapshot:
     """Extract the bounded, ordered file set from one tarball."""
-    files: list[dict[str, Any]] = []
+    files: list[SnapshotFile] = []
     used_bytes = 0
     truncated = False
     try:
@@ -298,7 +328,7 @@ class RepositorySnapshotService:
     def __init__(self, repositories: RepositoryService) -> None:
         self.repositories = repositories
 
-    def for_board(self, board_id: str) -> list[dict[str, Any]]:
+    def for_board(self, board_id: str) -> list[JsonObject]:
         """One entry per enabled repository on the board; failures are entries, not exceptions."""
         rows = self.repositories.for_board(board_id)
         if not rows:
@@ -307,8 +337,8 @@ class RepositorySnapshotService:
             return []
         return [self._one(row) for row in rows]
 
-    def _one(self, row: dict[str, Any]) -> dict[str, Any]:
-        entry: dict[str, Any] = {
+    def _one(self, row: RepositoryEntry) -> JsonObject:
+        entry: JsonObject = {
             "id": row["id"],
             "name": row["name"],
             "url": row["url"],
@@ -350,7 +380,10 @@ class RepositorySnapshotService:
             "commit_sha": sha,
             "file_count": len(snapshot["files"]),
             "truncated": snapshot["truncated"],
-            "files": snapshot["files"],
+            "files": [
+                {"path": file["path"], "bytes": file["bytes"], "content": file["content"]}
+                for file in snapshot["files"]
+            ],
         }
 
     @staticmethod

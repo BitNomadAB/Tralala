@@ -121,7 +121,7 @@ Run these from `backend/`.
 | `python -m pytest -x --lf` | Stop at the first failure, starting with the last failing tests. |
 | `python -m pytest -q --tb=short` | Short output for a quick loop. |
 | `python -m ruff check app tests migrations tools` | Lint everything; what CI runs. |
-| `python -m pyright` | Type check of the scope in `pyrightconfig.json`, all of it strict: the routes, `app/main.py`, `app/dev_reset.py`, `app/core`, `app/schemas`, the generated rows, repositories, `app/storage`, converted services, unit tests and build tools. What CI runs after ruff. Needs Node.js on the `PATH`. |
+| `python -m pyright` | Type check of the scope in `pyrightconfig.json`, all of it strict: all of `app/` (the routes, `app/main.py`, `app/dev_reset.py`, `app/core`, `app/schemas`, the generated rows, repositories, `app/storage` and every service), unit tests and build tools. What CI runs after ruff. Needs Node.js on the `PATH`. |
 | `python -m ruff check app --fix` | Apply the mechanical fixes. |
 | `python -m tools.deps licences` | The licence of every dependency, backend and frontend, runtime and development, counted per licence; fails on a licence outside the list in `AGENTS.md` (kept as SPDX ids in `tools/deps/licences.toml`). Needs both installs; what CI runs. `--list` prints every package. |
 | `python -m tools.deps audit` | Known vulnerabilities: pip-audit over `requirements.txt` and `requirements-dev.txt` (any advisory fails) and pnpm audit over the frontend lockfile (high and critical fail). Needs the network and pnpm; what CI runs. |

@@ -1,16 +1,16 @@
 """The pyright-strict scope has no way around the checker: no ``Any``, no ``cast``, no ignore.
 
-``pyrightconfig.json`` lists the strict scope (the routes, the app factory and the development
-reset, ``app/core``, ``app/schemas``, the generated rows, the repositories, the storage layer, every
-service converted to the repositories, the unit tests and the build tools). Strict mode reports an
-*unknown* type but accepts a declared ``Any``, a ``cast`` and an ignore comment, each of which
-switches the check off for one value. This guard reads every file in the scope and refuses all
-three.
+``pyrightconfig.json`` lists the strict scope: all of ``app/`` (the routes, the app factory and the
+development reset, ``app/core``, ``app/schemas``, the generated rows, the repositories, the storage
+layer and every service), the unit tests and the build tools. Strict mode reports an *unknown* type
+but accepts a declared ``Any``, a ``cast`` and an ignore comment, each of which switches the check
+off for one value. This guard reads every file in the scope and refuses all three.
 
 Every module pyright checks is in the strict scope; one that is included but not strict would run
 in pyright's ``standard`` mode, so an entry dropped from ``strict`` would lose strictness without a
-sound. The scope guard below names those modules (none), and the modules of ``app/`` pyright does
-not check yet, exactly: the scope can only grow.
+sound. The scope guard below names those modules (none) exactly, and refuses a module of ``app/``
+that neither list covers, so a new module joins the strict scope with its first line: the scope
+can only grow.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import io
 import json
 import re
 import tokenize
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from pathlib import Path
 
 import pytest
@@ -117,8 +117,6 @@ def test_the_guard_accepts_typed_code(source: str) -> None:
 # Checked in pyright's standard mode, not strict: nothing. An entry leaves this set by moving into
 # "strict", and a new one needs the reason it cannot be strict yet.
 STANDARD_ONLY: frozenset[str] = frozenset()
-# Not checked yet: the services not on the repositories; each joins the scope once its code is.
-UNCHECKED = frozenset({"app/services"})
 
 
 def scope(root: Path = BACKEND_ROOT) -> tuple[list[str], list[str]]:
@@ -130,6 +128,11 @@ def scope(root: Path = BACKEND_ROOT) -> tuple[list[str], list[str]]:
 def covered(module: str, entries: Collection[str]) -> bool:
     """Whether ``module`` (relative to the backend) is, or lies inside, one of ``entries``."""
     return any(module == entry or module.startswith(f"{entry}/") for entry in entries)
+
+
+def uncovered(modules: Iterable[str], entries: Collection[str]) -> list[str]:
+    """The ``modules`` that none of ``entries`` covers, in their order."""
+    return [module for module in modules if not covered(module, entries)]
 
 
 def app_modules(root: Path = BACKEND_ROOT) -> list[str]:
@@ -149,17 +152,21 @@ def test_only_the_named_modules_are_checked_below_strict() -> None:
     assert set(include) - set(strict) == STANDARD_ONLY
 
 
-def test_every_app_module_is_type_checked() -> None:
-    include, _ = scope()
-    unchecked = [module for module in app_modules() if not covered(module, include)]
-    assert [module for module in unchecked if not covered(module, UNCHECKED)] == [], (
+def test_every_app_module_is_type_checked_strictly() -> None:
+    include, strict = scope()
+    modules = app_modules()
+    # The walk found the app, so the checks below cannot pass over nothing.
+    assert {"app/main.py", "app/services/__init__.py", "app/services/runtime.py"} <= set(modules)
+    assert uncovered(modules, include) == [], (
         "every module of app/ is in pyrightconfig.json's include list"
     )
-    # Exact, so it can only shrink: an entry whose modules are all checked must go.
-    stale = [
-        entry for entry in sorted(UNCHECKED) if not any(covered(m, [entry]) for m in unchecked)
-    ]
-    assert stale == [], "every module under these is checked now; drop them from UNCHECKED"
+    assert uncovered(modules, strict) == [], "every module of app/ is checked strictly"
+
+
+def test_a_module_outside_the_scope_is_named() -> None:
+    modules = ["app/core/dates.py", "app/services/new_service.py", "app/main.py"]
+    assert uncovered(modules, ["app/core", "app/main.py"]) == ["app/services/new_service.py"]
+    assert uncovered(modules, ["app/core", "app/services", "app/main.py"]) == []
 
 
 @pytest.mark.parametrize(

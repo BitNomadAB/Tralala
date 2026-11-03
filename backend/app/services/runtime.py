@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from typing import Any, TypedDict
+from collections.abc import Mapping
+from typing import NotRequired, TypedDict, TypeIs
 
 import httpx
 from pydantic import JsonValue
 
+from ..core.config import Settings
 from ..core.errors import ValidationFailure
 from ..core.secrets import CredentialError, open_secret
 from . import connections
@@ -45,6 +47,67 @@ class ResponseSchema(TypedDict):
     schema: dict[str, JsonValue]
 
 
+class Completion(TypedDict):
+    """What one agent call returned: the answer's text, or the error that stopped it.
+
+    ``model`` and ``usage`` come with an answer only: the model the provider names (else the one
+    asked for) and the provider's token counts, as it reported them.
+    """
+
+    ok: bool
+    error: str | None
+    text: str
+    model: NotRequired[object]
+    usage: NotRequired[JsonValue]
+
+
+class AgentAnswer(Completion):
+    """A discussion answer: the completion and the position read from its text."""
+
+    verdict: str
+    justification: str
+
+
+def _app_settings(settings: object) -> Settings:
+    """The application settings, which the agent-call protocols pass on as ``object``."""
+    if isinstance(settings, Settings):
+        return settings
+    raise TypeError(f"an agent call needs the application Settings, not {type(settings).__name__}")
+
+
+def _timeout(agent_row: Mapping[str, object]) -> float:
+    """``timeout_seconds`` as ``float()`` reads it; nothing (or zero) is the 60-second default."""
+    value = agent_row.get("timeout_seconds") or 60
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    raise TypeError(f"timeout_seconds is not a number: {type(value).__name__}")
+
+
+def _is_object(value: object) -> TypeIs[dict[str, JsonValue]]:
+    """A parsed JSON value that is an object: its keys are strings and its values JSON."""
+    return isinstance(value, dict)
+
+
+def _member(value: JsonValue, key: str | int) -> JsonValue:
+    """``value[key]`` of parsed JSON; a ``KeyError``, ``IndexError`` or ``TypeError`` if absent."""
+    if isinstance(value, dict):
+        if isinstance(key, str):
+            return value[key]
+        raise KeyError(key)
+    if isinstance(value, list) and isinstance(key, int):
+        return value[key]
+    raise TypeError(f"{type(value).__name__} has no member {key!r}")
+
+
+def completion_content(body: JsonValue) -> JsonValue:
+    """``body["choices"][0]["message"]["content"]``: the answer of a chat completion.
+
+    A body of another shape raises the ``KeyError``, ``IndexError`` or ``TypeError`` that reading
+    it by subscript raised, so a caller treats a malformed answer exactly as before.
+    """
+    return _member(_member(_member(_member(body, "choices"), 0), "message"), "content")
+
+
 def provider_error(response: httpx.Response) -> str:
     """The status plus the provider's own words, bounded.
 
@@ -54,6 +117,7 @@ def provider_error(response: httpx.Response) -> str:
     read — never the request, which carries the prompt.
     """
     detail = ""
+    body: JsonValue
     try:
         body = response.json()
     except ValueError:
@@ -97,7 +161,7 @@ def extract_position(text: str) -> tuple[str, str]:
 def _structured_verdict(text: str) -> tuple[str, str] | None:
     for blob in reversed(VERDICT_JSON.findall(text)):
         try:
-            payload = json.loads(blob)
+            payload: JsonValue = json.loads(blob)
         except ValueError:
             continue
         if not isinstance(payload, dict):
@@ -117,11 +181,12 @@ def _agent_headers(api_key: str | None) -> dict[str, str]:
     return headers
 
 
-def _agent_key(settings: Any, agent_row: dict[str, Any]) -> str | None:
-    if not agent_row.get("api_key_ciphertext"):
+def _agent_key(settings: object, agent_row: Mapping[str, object]) -> str | None:
+    ciphertext = agent_row.get("api_key_ciphertext")
+    if not ciphertext:
         return None
     try:
-        return open_secret(settings, agent_row["api_key_ciphertext"])
+        return open_secret(_app_settings(settings), str(ciphertext))
     except CredentialError as exc:
         raise ValidationFailure("Agent credential cannot be decrypted") from exc
 
@@ -135,16 +200,16 @@ def _transcript(system_prompt: str, messages: list[dict[str, str]]) -> str:
     return "\n\n".join(lines)
 
 
-def _text_parts(value: Any) -> list[str]:
+def _text_parts(value: object) -> list[str]:
     """Every text part under ``parts``, whatever shape a server answered with."""
     texts: list[str] = []
-    if isinstance(value, dict):
+    if _is_object(value):
         parts = value.get("parts")
         if isinstance(parts, list):
             texts.extend(
-                part["text"]
+                text
                 for part in parts
-                if isinstance(part, dict) and isinstance(part.get("text"), str)
+                if isinstance(part, dict) and isinstance(text := part.get("text"), str)
             )
         for key in ("artifacts", "status", "message"):
             nested = value.get(key)
@@ -157,12 +222,12 @@ def _text_parts(value: Any) -> list[str]:
 
 
 def call_a2a(
-    settings: Any,
-    agent_row: dict[str, Any],
+    settings: object,
+    agent_row: Mapping[str, object],
     *,
     system_prompt: str,
     messages: list[dict[str, str]],
-) -> dict[str, Any]:
+) -> Completion:
     """Send one message over the A2A protocol and return the answer text.
 
     The card is fetched first because it names the RPC endpoint (``url``); a plain base URL is used
@@ -172,12 +237,12 @@ def call_a2a(
     """
     api_key = _agent_key(settings, agent_row)
     base_url = str(agent_row["base_url"]).rstrip("/")
-    timeout = float(agent_row.get("timeout_seconds") or 60)
+    timeout = _timeout(agent_row)
     headers = _agent_headers(api_key)
     endpoint = base_url
     try:
         with connections.endpoint_client(
-            timeout=timeout, allow_private=bool(settings.agents_allow_private_endpoints)
+            timeout=timeout, allow_private=_app_settings(settings).agents_allow_private_endpoints
         ) as client:
             card_url = (
                 base_url if base_url.endswith(".json") else f"{base_url}/.well-known/agent.json"
@@ -185,13 +250,13 @@ def call_a2a(
             try:
                 card = client.get(card_url, headers={**headers, "Accept": "application/json"})
                 if card.status_code < 400:
-                    payload = card.json()
-                    if isinstance(payload, dict) and isinstance(payload.get("url"), str):
-                        endpoint = payload["url"]
+                    document: JsonValue = card.json()
+                    if isinstance(document, dict) and isinstance(url := document.get("url"), str):
+                        endpoint = url
             except (httpx.HTTPError, ValueError):
                 # A missing card is not fatal: many deployments expose the RPC endpoint directly.
                 endpoint = base_url
-            payload = {
+            payload: dict[str, JsonValue] = {
                 "jsonrpc": "2.0",
                 "id": str(uuid.uuid4()),
                 "method": "message/send",
@@ -209,12 +274,16 @@ def call_a2a(
         return {"ok": False, "error": f"{type(exc).__name__}", "text": ""}
     if response.status_code >= 400:
         return {"ok": False, "error": provider_error(response), "text": ""}
+    body: JsonValue
     try:
         body = response.json()
     except ValueError:
         return {"ok": False, "error": "malformed_response", "text": ""}
-    if isinstance(body, dict) and body.get("error"):
-        code = str((body.get("error") or {}).get("code") or "a2a_error")
+    if isinstance(body, dict) and (error := body.get("error")):
+        if not isinstance(error, dict):
+            # Reading the code off an error that is not an object always raised; it still does.
+            raise AttributeError(f"'{type(error).__name__}' object has no attribute 'get'")
+        code = str(error.get("code") or "a2a_error")
         return {"ok": False, "error": f"a2a:{code}", "text": ""}
     result = body.get("result") if isinstance(body, dict) else None
     text = "\n".join(part.strip() for part in _text_parts(result) if part.strip())
@@ -230,15 +299,15 @@ def call_a2a(
 
 
 def call_completion(
-    settings: Any,
-    agent_row: dict[str, Any],
+    settings: object,
+    agent_row: Mapping[str, object],
     *,
     system_prompt: str,
     messages: list[dict[str, str]],
     temperature: float | None = None,
     max_tokens: int | None = None,
     response_schema: ResponseSchema | None = None,
-) -> dict[str, Any]:
+) -> Completion:
     """Call an agent and return the raw answer, whichever transport it speaks.
 
     Loop planning, RoadMap and QA generation reuse this provider call; discussion verdict
@@ -255,7 +324,7 @@ def call_completion(
         return call_a2a(settings, agent_row, system_prompt=system_prompt, messages=messages)
     api_key = _agent_key(settings, agent_row)
     headers = _agent_headers(api_key)
-    payload: dict[str, Any] = {
+    payload: dict[str, object] = {
         "model": agent_row.get("model") or "default",
         "messages": [{"role": "system", "content": system_prompt}, *messages],
         "temperature": (
@@ -273,10 +342,10 @@ def call_completion(
             "json_schema": {"name": response_schema["name"], "schema": response_schema["schema"]},
         }
     url = f"{str(agent_row['base_url']).rstrip('/')}/chat/completions"
-    timeout = float(agent_row.get("timeout_seconds") or 60)
+    timeout = _timeout(agent_row)
     try:
         with connections.endpoint_client(
-            timeout=timeout, allow_private=bool(settings.agents_allow_private_endpoints)
+            timeout=timeout, allow_private=_app_settings(settings).agents_allow_private_endpoints
         ) as client:
             response = client.post(url, headers=headers, json=payload)
             if "response_format" in payload and refuses_response_format(response):
@@ -291,26 +360,28 @@ def call_completion(
             "text": "",
         }
     try:
-        body = response.json()
-        text = body["choices"][0]["message"]["content"]
+        answer: JsonValue = response.json()
+        text = completion_content(answer)
     except (ValueError, KeyError, IndexError, TypeError):
         return {"ok": False, "error": "malformed_response", "text": ""}
+    # Only an object has "choices", so the answer is one here.
+    reply = answer if _is_object(answer) else {}
     return {
         "ok": True,
         "error": None,
         "text": str(text).strip(),
-        "model": body.get("model") or payload["model"],
-        "usage": body.get("usage") or {},
+        "model": reply.get("model") or payload["model"],
+        "usage": reply.get("usage") or {},
     }
 
 
 def call_agent(
-    settings: Any,
-    agent_row: dict[str, Any],
+    settings: object,
+    agent_row: Mapping[str, object],
     *,
     system_prompt: str,
     messages: list[dict[str, str]],
-) -> dict[str, Any]:
+) -> AgentAnswer:
     """Discussion-oriented call: the answer carries a structured position."""
     result = call_completion(
         settings, agent_row, system_prompt=system_prompt, messages=messages

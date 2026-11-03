@@ -861,7 +861,12 @@ def test_a_handler_outside_the_catalogue_module_has_no_name() -> None:
         name="read_card",
         description="Reads a card.",
         scopes=("cards:read",),
-        input_schema={"type": "object"},
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
         handler=lambda _services, _actor, _args: {},
     )
     assert handler_name(elsewhere) == ""

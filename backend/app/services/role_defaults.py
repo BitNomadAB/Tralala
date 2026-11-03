@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, TypeIs
+
+from pydantic import JsonValue
 
 RoleScope = Literal["board", "organisation"]
 
@@ -35,17 +37,34 @@ class BuiltinRole(TypedDict):
     prompt: str
 
 
+def _is_scope(value: str) -> TypeIs[RoleScope]:
+    return value in SCOPES
+
+
+def _seed_object(value: JsonValue) -> dict[str, JsonValue]:
+    """``value`` as a JSON object. Anything else raises the ``AttributeError`` that reading a key
+    from it (``.get``) always raised, so a malformed seed fails startup exactly as before."""
+    if isinstance(value, dict):
+        return value
+    raise AttributeError(f"'{type(value).__name__}' object has no attribute 'get'")
+
+
 def _load(path: Path = SEED_PATH) -> tuple[BuiltinRole, ...]:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    parsed: JsonValue = json.loads(path.read_text(encoding="utf-8"))
+    document = _seed_object(parsed)
     preamble = str(document.get("discussion_preamble") or "")
     roles: list[BuiltinRole] = []
     seen: set[str] = set()
-    for entry in document.get("roles") or []:
+    listed = document.get("roles") or []
+    if isinstance(listed, (bool, int, float)):
+        raise TypeError(f"'{type(listed).__name__}' object is not iterable")
+    for item in listed:
+        entry = _seed_object(item)
         key = str(entry.get("key") or "").strip()
         scope = str(entry.get("scope") or "board")
         if not key or key in seen:
             raise RuntimeError(f"role seed {path} has an empty or duplicate key: {key!r}")
-        if scope not in SCOPES:
+        if not _is_scope(scope):
             raise RuntimeError(f"role seed {path} has an unknown scope for {key}: {scope!r}")
         name = str(entry.get("name") or "").strip()
         prompt = str(entry.get("prompt") or "").replace(DISCUSSION_PLACEHOLDER, preamble).strip()
@@ -57,7 +76,7 @@ def _load(path: Path = SEED_PATH) -> tuple[BuiltinRole, ...]:
                 "key": key,
                 "name": name,
                 "description": str(entry.get("description") or "").strip(),
-                "scope": scope,  # type: ignore[typeddict-item]
+                "scope": scope,
                 "prompt": prompt,
             }
         )

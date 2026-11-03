@@ -20,11 +20,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Required, TypedDict
 
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound
 from .agent_tools_read import (
+    ToolArguments,
+    ToolResult,
     _loop_lists,
     _read_board,
     _read_discussion,
@@ -54,6 +56,25 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from . import Services
 
 
+class ArgumentSchema(TypedDict, total=False):
+    """The JSON schema of one argument: its type, and what a model is told about it."""
+
+    type: Required[str]
+    description: str
+    items: ArgumentSchema
+    minimum: int
+    maximum: int
+
+
+class InputSchema(TypedDict):
+    """A tool's arguments as a closed JSON schema object."""
+
+    type: str
+    properties: dict[str, ArgumentSchema]
+    required: list[str]
+    additionalProperties: bool
+
+
 @dataclass(frozen=True, slots=True)
 class AgentTool:
     """One callable capability: wire contract plus the handler that runs it."""
@@ -61,17 +82,17 @@ class AgentTool:
     name: str
     description: str
     scopes: tuple[str, ...]
-    input_schema: dict[str, Any]
-    handler: Callable[[Services, ActorContext, dict[str, Any]], dict[str, Any]]
+    input_schema: InputSchema
+    handler: Callable[[Services, ActorContext, ToolArguments], ToolResult]
 
 
-def _string(description: str) -> dict[str, Any]:
+def _string(description: str) -> ArgumentSchema:
     return {"type": "string", "description": description}
 
 
 def _object(
-    properties: dict[str, Any], *, required: list[str] | None = None
-) -> dict[str, Any]:
+    properties: dict[str, ArgumentSchema], *, required: list[str] | None = None
+) -> InputSchema:
     return {
         "type": "object",
         "properties": properties,
@@ -371,8 +392,8 @@ def describe_scope(tool: AgentTool) -> str:
 
 
 def run_tool(
-    services: Services, actor: ActorContext, name: str, args: dict[str, Any]
-) -> dict[str, Any]:
+    services: Services, actor: ActorContext, name: str, args: ToolArguments
+) -> ToolResult:
     """Run one catalogue entry as the calling actor.
 
     ``Forbidden`` for a missing scope is raised before the handler, so a tool never becomes an
@@ -393,6 +414,10 @@ def run_tool(
 __all__ = [
     "DEDUPE_WINDOW_SECONDS",
     "AgentTool",
+    "ArgumentSchema",
+    "InputSchema",
+    "ToolArguments",
+    "ToolResult",
     "_ask_agents",
     "_assign_ticket",
     "_comment_ticket",
