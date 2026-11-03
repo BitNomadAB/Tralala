@@ -11,6 +11,7 @@ export const keys = {
   loopDocuments: (boardId: string, loopId: string) => ["loop-documents", boardId, loopId] as const,
   loopPlan: (boardId: string, loopId: string) => ["loop-plan", boardId, loopId] as const,
   readiness: (boardId: string, loopId: string) => ["readiness", boardId, loopId] as const,
+  notes: (boardId: string, loopId: string) => ["notes", boardId, loopId] as const,
   qa: (boardId: string, loopId: string) => ["qa", boardId, loopId] as const,
   generationRuns: (boardId: string, loopId: string) =>
     ["generation-runs", boardId, loopId] as const,
@@ -93,6 +94,14 @@ export function useLoop(boardId: string, loopId: string) {
     queryKey: keys.loop(boardId, loopId),
     queryFn: () => api.getLoop(boardId, loopId),
     enabled: Boolean(boardId && loopId),
+  });
+}
+
+export function useLoopNotes(boardId: string, loopId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.notes(boardId, loopId),
+    queryFn: () => api.listNotes(boardId, loopId),
+    enabled: enabled && Boolean(boardId && loopId),
   });
 }
 

@@ -145,6 +145,10 @@ function HistoryRecordDialog({
   const documents = (
     (record?.envelope.documents as { kind: string; content: string }[] | undefined) ?? []
   ).filter((document) => document.content);
+  // A record from before the Loop notes existed has none.
+  const notes =
+    (record?.envelope.notes as
+      { id: string; author_name: string; content: string }[] | undefined) ?? [];
 
   return (
     <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
@@ -186,6 +190,23 @@ function HistoryRecordDialog({
                 </div>
               </section>
             ))}
+            {notes.length > 0 ? (
+              <section className="flex flex-col gap-1">
+                <h2 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                  Notes
+                </h2>
+                <ol className="flex max-h-64 flex-col gap-1.5 overflow-y-auto rounded-lg border border-[var(--border)] p-2 text-sm scrollbar-thin">
+                  {notes.map((note) => (
+                    <li key={note.id}>
+                      <span className="text-[11px] text-[var(--muted-foreground)]">
+                        {note.author_name}
+                      </span>
+                      {renderMarkdown(note.content)}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
             {record.artifacts.length > 0 ? (
               <section className="flex flex-col gap-1">
                 <h2 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">

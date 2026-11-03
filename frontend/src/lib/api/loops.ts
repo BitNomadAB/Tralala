@@ -1,4 +1,4 @@
-import type { Loop } from "../types";
+import type { Loop, LoopNote, LoopNotePage } from "../types";
 import { json, request, type QueryValue } from "./client";
 
 /** Loops and their lifecycle. */
@@ -35,6 +35,21 @@ export const loopsApi = {
       await request<Loop>(`/boards/${boardId}/loops/${loopId}`, {
         method: "PATCH",
         body: payload,
+      }),
+    );
+  },
+
+  async listNotes(boardId: string, loopId: string, limit = 200): Promise<LoopNotePage> {
+    return json(
+      await request<LoopNotePage>(`/boards/${boardId}/loops/${loopId}/notes?limit=${limit}`),
+    );
+  },
+
+  async addNote(boardId: string, loopId: string, content: string): Promise<LoopNote> {
+    return json(
+      await request<LoopNote>(`/boards/${boardId}/loops/${loopId}/notes`, {
+        method: "POST",
+        body: { content },
       }),
     );
   },

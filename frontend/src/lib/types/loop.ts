@@ -138,6 +138,23 @@ export interface UnplannedTicket {
   archived_at: string | null;
 }
 
+/** A note in a Loop's log: what belongs to the Loop and to no single Ticket. */
+export interface LoopNote {
+  id: string;
+  loop_id: string;
+  author_actor_id: string;
+  author_actor_type: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+}
+
+/** A page of notes, oldest first, and how many the Loop holds. */
+export interface LoopNotePage {
+  notes: LoopNote[];
+  count: number;
+}
+
 export interface LoopReadiness {
   loop_id: string;
   stage: LoopStage;

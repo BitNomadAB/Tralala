@@ -1,4 +1,11 @@
-import { AlertTriangle, Bot, ClipboardCheck, FileText, ListChecks } from "lucide-react";
+import {
+  AlertTriangle,
+  Bot,
+  ClipboardCheck,
+  FileText,
+  ListChecks,
+  NotebookPen,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +15,7 @@ import type { DocumentKind, Loop } from "@/lib/types";
 import { LoopAgentsDialog } from "./LoopAgentsDialog";
 import { LoopCompletionDialog } from "./LoopCompletionDialog";
 import { LoopDocumentDialog } from "./LoopDocumentDialog";
+import { LoopNotesPanel } from "./LoopNotesPanel";
 import { LoopPlanDialog } from "./LoopPlanDialog";
 import { STAGE_TONES, type PlanTab } from "./loopUi";
 
@@ -26,6 +34,7 @@ export function LoopHeader({
   const [planOpen, setPlanOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [completionOpen, setCompletionOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
   const documents = useLoopDocuments(boardId, loop.id);
   const readiness = useReadiness(boardId, loop.id);
   const { actor } = useAuth();
@@ -67,6 +76,9 @@ export function LoopHeader({
           </Button>
           <Button size="sm" variant="outline" onClick={() => setAgentsOpen(true)}>
             <Bot size={14} /> Loop agents
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setNotesOpen(true)}>
+            <NotebookPen size={14} /> Notes
           </Button>
           <Button size="sm" variant="outline" onClick={() => setPlanOpen(true)}>
             <ListChecks size={14} /> Plan &amp; readiness
@@ -138,6 +150,14 @@ export function LoopHeader({
         open={planOpen}
         onClose={() => setPlanOpen(false)}
         onChanged={onChanged}
+      />
+
+      <LoopNotesPanel
+        boardId={boardId}
+        loop={loop}
+        open={notesOpen}
+        readOnly={readOnly}
+        onClose={() => setNotesOpen(false)}
       />
 
       <LoopCompletionDialog
