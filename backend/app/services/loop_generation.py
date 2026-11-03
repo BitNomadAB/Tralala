@@ -861,8 +861,8 @@ class LoopGenerationService:
                 )
             else:
                 outputs = self.links.apply_qa_instructions(
-                    conn,
-                    loop,
+                    SqlBoardRepositories(conn),
+                    LoopsRow.from_mapping(loop),
                     QaInstructions.model_validate(payload),
                     run_id=run_id,
                     provenance=provenance,

@@ -119,7 +119,11 @@ class Services:
             registry=self.registry,
         )
         self.loop_qa = LoopQaService(
-            self.board, self.loop_helpers, self.loop_history, self.loop_links, boards=self.boards
+            self.board,
+            self.board_store,
+            self.loop_history,
+            self.loop_links,
+            idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
         )
         self.loop_links.bind(
             start_generation=self.loop_generation.start,
