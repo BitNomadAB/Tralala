@@ -102,7 +102,7 @@ class Services:
         # repositories yet (GCS-T00f..g) and still open connections themselves.
         self.loop_document = LoopDocumentService(self.board, self.board_store, self.loop_plan)
         self.loop_links = LoopWorkflowLinks()
-        self.loop_agents = LoopAgentService(self.boards, self.agent)
+        self.loop_agents = LoopAgentService(self.board_store, self.agent)
         self.loop_history = LoopHistoryService(self.board, boards=self.boards)
         self.loop_generation = LoopGenerationService(
             self.board,

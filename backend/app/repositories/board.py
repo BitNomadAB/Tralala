@@ -21,6 +21,7 @@ from .counters import CounterRepository
 from .idempotency import BoardIdempotencyRepository
 from .labels import LabelRepository
 from .lists import ListRepository
+from .loop_agents import LoopAgentRepository
 from .loop_documents import LoopApprovalRepository, LoopDocumentRepository
 from .loop_plans import (
     LoopDependencyRepository,
@@ -98,6 +99,9 @@ class BoardRepositories(Protocol):
 
     @property
     def search(self) -> CardSearchRepository: ...
+
+    @property
+    def loop_agents(self) -> LoopAgentRepository: ...
 
     def savepoint(self) -> AbstractContextManager[None]:
         """A nested transaction inside a writer: it keeps its writes when the block ends normally

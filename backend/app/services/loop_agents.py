@@ -8,55 +8,56 @@ always wins so one run can deviate without changing the stored default.
 
 from __future__ import annotations
 
-from typing import Any
-
-from sqlalchemy import text
+from collections.abc import Callable, Mapping
+from typing import Protocol
+from uuid import uuid4
 
 from ..core.context import ActorContext
+from ..core.dates import utcnow
 from ..core.errors import NotFound, ValidationFailure
-from ..storage.board_db import BoardDatabaseManager
-from ..storage.sqlite import utcnow
-from .activity import log_activity
-from .agents import AgentService
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from .activity import activity_entry
 
 PURPOSES: tuple[str, ...] = ("analysis", "roadmap", "qa")
 
 
+class BoardAgentRoster(Protocol):
+    """The registry side: which agents exist as board profiles, and which work on a board."""
+
+    def validate_ids(self, agent_ids: list[str]) -> None: ...
+
+    def agent_ids(self, board_id: str) -> list[str]: ...
+
+
+def _new_id() -> str:
+    return str(uuid4())
+
+
 class LoopAgentService:
-    def __init__(self, boards: BoardDatabaseManager, agents: AgentService) -> None:
-        self.boards = boards
+    def __init__(
+        self,
+        store: BoardUnitOfWork,
+        agents: BoardAgentRoster,
+        *,
+        clock: Callable[[], str] = utcnow,
+        new_id: Callable[[], str] = _new_id,
+    ) -> None:
+        self.store = store
         self.agents = agents
+        self._clock = clock
+        self._new_id = new_id
 
     def get(self, board_id: str, loop_id: str) -> dict[str, str | None]:
-        with self.boards.reader(board_id) as conn:
-            self._require_loop(conn, loop_id)
-            return self._read(conn, loop_id)
-
-    @staticmethod
-    def _require_loop(conn: Any, loop_id: str) -> None:
-        found = conn.execute(
-            text("SELECT id FROM loops WHERE id = :id"), {"id": loop_id}
-        ).mappings().first()
-        if found is None:
-            raise NotFound("Loop not found")
-
-    @staticmethod
-    def _read(conn: Any, loop_id: str) -> dict[str, str | None]:
-        stored = {
-            row["purpose"]: row["agent_id"]
-            for row in conn.execute(
-                text("SELECT purpose, agent_id FROM loop_agent_preferences WHERE loop_id = :id"),
-                {"id": loop_id},
-            ).mappings()
-        }
-        return {purpose: stored.get(purpose) for purpose in PURPOSES}
+        with self.store.reader(board_id) as repos:
+            _require_loop(repos, loop_id)
+            return _read(repos, loop_id)
 
     def set(
         self,
         actor: ActorContext,
         board_id: str,
         loop_id: str,
-        assignments: dict[str, str | None],
+        assignments: Mapping[str, str | None],
     ) -> dict[str, str | None]:
         """Replace the stored preference; ``None`` clears one purpose."""
         actor.require("boards:write")
@@ -71,45 +72,35 @@ class LoopAgentService:
                         code="agent_not_on_board",
                         details={"purpose": purpose, "agent_id": agent_id},
                     )
-        now = utcnow()
-        with self.boards.session(board_id) as conn:
-            self._require_loop(conn, loop_id)
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            _require_loop(repos, loop_id)
             for purpose, agent_id in assignments.items():
-                conn.execute(
-                    text("DELETE FROM loop_agent_preferences WHERE loop_id = :id AND purpose = :p"),
-                    {"id": loop_id, "p": purpose},
+                repos.loop_agents.replace(loop_id, purpose, agent_id, now=now)
+            repos.activity.add(
+                activity_entry(
+                    actor,
+                    action="loop.agents_updated",
+                    entity_type="loop",
+                    entity_id=loop_id,
+                    changes={"agents": dict(assignments)},
+                    entry_id=self._new_id(),
+                    timestamp=now,
                 )
-                if agent_id:
-                    conn.execute(
-                        text(
-                            "INSERT INTO loop_agent_preferences (loop_id, purpose, agent_id,"
-                            " updated_at) VALUES (:id, :p, :agent_id, :now)"
-                        ),
-                        {"id": loop_id, "p": purpose, "agent_id": agent_id, "now": now},
-                    )
-            log_activity(
-                conn,
-                actor,
-                action="loop.agents_updated",
-                entity_type="loop",
-                entity_id=loop_id,
-                changes={"agents": assignments},
             )
-            return self._read(conn, loop_id)
-
-    # --- resolution ------------------------------------------------------------
+            return _read(repos, loop_id)
 
     def resolve(self, board_id: str, loop_id: str, purpose: str) -> str | None:
         """The stored agent for one purpose, or ``None`` when the Loop has no preference."""
-        return self._read_purpose(board_id, loop_id, purpose)
+        with self.store.reader(board_id) as repos:
+            return repos.loop_agents.agent_for(loop_id, purpose)
 
-    def _read_purpose(self, board_id: str, loop_id: str, purpose: str) -> str | None:
-        with self.boards.reader(board_id) as conn:
-            row = conn.execute(
-                text(
-                    "SELECT agent_id FROM loop_agent_preferences"
-                    " WHERE loop_id = :id AND purpose = :p"
-                ),
-                {"id": loop_id, "p": purpose},
-            ).mappings().first()
-        return row["agent_id"] if row else None
+
+def _require_loop(repos: BoardRepositories, loop_id: str) -> None:
+    if repos.loops.get(loop_id) is None:
+        raise NotFound("Loop not found")
+
+
+def _read(repos: BoardRepositories, loop_id: str) -> dict[str, str | None]:
+    stored = repos.loop_agents.for_loop(loop_id)
+    return {purpose: stored.get(purpose) for purpose in PURPOSES}

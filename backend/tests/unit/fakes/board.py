@@ -22,6 +22,7 @@ from app.db.generated.board import (
     IdempotencyRecordsRow,
     LabelsRow,
     ListsRow,
+    LoopAgentPreferencesRow,
     LoopApprovalsRow,
     LoopDependenciesRow,
     LoopDocumentsRow,
@@ -54,6 +55,7 @@ from app.repositories.counters import BoardCounts, CounterRepository
 from app.repositories.idempotency import BoardIdempotencyRepository
 from app.repositories.labels import LabelChanges, LabelRepository
 from app.repositories.lists import ListRepository
+from app.repositories.loop_agents import LoopAgentRepository
 from app.repositories.loop_documents import LoopApprovalRepository, LoopDocumentRepository
 from app.repositories.loop_plans import (
     LoopDependencyRepository,
@@ -101,6 +103,9 @@ class BoardState:
         default_factory=dict[tuple[str, str], IdempotencyRecordsRow]
     )
     attachments: dict[str, AttachmentsRow] = field(default_factory=dict[str, AttachmentsRow])
+    loop_agents: dict[tuple[str, str], LoopAgentPreferencesRow] = field(
+        default_factory=dict[tuple[str, str], LoopAgentPreferencesRow]
+    )
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -124,6 +129,7 @@ class BoardState:
             comments=dict(self.comments),
             idempotency=dict(self.idempotency),
             attachments=dict(self.attachments),
+            loop_agents=dict(self.loop_agents),
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -147,6 +153,7 @@ class BoardState:
         self.comments = snapshot.comments
         self.idempotency = snapshot.idempotency
         self.attachments = snapshot.attachments
+        self.loop_agents = snapshot.loop_agents
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -1593,6 +1600,32 @@ class FakeCounterRepository:
         )
 
 
+class FakeLoopAgentRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def for_loop(self, loop_id: str) -> dict[str, str]:
+        return {
+            row.purpose: row.agent_id
+            for (owner, _), row in self._state.loop_agents.items()
+            if owner == loop_id
+        }
+
+    def agent_for(self, loop_id: str, purpose: str) -> str | None:
+        row = self._state.loop_agents.get((loop_id, purpose))
+        return None if row is None else row.agent_id
+
+    def replace(self, loop_id: str, purpose: str, agent_id: str | None, *, now: str) -> None:
+        if loop_id not in self._state.loops:
+            # The table's foreign key: a preference names a Loop of this board.
+            raise ConstraintError("FOREIGN KEY constraint failed")
+        self._state.loop_agents.pop((loop_id, purpose), None)
+        if agent_id:
+            self._state.loop_agents[(loop_id, purpose)] = LoopAgentPreferencesRow(
+                loop_id=loop_id, purpose=purpose, agent_id=agent_id, updated_at=now
+            )
+
+
 class FakeBoardRepositories:
     def __init__(self, state: BoardState) -> None:
         self._state = state
@@ -1618,6 +1651,7 @@ class FakeBoardRepositories:
         self.comments: CommentRepository = FakeCommentRepository(state)
         self.attachments: AttachmentRepository = FakeAttachmentRepository(state)
         self.search: CardSearchRepository = FakeCardSearchRepository(state)
+        self.loop_agents: LoopAgentRepository = FakeLoopAgentRepository(state)
         self.savepoints = 0
 
     @contextmanager
