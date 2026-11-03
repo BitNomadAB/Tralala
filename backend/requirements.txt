@@ -14,4 +14,4 @@ cryptography>=50,<51
 # Provider and A2A calls (services/runtime.py) and endpoint checks use httpx at runtime.
 httpx>=0.28,<1
 # Used directly by the event-stream endpoint; starlette pulls it in, but the app imports it.
-anyio>=4,<5
+anyio>=4.15.1,<5
