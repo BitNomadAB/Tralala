@@ -83,6 +83,9 @@ decides for itself whether to believe the `X-Forwarded-For` header it receives:
 
 - A person issues keys for their own machine under **Settings → New access key**. The value is shown
   once; only its SHA-256 is stored, and responses carry `has_api_key`, a short hint and `last_used_at`.
+- A key is issued by a signed-in person and never by another key: a token that calls
+  `POST /credentials`, or rotates a key, is refused with `403 human_action_required`. A leaked key
+  cannot reproduce itself, and revoking a person's keys ends everything their agents could do.
 - A personal key expires after `TRALALA_MEMBER_TOKEN_DEFAULT_DAYS` (default 30), cannot exceed
   `TRALALA_MEMBER_TOKEN_MAX_DAYS` (default 365), and a person may hold
   `TRALALA_MEMBER_TOKEN_LIMIT` live keys (default 10). Disabling the account revokes the keys it
@@ -98,7 +101,8 @@ decides for itself whether to believe the `X-Forwarded-For` header it receives:
 ## What no token can do
 
 Approving an analysis or a RoadMap, confirming a human-only Ticket, accepting QA, finalizing a Loop,
-changing a board's structure, and managing users or credentials are human decisions. They reject
+changing a board's structure, managing users or credentials, and issuing or rotating a key are human
+decisions. They reject
 tokens with `403 human_action_required` regardless of scope, and they are not registered as worker
 tools. Approvals bind to exact document revision ids, so a changed input invalidates them.
 

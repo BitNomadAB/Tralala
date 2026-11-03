@@ -479,7 +479,7 @@ class AuthService:
     def create_credential(
         self, actor: ActorContext, payload: CredentialCreate
     ) -> CredentialIssued:
-        """Any signed-in person may issue an agent access; only an admin may issue a wide one."""
+        """A person issues an agent access, never a token; an admin may issue a wide one."""
         return auth_tokens.create_credential(
             self.store, self.settings, actor, payload, stamp=self._stamp, new_id=self._new_id
         )
