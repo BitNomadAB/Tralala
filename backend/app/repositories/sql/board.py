@@ -28,6 +28,7 @@ from ..discussions import (
     DiscussionVoteRepository,
 )
 from ..events import EventRepository
+from ..generation_runs import GenerationRunRepository
 from ..idempotency import BoardIdempotencyRepository
 from ..labels import LabelRepository
 from ..lists import ListRepository
@@ -61,6 +62,7 @@ from .discussions import (
     SqlDiscussionVoteRepository,
 )
 from .events import SqlEventRepository
+from .generation_runs import SqlGenerationRunRepository
 from .idempotency import SqlBoardIdempotencyRepository
 from .labels import SqlLabelRepository
 from .lists import SqlListRepository
@@ -119,6 +121,7 @@ class SqlBoardRepositories:
         self.rounds: DiscussionRoundRepository = SqlDiscussionRoundRepository(connection)
         self.outcomes: DiscussionOutcomeRepository = SqlDiscussionOutcomeRepository(connection)
         self.mention_jobs: MentionJobRepository = SqlMentionJobRepository(connection)
+        self.generation_runs: GenerationRunRepository = SqlGenerationRunRepository(connection)
         self.archive: LoopArchiveRepository = SqlLoopArchiveRepository(connection)
         self.history: LoopHistoryRepository = SqlLoopHistoryRepository(connection)
 

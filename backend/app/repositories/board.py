@@ -28,6 +28,7 @@ from .discussions import (
     DiscussionVoteRepository,
 )
 from .events import EventRepository
+from .generation_runs import GenerationRunRepository
 from .idempotency import BoardIdempotencyRepository
 from .labels import LabelRepository
 from .lists import ListRepository
@@ -141,6 +142,9 @@ class BoardRepositories(Protocol):
 
     @property
     def mention_jobs(self) -> MentionJobRepository: ...
+
+    @property
+    def generation_runs(self) -> GenerationRunRepository: ...
 
     @property
     def archive(self) -> LoopArchiveRepository: ...

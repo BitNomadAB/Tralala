@@ -895,6 +895,32 @@ class FakeAgentRepository:
                 counts[row.role_template_id] = counts.get(row.role_template_id, 0) + 1
         return counts
 
+    def _scope(self, row: AgentsRow) -> str:
+        # COALESCE(r.scope, 'board') over the LEFT JOIN: no template (or a missing one) is 'board'.
+        template = (
+            None
+            if row.role_template_id is None
+            else self._state.role_templates.get(row.role_template_id)
+        )
+        return "board" if template is None else template.scope
+
+    def first_generator(
+        self, connection_types: Collection[str], *, agent_ids: Collection[str] | None = None
+    ) -> AgentsRow | None:
+        kept = [
+            row
+            for row in self._state.agents.values()
+            if row.enabled == 1
+            and row.connection_type in connection_types
+            and self._scope(row) != "organisation"
+            and (agent_ids is None or row.id in agent_ids)
+        ]
+        return min(kept, key=lambda row: nocase(row.name), default=None)
+
+    def role_scope(self, agent_id: str) -> str | None:
+        row = self._state.agents.get(agent_id)
+        return None if row is None else self._scope(row)
+
     def add(self, row: AgentsRow) -> None:
         if row.id in self._state.agents:
             raise ConstraintError(f"agents.id {row.id} exists")

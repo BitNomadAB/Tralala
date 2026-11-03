@@ -54,6 +54,27 @@ _AGENT_BY_ID = text(f"{_AGENT} WHERE id = :id")
 _AGENT_NAMES = text("SELECT id, name FROM agents WHERE id IN :ids").bindparams(
     bindparam("ids", expanding=True)
 )
+# The first enabled generator by name; an organisation profile is never a Loop's worker.
+_FIRST_GENERATOR = text(
+    f"SELECT {sql.column_list(AGENTS_COLUMNS, 'a')} FROM agents a"  # noqa: S608 - generated
+    " LEFT JOIN role_templates r ON r.id = a.role_template_id"
+    " WHERE a.enabled = 1 AND a.connection_type IN :connection_types"
+    " AND COALESCE(r.scope, 'board') != 'organisation'"
+    " ORDER BY a.name LIMIT 1"
+).bindparams(bindparam("connection_types", expanding=True))
+_FIRST_GENERATOR_AMONG = text(
+    f"SELECT {sql.column_list(AGENTS_COLUMNS, 'a')} FROM agents a"  # noqa: S608 - generated
+    " LEFT JOIN role_templates r ON r.id = a.role_template_id"
+    " WHERE a.enabled = 1 AND a.connection_type IN :connection_types"
+    " AND COALESCE(r.scope, 'board') != 'organisation' AND a.id IN :agent_ids"
+    " ORDER BY a.name LIMIT 1"
+).bindparams(
+    bindparam("connection_types", expanding=True), bindparam("agent_ids", expanding=True)
+)
+_ROLE_SCOPE = text(
+    "SELECT COALESCE(r.scope, 'board') AS scope FROM agents a"
+    " LEFT JOIN role_templates r ON r.id = a.role_template_id WHERE a.id = :id"
+)
 _COUNT_BY_ROLE_TEMPLATE = text(
     "SELECT role_template_id, COUNT(*) AS total FROM agents"
     " WHERE role_template_id IS NOT NULL GROUP BY role_template_id"
@@ -176,6 +197,24 @@ class SqlAgentRepository:
         return {
             values.text(row, "role_template_id"): values.integer(row, "total") for row in result
         }
+
+    def first_generator(
+        self, connection_types: Collection[str], *, agent_ids: Collection[str] | None = None
+    ) -> AgentsRow | None:
+        # An empty IN matches nothing.
+        if not connection_types or (agent_ids is not None and not agent_ids):
+            return None
+        parameters = {"connection_types": list(connection_types)}
+        statement = _FIRST_GENERATOR
+        if agent_ids is not None:
+            parameters["agent_ids"] = list(agent_ids)
+            statement = _FIRST_GENERATOR_AMONG
+        row = self._connection.execute(statement, parameters).mappings().first()
+        return None if row is None else AgentsRow.from_mapping(row)
+
+    def role_scope(self, agent_id: str) -> str | None:
+        row = self._connection.execute(_ROLE_SCOPE, {"id": agent_id}).mappings().first()
+        return None if row is None else values.text(row, "scope")
 
     def add(self, row: AgentsRow) -> None:
         parameters = {

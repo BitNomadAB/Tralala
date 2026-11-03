@@ -76,6 +76,7 @@ from app.repositories.discussions import (
     DiscussionVoteRepository,
 )
 from app.repositories.events import EventRepository, NewEvent
+from app.repositories.generation_runs import GenerationRunRepository
 from app.repositories.idempotency import BoardIdempotencyRepository
 from app.repositories.labels import LabelChanges, LabelRepository
 from app.repositories.lists import ListRepository
@@ -104,6 +105,7 @@ from tests.unit.fakes.discussions import (
     FakeDiscussionVoteRepository,
     FakeMentionJobRepository,
 )
+from tests.unit.fakes.generation import FakeGenerationRunRepository
 from tests.unit.fakes.history import FakeLoopArchiveRepository, FakeLoopHistoryRepository
 from tests.unit.fakes.registry import ConstraintError, like
 
@@ -1940,6 +1942,7 @@ class FakeBoardRepositories:
         self.rounds: DiscussionRoundRepository = FakeDiscussionRoundRepository(state)
         self.outcomes: DiscussionOutcomeRepository = FakeDiscussionOutcomeRepository(state)
         self.mention_jobs: MentionJobRepository = FakeMentionJobRepository(state)
+        self.generation_runs: GenerationRunRepository = FakeGenerationRunRepository(state)
         self.archive: LoopArchiveRepository = FakeLoopArchiveRepository(state)
         self.history: LoopHistoryRepository = FakeLoopHistoryRepository(state)
         self.savepoints = 0

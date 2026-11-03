@@ -102,6 +102,19 @@ class AgentRepository(Protocol):
         """How many agents reference each role template; a template without one is absent."""
         ...
 
+    def first_generator(
+        self, connection_types: Collection[str], *, agent_ids: Collection[str] | None = None
+    ) -> AgentsRow | None:
+        """The first enabled agent by name whose connection type is one of ``connection_types``
+        and that is not an organisation profile (an agent without a role template counts as a
+        board one); with ``agent_ids``, only one of those agents."""
+        ...
+
+    def role_scope(self, agent_id: str) -> str | None:
+        """The scope of the agent's role template, ``board`` when it has none; None when there
+        is no such agent."""
+        ...
+
     def add(self, row: AgentsRow) -> None:
         """Raises ``ConstraintViolationError`` when the name is taken."""
         ...
