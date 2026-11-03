@@ -366,9 +366,11 @@ HTTPS and runs no git binary, so a deploy key is not an alternative for this fie
 
 An agent needs either `role_template_id` or `role_prompt_override`. `connection_type` is
 `openai_compatible` or `a2a`. Base URLs are validated: `http`/`https` only, no embedded
-credentials, no cloud-metadata or link-local targets, no redirect following; private/loopback
-targets are allowed because local model servers are the primary use case
-(`TRALALA_AGENTS_ALLOW_PRIVATE_ENDPOINTS`).
+credentials, no cloud-metadata or link-local targets (a host name is judged by every address it
+resolves to), no redirect following; private/loopback targets, `[::1]` included, are allowed because
+local model servers are the primary use case (`TRALALA_AGENTS_ALLOW_PRIVATE_ENDPOINTS`). The same
+rule is checked again when a call or a connection test connects, and the connection goes to the
+checked address only; a refused address is reported as `ForbiddenAddressError`.
 
 API keys are sealed with Fernet (HKDF-derived from the install secret). Responses expose only
 `has_api_key` and a `••••ab12` hint — never the key itself. `/agents/directory` is the autocomplete

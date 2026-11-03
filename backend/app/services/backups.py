@@ -18,7 +18,16 @@ from .common import archive_file_name
 # The tables a validation report counts; the names are formatted into SQL text (see core/sql.py).
 _COUNTED_TABLES = ("lists", "cards", "labels", "checklists", "comments", "activity_log")
 
-BACKUP_PATTERN = re.compile(r"^backup-\d{8}T\d{6}Z(?:-[a-z0-9-]+)?\.sqlite$")
+BACKUP_PATTERN = re.compile(r"backup-[0-9]{8}T[0-9]{6}Z(?:-[a-z0-9-]+)?\.sqlite")
+
+
+def is_backup_name(name: str) -> bool:
+    """Whether ``name`` is a snapshot this service wrote, and so may be restored or pruned.
+
+    The whole name must match: ``match`` with ``$`` would also accept a trailing newline. The digits
+    are ``[0-9]`` because Python's digit class also matches other scripts' digits.
+    """
+    return BACKUP_PATTERN.fullmatch(name) is not None
 
 
 class BackupService:
@@ -119,7 +128,7 @@ class BackupService:
     def prune(self, board_id: str, keep: int) -> list[str]:
         """Delete the oldest snapshots beyond ``keep``.
 
-        Only files matching ``BACKUP_PATTERN`` are candidates: an operator may keep a hand-made copy
+        Only files ``is_backup_name`` accepts are candidates: an operator may keep a hand-made copy
         in the same directory, and this must never delete it.
         """
         self.board_service.require_row(board_id)
@@ -131,7 +140,7 @@ class BackupService:
         snapshots = sorted(
             file
             for file in directory.iterdir()
-            if file.is_file() and BACKUP_PATTERN.match(file.name)
+            if file.is_file() and is_backup_name(file.name)
         )
         # Names carry the UTC timestamp, so lexical order is chronological order.
         stale = snapshots[:-keep] if len(snapshots) > keep else []
@@ -179,7 +188,7 @@ class BackupService:
     def restore(self, actor: ActorContext, board_id: str, name: str) -> dict[str, Any]:
         actor.require("boards:admin")
         self.board_service.require_row(board_id)
-        if not BACKUP_PATTERN.match(name):
+        if not is_backup_name(name):
             raise ValidationFailure("Invalid backup name")
         source = self._directory(board_id) / name
         if not source.exists():

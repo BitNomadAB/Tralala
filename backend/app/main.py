@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -33,13 +32,12 @@ from .api.v1 import templates as template_routes
 from .api.v1 import users as user_routes
 from .core.config import Settings, get_settings
 from .core.errors import ApiError
+from .core.identifiers import accepted_request_id
 from .core.ratelimit import LoginThrottle, RateLimiter
 from .services import Services
 from .storage.sqlite import sqlite_supports_fts5
 
 logger = logging.getLogger("tralala")
-
-REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
 
 def _configure_logging() -> None:
@@ -120,7 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def observability(request: Request, call_next):
         incoming = request.headers.get("x-request-id", "")
         request.state.request_id = (
-            incoming if REQUEST_ID_PATTERN.match(incoming) else str(uuid.uuid4())
+            incoming if accepted_request_id(incoming) else str(uuid.uuid4())
         )
         content_length = request.headers.get("content-length")
         if (

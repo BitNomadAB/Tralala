@@ -1,13 +1,15 @@
 """Agent calls: what is sent to a provider and how each answer becomes a result.
 
-The provider is an in-process ``httpx.MockTransport``: the request the runtime builds is captured
-and a fixed response comes back, so no socket is opened and the same input always gives the same
+The runtime's real pinned client runs with a stand-in resolver, and the provider behind it is an
+in-process ``httpx.MockTransport``: the request the runtime builds is captured and a fixed response
+comes back, so no name is looked up, no socket is opened and the same input always gives the same
 result.
 """
 
 from __future__ import annotations
 
 import json
+import socket
 from collections.abc import Callable
 from typing import Any
 
@@ -16,9 +18,28 @@ import pytest
 
 from app.core.config import Settings
 from app.core.secrets import seal_secret
-from app.services import runtime
+from app.services import connections, runtime
 
 Handler = Callable[[httpx.Request], httpx.Response]
+
+# The stand-in resolver: a self-hosted model on the local network, and one name moved to the
+# cloud metadata address after its endpoint was saved.
+RESOLVES_TO = {
+    "llm.example.com": ["192.168.1.20"],
+    "a2a.example.com": ["192.168.1.21"],
+    "moved.example.com": ["169.254.169.254"],
+}
+
+
+def _resolve(host: str) -> list[str]:
+    if host not in RESOLVES_TO:
+        raise socket.gaierror(socket.EAI_NONAME, "unknown host")
+    return RESOLVES_TO[host]
+
+
+def _named(request: httpx.Request) -> str:
+    """The URL the runtime asked for: the pinned request keeps the name in its Host header."""
+    return str(request.url.copy_with(netloc=request.headers["host"].encode("ascii")))
 
 
 class Provider:
@@ -39,16 +60,18 @@ class Provider:
 
 @pytest.fixture()
 def provider(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], Provider]:
-    real_client = httpx.Client
+    real_client = connections.endpoint_client
 
     def install(handler: Handler) -> Provider:
         recorder = Provider(handler)
 
         def client(**options: Any) -> httpx.Client:
             recorder.client_options.append(options)
-            return real_client(transport=httpx.MockTransport(recorder), **options)
+            return real_client(
+                **options, resolve=_resolve, connect=lambda: httpx.MockTransport(recorder)
+            )
 
-        monkeypatch.setattr(runtime.httpx, "Client", client)
+        monkeypatch.setattr(connections, "endpoint_client", client)
         return recorder
 
     return install
@@ -101,7 +124,8 @@ def test_a_completion_sends_the_system_prompt_first(
         "usage": {"total_tokens": 9},
     }
     request = recorder.requests[0]
-    assert str(request.url) == "http://llm.example.com/v1/chat/completions"
+    assert _named(request) == "http://llm.example.com/v1/chat/completions"
+    assert request.url.host == "192.168.1.20"
     assert "authorization" not in request.headers
     assert recorder.body() == {
         "model": "default",
@@ -111,7 +135,7 @@ def test_a_completion_sends_the_system_prompt_first(
         ],
         "temperature": 0.3,
     }
-    assert recorder.client_options[0]["follow_redirects"] is False
+    assert recorder.client_options == [{"timeout": 10.0, "allow_private": True}]
 
 
 def test_the_agent_settings_and_its_sealed_key_reach_the_request(
@@ -155,6 +179,27 @@ def test_an_unreachable_provider_is_named_by_its_failure(
     provider(refuse)
     result = runtime.call_completion(settings, _agent(), system_prompt="s", messages=[])
     assert result == {"ok": False, "error": "ConnectError", "text": ""}
+
+
+def test_a_name_moved_to_a_refused_address_is_never_called(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(lambda _request: _completion("ok"))
+    moved = _agent(base_url="http://moved.example.com/v1")
+    result = runtime.call_completion(settings, moved, system_prompt="s", messages=[])
+    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": ""}
+    assert recorder.requests == []
+
+
+def test_a_private_model_is_not_called_when_private_endpoints_are_disabled(
+    settings: Settings, provider: Callable[[Handler], Provider]
+) -> None:
+    recorder = provider(lambda _request: _completion("ok"))
+    public_only = settings.model_copy(update={"agents_allow_private_endpoints": False})
+    result = runtime.call_completion(public_only, _agent(), system_prompt="s", messages=[])
+    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": ""}
+    assert recorder.client_options == [{"timeout": 10.0, "allow_private": False}]
+    assert recorder.requests == []
 
 
 def test_a_discussion_call_adds_the_position(
@@ -208,8 +253,9 @@ def test_an_a2a_agent_is_called_over_message_send(
     )
     assert result == {"ok": True, "error": None, "text": "AGREE\nEcho", "model": "a2a", "usage": {}}
     card, rpc = recorder.requests
-    assert str(card.url) == "http://llm.example.com/v1/.well-known/agent.json"
-    assert str(rpc.url) == "http://a2a.example.com/rpc"
+    assert _named(card) == "http://llm.example.com/v1/.well-known/agent.json"
+    assert _named(rpc) == "http://a2a.example.com/rpc"
+    assert (card.url.host, rpc.url.host) == ("192.168.1.20", "192.168.1.21")
     sent = recorder.body()
     assert sent["method"] == "message/send"
     assert sent["params"]["configuration"] == {"blocking": True}
@@ -226,7 +272,19 @@ def test_without_a_card_the_base_url_is_the_endpoint(
 ) -> None:
     recorder = provider(_a2a(lambda _message: _task("ok"), None))
     runtime.call_a2a(settings, _agent("a2a"), system_prompt="", messages=[])
-    assert str(recorder.requests[-1].url) == "http://llm.example.com/v1"
+    assert _named(recorder.requests[-1]) == "http://llm.example.com/v1"
+
+
+@pytest.mark.parametrize(
+    "card_url", ["http://169.254.169.254/latest/meta-data", "http://moved.example.com/rpc"]
+)
+def test_a_card_that_names_a_refused_endpoint_is_not_followed(
+    settings: Settings, provider: Callable[[Handler], Provider], card_url: str
+) -> None:
+    recorder = provider(_a2a(lambda _message: _task("ok"), card_url))
+    result = runtime.call_a2a(settings, _agent("a2a"), system_prompt="", messages=[])
+    assert result == {"ok": False, "error": "ForbiddenAddressError", "text": ""}
+    assert [request.method for request in recorder.requests] == ["GET"]
 
 
 @pytest.mark.parametrize(

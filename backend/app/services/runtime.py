@@ -11,6 +11,7 @@ import httpx
 
 from ..core.errors import ValidationFailure
 from ..core.secrets import CredentialError, open_secret
+from . import connections
 
 # Transports that can actually execute a request. Everything that picks an agent for a run asks
 # this set instead of naming one transport, so a new transport is added in a single place.
@@ -143,7 +144,8 @@ def call_a2a(
 
     The card is fetched first because it names the RPC endpoint (``url``); a plain base URL is used
     when the card does not carry one. The answer is collected from message parts, task artifacts or
-    the task status, in that order of likelihood.
+    the task status, in that order of likelihood. The card's ``url`` is the agent's own text, so it
+    goes through the same pinned client and the endpoint rule holds for it when it is connected to.
     """
     api_key = _agent_key(settings, agent_row)
     base_url = str(agent_row["base_url"]).rstrip("/")
@@ -151,7 +153,9 @@ def call_a2a(
     headers = _agent_headers(api_key)
     endpoint = base_url
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+        with connections.endpoint_client(
+            timeout=timeout, allow_private=bool(settings.agents_allow_private_endpoints)
+        ) as client:
             card_url = (
                 base_url if base_url.endswith(".json") else f"{base_url}/.well-known/agent.json"
             )
@@ -235,7 +239,9 @@ def call_completion(
     url = f"{str(agent_row['base_url']).rstrip('/')}/chat/completions"
     timeout = float(agent_row.get("timeout_seconds") or 60)
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+        with connections.endpoint_client(
+            timeout=timeout, allow_private=bool(settings.agents_allow_private_endpoints)
+        ) as client:
             response = client.post(url, headers=headers, json=payload)
     except Exception as exc:  # noqa: BLE001 - surfaced as an agent failure
         return {"ok": False, "error": f"{type(exc).__name__}", "text": ""}

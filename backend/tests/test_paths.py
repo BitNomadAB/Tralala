@@ -1,12 +1,12 @@
-"""Text that reaches a filesystem path: board ids, backup names and archive entries."""
+"""Request text that reaches a filesystem path, a response header or a log line."""
 
 from __future__ import annotations
 
 import pytest
 
 from app.core.errors import NotFound, ValidationFailure
-from app.core.identifiers import canonical_board_id
-from app.services.backups import BACKUP_PATTERN
+from app.core.identifiers import accepted_request_id, canonical_board_id
+from app.services.backups import is_backup_name
 from app.services.common import archive_file_name
 
 BOARD_ID = "0f8fad5b-d9cb-469f-a165-70867728950e"
@@ -56,7 +56,7 @@ def test_anything_else_is_a_missing_board(value: object) -> None:
     ],
 )
 def test_a_backup_name_from_the_service_is_accepted(name: str) -> None:
-    assert BACKUP_PATTERN.match(name)
+    assert is_backup_name(name) is True
 
 
 @pytest.mark.parametrize(
@@ -72,10 +72,15 @@ def test_a_backup_name_from_the_service_is_accepted(name: str) -> None:
         "backup-20260101T000000Z.sqlite.bak",
         "backup-2026010T000000Z.sqlite",
         " backup-20260101T000000Z.sqlite",
+        "backup-20260101T000000Z.sqlite\n",
+        "backup-20260101T000000Z-manual.sqlite\n",
+        "backup-20260101T000000Z.sqlite\r\n",
+        # Arabic-Indic digits are digits to Python's digit class, never to a backup name.
+        "backup-\u0662\u0660\u0662\u0666\u0660\u0661\u0660\u0661T000000Z.sqlite",
     ],
 )
 def test_any_other_backup_name_is_refused(name: str) -> None:
-    assert BACKUP_PATTERN.match(name) is None
+    assert is_backup_name(name) is False
 
 
 @pytest.mark.parametrize(
@@ -104,3 +109,16 @@ def test_an_archive_entry_must_be_a_plain_filename(entry: str) -> None:
 )
 def test_a_normal_archive_entry_keeps_its_stored_name(entry: str, name: str) -> None:
     assert archive_file_name(entry) == name
+
+
+@pytest.mark.parametrize("value", ["a", "req-1.2_3", BOARD_ID, "x" * 100])
+def test_a_short_token_is_kept_as_the_request_id(value: str) -> None:
+    assert accepted_request_id(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "x" * 101, "req 1", "req/1", "req-1\n", "req-1\r\nSet-Cookie: a=b", "réq"],
+)
+def test_anything_else_gets_a_server_request_id(value: str) -> None:
+    assert accepted_request_id(value) is False

@@ -61,7 +61,10 @@ message broker.
 12. **Provider credentials are sealed, never echoed.** API keys are encrypted with
     `core/secrets.py`; responses and logs expose only `has_api_key` and a short hint. Endpoints are
     validated by `services/connections.validate_endpoint` (no metadata/link-local targets, no
-    embedded credentials, no redirects).
+    embedded credentials, no redirects; a host name is judged by every address it resolves to), and
+    every call to an agent endpoint goes through `connections.endpoint_client`, which checks the
+    same rule when it connects and connects only to the checked address. Never open another HTTP
+    client to an agent endpoint.
 13. **The worker surface is one catalogue.** `services/agent_tools.py` is the only description of
     what an external worker token may call; `/mcp` and `/llms.txt` are generated from it and every
     handler calls a service. Adding a capability is a catalogue entry plus a handler — never a new

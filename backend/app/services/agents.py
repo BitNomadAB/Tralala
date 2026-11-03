@@ -771,7 +771,12 @@ class AgentService:
             else connections.probe_a2a
         )
         try:
-            result = probe(validated, api_key=api_key, timeout=timeout)
+            result = probe(
+                validated,
+                api_key=api_key,
+                timeout=timeout,
+                allow_private=self.settings.agents_allow_private_endpoints,
+            )
         except Exception as exc:  # the probe reports, it does not raise
             self._log_probe(
                 "agent_probe_failed",
@@ -785,7 +790,11 @@ class AgentService:
         completion: dict[str, Any] | None = None
         if result["ok"] and connection_type == "openai_compatible" and selected_model:
             completion = connections.probe_completion(
-                validated, model=selected_model, api_key=api_key, timeout=timeout
+                validated,
+                model=selected_model,
+                api_key=api_key,
+                timeout=timeout,
+                allow_private=self.settings.agents_allow_private_endpoints,
             )
             result = {**result, "completion": completion}
             if completion["ok"]:
