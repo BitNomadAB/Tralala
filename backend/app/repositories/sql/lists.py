@@ -21,6 +21,10 @@ _ACTIVE_FOR_LOOP = text(
     f"SELECT {_COLUMNS} FROM lists"  # noqa: S608 - from LISTS_COLUMNS
     " WHERE loop_id = :loop_id AND archived_at IS NULL ORDER BY position, id"
 )
+_ACTIVE_NAMES = text(
+    "SELECT name FROM lists WHERE loop_id = :loop_id AND archived_at IS NULL"
+    " ORDER BY position, created_at"
+)
 _POSITIONS = text(
     "SELECT id, position FROM lists WHERE loop_id = :loop_id AND archived_at IS NULL"
     " ORDER BY position, id"
@@ -65,6 +69,10 @@ class SqlListRepository:
         statement = _FOR_LOOP if include_archived else _ACTIVE_FOR_LOOP
         result = self._connection.execute(statement, {"loop_id": loop_id}).mappings()
         return [ListsRow.from_mapping(row) for row in result]
+
+    def active_names(self, loop_id: str) -> list[str]:
+        result = self._connection.execute(_ACTIVE_NAMES, {"loop_id": loop_id}).mappings()
+        return [values.text(row, "name") for row in result]
 
     def positions(self, loop_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:
         if exclude is None:

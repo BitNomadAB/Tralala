@@ -1,4 +1,5 @@
-"""SQL text is built from literals only: the helpers, and the allowlists the services give them."""
+"""SQL text is built from literals only: the helpers, and the allowlists services and repository
+Protocols give them."""
 
 # The pure part of a request or database path is often a private helper; these tests call it
 # on purpose (AGENTS.md, Verification contract), so private access is allowed in this file.
@@ -15,22 +16,24 @@ from typing import TypeIs
 import pytest
 from pydantic import BaseModel
 
+import app.repositories
 import app.services
 from app.core import sql
+from app.db.generated.registry import AGENTS_COLUMNS, REPOSITORIES_COLUMNS
+from app.repositories import agents as agent_repositories
+from app.repositories import board_rows, code_repositories
 from app.schemas.agents import AgentCreate, AgentUpdate, RoleTemplateUpdate
 from app.schemas.cards import CardUpdate
 from app.schemas.loops import LoopUpdate
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
 from app.schemas.subresources import ChecklistItemUpdate, LabelUpdate
 from app.services import (
-    agents,
     cards,
     common,
     discussions,
     events,
     loop_documents,
     loops,
-    repositories,
     search,
     subresources,
 )
@@ -47,11 +50,18 @@ def _is_tuple(value: object) -> TypeIs[tuple[object, ...]]:
     return isinstance(value, tuple)
 
 
-def _service_modules() -> list[ModuleType]:
-    return [
+def _allowlist_modules() -> list[ModuleType]:
+    """Every service and every repository Protocol module (``sql/`` takes its lists from there)."""
+    modules = [
         importlib.import_module(f"app.services.{info.name}")
         for info in pkgutil.iter_modules(app.services.__path__)
     ]
+    modules.extend(
+        importlib.import_module(f"app.repositories.{info.name}")
+        for info in pkgutil.iter_modules(app.repositories.__path__)
+        if not info.ispkg
+    )
+    return modules
 
 
 # --- the helpers -----------------------------------------------------------------------------
@@ -123,9 +133,9 @@ def test_where_refuses_a_filter_it_does_not_know_rather_than_dropping_it() -> No
 
 def test_every_allowlist_holds_plain_identifiers_and_every_filter_list_unique_names() -> None:
     checked = 0
-    for module in _service_modules():
+    for module in _allowlist_modules():
         for name, value in vars(module).items():
-            if not name.startswith("_") or not _is_tuple(value) or not value:
+            if not name.lstrip("_").isupper() or not _is_tuple(value) or not value:
                 continue
             items = value
             if name.endswith(("_EDITABLE", "_COLUMNS", "_TABLES", "_SORTS")):
@@ -148,12 +158,12 @@ def test_every_allowlist_holds_plain_identifiers_and_every_filter_list_unique_na
 
 
 def test_the_update_allowlists_cover_every_field_a_request_can_change() -> None:
-    assert _fields(RoleTemplateUpdate) <= set(agents._ROLE_TEMPLATE_EDITABLE)
+    assert _fields(RoleTemplateUpdate) <= set(agent_repositories.ROLE_TEMPLATE_EDITABLE)
     credentials = {"api_key_ciphertext", "api_key_hint"}
     assert _fields(AgentUpdate, "api_key", "clear_api_key") | credentials <= set(
-        agents._AGENT_EDITABLE
+        agent_repositories.AGENT_EDITABLE
     )
-    assert _fields(AgentCreate, "api_key") | credentials <= set(agents._AGENT_COLUMNS)
+    assert _fields(AgentCreate, "api_key") | credentials <= set(AGENTS_COLUMNS)
     assert _fields(LabelUpdate) <= set(subresources._LABEL_EDITABLE)
     assert _fields(ChecklistItemUpdate) <= set(subresources._CHECKLIST_ITEM_EDITABLE)
     assert _fields(LoopUpdate) | {"updated_at"} <= set(loops._LOOP_EDITABLE)
@@ -165,9 +175,50 @@ def test_the_update_allowlists_cover_every_field_a_request_can_change() -> None:
     )
     tokens = {"token_ciphertext", "token_hint"}
     assert _fields(RepositoryUpdate, "token", "clear_token") | tokens <= set(
-        repositories._REPOSITORY_EDITABLE
+        code_repositories.REPOSITORY_EDITABLE
     )
-    assert _fields(RepositoryCreate, "token") | tokens <= set(repositories._REPOSITORY_COLUMNS)
+    assert _fields(RepositoryCreate, "token") | tokens <= set(REPOSITORIES_COLUMNS)
+
+
+def _keys(required: frozenset[str], optional: frozenset[str]) -> list[str]:
+    return sorted(required | optional)
+
+
+def test_each_change_type_names_exactly_the_columns_its_update_may_format() -> None:
+    # A service writes a typed change (pyright checks its keys); the SQL repository formats the
+    # change's keys through the allowlist, which refuses any other name. The two must agree.
+    pairs = [
+        (
+            _keys(
+                board_rows.BoardChanges.__required_keys__,
+                board_rows.BoardChanges.__optional_keys__,
+            ),
+            board_rows.BOARD_EDITABLE,
+        ),
+        (
+            _keys(
+                agent_repositories.RoleTemplateChanges.__required_keys__,
+                agent_repositories.RoleTemplateChanges.__optional_keys__,
+            ),
+            agent_repositories.ROLE_TEMPLATE_EDITABLE,
+        ),
+        (
+            _keys(
+                agent_repositories.AgentChanges.__required_keys__,
+                agent_repositories.AgentChanges.__optional_keys__,
+            ),
+            agent_repositories.AGENT_EDITABLE,
+        ),
+        (
+            _keys(
+                code_repositories.RepositoryChanges.__required_keys__,
+                code_repositories.RepositoryChanges.__optional_keys__,
+            ),
+            code_repositories.REPOSITORY_EDITABLE,
+        ),
+    ]
+    for keys, allowed in pairs:
+        assert keys == sorted(allowed)
 
 
 # --- the statements are the ones the services wrote before ---------------------------------------
@@ -215,9 +266,8 @@ def test_thread_and_activity_filters_match_the_former_literals() -> None:
     assert sql.where(search._ACTIVITY_FILTERS, {"action": "x", "entity_type": "y"}) == (
         " WHERE entity_type = :entity_type AND action = :action"
     )
-    assert sql.where(agents._AGENT_FILTERS, {"enabled": 1, "q": "%a%"}) == (
-        " WHERE (name LIKE :q OR description LIKE :q) AND enabled = :enabled"
-    )
+    # The agent list's filters moved into app/repositories/sql/agents.py (GCS-T00d), which the
+    # build compiles against the schema; a unit test does not import the SQL repositories.
 
 
 def test_event_and_approval_identifiers_are_the_fixed_names() -> None:

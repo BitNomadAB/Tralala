@@ -163,7 +163,11 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   (`sql.column_list(ACTORS_COLUMNS, 'a', 'actor__')`), and read back with `values.prefixed`, so two
   tables' `id` never share a result key. A service returns typed values (a row, a `TypedDict` of
   its JSON shape), and a unit test changes a row with `row.__replace__(...)`, which pyright checks,
-  not `dataclasses.replace`.
+  not `dataclasses.replace`. A partial update takes a `TypedDict(total=False)` of its columns; the
+  literal tuple its SQL formats them from sits beside it in the Protocol module, and
+  `tests/unit/test_sql.py` holds the two equal. A write SQLite may refuse for a constraint a request
+  can break (a taken unique name) raises `ConstraintViolationError` from the SQL repository, and the
+  service answers it, so no service imports a driver error.
 - Pyright runs strict on the scope in `backend/pyrightconfig.json`: the generated rows, the
   repositories, every converted service, the unit tests and the build tools. In that scope there is
   no `Any`, no `cast` and no `# type: ignore`; `tests/unit/test_strict_scope.py` enforces it. Each

@@ -10,9 +10,13 @@ from sqlalchemy.engine import Connection
 from ...storage.board_db import BoardDatabaseManager
 from ..activity import ActivityRepository
 from ..board import BoardUnitOfWork
+from ..counters import CounterRepository
+from ..labels import LabelRepository
 from ..lists import ListRepository
 from ..loops import LoopRepository
 from .activity import SqlActivityRepository
+from .counters import SqlCounterRepository
+from .labels import SqlLabelRepository
 from .lists import SqlListRepository
 from .loops import SqlLoopRepository
 
@@ -26,6 +30,8 @@ class SqlBoardRepositories:
         self.lists: ListRepository = SqlListRepository(connection)
         self.loops: LoopRepository = SqlLoopRepository(connection)
         self.activity: ActivityRepository = SqlActivityRepository(connection)
+        self.labels: LabelRepository = SqlLabelRepository(connection)
+        self.counters: CounterRepository = SqlCounterRepository(connection)
 
 
 class SqlBoardUnitOfWork(BoardUnitOfWork):

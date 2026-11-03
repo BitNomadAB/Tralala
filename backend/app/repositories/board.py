@@ -12,6 +12,8 @@ from contextlib import AbstractContextManager
 from typing import Protocol
 
 from .activity import ActivityRepository
+from .counters import CounterRepository
+from .labels import LabelRepository
 from .lists import ListRepository
 from .loops import LoopRepository
 
@@ -27,6 +29,12 @@ class BoardRepositories(Protocol):
 
     @property
     def activity(self) -> ActivityRepository: ...
+
+    @property
+    def labels(self) -> LabelRepository: ...
+
+    @property
+    def counters(self) -> CounterRepository: ...
 
 
 class BoardUnitOfWork(Protocol):

@@ -18,6 +18,10 @@ from .accounts import (
     SessionRepository,
     UserRepository,
 )
+from .agents import AgentLinkRepository, AgentRepository, RoleTemplateRepository
+from .board_rows import BoardRowRepository, BoardStatsRepository
+from .code_repositories import CodeRepositoryRepository, RepositoryLinkRepository
+from .templates import BoardTemplateRepository
 
 
 class RegistryRepositories(Protocol):
@@ -37,6 +41,30 @@ class RegistryRepositories(Protocol):
 
     @property
     def credentials(self) -> CredentialRepository: ...
+
+    @property
+    def boards(self) -> BoardRowRepository: ...
+
+    @property
+    def board_stats(self) -> BoardStatsRepository: ...
+
+    @property
+    def board_templates(self) -> BoardTemplateRepository: ...
+
+    @property
+    def role_templates(self) -> RoleTemplateRepository: ...
+
+    @property
+    def agents(self) -> AgentRepository: ...
+
+    @property
+    def agent_links(self) -> AgentLinkRepository: ...
+
+    @property
+    def code_repositories(self) -> CodeRepositoryRepository: ...
+
+    @property
+    def repository_links(self) -> RepositoryLinkRepository: ...
 
 
 class RegistryUnitOfWork(Protocol):

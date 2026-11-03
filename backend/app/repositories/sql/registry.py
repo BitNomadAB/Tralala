@@ -15,7 +15,11 @@ from ..accounts import (
     SessionRepository,
     UserRepository,
 )
+from ..agents import AgentLinkRepository, AgentRepository, RoleTemplateRepository
+from ..board_rows import BoardRowRepository, BoardStatsRepository
+from ..code_repositories import CodeRepositoryRepository, RepositoryLinkRepository
 from ..registry import RegistryUnitOfWork
+from ..templates import BoardTemplateRepository
 from .accounts import (
     SqlActorRepository,
     SqlCredentialRepository,
@@ -23,6 +27,10 @@ from .accounts import (
     SqlSessionRepository,
     SqlUserRepository,
 )
+from .agents import SqlAgentLinkRepository, SqlAgentRepository, SqlRoleTemplateRepository
+from .board_rows import SqlBoardRowRepository, SqlBoardStatsRepository
+from .code_repositories import SqlCodeRepositoryRepository, SqlRepositoryLinkRepository
+from .templates import SqlBoardTemplateRepository
 
 
 class SqlRegistryRepositories:
@@ -36,6 +44,14 @@ class SqlRegistryRepositories:
         self.sessions: SessionRepository = SqlSessionRepository(connection)
         self.invites: InviteRepository = SqlInviteRepository(connection)
         self.credentials: CredentialRepository = SqlCredentialRepository(connection)
+        self.boards: BoardRowRepository = SqlBoardRowRepository(connection)
+        self.board_stats: BoardStatsRepository = SqlBoardStatsRepository(connection)
+        self.board_templates: BoardTemplateRepository = SqlBoardTemplateRepository(connection)
+        self.role_templates: RoleTemplateRepository = SqlRoleTemplateRepository(connection)
+        self.agents: AgentRepository = SqlAgentRepository(connection)
+        self.agent_links: AgentLinkRepository = SqlAgentLinkRepository(connection)
+        self.code_repositories: CodeRepositoryRepository = SqlCodeRepositoryRepository(connection)
+        self.repository_links: RepositoryLinkRepository = SqlRepositoryLinkRepository(connection)
 
 
 class SqlRegistryUnitOfWork(RegistryUnitOfWork):

@@ -85,12 +85,13 @@ class BoardService:
         boards: BoardDatabaseManager,
         migrations: Any | None = None,
         templates: Any | None = None,
-        stats: BoardStatsCache | None = None,
+        *,
+        stats: BoardStatsCache,
     ) -> None:
         self.settings = settings
         self.registry = registry
         self.boards = boards
-        self.stats = stats or BoardStatsCache(settings, registry, boards)
+        self.stats = stats
         self.migrations = migrations
         self.templates = templates
         self.repositories: Any | None = None

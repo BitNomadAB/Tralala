@@ -1,14 +1,24 @@
-"""The registry database in memory: the account repositories and their unit of work."""
+"""The registry database in memory: its repositories and their unit of work."""
 
 from __future__ import annotations
 
-from collections.abc import Generator
+import re
+import string
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from app.db.generated.registry import (
     ActorsRow,
+    AgentsRow,
     ApiCredentialsRow,
+    BoardAgentsRow,
+    BoardRepositoriesRow,
+    BoardsRow,
+    BoardStatsRow,
+    BoardTemplatesRow,
+    RepositoriesRow,
+    RoleTemplatesRow,
     SessionsRow,
     UserCredentialsRow,
     UserInvitesRow,
@@ -25,22 +35,58 @@ from app.repositories.accounts import (
     User,
     UserRepository,
 )
+from app.repositories.agents import (
+    AgentChanges,
+    AgentLinkRepository,
+    AgentRepository,
+    RoleTemplateChanges,
+    RoleTemplateRepository,
+)
+from app.repositories.board_rows import BoardChanges, BoardRowRepository, BoardStatsRepository
+from app.repositories.code_repositories import (
+    CodeRepositoryRepository,
+    LinkedBoard,
+    RepositoryChanges,
+    RepositoryLinkRepository,
+)
+from app.repositories.errors import ConstraintViolationError
 from app.repositories.registry import RegistryUnitOfWork
+from app.repositories.templates import BoardTemplateRepository
 
 CREATED = "2026-11-01T09:00:00Z"
 
 
 class ConstraintError(Exception):
-    """What SQLite would refuse (a primary, unique or foreign key): a test that sees it found
-    a bug."""
+    """What SQLite would refuse (a primary, unique or foreign key) where no service expects it:
+    a test that sees it found a bug. A taken unique name raises ``ConstraintViolationError``, as the
+    SQL repositories do, because the services answer that one."""
+
+
+_ASCII_FOLD = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
+
+def nocase(text: str) -> str:
+    """SQLite's NOCASE collation: the 26 ASCII capitals fold to lower case, nothing else does."""
+    return text.translate(_ASCII_FOLD)
+
+
+def like(value: str, pattern: str) -> bool:
+    """SQLite's ``LIKE``: ``%`` is any run, ``_`` one character, ASCII letters ignore case."""
+    parts = [
+        ".*" if char == "%" else "." if char == "_" else re.escape(char) for char in nocase(pattern)
+    ]
+    return re.fullmatch("".join(parts), nocase(value), flags=re.DOTALL) is not None
+
+
+type LinkKey = tuple[str, str]
 
 
 @dataclass(slots=True)
 class RegistryState:
-    """The account rows of the registry, as a test sets them up and the services change them.
+    """The rows of the registry, as a test sets them up and the services change them.
 
     Dictionaries keep insertion order, which stands in for SQLite's row order where a statement has
-    no ``ORDER BY``.
+    no ``ORDER BY``. A board link is keyed by ``(board_id, agent_id | repository_id)``.
     """
 
     actors: dict[str, ActorsRow] = field(default_factory=dict[str, ActorsRow])
@@ -50,6 +96,24 @@ class RegistryState:
     credentials: dict[str, ApiCredentialsRow] = field(
         default_factory=dict[str, ApiCredentialsRow]
     )
+    boards: dict[str, BoardsRow] = field(default_factory=dict[str, BoardsRow])
+    board_stats: dict[str, BoardStatsRow] = field(default_factory=dict[str, BoardStatsRow])
+    board_templates: dict[str, BoardTemplatesRow] = field(
+        default_factory=dict[str, BoardTemplatesRow]
+    )
+    role_templates: dict[str, RoleTemplatesRow] = field(
+        default_factory=dict[str, RoleTemplatesRow]
+    )
+    agents: dict[str, AgentsRow] = field(default_factory=dict[str, AgentsRow])
+    agent_links: dict[LinkKey, BoardAgentsRow] = field(
+        default_factory=dict[LinkKey, BoardAgentsRow]
+    )
+    code_repositories: dict[str, RepositoriesRow] = field(
+        default_factory=dict[str, RepositoriesRow]
+    )
+    repository_links: dict[LinkKey, BoardRepositoriesRow] = field(
+        default_factory=dict[LinkKey, BoardRepositoriesRow]
+    )
 
     def snapshot(self) -> RegistryState:
         return RegistryState(
@@ -58,6 +122,14 @@ class RegistryState:
             dict(self.sessions),
             dict(self.invites),
             dict(self.credentials),
+            dict(self.boards),
+            dict(self.board_stats),
+            dict(self.board_templates),
+            dict(self.role_templates),
+            dict(self.agents),
+            dict(self.agent_links),
+            dict(self.code_repositories),
+            dict(self.repository_links),
         )
 
     def restore(self, snapshot: RegistryState) -> None:
@@ -66,6 +138,14 @@ class RegistryState:
         self.sessions = snapshot.sessions
         self.invites = snapshot.invites
         self.credentials = snapshot.credentials
+        self.boards = snapshot.boards
+        self.board_stats = snapshot.board_stats
+        self.board_templates = snapshot.board_templates
+        self.role_templates = snapshot.role_templates
+        self.agents = snapshot.agents
+        self.agent_links = snapshot.agent_links
+        self.code_repositories = snapshot.code_repositories
+        self.repository_links = snapshot.repository_links
 
 
 def _require_actor(state: RegistryState, actor_id: str) -> None:
@@ -175,6 +255,129 @@ def invite_row(
         created_at=CREATED,
         expires_at=expires_at,
         used_at=used_at,
+    )
+
+
+def board_row(board_id: str, *, name: str = "", status: str = "active") -> BoardsRow:
+    return BoardsRow(
+        id=board_id,
+        name=name or f"Board {board_id}",
+        description="",
+        status=status,
+        created_at=CREATED,
+        updated_at=CREATED,
+        archived_at=None,
+        schema_version=1,
+        schema_revision=None,
+    )
+
+
+def role_template_row(
+    role_id: str,
+    *,
+    name: str = "",
+    system_prompt: str = "",
+    default_system_prompt: str | None = None,
+    built_in: bool = False,
+    builtin_key: str | None = None,
+    scope: str = "board",
+    updated_at: str = CREATED,
+) -> RoleTemplatesRow:
+    prompt = system_prompt or f"You are {role_id}."
+    return RoleTemplatesRow(
+        id=role_id,
+        name=name or f"Role {role_id}",
+        description=f"About {role_id}",
+        system_prompt=prompt,
+        default_system_prompt=prompt if default_system_prompt is None else default_system_prompt,
+        built_in=1 if built_in else 0,
+        builtin_key=builtin_key,
+        created_at=CREATED,
+        updated_at=updated_at,
+        scope=scope,
+    )
+
+
+def agent_row(
+    agent_id: str,
+    *,
+    name: str = "",
+    description: str = "",
+    role_template_id: str | None = None,
+    role_prompt_override: str | None = None,
+    connection_type: str = "openai_compatible",
+    base_url: str = "http://10.0.0.5:8080/v1",
+    model: str | None = None,
+    api_key_ciphertext: str | None = None,
+    api_key_hint: str | None = None,
+    timeout_seconds: int = 30,
+    enabled: bool = True,
+) -> AgentsRow:
+    return AgentsRow(
+        id=agent_id,
+        name=name or f"Agent {agent_id}",
+        description=description,
+        role_template_id=role_template_id,
+        role_prompt_override=role_prompt_override,
+        connection_type=connection_type,
+        base_url=base_url,
+        model=model,
+        api_key_ciphertext=api_key_ciphertext,
+        api_key_hint=api_key_hint,
+        temperature=None,
+        max_output_tokens=None,
+        timeout_seconds=timeout_seconds,
+        enabled=1 if enabled else 0,
+        last_test_status=None,
+        last_test_message=None,
+        last_tested_at=None,
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+
+
+def repository_row(
+    repository_id: str,
+    *,
+    name: str = "",
+    url: str = "",
+    branch: str | None = None,
+    token_ciphertext: str | None = None,
+    token_hint: str | None = None,
+    enabled: bool = True,
+) -> RepositoriesRow:
+    return RepositoriesRow(
+        id=repository_id,
+        name=name or f"Repository {repository_id}",
+        provider="github",
+        url=url or f"https://github.com/acme/{repository_id}",
+        branch=branch,
+        token_ciphertext=token_ciphertext,
+        token_hint=token_hint,
+        enabled=1 if enabled else 0,
+        last_checked_at=None,
+        last_check_status=None,
+        last_check_detail=None,
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+
+
+def board_template_row(
+    template_id: str,
+    *,
+    name: str = "",
+    lists_json: str = "[]",
+    labels_json: str = "[]",
+) -> BoardTemplatesRow:
+    return BoardTemplatesRow(
+        id=template_id,
+        name=name or f"Template {template_id}",
+        description="",
+        lists_json=lists_json,
+        labels_json=labels_json,
+        created_at=CREATED,
+        updated_at=CREATED,
     )
 
 
@@ -438,6 +641,355 @@ class FakeCredentialRepository:
             self.revoke(credential_id, now=now)
 
 
+class FakeBoardRowRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    def get(self, board_id: str) -> BoardsRow | None:
+        return self._state.boards.get(board_id)
+
+    def add(self, row: BoardsRow) -> None:
+        if row.id in self._state.boards:
+            raise ConstraintError(f"boards.id {row.id} exists")
+        self._state.boards[row.id] = row
+
+    def update(self, board_id: str, changes: BoardChanges, *, now: str) -> None:
+        if not changes:
+            raise ConstraintError("an update without a column is not SQL")
+        row = self._state.boards.get(board_id)
+        if row is not None:
+            self._state.boards[board_id] = row.__replace__(**changes, updated_at=now)
+
+    def delete(self, board_id: str) -> None:
+        self._state.boards.pop(board_id, None)
+        # ON DELETE CASCADE from every table that references the board.
+        self._state.board_stats.pop(board_id, None)
+        self._state.agent_links = {
+            key: link for key, link in self._state.agent_links.items() if key[0] != board_id
+        }
+        self._state.repository_links = {
+            key: link for key, link in self._state.repository_links.items() if key[0] != board_id
+        }
+
+
+class FakeBoardStatsRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    def for_boards(self, board_ids: Sequence[str]) -> dict[str, BoardStatsRow]:
+        stored = self._state.board_stats
+        return {board_id: stored[board_id] for board_id in board_ids if board_id in stored}
+
+    def store(self, row: BoardStatsRow) -> None:
+        if row.board_id not in self._state.boards:
+            raise ConstraintError(f"boards.id {row.board_id} does not exist")
+        self._state.board_stats[row.board_id] = row
+
+    def forget(self, board_id: str) -> None:
+        self._state.board_stats.pop(board_id, None)
+
+
+class FakeBoardTemplateRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    def _name_taken(self, name: str, *, other_than: str) -> bool:
+        return any(
+            nocase(row.name) == nocase(name) and row.id != other_than
+            for row in self._state.board_templates.values()
+        )
+
+    def all(self) -> list[BoardTemplatesRow]:
+        return sorted(self._state.board_templates.values(), key=lambda row: nocase(row.name))
+
+    def get(self, template_id: str) -> BoardTemplatesRow | None:
+        return self._state.board_templates.get(template_id)
+
+    def add(self, row: BoardTemplatesRow) -> None:
+        if row.id in self._state.board_templates:
+            raise ConstraintError(f"board_templates.id {row.id} exists")
+        if self._name_taken(row.name, other_than=row.id):
+            raise ConstraintViolationError("board_templates.name is unique")
+        self._state.board_templates[row.id] = row
+
+    def update(self, row: BoardTemplatesRow) -> None:
+        current = self._state.board_templates.get(row.id)
+        if current is None:
+            return
+        if self._name_taken(row.name, other_than=row.id):
+            raise ConstraintViolationError("board_templates.name is unique")
+        self._state.board_templates[row.id] = current.__replace__(
+            name=row.name,
+            description=row.description,
+            lists_json=row.lists_json,
+            labels_json=row.labels_json,
+            updated_at=row.updated_at,
+        )
+
+    def delete(self, template_id: str) -> None:
+        self._state.board_templates.pop(template_id, None)
+
+
+class FakeRoleTemplateRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    def _name_taken(self, name: str, *, other_than: str) -> bool:
+        return any(
+            nocase(row.name) == nocase(name) and row.id != other_than
+            for row in self._state.role_templates.values()
+        )
+
+    def all(self) -> list[RoleTemplatesRow]:
+        return sorted(
+            self._state.role_templates.values(),
+            key=lambda row: (-row.built_in, nocase(row.name)),
+        )
+
+    def get(self, role_id: str) -> RoleTemplatesRow | None:
+        return self._state.role_templates.get(role_id)
+
+    def by_builtin_key(self, key: str) -> RoleTemplatesRow | None:
+        return next(
+            (row for row in self._state.role_templates.values() if row.builtin_key == key), None
+        )
+
+    def add(self, row: RoleTemplatesRow) -> None:
+        if row.id in self._state.role_templates:
+            raise ConstraintError(f"role_templates.id {row.id} exists")
+        if self._name_taken(row.name, other_than=row.id):
+            raise ConstraintViolationError("role_templates.name is unique")
+        if row.builtin_key is not None and self.by_builtin_key(row.builtin_key) is not None:
+            raise ConstraintViolationError("role_templates.builtin_key is unique")
+        self._state.role_templates[row.id] = row
+
+    def update(self, role_id: str, changes: RoleTemplateChanges, *, now: str) -> None:
+        if not changes:
+            raise ConstraintError("an update without a column is not SQL")
+        row = self._state.role_templates.get(role_id)
+        if row is None:
+            return
+        name = changes.get("name")
+        if name is not None and self._name_taken(name, other_than=role_id):
+            raise ConstraintViolationError("role_templates.name is unique")
+        self._state.role_templates[role_id] = row.__replace__(**changes, updated_at=now)
+
+    def delete(self, role_id: str) -> None:
+        self._state.role_templates.pop(role_id, None)
+
+
+class FakeAgentRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    def _name_taken(self, name: str, *, other_than: str) -> bool:
+        return any(
+            nocase(row.name) == nocase(name) and row.id != other_than
+            for row in self._state.agents.values()
+        )
+
+    def get(self, agent_id: str) -> AgentsRow | None:
+        return self._state.agents.get(agent_id)
+
+    def listing(self, *, contains: str | None, enabled: bool | None) -> list[AgentsRow]:
+        pattern = None if contains is None else f"%{contains}%"
+        kept = [
+            row
+            for row in self._state.agents.values()
+            if (pattern is None or like(row.name, pattern) or like(row.description, pattern))
+            and (enabled is None or row.enabled == (1 if enabled else 0))
+        ]
+        return sorted(kept, key=lambda row: nocase(row.name))
+
+    def count_by_role_template(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in self._state.agents.values():
+            if row.role_template_id is not None:
+                counts[row.role_template_id] = counts.get(row.role_template_id, 0) + 1
+        return counts
+
+    def add(self, row: AgentsRow) -> None:
+        if row.id in self._state.agents:
+            raise ConstraintError(f"agents.id {row.id} exists")
+        if self._name_taken(row.name, other_than=row.id):
+            raise ConstraintViolationError("agents.name is unique")
+        self._state.agents[row.id] = row
+
+    def update(self, agent_id: str, changes: AgentChanges, *, now: str) -> None:
+        if not changes:
+            raise ConstraintError("an update without a column is not SQL")
+        row = self._state.agents.get(agent_id)
+        if row is None:
+            return
+        name = changes.get("name")
+        if name is not None and self._name_taken(name, other_than=agent_id):
+            raise ConstraintViolationError("agents.name is unique")
+        self._state.agents[agent_id] = row.__replace__(**changes, updated_at=now)
+
+    def record_test(self, agent_id: str, *, status: str, message: str, now: str) -> None:
+        row = self._state.agents.get(agent_id)
+        if row is not None:
+            self._state.agents[agent_id] = row.__replace__(
+                last_test_status=status, last_test_message=message, last_tested_at=now
+            )
+
+    def clear_role_template(self, role_id: str) -> None:
+        for agent_id, row in list(self._state.agents.items()):
+            if row.role_template_id == role_id:
+                self._state.agents[agent_id] = row.__replace__(role_template_id=None)
+
+    def delete(self, agent_id: str) -> None:
+        self._state.agents.pop(agent_id, None)
+        self._state.agent_links = {
+            key: link for key, link in self._state.agent_links.items() if key[1] != agent_id
+        }
+
+    def sealed_keys(self) -> dict[str, str]:
+        return {
+            row.id: row.api_key_ciphertext
+            for row in self._state.agents.values()
+            if row.api_key_ciphertext is not None
+        }
+
+    def reseal(self, agent_id: str, ciphertext: str) -> None:
+        row = self._state.agents.get(agent_id)
+        if row is not None:
+            self._state.agents[agent_id] = row.__replace__(api_key_ciphertext=ciphertext)
+
+
+def _selection_order(link: BoardAgentsRow | BoardRepositoriesRow) -> tuple[str, str]:
+    other = link.agent_id if isinstance(link, BoardAgentsRow) else link.repository_id
+    return link.created_at, other
+
+
+class FakeAgentLinkRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    def agent_ids(self, board_id: str) -> list[str]:
+        links = [link for link in self._state.agent_links.values() if link.board_id == board_id]
+        return [link.agent_id for link in sorted(links, key=_selection_order)]
+
+    def by_board(self) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for link in sorted(self._state.agent_links.values(), key=_selection_order):
+            grouped.setdefault(link.board_id, []).append(link.agent_id)
+        return grouped
+
+    def clear(self, board_id: str) -> None:
+        self._state.agent_links = {
+            key: link for key, link in self._state.agent_links.items() if key[0] != board_id
+        }
+
+    def add(self, row: BoardAgentsRow) -> None:
+        if row.board_id not in self._state.boards or row.agent_id not in self._state.agents:
+            raise ConstraintError(f"board_agents ({row.board_id}, {row.agent_id}) has no parent")
+        key = (row.board_id, row.agent_id)
+        if key in self._state.agent_links:
+            raise ConstraintError(f"board_agents {key} exists")
+        self._state.agent_links[key] = row
+
+
+class FakeCodeRepositoryRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    @staticmethod
+    def _ordered(rows: list[RepositoriesRow]) -> list[RepositoriesRow]:
+        return sorted(rows, key=lambda row: (nocase(row.name), row.id))
+
+    def get(self, repository_id: str) -> RepositoriesRow | None:
+        return self._state.code_repositories.get(repository_id)
+
+    def all(self) -> list[RepositoriesRow]:
+        return self._ordered(list(self._state.code_repositories.values()))
+
+    def for_board(self, board_id: str) -> list[RepositoriesRow]:
+        linked = {key[1] for key in self._state.repository_links if key[0] == board_id}
+        rows = self._state.code_repositories.values()
+        return self._ordered([row for row in rows if row.id in linked])
+
+    def url_taken(self, url: str, *, other_than: str | None = None) -> bool:
+        return any(
+            row.url == url and row.id != other_than
+            for row in self._state.code_repositories.values()
+        )
+
+    def add(self, row: RepositoriesRow) -> None:
+        if row.id in self._state.code_repositories:
+            raise ConstraintError(f"repositories.id {row.id} exists")
+        self._state.code_repositories[row.id] = row
+
+    def update(self, repository_id: str, changes: RepositoryChanges) -> None:
+        row = self._state.code_repositories.get(repository_id)
+        if row is not None:
+            self._state.code_repositories[repository_id] = row.__replace__(**changes)
+
+    def record_check(self, repository_id: str, *, status: str, detail: str, now: str) -> None:
+        row = self._state.code_repositories.get(repository_id)
+        if row is not None:
+            self._state.code_repositories[repository_id] = row.__replace__(
+                last_checked_at=now,
+                last_check_status=status,
+                last_check_detail=detail,
+                updated_at=now,
+            )
+
+    def delete(self, repository_id: str) -> None:
+        self._state.code_repositories.pop(repository_id, None)
+        self._state.repository_links = {
+            key: link
+            for key, link in self._state.repository_links.items()
+            if key[1] != repository_id
+        }
+
+    def sealed_tokens(self) -> dict[str, str]:
+        return {
+            row.id: row.token_ciphertext
+            for row in self._state.code_repositories.values()
+            if row.token_ciphertext is not None
+        }
+
+    def reseal(self, repository_id: str, ciphertext: str, *, now: str) -> None:
+        row = self._state.code_repositories.get(repository_id)
+        if row is not None:
+            self._state.code_repositories[repository_id] = row.__replace__(
+                token_ciphertext=ciphertext, updated_at=now
+            )
+
+
+class FakeRepositoryLinkRepository:
+    def __init__(self, state: RegistryState) -> None:
+        self._state = state
+
+    def linked_boards(self) -> list[LinkedBoard]:
+        linked = [
+            LinkedBoard(link=link, board=self._state.boards[link.board_id])
+            for link in self._state.repository_links.values()
+            if link.board_id in self._state.boards
+        ]
+        return sorted(linked, key=lambda entry: nocase(entry.board.name))
+
+    def clear(self, board_id: str) -> None:
+        self._state.repository_links = {
+            key: link for key, link in self._state.repository_links.items() if key[0] != board_id
+        }
+
+    def add(self, row: BoardRepositoriesRow) -> None:
+        parents = (
+            row.board_id in self._state.boards
+            and row.repository_id in self._state.code_repositories
+        )
+        if not parents:
+            raise ConstraintError(
+                f"board_repositories ({row.board_id}, {row.repository_id}) has no parent"
+            )
+        key = (row.board_id, row.repository_id)
+        if key in self._state.repository_links:
+            raise ConstraintError(f"board_repositories {key} exists")
+        self._state.repository_links[key] = row
+
+
 class FakeRegistryRepositories:
     def __init__(self, state: RegistryState) -> None:
         # Typed as the Protocols: pyright proves each fake implements its repository here.
@@ -446,6 +998,14 @@ class FakeRegistryRepositories:
         self.sessions: SessionRepository = FakeSessionRepository(state)
         self.invites: InviteRepository = FakeInviteRepository(state)
         self.credentials: CredentialRepository = FakeCredentialRepository(state)
+        self.boards: BoardRowRepository = FakeBoardRowRepository(state)
+        self.board_stats: BoardStatsRepository = FakeBoardStatsRepository(state)
+        self.board_templates: BoardTemplateRepository = FakeBoardTemplateRepository(state)
+        self.role_templates: RoleTemplateRepository = FakeRoleTemplateRepository(state)
+        self.agents: AgentRepository = FakeAgentRepository(state)
+        self.agent_links: AgentLinkRepository = FakeAgentLinkRepository(state)
+        self.code_repositories: CodeRepositoryRepository = FakeCodeRepositoryRepository(state)
+        self.repository_links: RepositoryLinkRepository = FakeRepositoryLinkRepository(state)
 
 
 class FakeRegistryUnitOfWork:

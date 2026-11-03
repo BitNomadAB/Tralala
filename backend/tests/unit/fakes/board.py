@@ -7,10 +7,12 @@ from collections.abc import Collection, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from app.core.errors import Conflict, NotFound
-from app.db.generated.board import ActivityLogRow, CardsRow, ListsRow, LoopsRow
+from app.core.errors import Conflict, NotFound, ServiceUnavailable
+from app.db.generated.board import ActivityLogRow, CardsRow, LabelsRow, ListsRow, LoopsRow
 from app.repositories.activity import ActivityRepository
 from app.repositories.board import BoardUnitOfWork
+from app.repositories.counters import BoardCounts, CounterRepository
+from app.repositories.labels import LabelRepository
 from app.repositories.lists import ListRepository
 from app.repositories.loops import LoopRepository
 
@@ -26,15 +28,23 @@ class BoardState:
     loops: dict[str, LoopsRow] = field(default_factory=dict[str, LoopsRow])
     cards: dict[str, CardsRow] = field(default_factory=dict[str, CardsRow])
     activity: list[ActivityLogRow] = field(default_factory=list[ActivityLogRow])
+    labels: dict[str, LabelsRow] = field(default_factory=dict[str, LabelsRow])
 
     def snapshot(self) -> BoardState:
-        return BoardState(dict(self.lists), dict(self.loops), dict(self.cards), list(self.activity))
+        return BoardState(
+            dict(self.lists),
+            dict(self.loops),
+            dict(self.cards),
+            list(self.activity),
+            dict(self.labels),
+        )
 
     def restore(self, snapshot: BoardState) -> None:
         self.lists = snapshot.lists
         self.loops = snapshot.loops
         self.cards = snapshot.cards
         self.activity = snapshot.activity
+        self.labels = snapshot.labels
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -152,6 +162,14 @@ class FakeListRepository:
         ]
         return sorted(rows, key=_display_order)
 
+    def active_names(self, loop_id: str) -> list[str]:
+        rows = [
+            row
+            for row in self._state.lists.values()
+            if row.loop_id == loop_id and row.archived_at is None
+        ]
+        return [row.name for row in sorted(rows, key=lambda row: (row.position, row.created_at))]
+
     def positions(self, loop_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:
         return [
             (row.id, row.position)
@@ -227,20 +245,54 @@ class FakeActivityRepository:
         self._state.activity.append(entry)
 
 
+class FakeLabelRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def all(self) -> list[LabelsRow]:
+        return sorted(self._state.labels.values(), key=lambda row: row.name)
+
+
+class FakeCounterRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def counts(self) -> BoardCounts:
+        return BoardCounts(
+            loops=sum(
+                1
+                for loop in self._state.loops.values()
+                if loop.archived_at is None and loop.completed_at is None
+            ),
+            lists=sum(1 for row in self._state.lists.values() if row.archived_at is None),
+            cards=sum(1 for card in self._state.cards.values() if card.archived_at is None),
+        )
+
+
 class FakeBoardRepositories:
     def __init__(self, state: BoardState) -> None:
         # Typed as the Protocols: pyright proves each fake implements its repository here.
         self.lists: ListRepository = FakeListRepository(state)
         self.loops: LoopRepository = FakeLoopRepository(state)
         self.activity: ActivityRepository = FakeActivityRepository(state)
+        self.labels: LabelRepository = FakeLabelRepository(state)
+        self.counters: CounterRepository = FakeCounterRepository(state)
 
 
 class FakeBoardUnitOfWork:
     """Commits a writer that ends normally, rolls back one that raises; a reader never commits."""
 
-    def __init__(self, state: BoardState, *, databases: Collection[str] = (BOARD_ID,)) -> None:
+    def __init__(
+        self,
+        state: BoardState,
+        *,
+        databases: Collection[str] = (BOARD_ID,),
+        unavailable: Collection[str] = (),
+    ) -> None:
         self.state = state
         self.databases = set(databases)
+        # Boards whose schema is being repaired: opening one answers 503, as the manager does.
+        self.unavailable = set(unavailable)
         self.commits = 0
         self.rollbacks = 0
 
@@ -250,6 +302,10 @@ class FakeBoardUnitOfWork:
     def _open(self, board_id: str) -> BoardState:
         if board_id not in self.databases:
             raise NotFound("Board database not found")
+        if board_id in self.unavailable:
+            raise ServiceUnavailable(
+                "Board schema is not at the current revision", code="board_schema_outdated"
+            )
         return self.state.snapshot()
 
     @contextmanager

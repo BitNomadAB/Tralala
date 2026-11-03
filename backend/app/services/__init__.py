@@ -16,6 +16,7 @@ from .attachments import AttachmentService
 from .auth import AuthService
 from .backup_scheduler import BackupScheduler
 from .backups import BackupService
+from .board_stats import BoardStatsCache
 from .boards import BoardService
 from .cards import CardService
 from .discussions import DiscussionService
@@ -53,15 +54,19 @@ class Services:
         self.boards = BoardDatabaseManager(settings)
         # The board unit of work for the services converted to repositories (GCS-T00c onwards).
         self.board_store = SqlBoardUnitOfWork(self.boards)
+        self.board_stats = BoardStatsCache(settings, self.registry_store, self.board_store)
+        # The manager has exactly one write choke point, so the cache is told there instead of
+        # asking every service to remember to invalidate.
+        self.boards.on_write = self.board_stats.invalidate
         self.migrations = MigrationManager(settings, self.registry, self.boards)
-        self.board = BoardService(settings, self.registry, self.boards, self.migrations)
-        self.template = TemplateService(self.registry, self.boards, self.board)
-        self.board.templates = self.template
-        self.role_templates = RoleTemplateService(self.registry)
-        self.agent = AgentService(
-            settings, self.registry, self.role_templates, accounts=self.registry_store
+        self.board = BoardService(
+            settings, self.registry, self.boards, self.migrations, stats=self.board_stats
         )
-        self.repository = RepositoryService(settings, self.registry)
+        self.template = TemplateService(self.registry_store, self.board_store, self.board)
+        self.board.templates = self.template
+        self.role_templates = RoleTemplateService(self.registry_store)
+        self.agent = AgentService(settings, self.registry_store)
+        self.repository = RepositoryService(settings, self.registry_store)
         self.repo_snapshot = RepositorySnapshotService(self.repository)
         self.board.repositories = self.repository
         self.board.agents = self.agent
