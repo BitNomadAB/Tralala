@@ -49,7 +49,7 @@ export function Field({
   label: string;
   htmlFor: string;
   children: React.ReactNode;
-  hint?: string;
+  hint?: string | undefined;
 }) {
   return (
     <div className="flex flex-col gap-1.5">

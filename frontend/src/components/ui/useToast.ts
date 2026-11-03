@@ -2,8 +2,15 @@ import { createContext, useContext } from "react";
 
 export type ToastVariant = "info" | "success" | "warning" | "error";
 
+/** What a caller passes; an undefined description is the same as none. */
+export interface ToastInput {
+  title: string;
+  description?: string | undefined;
+  variant?: ToastVariant;
+}
+
 export interface ToastContextValue {
-  push: (toast: { title: string; description?: string; variant?: ToastVariant }) => void;
+  push: (toast: ToastInput) => void;
 }
 
 /** Shared by `ToastProvider` (toast.tsx) and `useToast`; a component file exports only components. */

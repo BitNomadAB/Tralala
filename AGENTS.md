@@ -131,10 +131,11 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 - Text files are UTF-8 without a byte-order mark and use LF line endings (`.gitattributes`,
   `.editorconfig`). Backend code writes text with `newline=""` or writes bytes, so a file written on
   Windows is byte-identical to one written on Linux; `tests/test_text_files.py` enforces both.
-- TypeScript: strict, plus `noUncheckedIndexedAccess`, `noImplicitOverride` and
-  `verbatimModuleSyntax` (`frontend/tsconfig.json`). An index or regex result is narrowed, never
-  asserted with `!`; type-only imports say `import type`. No `any` unless justified, semantic CSS
-  variables from `src/index.css`.
+- TypeScript: strict, plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
+  `noImplicitOverride` and `verbatimModuleSyntax` (`frontend/tsconfig.json`). An index or regex
+  result is narrowed, never asserted with `!`; an optional property that may be passed `undefined`
+  says so (`?: T | undefined`); type-only imports say `import type`. No `any` unless justified,
+  semantic CSS variables from `src/index.css`.
 - ESLint (`frontend/eslint.config.js`): typed typescript-eslint, React hooks, jsx-a11y and import
   rules, every one an error. A rule is switched off or configured only in that file, with its reason
   on the line above; there is no inline `eslint-disable`.

@@ -46,8 +46,8 @@ export const keys = {
 };
 
 export function useBoards(filters: {
-  q?: string;
-  status?: string;
+  q?: string | undefined;
+  status?: string | undefined;
   sort?: string;
   order?: string;
   limit?: number;
@@ -139,7 +139,11 @@ export function useQaCycle(boardId: string, loopId: string, enabled = true) {
 
 export function useHistory(
   boardId: string,
-  params: { q?: string; source_kind?: string; qa_status?: string },
+  params: {
+    q?: string | undefined;
+    source_kind?: string | undefined;
+    qa_status?: string | undefined;
+  },
 ) {
   return useQuery({
     queryKey: keys.history(boardId, params),

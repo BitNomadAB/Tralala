@@ -22,7 +22,7 @@ export function AgentAccessGuide({
   token,
   onCopy,
 }: {
-  token?: string;
+  token?: string | undefined;
   onCopy?: (snippet: string) => void;
 }) {
   const snippet = mcpConfigSnippet(PLACEHOLDER_ORIGIN, token ?? "<your-token>");

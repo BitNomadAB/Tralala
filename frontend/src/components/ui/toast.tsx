@@ -1,12 +1,12 @@
 import { CheckCircle2, Info, TriangleAlert, XCircle } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
-import { ToastContext, type ToastVariant } from "./useToast";
+import { ToastContext, type ToastInput, type ToastVariant } from "./useToast";
 
 interface Toast {
   id: number;
   title: string;
-  description?: string;
+  description: string | undefined;
   variant: ToastVariant;
 }
 
@@ -28,15 +28,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const push = useCallback(
-    ({
-      title,
-      description,
-      variant = "info",
-    }: {
-      title: string;
-      description?: string;
-      variant?: ToastVariant;
-    }) => {
+    ({ title, description, variant = "info" }: ToastInput) => {
       const id = Date.now() + Math.random();
       setToasts((current) => [...current, { id, title, description, variant }]);
       window.setTimeout(() => {

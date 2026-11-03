@@ -32,7 +32,7 @@ export function RunPhases({
 }: {
   purpose: "analysis" | "roadmap";
   run: GenerationRun;
-  onDismiss?: () => void;
+  onDismiss?: (() => void) | undefined;
   compact?: boolean;
 }) {
   const steps = runSteps(purpose, run);

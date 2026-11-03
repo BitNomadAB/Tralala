@@ -89,10 +89,10 @@ export function RunPanel({
 
   const startMutation = useMutation({
     mutationFn: (input: {
-      rounds?: number;
+      rounds?: number | undefined;
       autonomous: boolean;
-      token_budget?: number;
-      time_budget_seconds?: number;
+      token_budget?: number | undefined;
+      time_budget_seconds?: number | undefined;
     }) => api.startDiscussion(boardId, discussion.id, input),
     onSuccess: (result) => {
       setPlanning(false);

@@ -51,7 +51,7 @@ export class ApiError extends Error {
 
   constructor(
     message: string,
-    options: { code: string; status: number; retryable?: boolean; details?: unknown },
+    options: { code: string; status: number; retryable?: boolean | undefined; details?: unknown },
   ) {
     super(message);
     this.name = "ApiError";
@@ -77,7 +77,7 @@ interface ErrorEnvelope {
 
 export interface ApiResult<T> {
   data: T;
-  meta?: PageMeta;
+  meta?: PageMeta | undefined;
 }
 
 function readCookie(name: string): string | null {
@@ -104,7 +104,7 @@ async function request<T>(
     const csrf = readCookie("tralala_csrf");
     if (csrf) headers["X-CSRF-Token"] = csrf;
   }
-  let body: BodyInit | undefined;
+  let body: BodyInit | null = null;
   if (options.body instanceof Blob || options.body instanceof ArrayBuffer) {
     body = options.body as BodyInit;
   } else if (options.body !== undefined) {
@@ -205,8 +205,8 @@ export const api = {
 
   async listBoards(
     params: {
-      q?: string;
-      status?: string;
+      q?: string | undefined;
+      status?: string | undefined;
       sort?: string;
       order?: string;
       limit?: number;
@@ -506,8 +506,14 @@ export const api = {
 
   async searchHistory(
     boardId: string,
-    params: { q?: string; source_kind?: string; qa_status?: string; limit?: number; offset?: number },
-  ): Promise<{ items: HistorySummary[]; meta?: PageMeta }> {
+    params: {
+      q?: string | undefined;
+      source_kind?: string | undefined;
+      qa_status?: string | undefined;
+      limit?: number;
+      offset?: number;
+    },
+  ): Promise<{ items: HistorySummary[]; meta?: PageMeta | undefined }> {
     const query = new URLSearchParams(
       Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined && value !== "")
@@ -736,10 +742,10 @@ export const api = {
     boardId: string,
     discussionId: string,
     payload: {
-      rounds?: number;
+      rounds?: number | undefined;
       autonomous?: boolean;
-      token_budget?: number;
-      time_budget_seconds?: number;
+      token_budget?: number | undefined;
+      time_budget_seconds?: number | undefined;
     } = {},
   ): Promise<DiscussionRunSummary> {
     return json(
@@ -927,7 +933,7 @@ export const api = {
   async listCards(
     boardId: string,
     loopId: string,
-    params: { list_id?: string; limit?: number; include_archived?: boolean } = {},
+    params: { list_id?: string | undefined; limit?: number; include_archived?: boolean } = {},
   ): Promise<Card[]> {
     const query = new URLSearchParams(
       Object.entries<QueryValue>(params)
@@ -943,15 +949,15 @@ export const api = {
     boardId: string,
     loopId: string,
     params: {
-      q?: string;
-      label?: string;
-      priority?: Priority;
-      overdue?: boolean;
+      q?: string | undefined;
+      label?: string | undefined;
+      priority?: Priority | undefined;
+      overdue?: boolean | undefined;
       completed?: boolean;
       include_archived?: boolean;
       limit?: number;
     },
-  ): Promise<{ items: Card[]; meta?: PageMeta }> {
+  ): Promise<{ items: Card[]; meta?: PageMeta | undefined }> {
     const query = new URLSearchParams(
       Object.entries<QueryValue>(params)
         .filter(([, value]) => value !== undefined && value !== "" && value !== false)
@@ -996,12 +1002,12 @@ export const api = {
     cardId: string,
     payload: {
       version: number;
-      title?: string;
-      description?: string;
-      priority?: Priority;
-      due_at?: string;
+      title?: string | undefined;
+      description?: string | undefined;
+      priority?: Priority | undefined;
+      due_at?: string | undefined;
       clear_due_at?: boolean;
-      completed?: boolean;
+      completed?: boolean | undefined;
       labels?: string[];
     },
   ): Promise<Card> {
@@ -1049,7 +1055,7 @@ export const api = {
   },
 
   async createRepository(payload: {
-    name?: string;
+    name?: string | undefined;
     url: string;
     branch?: string | null;
     enabled?: boolean;
@@ -1061,7 +1067,7 @@ export const api = {
   async updateRepository(
     repositoryId: string,
     payload: {
-      name?: string;
+      name?: string | undefined;
       url?: string;
       branch?: string | null;
       enabled?: boolean;
@@ -1188,7 +1194,7 @@ export const api = {
 
   async listActivity(
     boardId: string,
-    params: { entity_id?: string; limit?: number } = {},
+    params: { entity_id?: string | undefined; limit?: number } = {},
   ): Promise<ActivityEntry[]> {
     const query = new URLSearchParams(
       Object.entries<QueryValue>(params)
@@ -1210,7 +1216,7 @@ export const api = {
   async createCredential(payload: {
     name: string;
     scopes: string[];
-    expires_in_days?: number;
+    expires_in_days?: number | undefined;
   }): Promise<Credential> {
     return json(await request<Credential>("/credentials", { method: "POST", body: payload }));
   },
@@ -1242,7 +1248,7 @@ export const api = {
 
   async updateUser(
     userId: string,
-    payload: { role?: Role; disabled?: boolean },
+    payload: { role?: Role | undefined; disabled?: boolean | undefined },
   ): Promise<UserAccount> {
     return json(await request<UserAccount>(`/users/${userId}`, { method: "PATCH", body: payload }));
   },
