@@ -64,7 +64,7 @@ from app.repositories.loop_plans import (
     PlanTotals,
 )
 from app.repositories.loop_qa import LoopQaRepository
-from app.repositories.loops import LoopChanges, LoopRepository
+from app.repositories.loops import ApprovalColumn, LoopChanges, LoopRepository
 from app.repositories.search import CardSearch, CardSearchRepository
 from tests.unit.fakes.registry import ConstraintError, like
 
@@ -549,6 +549,45 @@ class FakeLoopRepository:
             ),
         )
 
+    @staticmethod
+    def _with_approval(loop: LoopsRow, column: ApprovalColumn, value: str | None) -> LoopsRow:
+        match column:
+            case "analysis_approval_id":
+                return loop.__replace__(analysis_approval_id=value)
+            case "roadmap_approval_id":
+                return loop.__replace__(roadmap_approval_id=value)
+            case "implementation_approval_id":
+                return loop.__replace__(implementation_approval_id=value)
+            case "qa_approval_id":
+                return loop.__replace__(qa_approval_id=value)
+
+    def clear_approvals(
+        self, loop_id: str, columns: Sequence[ApprovalColumn], *, now: str
+    ) -> None:
+        if not columns:
+            raise ConstraintError("an update without a column is not SQL")
+        loop = self._state.loops.get(loop_id)
+        if loop is None:
+            return
+        for column in columns:
+            loop = self._with_approval(loop, column, None)
+        self._state.loops[loop_id] = loop.__replace__(updated_at=now)
+
+    def set_approval(
+        self, loop_id: str, column: ApprovalColumn, approval_id: str, *, now: str
+    ) -> None:
+        self._change(
+            loop_id,
+            lambda loop: self._with_approval(loop, column, approval_id).__replace__(
+                version=loop.version + 1, updated_at=now
+            ),
+        )
+
+    def bump_version(self, loop_id: str, *, now: str) -> None:
+        self._change(
+            loop_id, lambda loop: loop.__replace__(version=loop.version + 1, updated_at=now)
+        )
+
 
 def _loops_of(state: BoardState, loop_id: str | None) -> set[str]:
     """The Loops a query covers: one, or every Loop of the board (``IN (SELECT id FROM loops)``)."""
@@ -568,6 +607,78 @@ class FakeLoopDocumentRepository:
         ]
         return sorted(found, key=lambda row: (row.kind, row.revision_number))
 
+    def _of(self, loop_id: str, kind: str) -> list[LoopDocumentsRow]:
+        return [row for row in self._state.documents if (row.loop_id, row.kind) == (loop_id, kind)]
+
+    def current(self, loop_id: str, kind: str) -> LoopDocumentsRow | None:
+        return next((row for row in self._of(loop_id, kind) if row.is_current == 1), None)
+
+    def count(self, loop_id: str, kind: str) -> int:
+        return len(self._of(loop_id, kind))
+
+    def page(self, loop_id: str, kind: str, *, limit: int, offset: int) -> list[LoopDocumentsRow]:
+        found = sorted(self._of(loop_id, kind), key=lambda row: row.revision_number, reverse=True)
+        return found[offset : offset + limit]
+
+    def next_revision(self, loop_id: str, kind: str) -> int:
+        return max((row.revision_number for row in self._of(loop_id, kind)), default=0) + 1
+
+    def _change(
+        self,
+        matches: Callable[[LoopDocumentsRow], bool],
+        change: Callable[[LoopDocumentsRow], LoopDocumentsRow],
+    ) -> None:
+        self._state.documents = [
+            change(row) if matches(row) else row for row in self._state.documents
+        ]
+
+    def clear_current(self, loop_id: str, kind: str) -> None:
+        self._change(
+            lambda row: (row.loop_id, row.kind) == (loop_id, kind),
+            lambda row: row.__replace__(is_current=0),
+        )
+
+    def withdraw_approval(self, loop_id: str, kind: str) -> None:
+        self._change(
+            lambda row: (row.loop_id, row.kind) == (loop_id, kind),
+            lambda row: row.__replace__(is_approved=0),
+        )
+
+    def add(self, row: LoopDocumentsRow) -> None:
+        for known in self._state.documents:
+            if known.id == row.id or (known.loop_id, known.kind, known.revision_number) == (
+                row.loop_id,
+                row.kind,
+                row.revision_number,
+            ):
+                raise ConstraintError(f"loop_documents {row.id} breaks the primary or a unique key")
+        if row.loop_id not in self._state.loops:
+            raise ConstraintError(f"loop_documents {row.id} names a Loop that does not exist")
+        same_kind = self._of(row.loop_id, row.kind)
+        if (row.is_current and any(known.is_current for known in same_kind)) or (
+            row.is_approved and any(known.is_approved for known in same_kind)
+        ):
+            raise ConstraintError(f"loop_documents {row.id} is a second current or approved one")
+        self._state.documents.append(row)
+
+    def approve(self, document_id: str) -> None:
+        row = next((known for known in self._state.documents if known.id == document_id), None)
+        if row is not None and any(
+            known.is_approved and known.id != document_id
+            for known in self._of(row.loop_id, row.kind)
+        ):
+            raise ConstraintError(f"loop_documents {document_id} would be a second approved one")
+        self._change(
+            lambda row: row.id == document_id,
+            lambda row: row.__replace__(is_approved=1, status="approved"),
+        )
+
+    def request_changes(self, document_id: str) -> None:
+        self._change(
+            lambda row: row.id == document_id,
+            lambda row: row.__replace__(is_approved=0, status="changes_requested"),
+        )
+
 
 class FakeLoopApprovalRepository:
     def __init__(self, state: BoardState) -> None:
@@ -578,6 +689,33 @@ class FakeLoopApprovalRepository:
         # ORDER BY created_at DESC, rowid DESC: newest insertion first, then a stable sort.
         found = [row for row in reversed(self._state.approvals) if row.loop_id in loops]
         return sorted(found, key=lambda row: row.created_at, reverse=True)
+
+    def get(self, approval_id: str) -> LoopApprovalsRow | None:
+        return next((row for row in self._state.approvals if row.id == approval_id), None)
+
+    def add(self, row: LoopApprovalsRow) -> None:
+        if self.get(row.id) is not None:
+            raise ConstraintError(f"loop_approvals.id {row.id} exists")
+        if row.loop_id not in self._state.loops:
+            raise ConstraintError(f"loop_approvals {row.id} names a Loop that does not exist")
+        self._state.approvals.append(row)
+
+    def supersede_others(self, loop_id: str, scope: str, *, keep: str, now: str) -> None:
+        self._state.approvals = [
+            row.__replace__(superseded_at=now)
+            if row.loop_id == loop_id
+            and row.scope == scope
+            and row.id != keep
+            and row.superseded_at is None
+            else row
+            for row in self._state.approvals
+        ]
+
+    def supersede(self, approval_id: str, *, now: str) -> None:
+        self._state.approvals = [
+            row.__replace__(superseded_at=now) if row.id == approval_id else row
+            for row in self._state.approvals
+        ]
 
 
 class FakeLoopPlanRepository:

@@ -31,7 +31,7 @@ from app.schemas.cards import CardUpdate
 from app.schemas.loops import LoopUpdate
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
 from app.schemas.subresources import ChecklistItemUpdate, LabelUpdate
-from app.services import discussions, events, loop_documents
+from app.services import discussions, events
 
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 FILTERS: sql.Filters = (("a", "a = :a"), ("b", "b IS NULL"), ("c", "(c LIKE :c OR d LIKE :c)"))
@@ -263,7 +263,7 @@ def test_event_and_approval_identifiers_are_the_fixed_names() -> None:
     assert events._EVENT_TABLES == ("discussion_events", "card_events")
     assert events._SCOPE_COLUMNS == ("discussion_id", "card_id")
     # Changing an input invalidates its approval and everything downstream of it, in this order.
-    assert loop_documents._APPROVAL_COLUMNS == (
+    assert loop_repositories.LOOP_APPROVAL_COLUMNS == (
         "analysis_approval_id",
         "roadmap_approval_id",
         "implementation_approval_id",

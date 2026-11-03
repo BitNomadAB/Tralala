@@ -20,6 +20,8 @@ from sqlalchemy.exc import IntegrityError
 
 from ..core.context import ActorContext
 from ..core.errors import ApiError, Conflict, NotFound, ServiceUnavailable, ValidationFailure
+from ..db.generated.board import LoopsRow
+from ..repositories.sql.board import SqlBoardRepositories
 from ..schemas.loops import AnalysisPayload, GenerationRequest, PlanPayload, QaInstructions
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
@@ -371,7 +373,9 @@ class LoopGenerationService:
             approvals = self.loops.latest_approvals(conn, loop_id)
             stale = self.loops._stale_reasons(documents, approvals)
             self._precondition(loop, request.purpose, documents, approvals, stale)
-            context = self.documents.collect_context(conn, loop)
+            context = self.documents.collect_context(
+                SqlBoardRepositories(conn), LoopsRow.from_mapping(loop)
+            )
             captured = {
                 "purpose": request.purpose,
                 "instructions": request.instructions,
@@ -809,7 +813,9 @@ class LoopGenerationService:
                 return
             loop = self.loops.require_loop_row(conn, board_id, loop_id)
             self.loops.ensure_writable(loop)
-            current = self.documents.collect_context(conn, loop)
+            current = self.documents.collect_context(
+                SqlBoardRepositories(conn), LoopsRow.from_mapping(loop)
+            )
             if request_fingerprint(current) != captured["context_hash"]:
                 conn.execute(
                     text(
@@ -837,13 +843,21 @@ class LoopGenerationService:
             }
             if captured["purpose"] == "analysis":
                 outputs = self.documents.store_generated_analysis(
-                    conn, loop, AnalysisPayload.model_validate(payload), _system_actor(row),
-                    run_id=run_id, provenance=provenance
+                    SqlBoardRepositories(conn),
+                    LoopsRow.from_mapping(loop),
+                    AnalysisPayload.model_validate(payload),
+                    _system_actor(row),
+                    run_id=run_id,
+                    provenance=provenance,
                 )
             elif captured["purpose"] == "roadmap":
                 outputs = self.documents.store_generated_roadmap(
-                    conn, loop, PlanPayload.model_validate(payload), _system_actor(row),
-                    run_id=run_id, provenance=provenance
+                    SqlBoardRepositories(conn),
+                    LoopsRow.from_mapping(loop),
+                    PlanPayload.model_validate(payload),
+                    _system_actor(row),
+                    run_id=run_id,
+                    provenance=provenance,
                 )
             else:
                 outputs = self.links.apply_qa_instructions(

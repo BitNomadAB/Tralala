@@ -1,12 +1,12 @@
 """TRANSITIONAL bridge between the converted Loop and Ticket services and the Loop workflow
 services that still hold a connection. GCS-T00f removes this module when it converts them.
 
-``LoopConnectionHelpers`` gives ``loop_documents``, ``loop_qa`` and ``loop_generation`` the
-dict-on-connection helpers LoopService used to have, under the same names and signatures. Each one
-runs the typed rule of ``services/loops.py`` on ``SqlBoardRepositories`` over the caller's
-connection, so it is the same transaction, and hands back the dicts those services read (a row's
-columns in table order, as ``SELECT *`` gave them). Dicts they pass back in are read through the
-generated rows' checked ``from_mapping``.
+``LoopConnectionHelpers`` gives ``loop_qa`` and ``loop_generation`` the dict-on-connection
+helpers LoopService used to have, under the same names and signatures. Each one runs the typed rule
+of ``services/loops.py`` on ``SqlBoardRepositories`` over the caller's connection, so it is the
+same transaction, and hands back the dicts those services read (a row's columns in table order, as
+``SELECT *`` gave them). Dicts they pass back in are read through the generated rows' checked
+``from_mapping``.
 
 The module is outside the pyright strict scope on purpose and is listed in the GCS-T00e and
 GCS-T00f notes.

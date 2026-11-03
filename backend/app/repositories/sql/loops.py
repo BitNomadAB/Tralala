@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from ...core import sql
 from ...db import values
 from ...db.generated.board import LOOPS_COLUMNS, LoopsRow
-from ..loops import LOOP_EDITABLE, LoopChanges
+from ..loops import LOOP_APPROVAL_COLUMNS, LOOP_EDITABLE, ApprovalColumn, LoopChanges
 
 # What the Loop list formats into its SQL text (see core/sql.py).
 _LOOP_FILTERS: sql.Filters = (
@@ -39,6 +41,7 @@ _ARCHIVE = text(
     "UPDATE loops SET archived_at = :now, version = version + 1, updated_at = :now WHERE id = :id"
 )
 _SET_STAGE = text("UPDATE loops SET stage = :stage, updated_at = :now WHERE id = :id")
+_BUMP_VERSION = text("UPDATE loops SET version = version + 1, updated_at = :now WHERE id = :id")
 _SET_CURRENT_PLAN = text(
     "UPDATE loops SET current_plan_id = :plan_id, updated_at = :now WHERE id = :id"
 )
@@ -129,3 +132,27 @@ class SqlLoopRepository:
 
     def clear_delivery_approvals(self, loop_id: str, *, now: str) -> None:
         self._connection.execute(_CLEAR_DELIVERY_APPROVALS, {"now": now, "id": loop_id})
+
+    def clear_approvals(
+        self, loop_id: str, columns: Sequence[ApprovalColumn], *, now: str
+    ) -> None:
+        cleared = sql.assignments(columns, LOOP_APPROVAL_COLUMNS)
+        statement = text(
+            f"UPDATE loops SET {cleared}, updated_at = :now WHERE id = :id"  # noqa: S608 - from LOOP_APPROVAL_COLUMNS
+        )
+        self._connection.execute(statement, {**dict.fromkeys(columns), "now": now, "id": loop_id})
+
+    def set_approval(
+        self, loop_id: str, column: ApprovalColumn, approval_id: str, *, now: str
+    ) -> None:
+        name = sql.identifier(column, LOOP_APPROVAL_COLUMNS)
+        statement = text(
+            f"UPDATE loops SET {name} = :approval_id, version = version + 1,"  # noqa: S608 - from LOOP_APPROVAL_COLUMNS
+            " updated_at = :now WHERE id = :id"
+        )
+        self._connection.execute(
+            statement, {"approval_id": approval_id, "now": now, "id": loop_id}
+        )
+
+    def bump_version(self, loop_id: str, *, now: str) -> None:
+        self._connection.execute(_BUMP_VERSION, {"now": now, "id": loop_id})

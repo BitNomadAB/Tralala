@@ -182,11 +182,11 @@ class CandidateSubmission(StrictModel):
     source_info_revision_id: Id | None = None
     source_analysis_ai_revision_id: Id | None = None
     source_analysis_revision_id: Id | None = None
-    provenance: dict = Field(default_factory=dict)
+    provenance: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("provenance")
     @classmethod
-    def _bounded_provenance(cls, value: dict) -> dict:
+    def _bounded_provenance(cls, value: dict[str, object]) -> dict[str, object]:
         if len(value) > 20:
             raise ValueError("provenance accepts at most 20 entries")
         return value
