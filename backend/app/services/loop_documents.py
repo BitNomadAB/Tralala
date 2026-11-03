@@ -45,6 +45,7 @@ from .loop_documents_generated import (
     store_run_analysis,
     store_run_roadmap,
 )
+from .loop_documents_human import store_human_analysis
 from .loop_documents_render import (
     content_hash,
     render_analysis,
@@ -63,6 +64,7 @@ from .loop_documents_views import (
     DocumentsView,
     GeneratedAnalysis,
     GeneratedRoadmap,
+    HumanViewStart,
     LoopContext,
     ResetResult,
     Review,
@@ -90,6 +92,9 @@ from .loops import (
 # approvals, so the edit belongs to a signed-in person.
 WORKER_INFO_STAGES = frozenset({"draft", "analysis_review"})
 
+# Starts the run in which a board agent writes the analysis for people (actor, board, Loop).
+type HumanViewStarter = Callable[[ActorContext, str, str], HumanViewStart]
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -112,6 +117,8 @@ class LoopDocumentService:
         self.boards = boards
         self.store = store
         self.plans = plans
+        # LoopGenerationService is built after this service, so the composition root sets it.
+        self.human_view: HumanViewStarter | None = None
         self._clock = clock
         self._new_id = new_id
 
@@ -321,7 +328,21 @@ class LoopDocumentService:
                     raise ValidationFailure("A RoadMap candidate needs a plan payload")
                 self._store_roadmap(repos, loop, payload.plan, actor, payload)
             refresh_stage(repos, loop_id, now=self._now())
-        return self.documents(board_id, loop_id)
+        # After the commit: the run reads the analysis just stored.
+        started = (
+            self.after_analysis(actor, board_id, loop_id) if payload.kind == "analysis" else None
+        )
+        view = self.documents(board_id, loop_id)
+        if started is not None:
+            view["human_view"] = started
+        return view
+
+    def after_analysis(self, actor: ActorContext, board_id: str, loop_id: str) -> HumanViewStart:
+        """Have a board agent write the analysis for people from the technical analysis that was
+        just stored; without one, the view rendered from the structure stays."""
+        if self.human_view is None:
+            return {"status": "skipped", "run_id": None, "reason": "not configured"}
+        return self.human_view(actor, board_id, loop_id)
 
     @staticmethod
     def _refuse_over_approval(repos: BoardRepositories, loop: LoopsRow, kind: str) -> None:
@@ -475,6 +496,27 @@ class LoopDocumentService:
             repos,
             loop,
             payload,
+            actor,
+            run_id=run_id,
+            provenance=provenance,
+            clock=self._now,
+            new_id=self._new_id,
+        )
+
+    def store_human_analysis(
+        self,
+        repos: BoardRepositories,
+        loop: LoopsRow,
+        content: str,
+        actor: ActorContext,
+        *,
+        run_id: str,
+        provenance: Mapping[str, object],
+    ) -> dict[str, str]:
+        return store_human_analysis(
+            repos,
+            loop,
+            content,
             actor,
             run_id=run_id,
             provenance=provenance,

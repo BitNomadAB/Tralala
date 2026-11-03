@@ -26,7 +26,7 @@ from uuid import uuid4
 
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..core.errors import Conflict, NotFound
+from ..core.errors import ApiError, Conflict, NotFound
 from ..core.logging import carry_request_id
 from ..db.generated.board import LoopGenerationRunsRow, LoopsRow
 from ..db.generated.registry import AgentsRow, BoardsRow
@@ -37,6 +37,7 @@ from ..schemas.loops import GenerationRequest
 from . import runtime
 from .idempotency import remember, request_fingerprint, stored_answer
 from .loop_documents import LoopDocumentService
+from .loop_documents_views import HumanViewStart
 from .loop_generation_agents import (
     PreferredAgents,
     RolePrompt,
@@ -98,6 +99,10 @@ __all__ = [
 ]
 
 logger = logging.getLogger("tralala.loop_generation")
+
+# A purpose that runs on the agent the Loop prefers for another: the analysis written for people
+# comes from the agent that analyses.
+AGENT_PURPOSE = {"analysis_human": "analysis"}
 
 
 class BoardRows(Protocol):
@@ -202,7 +207,7 @@ class LoopGenerationService:
             agent_id,
             board_id,
             loop_id,
-            purpose,
+            AGENT_PURPOSE.get(purpose, purpose),
             store=self.registry,
             loop_agents=self.loop_agents,
         )
@@ -223,6 +228,22 @@ class LoopGenerationService:
                     "Analysis needs a current Info revision written by a human",
                     code="document_stale",
                     details={"missing": "info"},
+                )
+            return
+        if purpose == "analysis_human":
+            technical = documents["analysis_ai"].current
+            if technical is None or not technical.payload_json:
+                raise Conflict(
+                    "There is no technical analysis to write for people",
+                    code="document_empty",
+                    details={"kind": "analysis_ai"},
+                )
+            if analysis_approved(documents, approvals, stale):
+                # Rewriting what a person approved would withdraw the approval behind their back.
+                raise Conflict(
+                    "The analysis is approved; request changes or reset it before it is rewritten",
+                    code="approval_exists",
+                    details={"scope": "analysis"},
                 )
             return
         if purpose == "roadmap":
@@ -250,6 +271,38 @@ class LoopGenerationService:
         idempotency_key: str | None = None,
     ) -> tuple[Mapping[str, object], bool]:
         actor.require("loops:generate")
+        return self._start(actor, board_id, loop_id, request, idempotency_key=idempotency_key)
+
+    def start_human_view(
+        self, actor: ActorContext, board_id: str, loop_id: str
+    ) -> HumanViewStart:
+        """After a new technical analysis, have the Loop's analysis agent write it for people.
+
+        It follows from an action the actor was allowed (a candidate, an analysis run), so it is
+        not checked again, and it never fails that action: without an agent, or with a run already
+        active, the view rendered from the structure stays and the reason is logged."""
+        request = GenerationRequest(purpose="analysis_human")
+        try:
+            run, _ = self._start(actor, board_id, loop_id, request)
+        except ApiError as exc:
+            logger.info(
+                "human_view_skipped",
+                extra={"board_id": board_id, "loop_id": loop_id, "reason": exc.code},
+            )
+            return {"status": "skipped", "run_id": None, "reason": exc.code}
+        # Inline (a unit test) the run has already ended; read where it stands now.
+        current = self.get(board_id, loop_id, str(run["id"]))
+        return {"status": str(current["status"]), "run_id": str(current["id"])}
+
+    def _start(
+        self,
+        actor: ActorContext,
+        board_id: str,
+        loop_id: str,
+        request: GenerationRequest,
+        *,
+        idempotency_key: str | None = None,
+    ) -> tuple[Mapping[str, object], bool]:
         self.board_service.ensure_active(board_id)
         fingerprint = request_fingerprint(
             {

@@ -23,6 +23,10 @@ class GenerationRunRepository(Protocol):
         """The Loop's runs, newest first (the later insert first on a tie), at most ``limit``."""
         ...
 
+    def active(self, loop_id: str, purpose: str) -> LoopGenerationRunsRow | None:
+        """The Loop's queued or running run for ``purpose``; there is at most one."""
+        ...
+
     def unfinished_ids(self) -> list[str]:
         """Every queued or running run of the board, in no particular order."""
         ...

@@ -284,7 +284,19 @@ def _run_analysis(
         run = services.loop_generation.get(board_id, loop_id, run_id)
     documents = services.loop_document.documents(board_id, loop_id)
     analysis = documents["documents"]["analysis_ai"]
+    # A completed analysis is written for people by a run of its own (loop_generation), listed
+    # before this one because it started after it.
+    human: dict[str, object] | None = None
+    for entry in services.loop_generation.list_runs(board_id, loop_id, limit=10):
+        if entry.get("id") == run_id:
+            break
+        if entry.get("purpose") == "analysis_human":
+            human = entry
+            break
     return {
+        "human_view": (
+            {"run_id": human.get("id"), "status": human.get("status")} if human else None
+        ),
         "run": {
             "id": run_id,
             "status": run["status"],

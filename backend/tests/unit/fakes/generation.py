@@ -37,6 +37,16 @@ class FakeGenerationRunRepository:
         # SQLite reads a negative LIMIT as no limit.
         return rows if limit < 0 else rows[:limit]
 
+    def active(self, loop_id: str, purpose: str) -> LoopGenerationRunsRow | None:
+        return next(
+            (
+                row
+                for row in self._state.generation_runs.values()
+                if row.loop_id == loop_id and row.purpose == purpose and row.status in ACTIVE
+            ),
+            None,
+        )
+
     def unfinished_ids(self) -> list[str]:
         return [row.id for row in self._state.generation_runs.values() if row.status in ACTIVE]
 

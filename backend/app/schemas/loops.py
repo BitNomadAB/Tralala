@@ -208,6 +208,7 @@ class DocumentOut(OutModel):
     current_content: str | None = None
     current_payload: dict[str, object] | None = None
     current_created_at: str | None = None
+    current_provenance: dict[str, object] = Field(default_factory=dict)
     approved_revision_id: str | None = None
     approved_revision_number: int | None = None
     approved_content: str | None = None
@@ -336,7 +337,9 @@ class HumanConfirmation(StrictModel):
 # --- Generation -------------------------------------------------------------------
 
 class GenerationRequest(StrictModel):
-    purpose: Literal["analysis", "roadmap", "qa"]
+    # analysis_human: a board agent writes the analysis a person reads, from the current technical
+    # analysis; its answer is text, checked for every material finding before it is stored.
+    purpose: Literal["analysis", "analysis_human", "roadmap", "qa"]
     agent_id: Id | None = None
     instructions: LongText = ""
 

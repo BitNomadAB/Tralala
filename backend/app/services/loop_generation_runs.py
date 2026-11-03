@@ -385,6 +385,15 @@ def _promote_run(
             run_id=run_id,
             provenance=provenance,
         )
+    elif captured["purpose"] == "analysis_human":
+        outputs = documents.store_human_analysis(
+            repos,
+            loop,
+            str(payload.get("content") or ""),
+            _system_actor(row),
+            run_id=run_id,
+            provenance=provenance,
+        )
     elif captured["purpose"] == "roadmap":
         outputs = documents.store_generated_roadmap(
             repos,

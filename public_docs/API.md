@@ -254,8 +254,8 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops/{loop_id}/documents` | Current and approved revisions per kind |
 | GET | `/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions` | Revision history |
 | PUT | `/boards/{board_id}/loops/{loop_id}/documents/info` | Human-only; new immutable revision |
-| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval. `expected_info_revision_id` / `expected_analysis_revision_id` answer `409 document_stale` when that document changed; a token gets `403 human_action_required` while the scope's approval is current |
-| POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids |
+| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval. `expected_info_revision_id` / `expected_analysis_revision_id` answer `409 document_stale` when that document changed; a token gets `403 human_action_required` while the scope's approval is current. An analysis answer adds `human_view`: the run that writes it for people, or `skipped` with the reason |
+| POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids; `409 generation_in_progress` while the analysis is being written for people |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/roadmap` | Human-only; publishes the plan atomically |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/{scope}/reset` | Human-only; clears the scope's documents and supersedes any approval behind them |
 | GET | `/boards/{board_id}/loops/{loop_id}/plan` | Active plan with phases and readiness |
@@ -263,7 +263,7 @@ document slots; there is no Board-level Kanban.
 | PUT | `/boards/{board_id}/loops/{loop_id}/agents` | Sets that preference (`boards:write`; omitted field keeps its value, `null` clears) |
 | GET | `/boards/{board_id}/loops/{loop_id}/readiness` | Machine-readable blockers and human gates |
 | GET | `/boards/{board_id}/loops/{loop_id}/context` | Bounded, versioned context plus output schemas |
-| POST | `/boards/{board_id}/loops/{loop_id}/generation-runs` | Starts an analysis, RoadMap or QA run (`202`); `Idempotency-Key` supported |
+| POST | `/boards/{board_id}/loops/{loop_id}/generation-runs` | Starts an analysis, RoadMap or QA run (`202`), or `analysis_human`: the analysis written for people from the current `analysis_ai` (`409 approval_exists` while the analysis is approved); `Idempotency-Key` supported |
 | GET | `/boards/{board_id}/loops/{loop_id}/generation-runs[/{run_id}]` | Durable run state and failures |
 | POST | `/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/cancel` | Cancels a queued or running run |
 | POST | `/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/retry` | Starts a new run with the same inputs |

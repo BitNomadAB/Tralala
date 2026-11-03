@@ -140,6 +140,8 @@ class Services:
             tool_steps=settings.generation_tool_steps,
             tool_result_chars=settings.generation_tool_result_chars,
         )
+        # A new technical analysis is written for people by the Loop's analysis agent.
+        self.loop_document.human_view = self.loop_generation.start_human_view
         self.loop_qa = LoopQaService(
             self.board,
             self.board_store,

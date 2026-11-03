@@ -24,12 +24,14 @@ from dataclasses import dataclass, field
 
 from pydantic import JsonValue
 
+from ..core.context import ActorContext
 from ..core.errors import ApiError
 from ..db.generated.registry import AgentsRow
 from ..repositories.board import BoardUnitOfWork
 from ..repositories.registry import RegistryUnitOfWork
 from .loop_documents import LoopDocumentService
 from .loop_generation_ask import CompletionCall, generate
+from .loop_generation_human import write_for_people
 from .loop_generation_prompts import JsonObject
 from .loop_generation_report import Ended, failure_of, log_finished, log_started
 from .loop_generation_runs import (
@@ -60,7 +62,12 @@ CLOSED_LOOP_CODES = {"loop_read_only", "loop_not_found"}
 NO_TOOLS = "the agent's provider does not take tools; its connection test says so"
 A2A = "an A2A agent cannot be offered tools"
 REFUSED = "the provider refused tool calls this time"
-_DOCUMENTS = {"analysis": "analysis", "roadmap": "RoadMap", "qa": "QA instructions"}
+_DOCUMENTS = {
+    "analysis": "analysis",
+    "analysis_human": "analysis for people",
+    "roadmap": "RoadMap",
+    "qa": "QA instructions",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +152,7 @@ class _Run:
         if purpose in {"analysis", "roadmap"}:
             self.phase("analysing_repository")
             captured, workspace = self.read_repositories(captured, agent)
-        self.phase("generating")
+        self.phase("writing_for_people" if purpose == "analysis_human" else "generating")
         captured, result = self.ask(purpose, captured, agent, workspace)
         if result.cancelled:
             self.trace.add("saving", "step", "Not saved: the run was cancelled")
@@ -169,6 +176,16 @@ class _Run:
         )
         kind, text = _saved(purpose, ended)
         self.trace.add("saving", kind, text)
+        if purpose == "analysis" and ended is not None and ended.status == "completed":
+            self.after_analysis(row.created_by_actor_id, row.created_by_actor_type)
+
+    def after_analysis(self, actor_id: str, actor_type: str) -> None:
+        """A promoted analysis is written for people next, by a run of its own; the person who
+        asked for the analysis asked for that too."""
+        actor = ActorContext(actor_id=actor_id, actor_type=actor_type, actor_name="")
+        started = self.context.documents.after_analysis(actor, self.board_id, self.loop_id)
+        if started["run_id"] is not None:
+            self.trace.add("saving", "note", "A board agent writes it for people next")
 
     def read_repositories(
         self, captured: JsonObject, agent: AgentsRow
@@ -233,6 +250,16 @@ class _Run:
         workspace: RepositoryWorkspace | None,
     ) -> tuple[JsonObject, Outcome]:
         prompt = self.context.system_prompt(purpose, agent)
+        if purpose == "analysis_human":
+            result = write_for_people(
+                captured,
+                agent,
+                system_prompt=prompt,
+                call_completion=self.context.call_completion,
+                settings=self.context.settings,
+                trace=self.trace,
+            )
+            return captured, result
         if workspace is not None:
             result = read_and_answer(
                 purpose,

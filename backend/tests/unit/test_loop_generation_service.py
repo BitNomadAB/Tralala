@@ -18,17 +18,27 @@ from pydantic import JsonValue
 
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, ValidationFailure
-from app.db.generated.board import LoopGenerationRunsRow, LoopsRow
+from app.db.generated.board import LoopDocumentsRow, LoopGenerationRunsRow, LoopsRow
 from app.db.generated.registry import BoardsRow
 from app.repositories.board import BoardRepositories
-from app.schemas.loops import AnalysisPayload, GenerationRequest, PlanPayload, QaInstructions
+from app.schemas.loops import (
+    AnalysisPayload,
+    CandidateSubmission,
+    GenerationRequest,
+    PlanPayload,
+    QaInstructions,
+)
 from app.services.agents import EffectiveRole
 from app.services.idempotency import request_fingerprint
 from app.services.loop_documents import LoopDocumentService
+from app.services.loop_documents_human import compose_human_view
+from app.services.loop_documents_render import render_traceability
+from app.services.loop_documents_views import DocumentsView
 from app.services.loop_generation import MAX_REPAIRS, PURPOSE_PROMPTS, LoopGenerationService
 from app.services.loop_generation_prompts import DEFAULT_CONTEXT_CHARS
 from app.services.loop_generation_report import MAX_EXCEPTION_TEXT
 from app.services.loop_generation_runs import MAX_OUTPUT_CHARS, stored_output
+from app.services.loop_generation_trace import parse_steps
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_plans import LoopPlanService
 from app.services.repo_snapshot import FetchedRepository
@@ -695,7 +705,9 @@ def test_an_analysis_run_is_captured_generated_and_promoted() -> None:
             "id-1",
             "info-1",
         )
-        assert json.loads(document.provenance_json) == PROVENANCE
+        # The human view is rendered from the structure until a board agent writes it.
+        rendered = {"rendered": True} if kind == "analysis" else {}
+        assert json.loads(document.provenance_json) == {**PROVENANCE, **rendered}
         assert (document.author_actor_id, document.author_actor_type) == ("alpha", "agent")
     assert w.state.loops[LOOP].stage == "analysis_review"
 
@@ -1387,3 +1399,212 @@ def test_two_commits_of_the_same_repository_are_different_inputs() -> None:
         hashes.append(w.run().input_hash)
     assert hashes[0] != hashes[1]
 
+
+
+# --- the analysis written for people -------------------------------------------------------------
+
+MATERIAL = AnalysisPayload.model_validate(
+    {
+        "outcome": "Verify addresses",
+        "findings": [
+            {
+                "id": "F-01",
+                "title": "Reuse auth",
+                "category": "reuse",
+                "technical_detail": "auth.py",
+                "plain_language": "Extend sign-in.",
+            },
+            {
+                "id": "F-02",
+                "title": "Bounces",
+                "category": "risk",
+                "technical_detail": "No bounce handling in the mailer.",
+                "plain_language": "Some e-mails never arrive.",
+            },
+            {
+                "id": "F-03",
+                "title": "Wording",
+                "category": "question",
+                "technical_detail": "No copy for the mail exists.",
+                "plain_language": "Someone has to write the e-mail.",
+            },
+        ],
+    }
+)
+WRITTEN = "People confirm by e-mail. Some never arrive [F-02]; who writes it is open [F-03]."
+HALF = "People confirm by e-mail. Some never arrive [F-02]."
+SAVED_FOR_PEOPLE = "Saved the analysis for people as a draft for a person to review and approve"
+
+
+def with_technical_analysis(w: World) -> None:
+    """The Loop's technical analysis ``ai-1`` from ``info-1``, and the view rendered from it."""
+    w.state.documents += [
+        document_row("ai-1", LOOP, "analysis_ai", info="info-1").__replace__(
+            payload_json=json.dumps(MATERIAL.model_dump())
+        ),
+        document_row("an-1", LOOP, "analysis", analysis_ai="ai-1").__replace__(
+            provenance_json='{"rendered": true}'
+        ),
+    ]
+
+
+def human_view(w: World) -> LoopDocumentsRow:
+    return next(row for row in w.state.documents if row.kind == "analysis" and row.is_current)
+
+
+def steps(w: World, run_id: str = "id-1") -> list[tuple[object, object]]:
+    """The run's trace as (kind, text) pairs."""
+    loaded = parse_steps(w.run(run_id).trace_json)
+    return [(step.get("kind"), step.get("text")) for step in loaded if isinstance(step, dict)]
+
+
+def wire(w: World) -> None:
+    """As the composition root does: a new technical analysis is written for people."""
+    w.service.documents.human_view = w.service.start_human_view
+
+
+def submit_analysis(w: World) -> DocumentsView:
+    candidate = CandidateSubmission(
+        kind="analysis", analysis=AnalysisPayload.model_validate(ANALYSIS)
+    )
+    return w.service.documents.submit_candidate(ADA, BOARD_ID, LOOP, candidate)
+
+
+def test_the_analysis_is_written_for_people_with_the_servers_traceability_block() -> None:
+    w = make(answers=[answer(WRITTEN)])
+    with_technical_analysis(w)
+    start(w, "analysis_human")
+    assert (w.run().status, w.run().purpose) == ("completed", "analysis_human")
+    human = human_view(w)
+    assert human.content == compose_human_view(WRITTEN, MATERIAL)
+    assert human.content.endswith(render_traceability(MATERIAL))
+    assert json.loads(human.provenance_json) == {**PROVENANCE, "written": True}
+    assert (human.source_analysis_ai_revision_id, human.source_info_revision_id) == (
+        "ai-1",
+        "info-1",
+    )
+    assert (human.author_actor_id, human.generation_run_id) == ("alpha", "id-1")
+    # A text answer: no schema, no tools, and only the Info and the analysis it explains.
+    (call,) = w.provider.calls
+    assert call.response_schema is None
+    assert call.system_prompt == f"You are alpha.\n\n{PURPOSE_PROMPTS['analysis_human']}"
+    message = call.messages[0]["content"]
+    assert "Users must confirm." in message
+    assert '"id": "F-03"' in message
+    assert "Context (JSON)" not in message
+    assert call.running == {"id-1": "writing_for_people"}
+    assert ("step", "The text names every material finding") in steps(w)
+    assert ("step", SAVED_FOR_PEOPLE) in steps(w)
+
+
+def test_a_text_that_leaves_a_finding_out_is_sent_back_once_with_its_id() -> None:
+    w = make(answers=[answer(HALF), answer(WRITTEN)])
+    with_technical_analysis(w)
+    start(w, "analysis_human")
+    assert w.run().status == "completed"
+    repair = w.provider.calls[1].messages
+    assert repair[1] == {"role": "assistant", "content": HALF}
+    assert "F-03" in str(repair[2]["content"])
+    assert "F-02" not in str(repair[2]["content"])
+    assert ("repair", "The text leaves out F-03 — asked the model to cover them") in steps(w)
+    assert human_view(w).content.startswith(WRITTEN)
+
+
+def test_a_text_that_still_leaves_one_out_fails_and_the_rendered_view_stays() -> None:
+    w = make(answers=[answer(HALF), answer(HALF)])
+    with_technical_analysis(w)
+    start(w, "analysis_human")
+    run = w.run()
+    assert (run.status, run.error_code) == ("failed", "coverage_missing")
+    assert json.loads(run.output_json) == {"error_details": {"finding_ids": ["F-03"]}}
+    assert "(not retryable)" not in (run.error_message or "")
+    assert human_view(w).id == "an-1"
+
+
+def test_an_empty_answer_counts_as_leaving_everything_out() -> None:
+    w = make(answers=[answer("  "), answer("```\n```")])
+    with_technical_analysis(w)
+    start(w, "analysis_human")
+    assert (w.run().status, w.run().error_code) == ("failed", "coverage_missing")
+    assert "F-02, F-03" in str(w.provider.calls[1].messages[2]["content"])
+
+
+def test_writing_for_people_needs_a_technical_analysis_nobody_approved_yet() -> None:
+    w = make()
+    with pytest.raises(Conflict) as empty:
+        start(w, "analysis_human")
+    assert (empty.value.code, empty.value.details) == ("document_empty", {"kind": "analysis_ai"})
+    with_technical_analysis(w)
+    reviewed = {"info": "info-1", "analysis_ai": "ai-1", "analysis": "an-1"}
+    w.state.approvals = [
+        approval_row("appr-1", LOOP, "analysis", revisions_json=json.dumps(reviewed))
+    ]
+    with pytest.raises(Conflict) as approved:
+        start(w, "analysis_human")
+    assert approved.value.code == "approval_exists"
+    assert approved.value.details == {"scope": "analysis"}
+    assert w.state.generation_runs == {}
+
+
+def test_the_analysis_is_written_for_people_by_the_loops_analysis_agent() -> None:
+    w = make(answers=[answer(WRITTEN)], preferences={"analysis": "beta", "roadmap": "alpha"})
+    with_technical_analysis(w)
+    start(w, "analysis_human")
+    assert w.run().agent_id == "beta"
+
+
+def test_a_generated_analysis_is_written_for_people_by_a_run_of_its_own() -> None:
+    w = make(answers=[VALID, answer("People confirm their address by e-mail.")])
+    wire(w)
+    start(w)
+    analysis_run, written_run = w.state.generation_runs.values()
+    assert (analysis_run.purpose, analysis_run.status) == ("analysis", "completed")
+    assert (written_run.purpose, written_run.status) == ("analysis_human", "completed")
+    assert (written_run.created_by_actor_id, written_run.created_by_actor_type) == (
+        "actor-1",
+        "user",
+    )
+    assert steps(w, analysis_run.id)[-1] == ("note", "A board agent writes it for people next")
+    human = human_view(w)
+    assert human.content.startswith("People confirm their address by e-mail.")
+    assert json.loads(human.provenance_json)["generation_run_id"] == written_run.id
+    assert len(w.provider.calls) == 2
+
+
+def test_a_submitted_analysis_is_written_for_people_once() -> None:
+    w = make(answers=[answer("People confirm their address by e-mail.")])
+    wire(w)
+    view = submit_analysis(w)
+    (run,) = w.state.generation_runs.values()
+    assert run.purpose == "analysis_human"
+    assert view.get("human_view") == {"status": "completed", "run_id": run.id}
+    assert view["documents"]["analysis"]["current_provenance"].get("written") is True
+
+
+def test_without_an_agent_the_rendered_view_stays_and_the_skip_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    w = make(agents=(), answers=[])
+    wire(w)
+    with caplog.at_level(logging.INFO, logger="tralala.loop_generation"):
+        view = submit_analysis(w)
+    assert view.get("human_view") == {
+        "status": "skipped",
+        "run_id": None,
+        "reason": "generation_unavailable",
+    }
+    assert {
+        "event": "human_view_skipped",
+        "board_id": BOARD_ID,
+        "loop_id": LOOP,
+        "reason": "generation_unavailable",
+    } in events(caplog.records)
+    assert view["documents"]["analysis"]["current_provenance"].get("rendered") is True
+
+
+def test_a_view_already_being_written_is_not_started_twice() -> None:
+    w = make(runs=[run_row("busy", status="running", purpose="analysis_human")])
+    with_technical_analysis(w)
+    started = w.service.start_human_view(ADA, BOARD_ID, LOOP)
+    assert started == {"status": "skipped", "run_id": None, "reason": "generation_in_progress"}
+    assert list(w.state.generation_runs) == ["busy"]

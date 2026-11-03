@@ -39,6 +39,9 @@ class DocumentView(TypedDict):
     current_content: str | None
     current_payload: JsonValue
     current_created_at: str | None
+    # Who wrote the current revision and how: a run's agent and model, ``rendered`` for a view
+    # rendered from the structure, ``written`` for one a board agent wrote for people.
+    current_provenance: dict[str, JsonValue]
     approved_revision_id: str | None
     approved_revision_number: int | None
     approved_content: str | None
@@ -65,11 +68,22 @@ class ApprovalEntry(TypedDict):
     created_at: str
 
 
+class HumanViewStart(TypedDict):
+    """What became of writing the analysis for people after a new technical analysis: the run that
+    writes it, or ``skipped`` with the reason (no agent, a run already active)."""
+
+    status: str
+    run_id: str | None
+    reason: NotRequired[str]
+
+
 class DocumentsView(TypedDict):
     loop_id: str
     loop_version: int
     documents: dict[str, DocumentView]
     approvals: dict[str, ApprovalEntry]
+    # After an analysis candidate: the run that writes it for people, or why there is none.
+    human_view: NotRequired[HumanViewStart]
 
 
 class RevisionEntry(TypedDict):
@@ -174,6 +188,17 @@ class GeneratedRoadmap(TypedDict):
     plan_id: str
     roadmap_ai: str
     roadmap: str
+
+
+def provenance_of(row: LoopDocumentsRow | None) -> dict[str, JsonValue]:
+    """The revision's provenance; none, or text that is not a JSON object, reads as empty."""
+    if row is None:
+        return {}
+    try:
+        value: JsonValue = json.loads(row.provenance_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def document_payload(row: LoopDocumentsRow | None) -> JsonValue:
@@ -293,6 +318,7 @@ def document_view(
         "current_content": current.content if current else None,
         "current_payload": document_payload(current),
         "current_created_at": current.created_at if current else None,
+        "current_provenance": provenance_of(current),
         "approved_revision_id": approved.id if approved else None,
         "approved_revision_number": approved.revision_number if approved else None,
         "approved_content": approved.content if approved else None,
@@ -313,6 +339,7 @@ __all__ = [
     "DocumentsView",
     "GeneratedAnalysis",
     "GeneratedRoadmap",
+    "HumanViewStart",
     "LoopContext",
     "ResetResult",
     "Review",
@@ -322,6 +349,7 @@ __all__ = [
     "approval_entry",
     "document_payload",
     "document_view",
+    "provenance_of",
     "review_entry",
     "revision_entry",
     "revision_summary",

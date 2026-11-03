@@ -200,7 +200,7 @@ def test_write_analysis_stores_both_views_from_mcp_and_names_the_next_step() -> 
     assert json.loads(technical.payload_json or "{}")["findings"][1]["id"] == "F-2"
     provenance = {"submitted": True, "through": "mcp", "author": "Coder", "actor_id": "agent-1"}
     assert json.loads(technical.provenance_json) == provenance
-    assert json.loads(human.provenance_json) == provenance
+    assert json.loads(human.provenance_json) == {**provenance, "rendered": True}
     assert "Some people may never get the e-mail." in human.content
     assert field(answer, "documents", "analysis_ai") == {
         "state": "ready_for_review",
@@ -209,6 +209,8 @@ def test_write_analysis_stores_both_views_from_mcp_and_names_the_next_step() -> 
     }
     assert field(answer, "documents", "analysis", "revision_id") == human.id
     assert answer["stale_reasons"] == {}
+    # Without a board agent to write it for people, the answer says why the view stays rendered.
+    assert answer["human_view"] == {"status": "skipped", "run_id": None, "reason": "not configured"}
     assert "Analysis tab" in str(answer["next_step"])
     assert w.state.loops[LOOP].stage == "analysis_review"
 

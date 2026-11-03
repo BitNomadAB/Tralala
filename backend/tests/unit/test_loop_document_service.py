@@ -10,14 +10,14 @@ source.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import pytest
 
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
-from app.db.generated.board import LoopsRow
+from app.db.generated.board import LoopGenerationRunsRow, LoopsRow
 from app.schemas.loops import (
     AnalysisPayload,
     ApprovalRequest,
@@ -34,6 +34,7 @@ from app.services.loop_documents import (
     render_analysis,
     render_roadmap,
 )
+from app.services.loop_documents_views import HumanViewStart
 from app.services.loop_plans import LoopPlanService
 from tests.unit.fakes.board import (
     BOARD_ID,
@@ -405,7 +406,7 @@ def test_an_analysis_candidate_writes_both_revisions_and_logs_them() -> None:
         technical.id,
         current(w, "info"),
     )
-    assert json.loads(human.provenance_json) == {"submitted": True, "tool": "cli"}
+    assert json.loads(human.provenance_json) == {"submitted": True, "rendered": True, "tool": "cli"}
     entry = w.state.activity[-1]
     assert (entry.action, json.loads(entry.changes_json)) == (
         "loop.analysis_candidate",
@@ -774,6 +775,134 @@ def test_a_roadmap_without_a_registered_plan_cannot_be_approved() -> None:
     with pytest.raises(AttributeError):
         review(w, "roadmap")
     assert all(plan.status == "draft" for plan in w.state.plans.values())
+
+
+# --- the analysis written for people -------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class HumanViews:
+    """The composition root's ``start_human_view``, recorded: who asked, for which Loop."""
+
+    calls: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
+
+    def __call__(self, actor: ActorContext, board_id: str, loop_id: str) -> HumanViewStart:
+        self.calls.append((actor.actor_id, board_id, loop_id))
+        return {"status": "queued", "run_id": "run-9"}
+
+
+def human_run(status: str) -> LoopGenerationRunsRow:
+    return LoopGenerationRunsRow(
+        id="run-9",
+        loop_id=LOOP,
+        purpose="analysis_human",
+        status=status,
+        input_json="{}",
+        input_hash="",
+        source_revisions_json="{}",
+        output_json="{}",
+        error_code=None,
+        error_message=None,
+        attempts=0,
+        agent_id="alpha",
+        agent_name="Alpha",
+        model=None,
+        role_snapshot_json="{}",
+        usage_json="{}",
+        created_by_actor_id="actor-1",
+        created_by_actor_type="user",
+        created_at=STAMP,
+        started_at=None,
+        finished_at=None,
+        phase=None,
+        trace_json="[]",
+    )
+
+
+def test_an_analysis_candidate_is_handed_on_to_be_written_for_people_once() -> None:
+    w = world()
+    info(w)
+    views = HumanViews()
+    w.service.human_view = views
+    view = w.service.submit_candidate(
+        HUMAN, BOARD_ID, LOOP, CandidateSubmission(kind="analysis", analysis=ANALYSIS)
+    )
+    assert view.get("human_view") == {"status": "queued", "run_id": "run-9"}
+    assert views.calls == [("actor-1", BOARD_ID, LOOP)]
+    # The rendered view says what it is until a board agent writes one.
+    analysis_view = view["documents"]["analysis"]
+    assert analysis_view["current_provenance"] == {"submitted": True, "rendered": True}
+    review(w, "analysis")
+    roadmap(w)
+    assert len(views.calls) == 1
+
+
+def test_without_a_writer_the_rendered_view_stays_and_the_answer_says_so() -> None:
+    w = world()
+    info(w)
+    view = w.service.submit_candidate(
+        HUMAN, BOARD_ID, LOOP, CandidateSubmission(kind="analysis", analysis=ANALYSIS)
+    )
+    assert view.get("human_view") == {
+        "status": "skipped",
+        "run_id": None,
+        "reason": "not configured",
+    }
+
+
+def test_a_written_view_becomes_the_current_analysis_from_the_current_sources() -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    with w.store.writer(BOARD_ID) as repos:
+        stored = w.service.store_human_analysis(
+            repos, w.loop, "For people [F-01].", AGENT, run_id="run-9", provenance={"model": "m"}
+        )
+    human = w.repos.documents.current(LOOP, "analysis")
+    assert human is not None
+    assert stored == {"analysis": human.id}
+    assert (human.content, human.generation_run_id, human.revision_number) == (
+        "For people [F-01].",
+        "run-9",
+        2,
+    )
+    assert (human.source_analysis_ai_revision_id, human.source_info_revision_id) == (
+        current(w, "analysis_ai"),
+        current(w, "info"),
+    )
+    assert json.loads(human.provenance_json) == {"model": "m", "written": True}
+    assert w.state.activity[-1].action == "loop.analysis_written_for_people"
+    state = w.service.documents(BOARD_ID, LOOP)["documents"]["analysis"]
+    assert (state["state"], state["current_provenance"]) == (
+        "ready_for_review",
+        {"model": "m", "written": True},
+    )
+
+
+def test_a_view_is_never_written_without_a_technical_analysis() -> None:
+    w = world()
+    info(w)
+    with pytest.raises(Conflict) as refused, w.store.writer(BOARD_ID) as repos:
+        w.service.store_human_analysis(repos, w.loop, "text", AGENT, run_id="r", provenance={})
+    assert refused.value.code == "document_empty"
+    assert refused.value.details == {"kind": "analysis_ai"}
+
+
+def test_the_analysis_is_not_approved_while_it_is_being_written_for_people() -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    w.state.generation_runs = {"run-9": human_run("running")}
+    with pytest.raises(Conflict) as refused:
+        review(w, "analysis")
+    assert (refused.value.code, refused.value.details) == (
+        "generation_in_progress",
+        {"purpose": "analysis_human", "run_id": "run-9"},
+    )
+    assert w.loop.analysis_approval_id is None
+    w.state.generation_runs = {"run-9": human_run("failed")}
+    review(w, "analysis")
+    assert w.loop.analysis_approval_id is not None
 
 
 # --- resets --------------------------------------------------------------------------------------

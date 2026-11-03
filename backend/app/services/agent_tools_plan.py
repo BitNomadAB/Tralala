@@ -216,6 +216,8 @@ def write_analysis(services: PlanWriting, actor: ActorContext, args: ToolArgumen
     view = services.loop_document.submit_candidate(actor, board_id, loop_id, submission)
     return {
         **_documents(view, ("info", "analysis_ai", "analysis")),
+        # A board agent writes the analysis for people next; without one it stays rendered.
+        "human_view": view.get("human_view"),
         "next_step": (
             "A person reviews the analysis in the Loop's Analysis tab. Once it is approved, "
             "write_roadmap plans the work."

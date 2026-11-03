@@ -95,7 +95,8 @@ def store_analysis_candidate(
         payload=None,
         actor=actor,
         sources={"analysis_ai": technical.id, "info": info_id},
-        provenance={"submitted": True, **submission.provenance},
+        # Rendered from the structure until a board agent writes it for people.
+        provenance={"submitted": True, "rendered": True, **submission.provenance},
     )
     invalidate_downstream(repos, loop.id, "analysis_ai", clock=clock)
     log_loop_activity(
@@ -219,7 +220,7 @@ def store_run_analysis(
         actor=actor,
         sources={"analysis_ai": technical.id, "info": info.id},
         generation_run_id=run_id,
-        provenance=provenance,
+        provenance={**provenance, "rendered": True},
     )
     invalidate_downstream(repos, loop.id, "analysis_ai", clock=clock)
     refresh_stage(repos, loop.id, now=clock())

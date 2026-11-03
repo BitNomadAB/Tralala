@@ -20,6 +20,9 @@ _RUN = (
 _GET = text(f"{_RUN} WHERE id = :id")
 _GET_IN_LOOP = text(f"{_RUN} WHERE id = :id AND loop_id = :loop_id")
 _RECENT = text(f"{_RUN} WHERE loop_id = :id ORDER BY created_at DESC, rowid DESC LIMIT :limit")
+_ACTIVE = text(
+    f"{_RUN} WHERE loop_id = :loop_id AND purpose = :purpose AND status IN ('queued','running')"
+)
 _UNFINISHED = text("SELECT id FROM loop_generation_runs WHERE status IN ('queued','running')")
 _ADD = text(
     "INSERT INTO loop_generation_runs (id, loop_id, purpose, status, input_json, input_hash,"
@@ -79,6 +82,11 @@ class SqlGenerationRunRepository:
     def recent(self, loop_id: str, *, limit: int) -> list[LoopGenerationRunsRow]:
         result = self._connection.execute(_RECENT, {"id": loop_id, "limit": limit}).mappings()
         return [LoopGenerationRunsRow.from_mapping(row) for row in result]
+
+    def active(self, loop_id: str, purpose: str) -> LoopGenerationRunsRow | None:
+        parameters = {"loop_id": loop_id, "purpose": purpose}
+        row = self._connection.execute(_ACTIVE, parameters).mappings().first()
+        return None if row is None else LoopGenerationRunsRow.from_mapping(row)
 
     def unfinished_ids(self) -> list[str]:
         return [values.text(row, "id") for row in self._connection.execute(_UNFINISHED).mappings()]

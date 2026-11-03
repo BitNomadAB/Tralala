@@ -42,7 +42,13 @@ def render_analysis(payload: AnalysisPayload) -> str:
         lines += ["", "## How success can be checked", ""] + [
             f"- {item}" for item in payload.verification
         ]
-    lines += ["", "---", "", "## Traceability", ""]
+    return "\n".join(lines).strip() + "\n\n---\n\n" + render_traceability(payload)
+
+
+def render_traceability(payload: AnalysisPayload) -> str:
+    """Each finding's id, category and technical detail, the sources and the baseline: what ties a
+    view written for people back to the technical analysis, whoever wrote the view."""
+    lines: list[str] = ["## Traceability", ""]
     for finding in payload.findings:
         detail = finding.technical_detail.replace("\n", " ").strip()
         lines.append(f"- `{finding.id}` ({finding.category}) {finding.title}: {detail}")
