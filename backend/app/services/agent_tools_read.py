@@ -345,6 +345,26 @@ def _read_loop(
     }
 
 
+def allowed_actions(card: CardEntry, *, execution_allowed: bool) -> list[str]:
+    """The tools a worker may call on a Ticket now; ``complete_ticket`` only while it is ready,
+    open and not a person's, and for a planned Ticket only while the Loop executes."""
+    if card["archived_at"]:
+        return []
+    if card["human_action_required"] and not card["completed_at"]:
+        return ["comment_ticket", "ask_agents"]
+    allowed = ["comment_ticket", "assign_ticket", "move_ticket", "ask_agents"]
+    if card["plan_item_id"] and not card["ready"]:
+        # A planned Ticket waits for its phase entry conditions; a manual one does not.
+        allowed.remove("move_ticket")
+    if (
+        card["ready"]
+        and not card["completed_at"]
+        and (execution_allowed or not card["plan_item_id"])
+    ):
+        allowed.append("complete_ticket")
+    return allowed
+
+
 def _read_ticket(
     services: Services, actor: ActorContext, args: ToolArguments
 ) -> ToolResult:
@@ -361,14 +381,7 @@ def _read_ticket(
         ),
         None,
     )
-    allowed = ["comment_ticket", "assign_ticket", "move_ticket", "ask_agents"]
-    if card["archived_at"]:
-        allowed = []
-    elif card["human_action_required"] and not card["completed_at"]:
-        allowed = ["comment_ticket", "ask_agents"]
-    elif card["plan_item_id"] and not card["ready"]:
-        # A planned Ticket waits for its phase entry conditions; a manual one does not.
-        allowed = [entry for entry in allowed if entry != "move_ticket"]
+    allowed = allowed_actions(card, execution_allowed=readiness["execution_allowed"])
     return {
         "ticket": {
             "id": card["id"],
@@ -436,6 +449,7 @@ __all__ = [
     "_text",
     "_thread_view",
     "_ticket_location",
+    "allowed_actions",
     "list_boards",
     "search_tickets",
 ]

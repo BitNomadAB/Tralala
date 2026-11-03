@@ -805,6 +805,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker |
+| `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. A refused completion writes nothing |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the messages and positions |
 | `read_discussion` | `discussions:read` | Read a thread with its messages and each agent's position |
 | `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |
@@ -828,7 +829,8 @@ Retries are safe where they matter. `create_loop` accepts an `idempotency_key` a
 answer for the same key; `write_info` returns the current revision unchanged when the content is
 identical; `comment_ticket` and `ask_agents` recognise the same actor repeating the same content or
 question within five minutes and return the existing comment or thread (`deduplicated: true`) instead
-of writing a second one.
+of writing a second one, and `complete_ticket` does the same for the same summary and evidence. A
+Ticket that is already completed answers `already_completed: true` without writing.
 
 ## Example: create a card
 

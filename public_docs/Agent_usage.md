@@ -86,6 +86,7 @@ certificate. `/llms.txt` is plain text at the same origin.
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |
 | `comment_ticket` | `comments:write` | add a comment: progress, findings, a blocker |
+| `complete_ticket` | `cards:write`, `comments:write` | finish a Ticket: your summary and evidence as a comment, then completed |
 | `create_loop` | `loops:write` | open a Loop for an agreed intent (idempotent) |
 | `write_info` | `loops:write` | write the Info, only while the Loop is `draft` or `analysis_review` |
 | `run_analysis` | `loops:generate` | ask the analysis agent to produce a candidate |
@@ -110,6 +111,7 @@ read_ticket                     -> read the one you are about to touch, includin
   ... do the work ...
 comment_ticket                  -> what you found or what you changed
 assign_ticket / move_ticket     -> hand it on, or move it to the column that means "in progress"
+complete_ticket(summary)        -> done: the summary and evidence as a comment, completed_at set
 ```
 
 To start something new together:
@@ -144,6 +146,10 @@ keys when you hand the RoadMap in again. Send `expected_info_revision_id` or
 - Create or archive boards, change board structure, publish or edit a RoadMap, create Tickets
   directly: the plan does, after a human approves it.
 - Change a Ticket's approved scope, or move work between Loops.
+- Complete a Ticket by moving it: a column named Done completes nothing. `complete_ticket` is the
+  way, and it is offered in `read_ticket`'s `allowed_actions` only while the Ticket is ready, open
+  and not a person's. A human-only Ticket answers `403 human_action_required` naming who confirms
+  it; an unfinished prerequisite answers `409 ticket_blocked` with the blockers.
 - See or change users, credentials or agent configuration.
 
 ## 6. Retries and repeats
@@ -152,7 +158,9 @@ keys when you hand the RoadMap in again. Send `expected_info_revision_id` or
   second one.
 - `write_info` with identical content returns the existing revision (`deduplicated: true`).
 - `comment_ticket` and `ask_agents` treat an identical call from the same actor within five minutes
-  as a retry and return the original object.
+  as a retry and return the original object; so does `complete_ticket` with the same summary and
+  evidence (`deduplicated: true`). A Ticket somebody already completed answers
+  `already_completed: true` and nothing is written.
 - `move_ticket` is version-checked: send the version you read, and a `409 version_conflict` means
   someone else moved it first — re-read rather than retrying blindly.
 

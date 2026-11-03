@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from .common import Id, Name, OutModel, StrictModel
+from .common import CommentText, Id, Name, OutModel, StrictModel
 
 
 class LabelOut(OutModel):
@@ -57,7 +57,7 @@ class ChecklistOut(OutModel):
 
 
 class CommentCreate(StrictModel):
-    content: Name
+    content: CommentText
 
 
 class CommentOut(OutModel):

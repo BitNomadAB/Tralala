@@ -60,6 +60,7 @@ CATALOGUE_FILES = tuple(
         "agent_tools_read.py",
         "agent_tools_write.py",
         "agent_tools_plan.py",
+        "agent_tools_tickets.py",
     )
 )
 COMPOSITION_ROOT = SERVICES_ROOT / "__init__.py"
