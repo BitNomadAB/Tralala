@@ -50,6 +50,10 @@ Worth knowing when you look at the dashboard:
 - **A taken label name answers 409.** Renaming a label to a name another label has answered 500;
   it now answers `409 label_name_taken` with `details.name`, and so does creating one, which
   answered `422 validation_failed` — the same answer every other taken name gets.
+- **A board whose file cannot be read can be archived, and then deleted.** Archiving it answered
+  `503 board_database_unreadable` (or `503 board_schema_outdated`) although the board was already
+  archived; it now answers 200. Only the board's own activity entry for the archive is missing, and
+  the backend log records that (`skipped: board_archived_activity`).
 - **The agent form follows the provider you pick.** A preset now fixes the endpoint for hosted
   providers, asks for the key only where one is needed, and says which providers need a model name at
   all — so a local Ollama install is not asked for a key and OpenAI cannot be saved without one.

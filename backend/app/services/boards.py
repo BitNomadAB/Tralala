@@ -25,7 +25,7 @@ from pydantic import JsonValue
 from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..core.errors import Conflict, NotFound, ValidationFailure
+from ..core.errors import Conflict, NotFound, ServiceUnavailable, ValidationFailure
 from ..core.identifiers import canonical_board_id
 from ..core.platform import copy_file, remove_file, remove_tree, retry_io
 from ..db.generated.board import BoardLoopDefaultsRow, LabelsRow
@@ -557,8 +557,23 @@ class BoardService:
             return self.serialize(row)
         self._update_row(board_id, {"status": "archived", "archived_at": self._now()})
         if self.boards.exists(board_id):
-            with self.boards.writer(board_id) as board:
-                self._log(board, actor, "board.archived", board_id)
+            try:
+                with self.boards.writer(board_id) as board:
+                    self._log(board, actor, "board.archived", board_id)
+            except ServiceUnavailable as exc:
+                # The archive is the registry's decision and is already made. A board whose
+                # database cannot be opened (unreadable, or not at the schema head) has to be
+                # archivable, because archiving is the way to delete it; only the board's own
+                # record of the archive is missing, and the log says so.
+                logger.error(
+                    json.dumps(
+                        {
+                            "event": exc.code,
+                            "board_id": board_id,
+                            "skipped": "board_archived_activity",
+                        }
+                    )
+                )
         return self.get(board_id)
 
     def restore(self, actor: ActorContext, board_id: str) -> BoardEntry:

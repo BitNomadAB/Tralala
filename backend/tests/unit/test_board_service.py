@@ -683,6 +683,28 @@ def test_a_board_without_its_database_archives_silently_and_cannot_be_restored(
     assert boards.registry.boards[uuid(7)].status == "archived"
 
 
+@pytest.mark.parametrize(
+    ("broken", "event"),
+    [("unreadable", "board_database_unreadable"), ("unavailable", "board_schema_outdated")],
+)
+def test_a_board_whose_database_cannot_be_opened_is_archived_and_can_then_be_deleted(
+    boards: Boards, caplog: pytest.LogCaptureFixture, broken: str, event: str
+) -> None:
+    # Was a 503 from the board's activity entry, after the row had already been archived.
+    getattr(boards.databases, broken).add(SOURCE)
+    with caplog.at_level(logging.WARNING, logger="tralala"):
+        entry = boards.service.archive(ADMIN, SOURCE)
+    assert (entry["status"], entry["archived_at"]) == ("archived", NOW)
+    assert boards.registry.boards[SOURCE].status == "archived"
+    assert [json.loads(record.getMessage()) for record in caplog.records] == [
+        {"event": event, "board_id": SOURCE, "skipped": "board_archived_activity"}
+    ]
+    assert boards.databases.states[SOURCE].activity == []
+    boards.service.delete(ADMIN, SOURCE, "Source")
+    assert SOURCE not in boards.registry.boards
+    assert not boards.databases.path(SOURCE).exists()
+
+
 # --- duplication ---------------------------------------------------------------------------------
 
 

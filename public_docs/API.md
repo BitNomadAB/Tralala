@@ -140,7 +140,7 @@ username.
 | POST | `/boards` (`Idempotency-Key` supported) | `boards:write` |
 | GET | `/boards/{board_id}` | `boards:read` |
 | PATCH | `/boards/{board_id}` | `boards:write` |
-| POST | `/boards/{board_id}/archive` | `boards:write` |
+| POST | `/boards/{board_id}/archive` (also when the board's database cannot be opened, so it can be deleted) | `boards:write` |
 | POST | `/boards/{board_id}/restore` | `boards:write` |
 | POST | `/boards/{board_id}/duplicate` | `boards:write` |
 | DELETE | `/boards/{board_id}` (body `{"confirm_name": "…"}`, board must be archived) | `boards:admin` |
