@@ -100,6 +100,16 @@ class Outcome:
     retryable: bool = False
 
 
+def stored_output(value: Mapping[str, object]) -> str:
+    """A run's output as stored: whole JSON of at most ``MAX_OUTPUT_CHARS`` characters, text kept as
+    written (an escaped "å" is six characters, "å" one). Output that still does not fit is
+    replaced by a note, never cut, because cut JSON makes the run unreadable."""
+    text = json.dumps(value, ensure_ascii=False)
+    if len(text) <= MAX_OUTPUT_CHARS:
+        return text
+    return json.dumps({"output_omitted": True, "chars": len(text)})
+
+
 def _loads(raw: str) -> JsonValue:
     value: JsonValue = json.loads(raw or "{}")
     return value
@@ -405,7 +415,7 @@ def _promote_run(
                 "The documents changed while the model was working; the result was "
                 "kept for inspection and was not promoted"
             ),
-            output_json=json.dumps({"stale_candidate": payload})[:MAX_OUTPUT_CHARS],
+            output_json=stored_output({"stale_candidate": payload}),
             now=now,
         )
         return Ended("failed", "generation_input_changed", now)
@@ -446,7 +456,7 @@ def _promote_run(
     usage_json = json.dumps(result.usage or {})
     repos.generation_runs.complete(
         run_id,
-        output_json=json.dumps({**payload, "_references": outputs})[:MAX_OUTPUT_CHARS],
+        output_json=stored_output({**payload, "_references": outputs}),
         usage_json=usage_json,
         model=result.model or row.model,
         now=now,

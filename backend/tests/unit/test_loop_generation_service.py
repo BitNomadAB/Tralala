@@ -28,6 +28,7 @@ from app.services.loop_documents import LoopDocumentService
 from app.services.loop_generation import MAX_REPAIRS, PURPOSE_PROMPTS, LoopGenerationService
 from app.services.loop_generation_prompts import DEFAULT_CONTEXT_CHARS
 from app.services.loop_generation_report import MAX_EXCEPTION_TEXT
+from app.services.loop_generation_runs import MAX_OUTPUT_CHARS, stored_output
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_plans import LoopPlanService
 from app.services.runtime import ResponseSchema
@@ -902,6 +903,52 @@ def test_a_run_logs_its_start_and_its_end_once(
             "snapshot_chars": len("print('hello')"),
         },
     ]
+
+
+def swedish_analysis(chars: int) -> dict[str, JsonValue]:
+    """An analysis whose four findings hold ``chars`` characters each outside ASCII."""
+    findings: list[JsonValue] = [
+        {
+            "id": f"F-0{number}",
+            "title": "Återanvänd inloggningen",
+            "category": "reuse",
+            "technical_detail": "å" * chars,
+            "plain_language": "Bygg ut inloggningen.",
+        }
+        for number in range(1, 5)
+    ]
+    return {"outcome": "Verifiera adresser", "findings": findings, "recommendation": "Välj."}
+
+
+def test_a_kept_result_outside_ascii_is_stored_whole_and_stays_readable() -> None:
+    # About 160 000 characters: escaped, six times that, which used to be cut into broken JSON.
+    w = make(answers=[answer(json.dumps(swedish_analysis(40_000), ensure_ascii=False))])
+    w.provider.before = lambda: revise_info(w)
+    start(w)
+    assert (w.run().error_code, len(w.run().output_json) <= MAX_OUTPUT_CHARS) == (
+        "generation_input_changed",
+        True,
+    )
+    # The run reads back: its answer carries the stored output parsed.
+    stored: JsonValue = json.loads(w.run().output_json)
+    assert w.service.get(BOARD_ID, LOOP, "id-1")["output"] == stored
+    match stored:
+        case {"stale_candidate": {"findings": [*_, {"technical_detail": detail}]}}:
+            assert detail == "å" * 40_000
+        case other:
+            pytest.fail(f"no kept candidate in {str(other)[:200]}")
+
+
+def test_a_promoted_result_keeps_its_text_as_written() -> None:
+    w = make(answers=[answer(json.dumps(swedish_analysis(1_000), ensure_ascii=False))])
+    start(w)
+    assert w.run().status == "completed"
+    assert "å" * 1_000 in w.run().output_json
+
+
+def test_output_that_does_not_fit_is_replaced_by_a_note_never_cut() -> None:
+    text = stored_output({"recommendation": "x" * MAX_OUTPUT_CHARS})
+    assert json.loads(text) == {"output_omitted": True, "chars": MAX_OUTPUT_CHARS + 22}
 
 
 # --- what changes while the model works ----------------------------------------------------------
