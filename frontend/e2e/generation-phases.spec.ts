@@ -148,6 +148,8 @@ test.describe("generation progress", () => {
     await expect(
       panel.getByText("No enabled repository is linked to this board."),
     ).toBeVisible();
+    // And the step itself is marked as skipped, not as done: a tick there claimed code was read.
+    await expect(panel.getByText("Skipped: no code was sent to the model")).toBeVisible();
 
     // It finishes without a reload, and the draft replaces the progress panel.
     await expect(analysis.getByText(/Sessions never time out today/)).toBeVisible({

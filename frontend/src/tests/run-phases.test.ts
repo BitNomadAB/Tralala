@@ -34,8 +34,57 @@ describe("run steps", () => {
     );
   });
 
-  it("has no failure json unless the run failed", () => {
-    expect(runFailureJson({ status: "running", phase: "generating", error_code: null, error_message: null })).toBeNull();
+  it("never shows a green tick on a repository step that read nothing", () => {
+    const steps = runSteps("analysis", {
+      status: "completed",
+      phase: "generating",
+      source_revisions: { repositories: [] },
+    });
+    expect(steps.map((step) => step.state)).toEqual(["done", "skipped", "done"]);
+  });
+
+  it("warns on the repository step when a repository could not be read", () => {
+    const steps = runSteps("analysis", {
+      status: "running",
+      phase: "generating",
+      source_revisions: {
+        repositories: [
+          {
+            id: "r1",
+            name: "acme api",
+            branch: null,
+            commit_sha: null,
+            file_count: 0,
+            truncated: false,
+            error: "unauthorized",
+          },
+        ],
+      },
+    });
+    expect(steps[1].state).toBe("warning");
+  });
+
+  it("keeps the tick when the snapshot really was captured", () => {
+    const steps = runSteps("analysis", {
+      status: "completed",
+      phase: "generating",
+      source_revisions: {
+        repositories: [
+          {
+            id: "r1",
+            name: "acme app",
+            branch: "main",
+            commit_sha: "abc123def456",
+            file_count: 12,
+            truncated: false,
+          },
+        ],
+      },
+    });
+    expect(steps[1].state).toBe("done");
+  });
+
+  it("has no failure json unless the run failed", () => {    expect(runFailureJson({ status: "running", phase: "generating", error_code: null, error_message: null })).toBeNull();
     const json = runFailureJson({
       status: "failed",
       phase: "generating",

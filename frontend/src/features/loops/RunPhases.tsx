@@ -1,6 +1,21 @@
-import { Check, Loader2, X } from "lucide-react";
-import { failedStepKey, repositoryOutcome, runFailureJson, runSteps } from "@/lib/runPhases";
+import { AlertTriangle, Check, Loader2, Minus, X } from "lucide-react";
+import {
+  failedStepKey,
+  repositoryOutcome,
+  runFailureJson,
+  runSteps,
+  type RunStep,
+} from "@/lib/runPhases";
 import type { GenerationRun } from "@/lib/types";
+
+/** What the step achieved, not what it was supposed to do: a skipped step says so. */
+function stepCaption(step: RunStep): string {
+  if (step.key === "analysing_repository") {
+    if (step.state === "skipped") return "Skipped: no code was sent to the model";
+    if (step.state === "warning") return "Only part of the snapshot could be read";
+  }
+  return step.caption;
+}
 
 /**
  * The steps a generation run passes through, with the failing step's own JSON.
@@ -56,11 +71,13 @@ export function RunPhases({
           const tone =
             step.state === "failed"
               ? "text-[var(--destructive)]"
-              : step.state === "active"
-                ? "text-[var(--primary)]"
-                : step.state === "done"
-                  ? "text-[var(--success)]"
-                  : "text-[var(--muted-foreground)]";
+              : step.state === "warning"
+                ? "text-[var(--warning)]"
+                : step.state === "active"
+                  ? "text-[var(--primary)]"
+                  : step.state === "done"
+                    ? "text-[var(--success)]"
+                    : "text-[var(--muted-foreground)]";
           return (
             <li key={step.key} className="flex flex-col gap-1">
               <div className={`flex items-start gap-2 ${tone}`}>
@@ -69,6 +86,10 @@ export function RunPhases({
                     <Check size={10} />
                   ) : step.state === "failed" ? (
                     <X size={10} />
+                  ) : step.state === "warning" ? (
+                    <AlertTriangle size={10} />
+                  ) : step.state === "skipped" ? (
+                    <Minus size={10} />
                   ) : step.state === "active" ? (
                     <Loader2 size={10} className="animate-spin" />
                   ) : (
@@ -79,7 +100,7 @@ export function RunPhases({
                   <span className="font-medium">{step.label}</span>
                   {compact ? null : (
                     <span className="text-[11px] text-[var(--muted-foreground)]">
-                      {step.caption}
+                      {stepCaption(step)}
                     </span>
                   )}
                 </div>

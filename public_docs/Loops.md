@@ -85,15 +85,17 @@ only the repositories of the boards it serves.
 
 A run is one background call, so the document dialog shows the step it is on — *Reading Info data*,
 *Analysing repository*, *Generating analysis* (or *RoadMap*) — in a second panel beside the dialog
-(inline at the top of the dialog on a narrow screen). The repository step also reports what it got:
-`acme/app @ abc123de, 34 files`, `acme/app · unavailable (unauthorized)`, or *no enabled repository is
-linked to this board*. A green tick on its own would read like the code had been read; the line under
-the step is what tells you whether it was. The same panel is where a failure appears: the step that
-failed is marked, carries the provider's own answer as JSON, and stays on screen until it is
-dismissed. *Generate* is locked and glows for the duration, so the same document cannot be started
-twice by accident. The red *Reset* button at the bottom-left corner clears the analysis or the
-RoadMap — an approved one as well as a draft — and asks first, because the text is retired rather
-than edited.
+(inline at the top of the dialog on a narrow screen). A step is only marked done when it produced what
+its name promises: the repository step is marked *skipped* when the board links no enabled repository
+("no code was sent to the model") and *warned* when a repository could not be read, while the line
+under it names the commit and file count it did get — `acme/app @ abc123de, 34 files`,
+`acme/app · unavailable (unauthorized)`, or *no enabled repository is linked to this board*. A green
+tick there used to claim the model had seen code it never received. The same panel is where a failure
+appears: the step that failed is marked, carries the provider's own answer as JSON, and stays on
+screen until it is dismissed. *Generate* is locked and glows for the duration, so the same document
+cannot be started twice by accident. The red *Reset* button at the bottom-left corner clears the
+analysis or the RoadMap — an approved one as well as a draft — and asks first, because the text is
+retired rather than edited.
 
 ## Board profiles and organisation profiles
 
