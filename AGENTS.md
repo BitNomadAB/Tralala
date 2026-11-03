@@ -14,10 +14,12 @@ message broker.
 
 1. **One service layer.** Every interface (React UI, REST, WebMCP) calls the same functions in
    `backend/app/services/`. Business rules never live in routers, React components or WebMCP tools.
-   A service reaches a database only through the repository Protocols and the unit of work in
-   `backend/app/repositories/` (implemented over SQL in `repositories/sql/`), never through
-   `BoardDatabaseManager`, `Registry`, a connection or SQL text of its own. `services/lists.py` is
-   the reference; services not converted yet still hold those handles until their conversion.
+   A service reaches a database only through the repository Protocols and the units of work in
+   `backend/app/repositories/` (`repositories/board.py` for a board, `repositories/registry.py` for
+   the registry; implemented over SQL in `repositories/sql/`), never through
+   `BoardDatabaseManager`, `Registry`, a connection or SQL text of its own. `services/lists.py` and
+   `services/auth.py` are the references; services not converted yet still hold those handles until
+   their conversion.
 2. **Board isolation.** A board's data lives only in `data/boards/{uuid}/board.sqlite`. A board id
    is always a UUID resolved through `BoardDatabaseManager`; never build a path from user text.
 2b. **A Loop owns its Kanban.** Boards contain Loops; loops contain lists, Tickets, documents,
@@ -156,9 +158,12 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 - Database rows are the generated `<Table>Row` dataclasses (`app/db/generated`, never edited by
   hand; rerun `python -m tools.dbgen` after a migration). A repository selects exactly a row's
   columns (`sql.column_list(<TABLE>_COLUMNS)`) and maps each result through the row's checked
-  `from_mapping`. A service returns typed values (a row, a `TypedDict` of its JSON shape), and a
-  unit test changes a row with `row.__replace__(...)`, which pyright checks, not
-  `dataclasses.replace`.
+  `from_mapping`. A join returns the rows side by side in a small frozen value: each table is
+  selected through its alias, every joined one also under a prefix
+  (`sql.column_list(ACTORS_COLUMNS, 'a', 'actor__')`), and read back with `values.prefixed`, so two
+  tables' `id` never share a result key. A service returns typed values (a row, a `TypedDict` of
+  its JSON shape), and a unit test changes a row with `row.__replace__(...)`, which pyright checks,
+  not `dataclasses.replace`.
 - Pyright runs strict on the scope in `backend/pyrightconfig.json`: the generated rows, the
   repositories, every converted service, the unit tests and the build tools. In that scope there is
   no `Any`, no `cast` and no `# type: ignore`; `tests/unit/test_strict_scope.py` enforces it. Each
@@ -193,7 +198,7 @@ tests/infrastructure`.
   suite refuses to start on rows generated from an older schema. When a rule sits inside a request
   path, extract the pure part and test that, as `csrf_satisfied` in `core/security.py` is.
 - **The infrastructure suite** (`tests/infrastructure/`) is the only backend test that opens SQLite,
-  and it stays minimal: connection set-up, migrations to completion, the unit of work's commit and
+  and it stays minimal: connection set-up, migrations to completion, each unit of work's commit and
   rollback, a board releasing its file, availability. One real database per session, never per
   test; no test per table, column, constraint or repository, and no business rule against a real
   database.

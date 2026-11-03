@@ -21,6 +21,28 @@ class ColumnValues(Protocol):
     def __getitem__(self, column: str, /) -> object: ...
 
 
+class _Prefixed:
+    """One table's columns in a joined result, where they were selected as ``<prefix><column>``."""
+
+    __slots__ = ("_prefix", "_row")
+
+    def __init__(self, row: ColumnValues, prefix: str) -> None:
+        self._row = row
+        self._prefix = prefix
+
+    def __getitem__(self, column: str, /) -> object:
+        return self._row[self._prefix + column]
+
+
+def prefixed(row: ColumnValues, prefix: str) -> ColumnValues:
+    """The columns ``sql.column_list(..., prefix=prefix)`` selected, under their own names.
+
+    A generated row's ``from_mapping`` reads a joined table's columns through this, so two tables
+    that share a column name (``id``, ``name``) never meet in one result key.
+    """
+    return _Prefixed(row, prefix)
+
+
 class ColumnTypeError(TypeError):
     """A column held a value its declared type does not allow."""
 

@@ -2,6 +2,7 @@
   "include": [
     "app/db",
     "app/repositories",
+    "app/services/auth.py",
     "app/services/lists.py",
     "app/services/ordering.py",
     "tests/unit",
@@ -10,6 +11,7 @@
   "strict": [
     "app/db",
     "app/repositories",
+    "app/services/auth.py",
     "app/services/lists.py",
     "app/services/ordering.py",
     "tests/unit",

@@ -69,6 +69,23 @@ def test_a_column_list_names_every_column_in_order() -> None:
     assert sql.column_list(("id",)) == "id"
 
 
+def test_a_column_list_in_a_join_qualifies_and_prefixes_each_column() -> None:
+    assert sql.column_list(("id", "name"), "a") == "a.id, a.name"
+    joined = "a.id AS actor__id, a.name AS actor__name"
+    assert sql.column_list(("id", "name"), "a", "actor__") == joined
+    assert sql.column_list(("id",), prefix="p_") == "id AS p_id"
+
+
+@pytest.mark.parametrize(
+    ("table", "prefix"), [("a; DROP TABLE actors", ""), ("a", "x AS y, "), ("1a", ""), ("a.b", "")]
+)
+def test_a_column_list_refuses_an_alias_or_prefix_that_is_not_a_plain_name(
+    table: str, prefix: str
+) -> None:
+    with pytest.raises(ValueError, match="is not a table alias or a column prefix"):
+        sql.column_list(("id",), table, prefix)
+
+
 def test_assignments_follow_the_allowlist_order_and_bind_every_column() -> None:
     allowed = ("title", "description", "version", "updated_at")
     expected = "title = :title, version = :version, updated_at = :updated_at"

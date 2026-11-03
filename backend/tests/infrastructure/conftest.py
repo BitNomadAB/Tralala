@@ -22,6 +22,7 @@ from sqlalchemy import text
 from app.core.config import Settings
 from app.db import freshness
 from app.repositories.sql.board import SqlBoardUnitOfWork
+from app.repositories.sql.registry import SqlRegistryUnitOfWork
 from app.storage.board_db import BoardDatabaseManager
 from app.storage.migration_manager import MigrationManager, MigrationReport
 from app.storage.registry import Registry
@@ -118,4 +119,29 @@ def probe(boards: BoardDatabaseManager, board_id: str, probe_table: str) -> Iter
     """The probe table, emptied again after the test."""
     yield probe_table
     with boards.session(board_id) as connection:
+        connection.execute(text("DELETE FROM infrastructure_probe"))
+
+
+@pytest.fixture(scope="session")
+def registry_store(registry: Registry, first_migration: MigrationReport) -> SqlRegistryUnitOfWork:
+    del first_migration
+    return SqlRegistryUnitOfWork(registry)
+
+
+@pytest.fixture(scope="session")
+def registry_probe_table(registry: Registry, first_migration: MigrationReport) -> Iterator[str]:
+    """The registry's probe table: no migration knows it, for the same reason as the board's."""
+    del first_migration
+    with registry.connect() as connection:
+        connection.execute(text("CREATE TABLE infrastructure_probe (value TEXT NOT NULL)"))
+    yield "infrastructure_probe"
+    with registry.connect() as connection:
+        connection.execute(text("DROP TABLE infrastructure_probe"))
+
+
+@pytest.fixture
+def registry_probe(registry: Registry, registry_probe_table: str) -> Iterator[str]:
+    """The registry's probe table, emptied again after the test."""
+    yield registry_probe_table
+    with registry.connect() as connection:
         connection.execute(text("DELETE FROM infrastructure_probe"))

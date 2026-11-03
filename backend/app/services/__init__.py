@@ -6,6 +6,7 @@ import logging
 from ..core.config import Settings
 from ..core.errors import NotFound, ServiceUnavailable
 from ..repositories.sql.board import SqlBoardUnitOfWork
+from ..repositories.sql.registry import SqlRegistryUnitOfWork
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.migration_manager import MigrationManager, MigrationReport
 from ..storage.process_lock import DataDirectoryLock
@@ -47,6 +48,8 @@ class Services:
         settings.ensure_dirs()
         self.settings = settings
         self.registry = Registry(settings)
+        # The registry unit of work for the services converted to repositories (GCS-T00d onwards).
+        self.registry_store = SqlRegistryUnitOfWork(self.registry)
         self.boards = BoardDatabaseManager(settings)
         # The board unit of work for the services converted to repositories (GCS-T00c onwards).
         self.board_store = SqlBoardUnitOfWork(self.boards)
@@ -55,7 +58,9 @@ class Services:
         self.template = TemplateService(self.registry, self.boards, self.board)
         self.board.templates = self.template
         self.role_templates = RoleTemplateService(self.registry)
-        self.agent = AgentService(settings, self.registry, self.role_templates)
+        self.agent = AgentService(
+            settings, self.registry, self.role_templates, accounts=self.registry_store
+        )
         self.repository = RepositoryService(settings, self.registry)
         self.repo_snapshot = RepositorySnapshotService(self.repository)
         self.board.repositories = self.repository
@@ -97,7 +102,7 @@ class Services:
             keep=settings.backup_keep,
         )
         self.attachment = AttachmentService(self.board)
-        self.auth = AuthService(settings, self.registry)
+        self.auth = AuthService(settings, self.registry_store)
         self.discussion = DiscussionService(self.board, self.agent)
         self.event = EventService(self.board)
         self.orchestrator = Orchestrator(settings, self.board, self.event)
@@ -113,7 +118,7 @@ class Services:
         """Take the data directory, then migrate, before the application accepts requests."""
         self.data_lock.acquire()
         self.migrations.migrate_registry()
-        self.registry.bootstrap_admin()
+        self.auth.bootstrap_admin()
         self.role_templates.seed_defaults()
         resealed = self.agent.reseal_credentials()
         if resealed:

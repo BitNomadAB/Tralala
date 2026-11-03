@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure
+from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.agents import (
     AgentCreate,
     AgentDuplicate,
@@ -295,10 +296,19 @@ class RoleTemplateService:
 class AgentService:
     """Agent configurations: identity, connection, credentials and role assignment."""
 
-    def __init__(self, settings: Any, registry: Registry, roles: RoleTemplateService) -> None:
+    def __init__(
+        self,
+        settings: Any,
+        registry: Registry,
+        roles: RoleTemplateService,
+        *,
+        accounts: RegistryUnitOfWork,
+    ) -> None:
         self.settings = settings
         self.registry = registry
         self.roles = roles
+        # People are read through the account repositories; the rest moves there in GCS-T00d.
+        self.accounts = accounts
 
     # --- serialization ---------------------------------------------------------
 
@@ -376,15 +386,17 @@ class AgentService:
         only list a worker token may read, and it carries no password, session or role detail
         beyond the role name an assignee list needs.
         """
+        with self.accounts.reader() as repos:
+            users = repos.users.all()
         return [
             {
-                "id": row["id"],
-                "name": row["name"],
+                "id": user.actor.id,
+                "name": user.actor.name,
                 "type": "user",
-                "role": row.get("role"),
+                "role": user.credentials.role,
             }
-            for row in self.registry.list_users()
-            if row.get("disabled_at") is None
+            for user in users
+            if user.actor.disabled_at is None
         ]
 
     def askable_agents(self, board_id: str) -> list[dict[str, Any]]:

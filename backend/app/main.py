@@ -268,7 +268,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         app.state.services.initialize()
-        purged = app.state.services.registry.purge_expired_sessions()
+        purged = app.state.services.auth.purge_expired_sessions()
         logger.info(
             json.dumps(
                 {

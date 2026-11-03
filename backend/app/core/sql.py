@@ -10,6 +10,7 @@ that names the tuple.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection, Iterable
 
 type Filters = tuple[tuple[str, str], ...]
@@ -36,9 +37,24 @@ def assignments(names: Iterable[str], allowed: tuple[str, ...]) -> str:
     return ", ".join(f"{column} = :{column}" for column in _chosen(names, allowed))
 
 
-def column_list(columns: tuple[str, ...]) -> str:
-    """``a, b, c``: a select list, such as a generated row's column tuple."""
-    return ", ".join(columns)
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def column_list(columns: tuple[str, ...], table: str = "", prefix: str = "") -> str:
+    """``a, b, c``: a select list, such as a generated row's column tuple.
+
+    In a join, ``table`` qualifies each column with the table's alias (``t.a``), and ``prefix``
+    also names each one ``<prefix>a`` in the result (``t.a AS pa``), so the columns of a joined
+    row cannot collide with another table's; ``values.prefixed`` reads them back by their own
+    names. Both are literals at the call site, and anything but a plain name is refused.
+    """
+    for name in (table, prefix):
+        if name and not _NAME.fullmatch(name):
+            raise ValueError(f"{name!r} is not a table alias or a column prefix")
+    qualifier = f"{table}." if table else ""
+    if prefix:
+        return ", ".join(f"{qualifier}{column} AS {prefix}{column}" for column in columns)
+    return ", ".join(f"{qualifier}{column}" for column in columns)
 
 
 def insert_columns(names: Iterable[str], allowed: tuple[str, ...]) -> tuple[str, str]:

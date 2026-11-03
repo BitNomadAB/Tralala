@@ -59,7 +59,7 @@ planning groups, not Kanban columns.
 | --- | --- | --- |
 | API | `backend/app/api` | HTTP routing, authentication dependency, envelopes, status codes |
 | Services | `backend/app/services` | Business rules, transactions, activity logging, ordering |
-| Repositories | `backend/app/repositories` | Typed interfaces a service reads and writes through, and the unit of work that opens a reader or writer on a board; `repositories/sql` implements them over SQL |
+| Repositories | `backend/app/repositories` | Typed interfaces a service reads and writes through, and the units of work that open a reader or writer on a board or on the registry; `repositories/sql` implements them over SQL |
 | Rows | `backend/app/db` | One typed row class per table, generated from the migrations by `python -m tools.dbgen` |
 | Storage | `backend/app/storage` | SQLite engines, migrations, registry and per-board databases |
 | Schemas | `backend/app/schemas` | Pydantic v2 request/response validation |
