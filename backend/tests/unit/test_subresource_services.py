@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 import pytest
 
 from app.core.context import ActorContext
-from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure
+from app.core.errors import Conflict, Forbidden, NotFound
 from app.db.generated.board import (
     CardLabelsRow,
     ChecklistItemsRow,
@@ -56,7 +56,6 @@ from tests.unit.fakes.board import (
     loop_row,
 )
 from tests.unit.fakes.registry import (
-    ConstraintError,
     FakeRegistryUnitOfWork,
     RegistryState,
     actor_row,
@@ -271,14 +270,35 @@ def test_a_new_label_is_stored_and_logged() -> None:
     assert w.checks.calls == [("ensure_active", BOARD_ID)]
 
 
+def name_taken(raised: pytest.ExceptionInfo[Conflict], name: str) -> None:
+    assert (raised.value.status_code, raised.value.code) == (409, "label_name_taken")
+    assert raised.value.message == "A label with this name already exists"
+    assert raised.value.details == {"name": name}
+
+
 def test_a_label_name_is_unique_but_may_equal_another_labels_id() -> None:
     w = world()
-    with pytest.raises(ValidationFailure, match="A label with that name already exists"):
+    with pytest.raises(Conflict) as raised:
         w.labels.create(PERSON, BOARD_ID, LabelCreate(name="Bug"))
+    name_taken(raised, "Bug")
     assert w.store.rollbacks == 1
     assert set(w.state.labels) == {"bug", "idea"}
     entry = w.labels.create(PERSON, BOARD_ID, LabelCreate(name="bug"))
     assert entry == {"id": "new-2", "name": "bug", "color": "#64748b"}
+
+
+def test_a_label_renamed_to_a_taken_name_is_refused_and_keeps_its_own() -> None:
+    # Was the database's unique refusal unmapped: a 500.
+    w = world()
+    with pytest.raises(Conflict) as raised:
+        w.labels.update(PERSON, BOARD_ID, "bug", LabelUpdate(name="Idea", color="#0000ff"))
+    name_taken(raised, "Idea")
+    assert w.store.rollbacks == 1
+    assert w.state.labels["bug"] == LabelsRow(id="bug", name="Bug", color="#ff0000")
+    assert w.state.activity == []
+    # Its own name is not taken by itself, and a name differing only in case is another name.
+    assert w.labels.update(PERSON, BOARD_ID, "bug", LabelUpdate(name="Bug"))["name"] == "Bug"
+    assert w.labels.update(PERSON, BOARD_ID, "bug", LabelUpdate(name="idea"))["name"] == "idea"
 
 
 def test_writing_labels_needs_the_card_scope_and_a_board_that_takes_writes() -> None:
@@ -342,15 +362,6 @@ def test_an_unknown_label_is_not_found() -> None:
         w.labels.update(PERSON, BOARD_ID, "nope", LabelUpdate())
     with pytest.raises(NotFound, match="Label not found"):
         w.labels.delete(PERSON, BOARD_ID, "nope")
-
-
-def test_renaming_a_label_to_a_taken_name_is_refused_by_the_database() -> None:
-    # No service rule: the unique index refuses it (SQLite raises IntegrityError), as before.
-    w = world()
-    with pytest.raises(ConstraintError):
-        w.labels.update(PERSON, BOARD_ID, "idea", LabelUpdate(name="Bug"))
-    assert w.state.labels["idea"].name == "Idea"
-    assert w.state.activity == []
 
 
 def test_a_deleted_label_leaves_every_card_that_carried_it() -> None:

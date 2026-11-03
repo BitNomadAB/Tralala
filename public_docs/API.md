@@ -602,6 +602,10 @@ lists render without a cross-database join; every change is written to the activ
 | GET | `/boards/{board_id}/cards/{card_id}/events` (`text/event-stream`) | `cards:read` |
 | GET | `/boards/{board_id}/cards/{card_id}/events/history?after=&limit=` | `cards:read` |
 
+A label name is unique on its board, compared exactly (`Bug` and `bug` are two labels). Creating a
+label, or renaming one, to a name another label has answers `409 label_name_taken` with
+`details.name`.
+
 Mention an enabled agent in a comment with `@[Agent Name]` (the composer inserts this form; a bare
 `@Name` also matches an enabled agent whose name is an exact prefix). Saving the comment queues one
 job per mentioned agent and returns immediately; each job answers as a normal agent-authored comment

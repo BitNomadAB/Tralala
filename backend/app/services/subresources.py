@@ -19,7 +19,7 @@ from uuid import uuid4
 
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..core.errors import Forbidden, NotFound, ValidationFailure
+from ..core.errors import Conflict, Forbidden, NotFound
 from ..db.generated.board import (
     CardsRow,
     ChecklistItemsRow,
@@ -191,6 +191,14 @@ class _BoardParts:
         )
 
 
+def label_name_taken(name: str) -> Conflict:
+    """A label name is unique on its board (exactly, as the column's UNIQUE compares it); a create
+    or a rename to a taken name answers as every other taken name does."""
+    return Conflict(
+        "A label with this name already exists", code="label_name_taken", details={"name": name}
+    )
+
+
 class LabelService(_BoardParts):
     def list(self, board_id: str) -> list[LabelEntry]:
         self.boards.require_row(board_id)
@@ -203,7 +211,7 @@ class LabelService(_BoardParts):
         row = LabelsRow(id=self._new_id(), name=payload.name, color=payload.color)
         with self.store.writer(board_id) as repos:
             if repos.labels.by_name(payload.name) is not None:
-                raise ValidationFailure("A label with that name already exists")
+                raise label_name_taken(payload.name)
             repos.labels.add(row)
             self._log(
                 repos,
@@ -229,6 +237,10 @@ class LabelService(_BoardParts):
             existing = repos.labels.get(label_id)
             if existing is None:
                 raise NotFound("Label not found")
+            if "name" in changes:
+                holder = repos.labels.by_name(changes["name"])
+                if holder is not None and holder.id != label_id:
+                    raise label_name_taken(changes["name"])
             if changes:
                 repos.labels.update(label_id, changes)
                 self._log(

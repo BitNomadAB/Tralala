@@ -47,6 +47,9 @@ Worth knowing when you look at the dashboard:
   filter, as an empty one always was, whether or not the board has its full-text index; the
   App-wide search answers it with `422 validation_failed`. Both answered 500 on a board with the
   index. Spaces around the words are ignored by both search engines.
+- **A taken label name answers 409.** Renaming a label to a name another label has answered 500;
+  it now answers `409 label_name_taken` with `details.name`, and so does creating one, which
+  answered `422 validation_failed` — the same answer every other taken name gets.
 - **The agent form follows the provider you pick.** A preset now fixes the endpoint for hosted
   providers, asks for the key only where one is needed, and says which providers need a model name at
   all — so a local Ollama install is not asked for a key and OpenAI cannot be saved without one.
