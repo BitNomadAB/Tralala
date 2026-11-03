@@ -120,6 +120,15 @@ export default allErrors(
       rules: {
         // Off: autoFocus is only used to move focus into what the user just opened (WAI-ARIA dialog).
         "jsx-a11y-x/no-autofocus": "off",
+        // On: the browser console is not the app's log; the one reporter is allowed below.
+        "no-console": "error",
+      },
+    },
+    {
+      // console.error is how the root reports an error a boundary caught (main.tsx's onCaughtError).
+      files: ["src/app/errorReporting.ts"],
+      rules: {
+        "no-console": ["error", { allow: ["error"] }],
       },
     },
     {

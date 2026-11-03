@@ -150,6 +150,12 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 - API: JSON envelope `{success, data, request_id, meta}`; errors `{success:false, error, request_id}`.
   Unknown request fields are rejected (`extra="forbid"`). Timestamps are ISO 8601 UTC.
 - Frontend state: TanStack Query for server state; no global store for board data.
+- Every level of the route tree in `src/app/App.tsx` renders inside `RouteErrorBoundary`
+  (`src/app/RouteErrorBoundary.tsx`): a page that throws shows a fallback inside the layout, with the
+  request id of an `ApiError`, "Try again" and "Reload page". Add a route inside the existing levels,
+  never beside them. A query that wants its error on that fallback sets `throwOnError`; "Try again"
+  resets it so it fetches again. Only the root's `onCaughtError` (`src/app/errorReporting.ts`)
+  writes to the console, once per caught error; ESLint's `no-console` holds the rest of `src/`.
 - Card content is untrusted: Markdown is rendered by `src/lib/markdown.tsx`, which never injects HTML.
 
 ## Verification contract

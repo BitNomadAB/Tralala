@@ -18,6 +18,7 @@ import { TemplateEditorPage } from "@/features/settings/TemplateEditorPage";
 import { ThemeProvider } from "@/themes/ThemeProvider";
 import { AmbientBackground } from "./AmbientBackground";
 import { AppLayout } from "./AppLayout";
+import { RouteErrorBoundary } from "./RouteErrorBoundary";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,27 +63,36 @@ export function App() {
           <ToastProvider>
             <BrowserRouter>
               <Routes>
-                <Route path="/login" element={<LoginRoute />} />
-                <Route path="/enrol" element={<EnrolPage />} />
-                <Route
-                  element={
-                    <RequireAuth>
-                      <AppLayout />
-                    </RequireAuth>
-                  }
-                >
-                  <Route path="/" element={<DashboardPage />} />
-                  <Route path="/boards/:boardId" element={<BoardLoopsPage />} />
-                  <Route path="/boards/:boardId/loops/:loopId" element={<LoopPage />} />
-                  <Route path="/boards/:boardId/history" element={<HistoryPage />} />
-                  <Route path="/discussions" element={<DiscussionsPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="/settings/repositories" element={<RepositoriesPage />} />
-                  <Route path="/settings/templates/:templateId" element={<TemplateEditorPage />} />
-                  <Route path="/settings/roles/:roleId" element={<RoleTemplateEditorPage />} />
-                  <Route path="/settings/agents/:agentId" element={<AgentEditorPage />} />
+                {/* Each level of routes renders inside an error boundary, so a page that throws
+                    shows a fallback inside the layout and a new route cannot be left outside. */}
+                <Route element={<RouteErrorBoundary />}>
+                  <Route path="/login" element={<LoginRoute />} />
+                  <Route path="/enrol" element={<EnrolPage />} />
+                  <Route
+                    element={
+                      <RequireAuth>
+                        <AppLayout />
+                      </RequireAuth>
+                    }
+                  >
+                    <Route element={<RouteErrorBoundary />}>
+                      <Route path="/" element={<DashboardPage />} />
+                      <Route path="/boards/:boardId" element={<BoardLoopsPage />} />
+                      <Route path="/boards/:boardId/loops/:loopId" element={<LoopPage />} />
+                      <Route path="/boards/:boardId/history" element={<HistoryPage />} />
+                      <Route path="/discussions" element={<DiscussionsPage />} />
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/settings/repositories" element={<RepositoriesPage />} />
+                      <Route
+                        path="/settings/templates/:templateId"
+                        element={<TemplateEditorPage />}
+                      />
+                      <Route path="/settings/roles/:roleId" element={<RoleTemplateEditorPage />} />
+                      <Route path="/settings/agents/:agentId" element={<AgentEditorPage />} />
+                    </Route>
+                  </Route>
+                  <Route path="*" element={<Navigate to="/" replace />} />
                 </Route>
-                <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </BrowserRouter>
           </ToastProvider>

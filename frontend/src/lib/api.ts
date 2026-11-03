@@ -48,10 +48,18 @@ export class ApiError extends Error {
   readonly status: number;
   readonly retryable: boolean;
   readonly details: unknown;
+  /** The id the server logged this request under; null when no response named one. */
+  readonly requestId: string | null;
 
   constructor(
     message: string,
-    options: { code: string; status: number; retryable?: boolean | undefined; details?: unknown },
+    options: {
+      code: string;
+      status: number;
+      retryable?: boolean | undefined;
+      details?: unknown;
+      requestId?: string | null | undefined;
+    },
   ) {
     super(message);
     this.name = "ApiError";
@@ -59,6 +67,7 @@ export class ApiError extends Error {
     this.status = options.status;
     this.retryable = options.retryable ?? false;
     this.details = options.details;
+    this.requestId = options.requestId ?? null;
   }
 }
 
@@ -135,6 +144,8 @@ async function request<T>(
       status: response.status,
       retryable: error?.retryable,
       details: error?.details,
+      // The envelope names it; the server's X-Request-ID header covers a body that is not JSON.
+      requestId: payload?.request_id ?? response.headers.get("X-Request-ID"),
     });
   }
 
