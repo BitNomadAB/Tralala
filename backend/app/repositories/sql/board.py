@@ -22,7 +22,12 @@ from ..idempotency import BoardIdempotencyRepository
 from ..labels import LabelRepository
 from ..lists import ListRepository
 from ..loop_documents import LoopApprovalRepository, LoopDocumentRepository
-from ..loop_plans import LoopPlanRepository
+from ..loop_plans import (
+    LoopDependencyRepository,
+    LoopPhaseRepository,
+    LoopPlanItemRepository,
+    LoopPlanRepository,
+)
 from ..loop_qa import LoopQaRepository
 from ..loops import LoopRepository
 from ..search import CardSearchRepository, FullTextIndex
@@ -37,7 +42,12 @@ from .idempotency import SqlBoardIdempotencyRepository
 from .labels import SqlLabelRepository
 from .lists import SqlListRepository
 from .loop_documents import SqlLoopApprovalRepository, SqlLoopDocumentRepository
-from .loop_plans import SqlLoopPlanRepository
+from .loop_plans import (
+    SqlLoopDependencyRepository,
+    SqlLoopPhaseRepository,
+    SqlLoopPlanItemRepository,
+    SqlLoopPlanRepository,
+)
 from .loop_qa import SqlLoopQaRepository
 from .loops import SqlLoopRepository
 from .search import SqlCardSearchRepository
@@ -47,7 +57,8 @@ class SqlBoardRepositories:
     """The board repositories over one connection, inside one reader or writer."""
 
     def __init__(self, connection: Connection) -> None:
-        # Code that is not converted yet takes a Connection; this is the same transaction.
+        # The reader's or writer's connection: the savepoint nests in it, and the infrastructure
+        # suite probes the transaction through it.
         self.connection = connection
         self.lists: ListRepository = SqlListRepository(connection)
         self.loops: LoopRepository = SqlLoopRepository(connection)
@@ -60,6 +71,9 @@ class SqlBoardRepositories:
         self.documents: LoopDocumentRepository = SqlLoopDocumentRepository(connection)
         self.approvals: LoopApprovalRepository = SqlLoopApprovalRepository(connection)
         self.plans: LoopPlanRepository = SqlLoopPlanRepository(connection)
+        self.phases: LoopPhaseRepository = SqlLoopPhaseRepository(connection)
+        self.plan_items: LoopPlanItemRepository = SqlLoopPlanItemRepository(connection)
+        self.dependencies: LoopDependencyRepository = SqlLoopDependencyRepository(connection)
         self.qa: LoopQaRepository = SqlLoopQaRepository(connection)
         self.idempotency: BoardIdempotencyRepository = SqlBoardIdempotencyRepository(connection)
         self.checklists: ChecklistRepository = SqlChecklistRepository(connection)

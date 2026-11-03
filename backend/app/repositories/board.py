@@ -22,7 +22,12 @@ from .idempotency import BoardIdempotencyRepository
 from .labels import LabelRepository
 from .lists import ListRepository
 from .loop_documents import LoopApprovalRepository, LoopDocumentRepository
-from .loop_plans import LoopPlanRepository
+from .loop_plans import (
+    LoopDependencyRepository,
+    LoopPhaseRepository,
+    LoopPlanItemRepository,
+    LoopPlanRepository,
+)
 from .loop_qa import LoopQaRepository
 from .loops import LoopRepository
 from .search import CardSearchRepository
@@ -63,6 +68,15 @@ class BoardRepositories(Protocol):
 
     @property
     def plans(self) -> LoopPlanRepository: ...
+
+    @property
+    def phases(self) -> LoopPhaseRepository: ...
+
+    @property
+    def plan_items(self) -> LoopPlanItemRepository: ...
+
+    @property
+    def dependencies(self) -> LoopDependencyRepository: ...
 
     @property
     def qa(self) -> LoopQaRepository: ...

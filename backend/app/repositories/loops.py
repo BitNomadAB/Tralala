@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Final, Protocol, TypedDict
+from collections.abc import Sequence
+from typing import Final, Literal, Protocol, TypedDict
 
 from ..db.generated.board import LoopsRow
 
 LOOP_EDITABLE: Final = ("name", "goal", "version", "updated_at")
 """The columns ``LoopRepository.update`` may set: the keys of ``LoopChanges``."""
+
+type ApprovalColumn = Literal[
+    "analysis_approval_id", "roadmap_approval_id", "implementation_approval_id", "qa_approval_id"
+]
+
+LOOP_APPROVAL_COLUMNS: Final[tuple[ApprovalColumn, ...]] = (
+    "analysis_approval_id",
+    "roadmap_approval_id",
+    "implementation_approval_id",
+    "qa_approval_id",
+)
+"""A Loop's approvals, upstream first: changing an input invalidates its approval and every one
+after it."""
 
 
 class LoopChanges(TypedDict, total=False):
@@ -50,6 +64,26 @@ class LoopRepository(Protocol):
         """A computed stage; it is not an edit, so the version stays."""
         ...
 
+    def set_current_plan(self, loop_id: str, plan_id: str, *, now: str) -> None:
+        """The plan the Loop now executes; publishing is not an edit, so the version stays."""
+        ...
+
     def clear_delivery_approvals(self, loop_id: str, *, now: str) -> None:
         """Forget the implementation and QA approvals: reopened work must be accepted again."""
+        ...
+
+    def clear_approvals(
+        self, loop_id: str, columns: Sequence[ApprovalColumn], *, now: str
+    ) -> None:
+        """Forget the named approvals; it is not an edit, so the version stays."""
+        ...
+
+    def set_approval(
+        self, loop_id: str, column: ApprovalColumn, approval_id: str, *, now: str
+    ) -> None:
+        """A review scope's approval, and the next version."""
+        ...
+
+    def bump_version(self, loop_id: str, *, now: str) -> None:
+        """The next version, as a person's decision about the Loop's documents makes it."""
         ...

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, Protocol, TypedDict
 
-from ..db.generated.board import CardsRow, LabelsRow
+from ..db.generated.board import CardsRow, LabelsRow, LoopPlanItemsRow
 
 CARD_EDITABLE: Final = (
     "title",
@@ -117,6 +117,10 @@ class CardRepository(Protocol):
         """``(id, position)`` of the list's unarchived cards in display order, minus ``exclude``."""
         ...
 
+    def highest_position(self, list_id: str) -> int:
+        """The highest position in the list, archived cards included; 0 for an empty list."""
+        ...
+
     def renumber(self, positions: Sequence[tuple[str, int]]) -> None:
         """Rewrite positions only; renumbering is not an edit, so ``updated_at`` stays."""
         ...
@@ -124,6 +128,12 @@ class CardRepository(Protocol):
     def add(self, row: CardsRow) -> None: ...
 
     def update(self, card_id: str, changes: CardChanges) -> None: ...
+
+    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str) -> None:
+        """The card published from ``item`` (its id, and the item as its plan item) takes the
+        item's title, instructions as description, actor, mode, human texts and Phase; its version
+        stays. Any other card is left alone."""
+        ...
 
     def move(self, card_id: str, list_id: str, position: int, *, now: str) -> None:
         """The new list and position, and the next version."""

@@ -1,36 +1,28 @@
 """TRANSITIONAL bridge between the converted Loop and Ticket services and the Loop workflow
 services that still hold a connection. GCS-T00f removes this module when it converts them.
 
-* ``LoopConnectionHelpers`` gives ``loop_documents``, ``loop_plans``, ``loop_qa`` and
-  ``loop_generation`` the dict-on-connection helpers LoopService used to have, under the same names
-  and signatures. Each one runs the typed rule of ``services/loops.py`` on ``SqlBoardRepositories``
-  over the caller's connection, so it is the same transaction, and hands back the dicts those
-  services read (a row's columns in table order, as ``SELECT *`` gave them). Dicts they pass back
-  in are read through the generated rows' checked ``from_mapping``.
-* ``LoopPlanViews`` gives the converted services ``PlanViews`` over ``LoopPlanService``: it takes
-  the connection out of the SQL repositories and hands the plan service the Loop row as a dict.
+``LoopConnectionHelpers`` gives ``loop_qa`` and ``loop_generation`` the dict-on-connection
+helpers LoopService used to have, under the same names and signatures. Each one runs the typed rule
+of ``services/loops.py`` on ``SqlBoardRepositories`` over the caller's connection, so it is the
+same transaction, and hands back the dicts those services read (a row's columns in table order, as
+``SELECT *`` gave them). Dicts they pass back in are read through the generated rows' checked
+``from_mapping``.
 
-The module is outside the pyright strict scope on purpose and is listed in the GCS-T00e notes:
-``LoopPlanViews`` declares the plan service's dicts as the ``PlanViews`` TypedDicts without a check,
-which is the gap GCS-T00f closes by converting the plan service to return them.
+The module is outside the pyright strict scope on purpose and is listed in the GCS-T00e and
+GCS-T00f notes.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy.engine import Connection
 
 from ..core.dates import utcnow
 from ..db.generated.board import LoopApprovalsRow, LoopDocumentsRow, LoopsRow
-from ..repositories.board import BoardRepositories
 from ..repositories.sql.board import SqlBoardRepositories
 from . import loops
-from .plan_views import PlanView, Readiness
-
-if TYPE_CHECKING:
-    from .loop_plans import LoopPlanService
 
 # The former signatures, loose as they were, so the callers read the same types as before.
 type Row = dict[str, Any]
@@ -113,27 +105,3 @@ class LoopConnectionHelpers:
         kind: str, documents: Documents, approvals: dict[str, Row], stale: dict[str, list[str]]
     ) -> Row:
         return dict(loops.document_state(kind, _slots(documents), _approvals(approvals), stale))
-
-
-def _connection(repos: BoardRepositories) -> Connection:
-    if not isinstance(repos, SqlBoardRepositories):
-        raise TypeError("the plan service reads through a SQL connection until GCS-T00f")
-    return repos.connection
-
-
-class LoopPlanViews:
-    """``PlanViews`` over the unconverted ``LoopPlanService`` (bound by the composition root)."""
-
-    def __init__(self) -> None:
-        self.service: LoopPlanService | None = None
-
-    def _plans(self) -> LoopPlanService:
-        if self.service is None:
-            raise RuntimeError("LoopPlanViews is used before the plan service is bound")
-        return self.service
-
-    def plan_view(self, repos: BoardRepositories, loop: LoopsRow) -> PlanView:
-        return self._plans().plan_view(_connection(repos), asdict(loop))
-
-    def readiness(self, repos: BoardRepositories, loop: LoopsRow) -> Readiness:
-        return self._plans().readiness(_connection(repos), asdict(loop))
