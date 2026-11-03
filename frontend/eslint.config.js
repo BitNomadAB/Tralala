@@ -137,6 +137,26 @@ export default allErrors(
             message:
               "Sign out with useAuth().signOutLocally(); clearing the query cache detaches the session's observer and leaves a dead session on screen.",
           },
+          // A test answers the API through MSW (src/tests/msw/), never by replacing the client or
+          // fetch: a replaced client skips the envelope check, the JSON body and the 401 path.
+          {
+            selector:
+              "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock)$/][arguments.0.value=/lib.api/]",
+            message:
+              "Answer the request with an MSW handler (src/tests/msw/) instead of mocking the API client.",
+          },
+          {
+            selector:
+              "CallExpression[callee.object.name='vi'][callee.property.name='spyOn'][arguments.0.name='api']",
+            message:
+              "Answer the request with an MSW handler (src/tests/msw/) instead of replacing an API call.",
+          },
+          {
+            selector:
+              "CallExpression[callee.object.name='vi'][callee.property.name='stubGlobal'][arguments.0.value='fetch']",
+            message:
+              "Answer the request with an MSW handler (src/tests/msw/) instead of replacing fetch.",
+          },
         ],
       },
     },

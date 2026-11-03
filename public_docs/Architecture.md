@@ -379,4 +379,8 @@ tool may do.
   inserted, so a crash can leave an unreferenced file but never a row whose bytes are missing.
 - End-to-end tests (`frontend/e2e`) run through `scripts/run-playwright.mjs`, which reuses a local
   Playwright install and boots an isolated stack (backend `:8077`, Vite `:5273`). The commands are in
-  [practical_commands.md](practical_commands.md).
+  [practical_commands.md](practical_commands.md). One journey runs axe-core on the dashboard, a Loop
+  page and Settings and fails on a serious or critical accessibility violation.
+- Frontend unit and component tests (`frontend/src/tests`) never replace the API client: MSW answers
+  its requests with the same envelope the backend writes, so the request body, the CSRF header and
+  the handling of a 401 are part of every test that sends a request.

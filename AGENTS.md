@@ -173,6 +173,14 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   its own chunk; layouts stay eager, so a URL renders one lazy page. A page chunk that cannot be
   loaded (a tab left open across an upgrade) reloads the tab once; a sessionStorage flag set before
   the reload and cleared by the next page that loads makes a reload loop impossible.
+- Frontend tests answer the API through MSW (`src/tests/msw/`), never by replacing the client:
+  `src/tests/setup.ts` starts one server per test file, a request no handler answers fails, and the
+  handlers return the real envelope, so the JSON body, the CSRF header, the envelope check and the
+  401 → `tralala:unauthorized` path run in every test that sends a request. ESLint's
+  `no-restricted-syntax` forbids `vi.mock` of the API client, `vi.spyOn(api, …)` and stubbing
+  `fetch`. The journey `frontend/e2e/accessibility.spec.ts` runs axe-core on the dashboard, a Loop
+  page and Settings: a serious or critical violation fails it, moderate and minor ones are
+  annotations on the test.
 - Card content is untrusted: Markdown is rendered by `src/lib/markdown.tsx`, which never injects HTML.
 
 ## Verification contract
