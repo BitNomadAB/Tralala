@@ -8,13 +8,14 @@ from sqlalchemy import text
 
 from ..core import sql
 from ..core.errors import NotFound
+from ..repositories.sql.cards import LABEL_JOIN
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
 from .activity import activity_feed
 from .boards import BoardService
-from .cards import CardService
-from .common import LABEL_JOIN, decorate_cards, rows
+from .common import decorate_cards, rows
+from .loop_plans import LoopPlanService
 
 # What the searches format into SQL text (see core/sql.py).
 _CARD_FTS_JOIN = " JOIN cards_fts f ON f.rowid = c.rowid"
@@ -42,13 +43,13 @@ class SearchService:
     def __init__(
         self,
         board_service: BoardService,
-        card_service: CardService,
+        plans: LoopPlanService,
         *,
         boards: BoardDatabaseManager,
         registry: Registry,
     ) -> None:
         self.board_service = board_service
-        self.card_service = card_service
+        self.plans = plans
         self.boards = boards
         self.registry = registry
 
@@ -126,7 +127,7 @@ class SearchService:
             loop_row = loop[0]
             readiness: dict[str, dict[str, Any]] = {}
             if loop_row["current_plan_id"]:
-                evaluation = self.card_service.plans.readiness(conn, loop_row)  # type: ignore[union-attr]
+                evaluation = self.plans.readiness(conn, loop_row)
                 readiness = {
                     item["card_id"]: item for item in evaluation["items"] if item["card_id"]
                 }

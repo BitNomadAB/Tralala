@@ -404,6 +404,10 @@ class FakeActorRepository:
     def any_user(self) -> bool:
         return any(actor.type == "user" for actor in self._state.actors.values())
 
+    def enabled(self, actor_id: str) -> ActorsRow | None:
+        actor = self._state.actors.get(actor_id)
+        return actor if actor is not None and actor.disabled_at is None else None
+
     def add(self, row: ActorsRow) -> None:
         if row.id in self._state.actors:
             raise ConstraintError(f"actors.id {row.id} exists")

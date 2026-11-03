@@ -15,6 +15,10 @@ class BoardMetadataRepository(Protocol):
 
 
 class LoopDefaultsRepository(Protocol):
+    def get(self) -> BoardLoopDefaultsRow | None:
+        """The column names a new Loop starts with, unless it names its own."""
+        ...
+
     def add(self, row: BoardLoopDefaultsRow) -> None:
         """The board's defaults, written once when the board is created (one row, id 1)."""
         ...

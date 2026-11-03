@@ -13,9 +13,14 @@ from typing import Protocol
 
 from .activity import ActivityRepository
 from .board_metadata import BoardMetadataRepository, LoopDefaultsRepository
+from .cards import CardRepository
 from .counters import CounterRepository
+from .idempotency import BoardIdempotencyRepository
 from .labels import LabelRepository
 from .lists import ListRepository
+from .loop_documents import LoopApprovalRepository, LoopDocumentRepository
+from .loop_plans import LoopPlanRepository
+from .loop_qa import LoopQaRepository
 from .loops import LoopRepository
 
 
@@ -42,6 +47,29 @@ class BoardRepositories(Protocol):
 
     @property
     def loop_defaults(self) -> LoopDefaultsRepository: ...
+
+    @property
+    def cards(self) -> CardRepository: ...
+
+    @property
+    def documents(self) -> LoopDocumentRepository: ...
+
+    @property
+    def approvals(self) -> LoopApprovalRepository: ...
+
+    @property
+    def plans(self) -> LoopPlanRepository: ...
+
+    @property
+    def qa(self) -> LoopQaRepository: ...
+
+    @property
+    def idempotency(self) -> BoardIdempotencyRepository: ...
+
+    def savepoint(self) -> AbstractContextManager[None]:
+        """A nested transaction inside a writer: it keeps its writes when the block ends normally
+        and undoes only them when it raises, so one failed item of a batch leaves the others."""
+        ...
 
 
 class BoardUnitOfWork(Protocol):

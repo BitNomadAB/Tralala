@@ -3,45 +3,29 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import TextClause, bindparam, text
+from sqlalchemy import TextClause, text
 from sqlalchemy.engine import Connection
 
 from ..core import sql
 from ..core.errors import Conflict, ValidationFailure
-from ..storage.sqlite import utcnow
+from ..repositories.sql.cards import SqlCardRepository
+from ..repositories.sql.idempotency import SqlBoardIdempotencyRepository
+from . import idempotency
 from .ordering import place
 
 # What the helpers below format into SQL text (see core/sql.py). A positioned table's siblings are
-# the rows its filter of the same name selects; ``other`` leaves out the row being moved.
-_POSITIONED_TABLES = ("lists", "cards", "checklists", "checklist_items")
+# the rows its filter of the same name selects; ``other`` leaves out the row being moved. Lists and
+# cards are placed by their repositories (``ListRepository``, ``CardRepository``).
+_POSITIONED_TABLES = ("checklists", "checklist_items")
 _SIBLING_FILTERS: sql.Filters = (
-    ("lists", "loop_id = :loop_id AND archived_at IS NULL"),
-    ("cards", "list_id = :list_id AND archived_at IS NULL"),
     ("checklists", "card_id = :card_id"),
     ("checklist_items", "checklist_id = :checklist_id"),
     ("other", "id != :id"),
 )
-# The join a label filter needs, shared by the card list and the card search.
-LABEL_JOIN = " JOIN card_labels cl ON cl.card_id = c.id JOIN labels l ON l.id = cl.label_id"
-
-_LABELS_FOR_CARDS = text(
-    "SELECT cl.card_id, l.id, l.name, l.color FROM card_labels cl"
-    " JOIN labels l ON l.id = cl.label_id WHERE cl.card_id IN :card_ids"
-    " ORDER BY l.name"
-).bindparams(bindparam("card_ids", expanding=True))
-_CHECKLIST_COUNTS = text(
-    "SELECT ch.card_id, COUNT(i.id) AS total, COALESCE(SUM(i.completed), 0) AS completed"
-    " FROM checklists ch LEFT JOIN checklist_items i ON i.checklist_id = ch.id"
-    " WHERE ch.card_id IN :card_ids GROUP BY ch.card_id"
-).bindparams(bindparam("card_ids", expanding=True))
-_COMMENT_COUNTS = text(
-    "SELECT card_id, COUNT(*) AS total FROM comments WHERE card_id IN :card_ids"
-    " GROUP BY card_id"
-).bindparams(bindparam("card_ids", expanding=True))
 
 
 def parse_timestamp(value: str | None) -> datetime | None:
@@ -110,80 +94,28 @@ def position_for_index(
     return placement.position
 
 
-def labels_for_cards(conn: Connection, card_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-    if not card_ids:
-        return {}
-    result: dict[str, list[dict[str, Any]]] = {card_id: [] for card_id in card_ids}
-    for row in rows(conn, _LABELS_FOR_CARDS, {"card_ids": list(card_ids)}):
-        result[row["card_id"]].append({"id": row["id"], "name": row["name"], "color": row["color"]})
-    return result
-
-
-def card_counts(conn: Connection, card_ids: list[str]) -> dict[str, dict[str, int]]:
-    if not card_ids:
-        return {}
-    params = {"card_ids": list(card_ids)}
-    result: dict[str, dict[str, int]] = {
-        card_id: {"checklist_total": 0, "checklist_completed": 0, "comment_count": 0}
-        for card_id in card_ids
-    }
-    for row in rows(conn, _CHECKLIST_COUNTS, params):
-        result[row["card_id"]]["checklist_total"] = int(row["total"])
-        result[row["card_id"]]["checklist_completed"] = int(row["completed"])
-    for row in rows(conn, _COMMENT_COUNTS, params):
-        result[row["card_id"]]["comment_count"] = int(row["total"])
-    return result
-
-
 def decorate_cards(
     conn: Connection, board_id: str, cards: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    """Each card with its board, labels and counts, as ``CardService`` shows them; for the card
+    search until it is converted (GCS-T00e part 3)."""
+    repository = SqlCardRepository(conn)
     ids = [card["id"] for card in cards]
-    labels = labels_for_cards(conn, ids)
-    counts = card_counts(conn, ids)
+    labels = repository.labels(ids)
+    counts = repository.counts(ids)
     decorated = []
     for card in cards:
         entry = dict(card)
         entry["board_id"] = board_id
-        entry["labels"] = labels.get(card["id"], [])
-        entry.update(counts.get(card["id"], {}))
+        entry["labels"] = [
+            {"id": label.id, "name": label.name, "color": label.color}
+            for label in labels[card["id"]]
+        ]
+        entry["checklist_total"] = counts[card["id"]].checklist_total
+        entry["checklist_completed"] = counts[card["id"]].checklist_completed
+        entry["comment_count"] = counts[card["id"]].comment_count
         decorated.append(entry)
     return decorated
-
-
-def resolve_label_ids(conn: Connection, names_or_ids: list[str]) -> list[str]:
-    """Labels may be referenced by id or by name; unknown names are created."""
-    resolved: list[str] = []
-    for reference in names_or_ids:
-        reference = reference.strip()
-        if not reference:
-            continue
-        found = one(
-            conn, "SELECT id FROM labels WHERE id = :ref OR name = :ref", {"ref": reference}
-        )
-        if found is None:
-            from uuid import uuid4
-
-            new_id = str(uuid4())
-            conn.execute(
-                text("INSERT INTO labels (id, name, color) VALUES (:id, :name, :color)"),
-                {"id": new_id, "name": reference, "color": "#64748b"},
-            )
-            found = {"id": new_id}
-        if found["id"] not in resolved:
-            resolved.append(found["id"])
-    return resolved
-
-
-def set_card_labels(conn: Connection, card_id: str, label_ids: list[str]) -> None:
-    conn.execute(text("DELETE FROM card_labels WHERE card_id = :id"), {"id": card_id})
-    for label_id in label_ids:
-        conn.execute(
-            text(
-                "INSERT OR IGNORE INTO card_labels (card_id, label_id) VALUES (:card_id, :label_id)"
-            ),
-            {"card_id": card_id, "label_id": label_id},
-        )
 
 
 def request_fingerprint(payload: Any) -> str:
@@ -193,32 +125,17 @@ def request_fingerprint(payload: Any) -> str:
 
 def check_idempotency(
     conn: Connection, *, actor_id: str, key: str | None, fingerprint: str
-) -> dict[str, Any] | None:
+) -> Any:
     """Return the stored response for a replayed idempotency key, or None."""
     if not key:
         return None
-    existing = one(
-        conn,
-        "SELECT request_hash, response_json, expires_at FROM idempotency_records"
-        " WHERE actor_id = :actor_id AND idempotency_key = :key",
-        {"actor_id": actor_id, "key": key},
+    return idempotency.stored_answer(
+        SqlBoardIdempotencyRepository(conn),
+        actor_id=actor_id,
+        key=key,
+        fingerprint=fingerprint,
+        now=datetime.now(UTC),
     )
-    if existing is None:
-        return None
-    if existing["request_hash"] != fingerprint:
-        raise Conflict(
-            "Idempotency key was already used with a different payload",
-            code="idempotency_key_reused",
-        )
-    if existing["expires_at"] >= utcnow():
-        return json.loads(existing["response_json"])
-    conn.execute(
-        text(
-            "DELETE FROM idempotency_records WHERE actor_id = :actor_id AND idempotency_key = :key"
-        ),
-        {"actor_id": actor_id, "key": key},
-    )
-    return None
 
 
 def store_idempotency(
@@ -232,22 +149,14 @@ def store_idempotency(
 ) -> None:
     if not key:
         return
-    now = utcnow()
-    expires_at = iso_utc(datetime.now(UTC) + timedelta(seconds=ttl_seconds))
-    conn.execute(
-        text(
-            "INSERT OR REPLACE INTO idempotency_records"
-            " (actor_id, idempotency_key, request_hash, response_json, created_at, expires_at)"
-            " VALUES (:actor_id, :key, :hash, :response, :now, :expires_at)"
-        ),
-        {
-            "actor_id": actor_id,
-            "key": key,
-            "hash": fingerprint,
-            "response": json.dumps(result),
-            "now": now,
-            "expires_at": expires_at,
-        },
+    idempotency.remember(
+        SqlBoardIdempotencyRepository(conn),
+        actor_id=actor_id,
+        key=key,
+        fingerprint=fingerprint,
+        answer=result,
+        now=datetime.now(UTC),
+        ttl_seconds=ttl_seconds,
     )
 
 

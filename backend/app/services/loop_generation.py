@@ -28,9 +28,9 @@ from . import runtime
 from .agents import AgentService
 from .boards import BoardService
 from .common import one, request_fingerprint, rows, run_idempotent
+from .loop_bridge import LoopConnectionHelpers
 from .loop_documents import LoopDocumentService
 from .loop_links import LoopWorkflowLinks
-from .loops import LoopService
 from .runtime import EXECUTABLE_CONNECTION_TYPES
 
 logger = logging.getLogger("tralala.loop_generation")
@@ -125,7 +125,7 @@ class LoopGenerationService:
     def __init__(
         self,
         board_service: BoardService,
-        loop_service: LoopService,
+        loop_service: LoopConnectionHelpers,
         document_service: LoopDocumentService,
         links: LoopWorkflowLinks,
         agent_service: AgentService,

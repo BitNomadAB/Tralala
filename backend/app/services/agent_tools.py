@@ -30,6 +30,7 @@ from ..schemas.subresources import CommentCreate
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
+    from .cards import CardEntry
     from .lists import ListEntry
 
 # A retried call arrives seconds later; a deliberate repeat rarely does. This window is what tells
@@ -108,7 +109,7 @@ def _resolve_list(services: Services, board_id: str, loop_id: str, wanted: str) 
 
 def _ticket_location(
     services: Services, board_id: str, card_id: str
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, CardEntry]:
     loop_id, _ = services.card.locate(board_id, card_id)
     return loop_id, services.card.get(board_id, loop_id, card_id)
 

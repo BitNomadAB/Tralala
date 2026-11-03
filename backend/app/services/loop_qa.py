@@ -33,10 +33,10 @@ from .common import (
     rows,
     store_idempotency,
 )
+from .loop_bridge import LoopConnectionHelpers
 from .loop_history import LoopHistoryService
 from .loop_identifiers import format_ticket_key
 from .loop_links import LoopWorkflowLinks
-from .loops import LoopService
 
 QA_PHASE_NAME = "Verification"
 BLOCKING_RESULT_STATUSES = {"failed", "blocked", "not_run"}
@@ -91,7 +91,7 @@ class LoopQaService:
     def __init__(
         self,
         board_service: BoardService,
-        loop_service: LoopService,
+        loop_service: LoopConnectionHelpers,
         history_service: LoopHistoryService,
         links: LoopWorkflowLinks,
         *,

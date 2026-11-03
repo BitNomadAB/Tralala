@@ -34,6 +34,10 @@ _OWNER_NAME = "owner__name"
 # --- actors --------------------------------------------------------------------------------------
 
 _ANY_USER = text("SELECT id FROM actors WHERE type = 'user' LIMIT 1")
+_ENABLED_ACTOR = text(
+    f"SELECT {sql.column_list(ACTORS_COLUMNS)}"  # noqa: S608 - from generated columns
+    " FROM actors WHERE id = :id AND disabled_at IS NULL"
+)
 _ADD_ACTOR = text(
     "INSERT INTO actors (id, type, name, created_at, disabled_at)"
     " VALUES (:id, :type, :name, :created_at, :disabled_at)"
@@ -181,6 +185,10 @@ class SqlActorRepository:
 
     def any_user(self) -> bool:
         return self._connection.execute(_ANY_USER).first() is not None
+
+    def enabled(self, actor_id: str) -> ActorsRow | None:
+        row = self._connection.execute(_ENABLED_ACTOR, {"id": actor_id}).mappings().first()
+        return None if row is None else ActorsRow.from_mapping(row)
 
     def add(self, row: ActorsRow) -> None:
         self._connection.execute(

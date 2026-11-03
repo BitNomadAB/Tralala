@@ -22,18 +22,18 @@ from app.core import sql
 from app.db.generated.registry import AGENTS_COLUMNS, REPOSITORIES_COLUMNS
 from app.repositories import agents as agent_repositories
 from app.repositories import board_rows, code_repositories
+from app.repositories import cards as card_repositories
+from app.repositories import loops as loop_repositories
 from app.schemas.agents import AgentCreate, AgentUpdate, RoleTemplateUpdate
 from app.schemas.cards import CardUpdate
 from app.schemas.loops import LoopUpdate
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
 from app.schemas.subresources import ChecklistItemUpdate, LabelUpdate
 from app.services import (
-    cards,
     common,
     discussions,
     events,
     loop_documents,
-    loops,
     search,
     subresources,
 )
@@ -166,12 +166,12 @@ def test_the_update_allowlists_cover_every_field_a_request_can_change() -> None:
     assert _fields(AgentCreate, "api_key") | credentials <= set(AGENTS_COLUMNS)
     assert _fields(LabelUpdate) <= set(subresources._LABEL_EDITABLE)
     assert _fields(ChecklistItemUpdate) <= set(subresources._CHECKLIST_ITEM_EDITABLE)
-    assert _fields(LoopUpdate) | {"updated_at"} <= set(loops._LOOP_EDITABLE)
+    assert _fields(LoopUpdate) | {"updated_at"} <= set(loop_repositories.LOOP_EDITABLE)
     card_fields = _fields(
         CardUpdate, "clear_due_at", "completed", "labels", "assignee_actor_id", "clear_assignee"
     )
     assert card_fields | {"completed_at", "assignee_actor_id", "updated_at"} <= set(
-        cards._CARD_EDITABLE
+        card_repositories.CARD_EDITABLE
     )
     tokens = {"token_ciphertext", "token_hint"}
     assert _fields(RepositoryUpdate, "token", "clear_token") | tokens <= set(
@@ -216,6 +216,20 @@ def test_each_change_type_names_exactly_the_columns_its_update_may_format() -> N
             ),
             code_repositories.REPOSITORY_EDITABLE,
         ),
+        (
+            _keys(
+                loop_repositories.LoopChanges.__required_keys__,
+                loop_repositories.LoopChanges.__optional_keys__,
+            ),
+            loop_repositories.LOOP_EDITABLE,
+        ),
+        (
+            _keys(
+                card_repositories.CardChanges.__required_keys__,
+                card_repositories.CardChanges.__optional_keys__,
+            ),
+            card_repositories.CARD_EDITABLE,
+        ),
     ]
     for keys, allowed in pairs:
         assert keys == sorted(allowed)
@@ -225,11 +239,8 @@ def test_each_change_type_names_exactly_the_columns_its_update_may_format() -> N
 
 
 def test_sibling_scopes_are_the_clauses_the_callers_used_to_pass() -> None:
+    # Lists and cards are placed by their repositories (sql/lists.py, sql/cards.py).
     expected = {
-        ("lists",): " WHERE loop_id = :loop_id AND archived_at IS NULL",
-        ("lists", "other"): " WHERE loop_id = :loop_id AND archived_at IS NULL AND id != :id",
-        ("cards",): " WHERE list_id = :list_id AND archived_at IS NULL",
-        ("cards", "other"): " WHERE list_id = :list_id AND archived_at IS NULL AND id != :id",
         ("checklists",): " WHERE card_id = :card_id",
         ("checklist_items",): " WHERE checklist_id = :checklist_id",
         ("checklist_items", "other"): " WHERE checklist_id = :checklist_id AND id != :id",
@@ -241,23 +252,11 @@ def test_sibling_scopes_are_the_clauses_the_callers_used_to_pass() -> None:
     }
 
 
-def test_the_card_filters_keep_the_order_the_query_always_had() -> None:
-    everything = [name for name, _ in cards._CARD_FILTERS if name not in {"open", "unassigned"}]
-    assert sql.where(cards._CARD_FILTERS, everything) == (
-        " WHERE c.loop_id = :loop_id AND c.archived_at IS NULL AND c.list_id = :list_id"
-        " AND (c.title LIKE :q OR c.description LIKE :q) AND (l.id = :label OR l.name = :label)"
-        " AND c.priority = :priority AND c.due_at IS NOT NULL AND c.due_at <= :due_before"
-        " AND c.due_at IS NOT NULL AND c.due_at < :now AND c.completed_at IS NULL"
-        " AND c.completed_at IS NOT NULL AND c.assignee_actor_id = :assignee"
-    )
-    assert sql.where(cards._BOARD_TICKET_FILTERS, ["open", "q"]) == (
-        " WHERE c.archived_at IS NULL AND l.completed_at IS NULL AND l.archived_at IS NULL"
-        " AND (c.title LIKE :q OR c.ticket_key LIKE :q)"
-    )
+def test_the_card_search_join_is_the_fixed_fragment() -> None:
+    # The card list's filters, sorts and label join moved into app/repositories/sql/cards.py
+    # (GCS-T00e); the build compiles them against the schema, and a unit test does not import the
+    # SQL repositories.
     assert search._CARD_FTS_JOIN == " JOIN cards_fts f ON f.rowid = c.rowid"
-    assert common.LABEL_JOIN == (
-        " JOIN card_labels cl ON cl.card_id = c.id JOIN labels l ON l.id = cl.label_id"
-    )
 
 
 def test_thread_and_activity_filters_match_the_former_literals() -> None:

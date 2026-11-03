@@ -21,8 +21,8 @@ from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
 from .common import one, rows
+from .loop_bridge import LoopConnectionHelpers
 from .loop_identifiers import format_ticket_key, phase_prefix
-from .loops import LoopService
 
 
 def _is_uuid(value: str) -> bool:
@@ -37,7 +37,7 @@ class LoopPlanService:
     def __init__(
         self,
         board_service: BoardService,
-        loop_service: LoopService,
+        loop_service: LoopConnectionHelpers,
         *,
         boards: BoardDatabaseManager,
     ) -> None:

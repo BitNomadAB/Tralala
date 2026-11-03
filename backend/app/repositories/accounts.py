@@ -67,6 +67,10 @@ class ActorRepository(Protocol):
         """Whether any person exists, enabled or not."""
         ...
 
+    def enabled(self, actor_id: str) -> ActorsRow | None:
+        """The actor (a person or a token's agent actor) unless it is disabled."""
+        ...
+
     def add(self, row: ActorsRow) -> None: ...
 
     def disable(self, actor_id: str, *, now: str) -> None:

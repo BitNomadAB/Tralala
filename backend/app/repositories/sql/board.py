@@ -13,15 +13,25 @@ from ..activity import ActivityRepository
 from ..board import BoardUnitOfWork
 from ..board_files import BoardFiles, BoardMigrator
 from ..board_metadata import BoardMetadataRepository, LoopDefaultsRepository
+from ..cards import CardRepository
 from ..counters import CounterRepository
+from ..idempotency import BoardIdempotencyRepository
 from ..labels import LabelRepository
 from ..lists import ListRepository
+from ..loop_documents import LoopApprovalRepository, LoopDocumentRepository
+from ..loop_plans import LoopPlanRepository
+from ..loop_qa import LoopQaRepository
 from ..loops import LoopRepository
 from .activity import SqlActivityRepository
 from .board_metadata import SqlBoardMetadataRepository, SqlLoopDefaultsRepository
+from .cards import SqlCardRepository
 from .counters import SqlCounterRepository
+from .idempotency import SqlBoardIdempotencyRepository
 from .labels import SqlLabelRepository
 from .lists import SqlListRepository
+from .loop_documents import SqlLoopApprovalRepository, SqlLoopDocumentRepository
+from .loop_plans import SqlLoopPlanRepository
+from .loop_qa import SqlLoopQaRepository
 from .loops import SqlLoopRepository
 
 
@@ -38,6 +48,17 @@ class SqlBoardRepositories:
         self.counters: CounterRepository = SqlCounterRepository(connection)
         self.metadata: BoardMetadataRepository = SqlBoardMetadataRepository(connection)
         self.loop_defaults: LoopDefaultsRepository = SqlLoopDefaultsRepository(connection)
+        self.cards: CardRepository = SqlCardRepository(connection)
+        self.documents: LoopDocumentRepository = SqlLoopDocumentRepository(connection)
+        self.approvals: LoopApprovalRepository = SqlLoopApprovalRepository(connection)
+        self.plans: LoopPlanRepository = SqlLoopPlanRepository(connection)
+        self.qa: LoopQaRepository = SqlLoopQaRepository(connection)
+        self.idempotency: BoardIdempotencyRepository = SqlBoardIdempotencyRepository(connection)
+
+    @contextmanager
+    def savepoint(self) -> Generator[None]:
+        with self.connection.begin_nested():
+            yield
 
 
 class SqlBoardUnitOfWork(BoardUnitOfWork):

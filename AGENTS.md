@@ -19,7 +19,8 @@ message broker.
    the registry; implemented over SQL in `repositories/sql/`), never through
    `BoardDatabaseManager`, `Registry`, a connection or SQL text of its own. `services/lists.py` and
    `services/auth.py` are the references; services not converted yet still hold those handles until
-   their conversion.
+   their conversion. The Loop workflow services reach the converted Loop and Ticket rules through
+   the transitional `services/loop_bridge.py`, which is deleted when they are converted.
 2. **Board isolation.** A board's data lives only in `data/boards/{uuid}/board.sqlite`. A board id
    is always a UUID resolved through `BoardDatabaseManager`; never build a path from user text.
 2b. **A Loop owns its Kanban.** Boards contain Loops; loops contain lists, Tickets, documents,

@@ -24,6 +24,7 @@ from .discussions import DiscussionService
 from .events import EventService
 from .lists import ListService
 from .loop_agents import LoopAgentService
+from .loop_bridge import LoopConnectionHelpers, LoopPlanViews
 from .loop_documents import LoopDocumentService
 from .loop_generation import LoopGenerationService
 from .loop_history import LoopHistoryService
@@ -80,19 +81,29 @@ class Services:
         )
         self.template = TemplateService(self.registry_store, self.board_store, self.board)
         self.board.templates = self.template
+        # The plan views and the connection helpers are the transitional bridge to the Loop
+        # workflow services, which GCS-T00f converts (services/loop_bridge.py).
+        self.loop_plan_views = LoopPlanViews()
+        self.card = CardService(
+            settings, self.board, self.board_store, self.registry_store, plans=self.loop_plan_views
+        )
+        self.loop = LoopService(
+            settings, self.board, self.board_store, plans=self.loop_plan_views, tickets=self.card
+        )
+        self.loop_helpers = LoopConnectionHelpers(self.loop)
         # The services below that take ``boards`` (and ``registry``) are not converted to the
         # repositories yet (GCS-T00e..g) and still open connections themselves.
-        self.loop = LoopService(self.board, boards=self.boards)
-        self.loop_plan = LoopPlanService(self.board, self.loop, boards=self.boards)
+        self.loop_plan = LoopPlanService(self.board, self.loop_helpers, boards=self.boards)
+        self.loop_plan_views.service = self.loop_plan
         self.loop_document = LoopDocumentService(
-            self.board, self.loop, self.loop_plan, boards=self.boards
+            self.board, self.loop_helpers, self.loop_plan, boards=self.boards
         )
         self.loop_links = LoopWorkflowLinks()
         self.loop_agents = LoopAgentService(self.boards, self.agent)
         self.loop_history = LoopHistoryService(self.board, boards=self.boards)
         self.loop_generation = LoopGenerationService(
             self.board,
-            self.loop,
+            self.loop_helpers,
             self.loop_document,
             self.loop_links,
             self.agent,
@@ -102,23 +113,18 @@ class Services:
             registry=self.registry,
         )
         self.loop_qa = LoopQaService(
-            self.board, self.loop, self.loop_history, self.loop_links, boards=self.boards
+            self.board, self.loop_helpers, self.loop_history, self.loop_links, boards=self.boards
         )
         self.loop_links.bind(
             start_generation=self.loop_generation.start,
             apply_qa_instructions=self.loop_qa.apply_instructions,
         )
-        self.loop.plans = self.loop_plan
         self.list = ListService(self.board, self.board_store)
-        self.card = CardService(
-            self.board, self.loop, self.loop_plan, boards=self.boards, registry=self.registry
-        )
-        self.loop.cards = self.card
         self.label = LabelService(self.board, boards=self.boards)
         self.checklist = ChecklistService(self.board, boards=self.boards)
         self.comment = CommentService(self.board, boards=self.boards, registry=self.registry)
         self.search = SearchService(
-            self.board, self.card, boards=self.boards, registry=self.registry
+            self.board, self.loop_plan, boards=self.boards, registry=self.registry
         )
         self.backup = BackupService(self.board, boards=self.boards)
         self.backup_scheduler = BackupScheduler(
