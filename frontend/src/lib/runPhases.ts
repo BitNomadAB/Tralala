@@ -12,7 +12,11 @@ export interface RunStep {
   state: RunStepState;
 }
 
-const ORDER: RunPhaseKey[] = ["reading_info", "analysing_repository", "generating"];
+const ORDER: readonly [RunPhaseKey, ...RunPhaseKey[]] = [
+  "reading_info",
+  "analysing_repository",
+  "generating",
+];
 
 /** Only status and phase are always known; the recorded sources arrive once the step has run. */
 type RunFacts = Pick<GenerationRun, "status" | "phase"> &

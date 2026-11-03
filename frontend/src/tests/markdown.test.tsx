@@ -30,8 +30,8 @@ describe("renderMarkdown", () => {
     );
     const anchors = container.querySelectorAll("a");
     expect(anchors).toHaveLength(1);
-    expect(anchors[0].getAttribute("href")).toBe("https://example.com");
-    expect(anchors[0].getAttribute("rel")).toContain("noreferrer");
+    expect(anchors[0]?.getAttribute("href")).toBe("https://example.com");
+    expect(anchors[0]?.getAttribute("rel")).toContain("noreferrer");
     expect(container.textContent).toContain("bad");
   });
 
@@ -41,5 +41,34 @@ describe("renderMarkdown", () => {
     );
     expect(container.querySelectorAll("li")).toHaveLength(2);
     expect(container.querySelector("pre code")?.textContent).toContain("const a = 1;");
+  });
+
+  it("renders four heading levels, ordered lists and joined paragraph lines", () => {
+    const { container } = render(
+      <div>
+        {renderMarkdown("# a\n## b\n### c\n#### d\n##### e\n\n1. one\n2. two\nfirst\nsecond")}
+      </div>,
+    );
+    expect([...container.querySelectorAll("h1, h2, h3, h4")].map((node) => node.tagName)).toEqual(
+      ["H1", "H2", "H3", "H4"],
+    );
+    expect(container.querySelectorAll("ol li")).toHaveLength(2);
+    expect([...container.querySelectorAll("p")].map((node) => node.textContent)).toEqual([
+      "##### e",
+      "first second",
+    ]);
+  });
+
+  it("renders a heading marker the heading pattern rejects as a paragraph, without hanging", () => {
+    for (const separator of ["\r", "\u2028"]) {
+      const { container, unmount } = render(
+        <div>{renderMarkdown(`# a${separator}b\nnext`)}</div>,
+      );
+      expect(container.querySelector("h1")).toBeNull();
+      expect([...container.querySelectorAll("p")].map((node) => node.textContent)).toEqual([
+        `# a${separator}b next`,
+      ]);
+      unmount();
+    }
   });
 });

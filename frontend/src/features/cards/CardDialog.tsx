@@ -650,7 +650,8 @@ export function CardDialog({
                         );
                       } else if (event.key === "Enter") {
                         event.preventDefault();
-                        chooseAgent(suggestions[mentionIndex]);
+                        const highlighted = suggestions[mentionIndex];
+                        if (highlighted) chooseAgent(highlighted);
                       }
                     }}
                     onBlur={() => setMentionToken(null)}

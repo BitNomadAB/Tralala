@@ -6,19 +6,21 @@ import { cn } from "@/lib/utils";
 import type { ThemeMode } from "@/themes/theme";
 import { useTheme } from "@/themes/useTheme";
 
-const themeOptions: { value: ThemeMode; label: string; Icon: typeof Sun }[] = [
-  { value: "dark", label: "Dark theme", Icon: Moon },
-  { value: "light", label: "Light theme", Icon: Sun },
-  { value: "system", label: "System theme", Icon: MonitorSmartphone },
-];
+/** Each mode's label and icon, and the mode the toggle switches to next. */
+const themeOptions: Record<ThemeMode, { label: string; Icon: typeof Sun; next: ThemeMode }> = {
+  dark: { label: "Dark theme", Icon: Moon, next: "light" },
+  light: { label: "Light theme", Icon: Sun, next: "system" },
+  system: { label: "System theme", Icon: MonitorSmartphone, next: "dark" },
+};
 
 export function AppLayout() {
   const { actor, logout } = useAuth();
   const { mode, setMode } = useTheme();
   const navigate = useNavigate();
 
-  const nextTheme = themeOptions[(themeOptions.findIndex((item) => item.value === mode) + 1) % 3];
-  const ActiveIcon = themeOptions.find((item) => item.value === mode)?.Icon ?? Moon;
+  const nextMode = themeOptions[mode].next;
+  const nextTheme = themeOptions[nextMode];
+  const ActiveIcon = themeOptions[mode].Icon;
 
   async function signOut() {
     await logout();
@@ -80,7 +82,7 @@ export function AppLayout() {
               size="icon"
               aria-label={`Switch to ${nextTheme.label.toLowerCase()}`}
               title={`Current: ${mode}. Switch to ${nextTheme.label.toLowerCase()}.`}
-              onClick={() => setMode(nextTheme.value)}
+              onClick={() => setMode(nextMode)}
               className="border border-[var(--border)]"
             >
               <ActiveIcon size={15} />

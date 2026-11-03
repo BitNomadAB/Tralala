@@ -13,7 +13,7 @@ import { useAgent, useRoleTemplates } from "@/lib/queries";
 import type { Agent, AgentTestResult, ConnectionType } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 
-const ADJECTIVES = [
+const ADJECTIVES: readonly [string, ...string[]] = [
   "Curious",
   "Careful",
   "Pragmatic",
@@ -25,7 +25,7 @@ const ADJECTIVES = [
   "Precise",
   "Inventive",
 ];
-const NOUNS = [
+const NOUNS: readonly [string, ...string[]] = [
   "Otter",
   "Badger",
   "Heron",
@@ -38,10 +38,13 @@ const NOUNS = [
   "Pike",
 ];
 
+/** One word at random; the fallback never runs, the tuple type proves the list is not empty. */
+function pick(words: readonly [string, ...string[]]): string {
+  return words[Math.floor(Math.random() * words.length)] ?? words[0];
+}
+
 function randomName(): string {
-  const adjective = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  return `${adjective} ${noun} ${Math.floor(10 + Math.random() * 90)}`;
+  return `${pick(ADJECTIVES)} ${pick(NOUNS)} ${Math.floor(10 + Math.random() * 90)}`;
 }
 
 export function AgentEditorPage() {

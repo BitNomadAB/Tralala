@@ -16,6 +16,15 @@ const PURPOSES = [
   { key: "qa_agent_id", purpose: "qa", label: "QA instructions" },
 ] as const;
 
+type PurposeKey = (typeof PURPOSES)[number]["key"];
+
+/** "" is "Board default" in every select, and is sent as null. */
+const NO_CHOICE: Record<PurposeKey, string> = {
+  analysis_agent_id: "",
+  roadmap_agent_id: "",
+  qa_agent_id: "",
+};
+
 /**
  * Which agent this Loop prefers per purpose. A stored choice only fills in the default of the next
  * run; the run dialog can still deviate, and the server still refuses an agent the board dropped.
@@ -36,7 +45,7 @@ export function LoopAgentsDialog({
   const boardQuery = useBoard(boardId);
   const agentsQuery = useAgents();
   const preferencesQuery = useLoopAgents(boardId, loop.id);
-  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<Record<PurposeKey, string>>(NO_CHOICE);
   const [draftSource, setDraftSource] = useState<LoopAgentPreferences | undefined>(undefined);
 
   const boardAgents = useMemo(
@@ -93,7 +102,7 @@ export function LoopAgentsDialog({
             <Field key={entry.key} label={entry.label} htmlFor={`loop-agent-${entry.purpose}`}>
               <Select
                 id={`loop-agent-${entry.purpose}`}
-                value={draft[entry.key] ?? ""}
+                value={draft[entry.key]}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, [entry.key]: event.target.value }))
                 }

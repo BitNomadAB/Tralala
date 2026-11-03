@@ -52,9 +52,8 @@ export function fromDateInputValue(value: string): string | null {
   return date.toISOString().replace(".000Z", "Z");
 }
 
-export function moveItem<T>(items: T[], from: number, to: number): T[] {
+export function moveItem<T>(items: readonly T[], from: number, to: number): T[] {
   const next = [...items];
-  const [item] = next.splice(from, 1);
-  next.splice(to, 0, item);
+  next.splice(to, 0, ...next.splice(from, 1));
   return next;
 }

@@ -8,6 +8,7 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import type { BoardTemplate } from "@/lib/types";
+import { moveItem } from "@/lib/utils";
 
 interface LabelDraft {
   name: string;
@@ -111,9 +112,7 @@ export function TemplateEditorPage() {
     setLists((current) => {
       const target = index + offset;
       if (target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
+      return moveItem(current, index, target);
     });
   };
 

@@ -101,6 +101,9 @@ export default allErrors(
         ],
         // Option: `const { omitted, ...rest } = value` is how a key is left out of a copy.
         "@typescript-eslint/no-unused-vars": ["error", { ignoreRestSiblings: true }],
+        // On: under verbatimModuleSyntax `import { type A } from "m"` still loads "m" at runtime;
+        // TypeScript itself requires the `type` marker, so consistent-type-imports stays off.
+        "@typescript-eslint/no-import-type-side-effects": "error",
       },
     },
     {
