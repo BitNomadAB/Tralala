@@ -39,7 +39,8 @@ facts that explain most surprises:
   equal to the `tralala_csrf` cookie. Bearer-token requests never need it.
 - **Everyone is throttled at once** — the backend is seeing one address for all clients. Behind a
   proxy set `TRALALA_TRUST_PROXY_HEADERS=true` (the compose default); the proxy must send
-  `X-Forwarded-For`.
+  `X-Forwarded-For`. With another proxy in front of Caddy, also set `TRALALA_TRUSTED_PROXIES` to
+  its address, or Caddy replaces the header with that proxy's address.
 
 ## The web tier (Caddy)
 

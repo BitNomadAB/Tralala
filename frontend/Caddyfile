@@ -6,10 +6,19 @@
 #   http://:8080         a non-default port while testing
 #
 # TRALALA_BACKEND is the upstream; compose supplies the service name.
+#
+# TRALALA_TRUSTED_PROXIES lists, separated by spaces, the addresses or CIDR ranges of a proxy in
+# front of Caddy whose X-Forwarded-For (and -Proto, -Host) Caddy passes on to the backend. Empty, the
+# default, trusts no one: Caddy replaces the header with the address that connected to it.
 {
 	# The admin API stays on the container's loopback. It is how the healthcheck asks Caddy whether
 	# the configuration is live, and it is not reachable from another container.
 	admin localhost:2019
+
+	# Server-wide, so every reverse_proxy below (and any added later) follows the same list.
+	servers {
+		trusted_proxies static {$TRALALA_TRUSTED_PROXIES}
+	}
 }
 
 {$TRALALA_SITE_ADDRESS::80} {

@@ -10,6 +10,7 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
 | Set `TRALALA_SECRET_KEY` to a long random value and keep it | It signs sessions and seals provider keys. Without it a per-install secret is generated, which is fine locally but invisible in a container that is recreated. |
 | Serve over HTTPS and set `TRALALA_COOKIE_SECURE=true` | Otherwise the session cookie can travel in clear text. With the bundled Caddy, set `TRALALA_SITE_ADDRESS` to a hostname. |
 | Keep `TRALALA_TRUST_PROXY_HEADERS=true` behind the bundled Caddy, `false` if the backend is directly reachable | It decides whether `X-Forwarded-For` is believed, and therefore whether the sign-in throttle sees clients or the proxy. |
+| Set `TRALALA_TRUSTED_PROXIES` when another proxy sits in front of Caddy | Otherwise Caddy replaces the client address with that proxy's, and every visitor shares one sign-in throttle. See [Client addresses behind a proxy](#client-addresses-behind-a-proxy). |
 | Change the administrator password, then delete `<data>/.bootstrap-password` | The generated password is a delivery mechanism, not a long-term credential. |
 | Keep backups of `<data>` and test one restore | A backup you never restored is a hypothesis. Restoring a snapshot restores the database **and** the uploaded files. |
 | Decide about `/docs` and `/openapi.json` | They require a session by default. `TRALALA_ENABLE_DOCS=false` removes them entirely. |
@@ -42,6 +43,39 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
   counts from the moment it starts, so parallel requests try no more passwords before the lock than
   the same requests one after another. Cookies are signed with a per-install secret; a session value
   from another installation is invalid.
+
+## Client addresses behind a proxy
+
+The sign-in throttle counts per client address, so the backend has to learn the address of the
+browser rather than of a proxy. With the bundled Caddy a request passes up to two hops, and each one
+decides for itself whether to believe the `X-Forwarded-For` header it receives:
+
+1. **Into Caddy: `TRALALA_TRUSTED_PROXIES`.** A space-separated list of addresses or CIDR ranges,
+   empty by default. A connection from a listed address keeps its `X-Forwarded-For` (and
+   `X-Forwarded-Proto` and `X-Forwarded-Host`), and Caddy appends the address that connected. From
+   any other address Caddy replaces the header with the address that connected, so empty trusts no
+   one, which is right when browsers reach Caddy directly.
+2. **Into the backend: `TRALALA_TRUST_PROXY_HEADERS`.** With `true` (the compose default) the
+   backend takes the first address in `X-Forwarded-For`; with `false` it takes the address that
+   connected, which behind Caddy is always Caddy.
+
+| Deployment | `TRALALA_TRUSTED_PROXIES` | `TRALALA_TRUST_PROXY_HEADERS` |
+| --- | --- | --- |
+| Browsers reach Caddy directly (plain HTTP or Caddy's own HTTPS) | empty | `true` |
+| A TLS-terminating proxy or load balancer in front of Caddy | that proxy, as Caddy sees it | `true` |
+| The backend is reachable without Caddy | not used | `false` |
+
+- List the address Caddy sees the proxy connect from, for example
+  `TRALALA_TRUSTED_PROXIES=192.168.1.20` or `TRALALA_TRUSTED_PROXIES=10.0.0.0/8 192.168.0.0/16`. A
+  proxy on another machine arrives with its own address. A proxy on the same machine that forwards
+  to the published port usually arrives from the Docker network's gateway (such as `172.18.0.1`;
+  `docker network inspect` on the project's network shows it), and a proxy container on the same
+  Compose network from that network's subnet.
+- Trust that proxy and nothing else: whoever reaches Caddy from a trusted address chooses the client
+  address the throttle sees. When the trusted address is the Docker gateway, publish Caddy only to
+  the proxy, for example `TRALALA_HTTP_PORT=127.0.0.1:8080` for a proxy on the same machine.
+- The proxy in front must set `X-Forwarded-For` to the address it sees instead of appending to a
+  value the client sent, because the backend believes the first address in the list.
 
 ## Agent access keys
 

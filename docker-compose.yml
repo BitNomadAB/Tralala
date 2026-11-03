@@ -43,6 +43,9 @@ services:
       # Caddy obtain a certificate itself: a public CA for a public name, its local CA otherwise.
       TRALALA_SITE_ADDRESS: ${TRALALA_SITE_ADDRESS:-:80}
       TRALALA_BACKEND: backend:8000
+      # Space-separated addresses or CIDR ranges of a proxy in front of Caddy whose X-Forwarded-For
+      # Caddy keeps. Empty trusts no one, so Caddy records the address that connected to it.
+      TRALALA_TRUSTED_PROXIES: ${TRALALA_TRUSTED_PROXIES:-}
     ports:
       - "${TRALALA_HTTP_PORT:-8080}:80"
       # Only used when TRALALA_SITE_ADDRESS is an HTTPS address.

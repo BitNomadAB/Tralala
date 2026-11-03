@@ -186,6 +186,31 @@ jobs:
           # The security policy and the removed Server header are part of the contract.
           curl -sI http://127.0.0.1:8080/ | grep -qi "content-security-policy"
           ! curl -sI http://127.0.0.1:8080/ | grep -qi "^server:"
+      # Caddy keeps the X-Forwarded-For of an address in TRALALA_TRUSTED_PROXIES and replaces it for
+      # anyone else. The stand-in backend is the Caddy base image answering with the header it got;
+      # `web` above runs without the variable, as an install that never sets it does.
+      - name: Trusted proxies decide whose X-Forwarded-For reaches the backend
+        run: |
+          docker network create proxies
+          docker network connect proxies web
+          docker run -d --name backend --network proxies caddy:2-alpine \
+            caddy respond --listen :8000 '{http.request.header.X-Forwarded-For}'
+          docker run -d --name web-trusted --network proxies -p 8081:80 \
+            -e TRALALA_TRUSTED_PROXIES="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16" tralala-web:ci
+          docker run -d --name web-untrusted --network proxies -p 8082:80 \
+            -e TRALALA_TRUSTED_PROXIES=192.0.2.0/24 tralala-web:ci
+          xff() { curl -fsS -H "X-Forwarded-For: 203.0.113.7" "http://127.0.0.1:$1/api/v1/health"; }
+          for port in 8080 8081 8082; do
+            for attempt in $(seq 1 30); do
+              if xff "$port" >/dev/null 2>&1; then break; fi
+              sleep 1
+            done
+          done
+          trusted=$(xff 8081); untrusted=$(xff 8082); default=$(xff 8080)
+          echo "trusted: $trusted | untrusted: $untrusted | default: $default"
+          [[ "$trusted" == "203.0.113.7, "* ]]
+          [[ -n "$untrusted" && "$untrusted" != *203.0.113.7* ]]
+          [[ -n "$default" && "$default" != *203.0.113.7* ]]
       - name: Build the backend image
         run: docker build -t tralala-backend:ci ./backend
       # A local model preset points at host.docker.internal; the mapping is what makes that name
@@ -196,7 +221,7 @@ jobs:
           grep -Eq 'host\.docker\.internal[:=]host-gateway' compose.ci.yml
       - name: Logs on failure
         if: failure()
-        run: docker logs web || true
+        run: for name in web web-trusted backend; do docker logs "$name" || true; done
 
   e2e:
     name: Journeys (Playwright)

@@ -87,7 +87,9 @@ TLS is configuration in the web container, not a second service. `TRALALA_SITE_A
 Set `TRALALA_COOKIE_SECURE=true` once the site is served over HTTPS. Keep
 `TRALALA_TRUST_PROXY_HEADERS=true` (the compose default): Caddy is the only caller of the backend, so
 trusting its `X-Forwarded-For` is what keeps the sign-in throttle keyed on the real client rather
-than on the proxy.
+than on the proxy. When another proxy terminates TLS in front of Caddy, also set
+`TRALALA_TRUSTED_PROXIES` to that proxy's address, as
+[Security defaults](Security_defaults.md#client-addresses-behind-a-proxy) explains.
 
 ### Behind Tailscale
 
