@@ -105,9 +105,6 @@ export function LoopDocumentDialog({
         description="Info is written by a person. Analysis and RoadMap pair a technical view with a plain-language one."
         className="w-[min(960px,96vw)]"
       >
-        {visibleRun ? (
-          <GenerationRunPanel scope={scope} run={visibleRun} onDismiss={dismissRun} />
-        ) : null}
         <LoopPlanTabs
           tab={tab}
           onTabChange={(entry) => {
@@ -126,6 +123,7 @@ export function LoopDocumentDialog({
           generateDisabled={readOnly || generation.generate.isPending || generating}
           onGenerate={(purpose) => generation.generate.mutate(purpose)}
         />
+        {/* Once, under the button that started the run; from 2xl the aside below shows it instead. */}
         {visibleRun ? (
           <GenerationRunPanel scope={scope} run={visibleRun} onDismiss={dismissRun} />
         ) : null}

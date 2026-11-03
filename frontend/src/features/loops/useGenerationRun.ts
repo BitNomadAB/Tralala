@@ -39,7 +39,7 @@ export function useGenerationRun({
       invalidate();
       toast.push({
         title: "Generation started",
-        description: "Following the run?",
+        description: "Following the run…",
         variant: "success",
       });
     },

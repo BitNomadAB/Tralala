@@ -72,7 +72,7 @@ export function EditBoardDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={saving || !draft.name.trim()}>
-              {saving ? "Saving?" : "Save board"}
+              {saving ? "Saving…" : "Save board"}
             </Button>
           </div>
         </form>
