@@ -63,6 +63,7 @@ from tests.unit.fakes.registry import (
     repository_row,
     role_template_row,
 )
+from tests.unit.log_lines import events
 
 MOMENT = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
 NOW = "2026-11-03T10:00:00Z"
@@ -696,7 +697,7 @@ def test_a_board_whose_database_cannot_be_opened_is_archived_and_can_then_be_del
         entry = boards.service.archive(ADMIN, SOURCE)
     assert (entry["status"], entry["archived_at"]) == ("archived", NOW)
     assert boards.registry.boards[SOURCE].status == "archived"
-    assert [json.loads(record.getMessage()) for record in caplog.records] == [
+    assert events(caplog.records) == [
         {"event": event, "board_id": SOURCE, "skipped": "board_archived_activity"}
     ]
     assert boards.databases.states[SOURCE].activity == []
@@ -1051,8 +1052,8 @@ def test_a_refused_import_whose_files_are_held_keeps_its_row_in_error_and_logs_t
         boards.service.import_archive(ADMIN, _archive({"format_version": 2}))
     assert boards.registry.boards[uuid(1)].status == "error"
     assert _left_behind(boards, uuid(1)) == ["row", "files"]
-    [line] = [record.getMessage() for record in caplog.records]
-    assert json.loads(line) == {
+    [line] = events(caplog.records)
+    assert line == {
         "event": "board_import_leftover",
         "board_id": uuid(1),
         "leftover": f"boards/{uuid(1)}",
@@ -1070,7 +1071,7 @@ def test_a_refused_import_whose_files_are_held_before_it_had_a_row_adds_none(
     ):
         boards.service.import_archive(ADMIN, _archive({"format_version": 2}, board=b"garbage"))
     assert set(boards.registry.boards) == {SOURCE}
-    assert '"event": "board_import_leftover"' in caplog.text
+    assert "board_import_leftover" in [line["event"] for line in events(caplog.records)]
 
 
 def test_an_archive_from_an_older_release_is_migrated_before_it_is_opened(boards: Boards) -> None:
@@ -1129,7 +1130,7 @@ def test_the_list_steps_past_a_board_whose_file_cannot_be_read_and_logs_it_once(
     assert (summary, total) == ([("Broken", "error", 0, 0), ("Source", "active", 1, 2)], 2)
     assert again == first
     assert single == first[0]
-    assert [json.loads(record.getMessage()) for record in caplog.records] == [
+    assert events(caplog.records) == [
         {"event": "board_database_unreadable", "board_id": broken, "skipped": "board_counts"}
     ]
     assert boards.registry.boards[broken].status == "error"

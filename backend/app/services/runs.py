@@ -37,7 +37,7 @@ from .events import (
 )
 from .orchestrator import Failure, RoundOutcome
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tralala.runs")
 
 ACTIVE_RUN_STATUSES = ("running", "paused")
 CLOSED_THREAD_STATUSES = {"approved", "vetoed", "cancelled"}

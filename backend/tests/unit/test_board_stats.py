@@ -7,7 +7,6 @@ by the typed fakes in ``tests/unit/fakes``.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -34,6 +33,7 @@ from tests.unit.fakes.registry import (
     RegistryState,
     board_row,
 )
+from tests.unit.log_lines import events
 
 NOW = datetime(2026, 11, 3, 10, 0, 0, 400_000, tzinfo=UTC)
 NOW_TEXT = "2026-11-03T10:00:00Z"
@@ -159,11 +159,9 @@ def test_a_board_that_cannot_be_opened_counts_zero(cache: Cache) -> None:
     assert cache.registry.board_stats[REPAIRING] == stored(REPAIRING, NOW_TEXT, (0, 0, 0))
 
 
-def _unreadable_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+def _unreadable_lines(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]]:
     return [
-        record.getMessage()
-        for record in caplog.records
-        if json.loads(record.getMessage())["event"] == "board_database_unreadable"
+        line for line in events(caplog.records) if line["event"] == "board_database_unreadable"
     ]
 
 
@@ -182,7 +180,7 @@ def test_a_board_whose_file_cannot_be_read_counts_zero_and_is_logged_once(
             MISSING: (0, 0, 0),
         }
     [line] = _unreadable_lines(caplog)
-    assert json.loads(line) == {
+    assert line == {
         "event": "board_database_unreadable",
         "board_id": BROKEN,
         "skipped": "board_counts",
@@ -237,4 +235,6 @@ def test_counters_that_cannot_be_dropped_never_fail_the_write(
     broken = BoardStatsCache(settings, UnwritableRegistry(cache.registry), cache.boards)
     with caplog.at_level(logging.WARNING, logger="tralala"):
         broken.invalidate(BOARD_ID)
-    assert f'"board_stats_invalidate_failed", "board_id": "{BOARD_ID}"' in caplog.text
+    assert events(caplog.records) == [
+        {"event": "board_stats_invalidate_failed", "board_id": BOARD_ID}
+    ]

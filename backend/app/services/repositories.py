@@ -14,7 +14,6 @@ ones as defaults, so every rule here runs in a unit test without a database or a
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 from typing import NotRequired, Protocol, TypedDict, TypeIs
@@ -329,13 +328,8 @@ class RepositoryService:
         with self.store.writer() as repos:
             repos.code_repositories.add(row)
         logger.info(
-            json.dumps(
-                {
-                    "event": "repository_created",
-                    "repository_id": row.id,
-                    "has_token": bool(row.token_ciphertext),
-                }
-            )
+            "repository_created",
+            extra={"repository_id": row.id, "has_token": bool(row.token_ciphertext)},
         )
         return self.get(row.id)
 

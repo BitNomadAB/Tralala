@@ -124,6 +124,26 @@ facts that explain most surprises:
 - **`503 generation_unavailable`** — no usable generation agent: configure an OpenAI-compatible or
   A2A agent in **Settings → Agents**, enable it, and make it a member of the board.
 
+## Reading the backend log
+
+Every line the backend writes is one JSON object: `ts` (UTC), `level`, `event` (what happened, such
+as `http_request` or `backup_failed`), `logger`, `request_id`, then the event's own fields. A logged
+exception adds its traceback as `exc_info`.
+
+- **Everything one request did** — every line written while a request is served carries its id, so
+  the `X-Request-ID` of a response finds the `http_request` line and whatever else that request
+  logged: `docker compose logs backend | grep <id>`. Work outside a request (startup, scheduled
+  backups, queued agent runs) has `"request_id": null`.
+- **More or less detail** — `TRALALA_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING` or `ERROR`; default
+  `INFO`) is the lowest level written. `WARNING` drops the per-request lines.
+- **`[redacted]` in a line** — the value of a field named `token`, `api_key`, `authorization` or
+  `password`, at any depth, is never written.
+- **`backup_created` has no `name`** — the snapshot's file name is `backup_name`: a log field cannot
+  be called `name`.
+- **A line that is not JSON** — it is uvicorn's, in uvicorn's format: the startup banner, the access
+  log unless it is off (the container runs with `--no-access-log`), and the traceback of an
+  exception the backend did not handle, after the backend's own `unhandled_exception` line.
+
 ## Tests
 
 - **`pnpm test:e2e` cannot find a browser** — the runner reuses a local Playwright install and only
@@ -134,6 +154,6 @@ facts that explain most surprises:
 - **The backend suite fails on a fresh clone** — it needs `backend/requirements-dev.txt`, not
   `requirements.txt`, and it writes into a temporary directory, so it needs nothing pre-configured.
 
-If none of this fits, capture the failing request's `X-Request-ID` from the response and the matching
-`{"event": "http_request", ...}` line from the backend log: that pair is what makes a report
-actionable. Security issues go to <tralala@bitnomad.se>, privately.
+If none of this fits, capture the failing request's `X-Request-ID` from the response and the backend
+log lines whose `request_id` matches it: that pair is what makes a report actionable. Security issues
+go to <tralala@bitnomad.se>, privately.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid
@@ -34,6 +33,7 @@ from .api.v1 import users as user_routes
 from .core.config import Settings, get_settings
 from .core.errors import ApiError
 from .core.identifiers import accepted_request_id
+from .core.logging import bound_request_id, configure_logging
 from .core.ratelimit import LoginThrottle, RateLimiter
 from .services import Services
 from .storage.sqlite import sqlite_supports_fts5
@@ -50,16 +50,6 @@ logger = logging.getLogger("tralala")
 THREADPOOL_TOKENS = 40
 
 
-def _configure_logging() -> None:
-    if logger.handlers:
-        return
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
-
-
 def _error_response(
     request: Request, status_code: int, code: str, message: str, **extra: Any
 ) -> JSONResponse:
@@ -73,8 +63,8 @@ def _error_response(
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    _configure_logging()
     settings = settings or get_settings()
+    configure_logging(settings)
     app = FastAPI(
         title="Tralala API",
         version="1.0.0",
@@ -127,42 +117,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def observability(request: Request, call_next):
         incoming = request.headers.get("x-request-id", "")
-        request.state.request_id = (
-            incoming if accepted_request_id(incoming) else str(uuid.uuid4())
-        )
-        content_length = request.headers.get("content-length")
-        if (
-            content_length
-            and content_length.isdigit()
-            and int(content_length) > settings.max_request_bytes
-        ):
-            return _error_response(
-                request, 413, "payload_too_large", "Request body exceeds the configured limit"
-            )
-        started = time.perf_counter()
-        response = await call_next(request)
-        duration_ms = round((time.perf_counter() - started) * 1000, 2)
-        response.headers["X-Request-ID"] = request.state.request_id
-        if request.url.path.startswith("/api/") or request.url.path == "/mcp":
-            response.headers["Cache-Control"] = "no-store"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        logger.info(
-            json.dumps(
-                {
-                    "event": "http_request",
-                    "request_id": request.state.request_id,
+        request_id = incoming if accepted_request_id(incoming) else str(uuid.uuid4())
+        request.state.request_id = request_id
+        # Every line logged while this request is served carries its id, threads included.
+        with bound_request_id(request_id):
+            content_length = request.headers.get("content-length")
+            if (
+                content_length
+                and content_length.isdigit()
+                and int(content_length) > settings.max_request_bytes
+            ):
+                return _error_response(
+                    request, 413, "payload_too_large", "Request body exceeds the configured limit"
+                )
+            started = time.perf_counter()
+            response = await call_next(request)
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            response.headers["X-Request-ID"] = request_id
+            if request.url.path.startswith("/api/") or request.url.path == "/mcp":
+                response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            logger.info(
+                "http_request",
+                extra={
                     "method": request.method,
                     "path": request.url.path,
                     "status": response.status_code,
                     "duration_ms": duration_ms,
                     "actor_id": getattr(request.state, "actor_id", None),
                     "replayed": getattr(request.state, "replayed", False),
-                }
+                },
             )
-        )
-        return response
+            return response
 
     @app.exception_handler(ApiError)
     async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
@@ -200,17 +188,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
-        # The type is enough to triage; messages and tracebacks can carry SQL values.
-        logger.error(
-            json.dumps(
-                {
-                    "event": "unhandled_exception",
-                    "request_id": getattr(request.state, "request_id", ""),
-                    "path": request.url.path,
-                    "error_type": type(exc).__name__,
-                }
+        # The type is enough to triage; messages and tracebacks can carry SQL values. This handler
+        # runs outside the observability middleware, so it binds the request id again.
+        with bound_request_id(getattr(request.state, "request_id", "")):
+            logger.error(
+                "unhandled_exception",
+                extra={"path": request.url.path, "error_type": type(exc).__name__},
             )
-        )
         return _error_response(
             request, 500, "internal_error", "An unexpected error occurred", retryable=True
         )
@@ -282,19 +266,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.services.initialize()
         purged = app.state.services.auth.purge_expired_sessions()
         logger.info(
-            json.dumps(
-                {
-                    "event": "startup",
-                    "data_dir": str(settings.data_dir),
-                    "purged_sessions": purged,
-                }
-            )
+            "startup",
+            extra={"data_dir": str(settings.data_dir), "purged_sessions": purged},
         )
         try:
             yield
         finally:
             app.state.services.shutdown()
-            logger.info(json.dumps({"event": "shutdown"}))
+            logger.info("shutdown")
 
     app.router.lifespan_context = lifespan
 

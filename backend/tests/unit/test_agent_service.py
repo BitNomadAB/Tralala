@@ -9,6 +9,7 @@ the service stored.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 
@@ -34,6 +35,7 @@ from tests.unit.fakes.registry import (
     role_template_row,
     sign_in_row,
 )
+from tests.unit.log_lines import events, lines
 
 NOW = "2026-11-03T10:00:00Z"
 KEY = "sk-helper-1234"
@@ -723,10 +725,9 @@ def test_a_probe_that_raises_is_logged_and_raised_and_records_nothing(
         pytest.raises(RuntimeError, match="boom"),
     ):
         agents.service.test(ADMIN, "helper", AgentTestRequest())
-    events = [record.getMessage() for record in caplog.records]
-    assert '"event": "agent_probe_started"' in events[0]
-    assert '"event": "agent_probe_failed"' in events[1]
-    assert '"reason": "RuntimeError"' in events[1]
+    started, failed = events(caplog.records)
+    assert started["event"] == "agent_probe_started"
+    assert (failed["event"], failed["reason"]) == ("agent_probe_failed", "RuntimeError")
     assert agents.state.agents["helper"].last_test_status is None
 
 
@@ -738,7 +739,9 @@ def test_the_probe_log_never_carries_the_key(
         agents.service.probe(
             ADMIN, AgentTestRequest(base_url="http://10.0.0.5/v1", api_key="sk-unsaved-7777")
         )
-    assert len(caplog.records) == 4
-    assert KEY not in caplog.text
-    assert "sk-unsaved-7777" not in caplog.text
-    assert '"has_api_key": true' in caplog.text
+    written = lines(caplog.records)
+    assert len(written) == 4
+    assert KEY not in json.dumps(written)
+    assert "sk-unsaved-7777" not in json.dumps(written)
+    started = [line for line in written if line["event"] == "agent_probe_started"]
+    assert [line["has_api_key"] for line in started] == [True, True]

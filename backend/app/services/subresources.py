@@ -45,7 +45,7 @@ from .lists import BoardChecks
 from .loops import ensure_ticket_writable
 from .ordering import place
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tralala.subresources")
 
 
 class LabelEntry(TypedDict):

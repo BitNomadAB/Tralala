@@ -92,6 +92,12 @@ Worth knowing when you look at the dashboard:
   (`TRALALA_DISCUSSION_TOKEN_BUDGET`, `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`). There is no
   per-token rate limit. See
   [Security_defaults.md](Security_defaults.md#accepted-risks-on-purpose).
+- **Every backend log line has the same frame.** Each line is a JSON object with `ts`, `level`,
+  `event`, `logger` and `request_id`, then the event's fields, and every line written while a request
+  is served carries that request's id — not only the `http_request` line. A logged exception keeps
+  its traceback in `exc_info`, `TRALALA_LOG_LEVEL` sets the lowest level written, and
+  `backup_created` names the snapshot file `backup_name` (was `name`). See
+  [Troubleshooting.md](Troubleshooting.md#reading-the-backend-log).
 
 Known limitations are listed in [Security_defaults.md](Security_defaults.md) and in the operational
 notes of [Architecture.md](Architecture.md#operational-notes).

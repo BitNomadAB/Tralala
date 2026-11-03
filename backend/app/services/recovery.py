@@ -8,7 +8,6 @@ already marked it); a board mid-repair or without its database is stepped past a
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable, Iterable, Sequence
 
@@ -29,17 +28,12 @@ def recover_async_work(board_ids: Iterable[str], recoverers: Sequence[Recover]) 
                 recovered += recover(board_id)
         except BoardUnreadable:
             logger.error(
-                json.dumps(
-                    {
-                        "event": "board_database_unreadable",
-                        "board_id": board_id,
-                        "skipped": "async_work_recovery",
-                    }
-                )
+                "board_database_unreadable",
+                extra={"board_id": board_id, "skipped": "async_work_recovery"},
             )
         except (NotFound, ServiceUnavailable):
             # A board mid-repair is resolved by the Migration Manager or on its next start.
             continue
     if recovered:
-        logger.info(json.dumps({"event": "async_work_recovered", "items": recovered}))
+        logger.info("async_work_recovered", extra={"items": recovered})
     return recovered

@@ -3,7 +3,6 @@ is mid-repair or has no database never stops the others or the start."""
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Collection
 from dataclasses import dataclass, field
@@ -12,6 +11,7 @@ import pytest
 
 from app.core.errors import BoardUnreadable, NotFound, ServiceUnavailable
 from app.services.recovery import recover_async_work
+from tests.unit.log_lines import events
 
 FIRST = "6a1b0000-0000-4000-8000-000000000001"
 BROKEN = "6a1b0000-0000-4000-8000-000000000002"
@@ -41,7 +41,7 @@ class Recoverer:
 
 
 def _events(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]]:
-    return [json.loads(record.getMessage()) for record in caplog.records]
+    return events(caplog.records)
 
 
 def test_every_recoverer_runs_on_every_board_and_the_total_is_logged(

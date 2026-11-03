@@ -11,7 +11,6 @@ one backend per data directory, and a second process taking snapshots would figh
 
 from __future__ import annotations
 
-import json
 import logging
 from threading import Event, Thread
 from typing import Protocol, TypedDict
@@ -105,11 +104,7 @@ class BackupScheduler:
             try:
                 self.run_once()
             except Exception as exc:  # noqa: BLE001 - a failed cycle must not kill the thread
-                logger.error(
-                    json.dumps(
-                        {"event": "backup_cycle_failed", "error_type": type(exc).__name__}
-                    )
-                )
+                logger.error("backup_cycle_failed", extra={"error_type": type(exc).__name__})
             delay = min(self.interval_hours * 3600.0, MAX_CHECK_SECONDS)
 
     def run_once(self) -> CycleReport:
@@ -130,28 +125,22 @@ class BackupScheduler:
                 removed = self.backups.prune(board_id, self.keep)
                 report["created"].append({"board_id": board_id, "name": created["name"]})
                 report["pruned"].append({"board_id": board_id, "names": removed})
+                # "name" is a LogRecord attribute, so the backup's file name is "backup_name".
                 logger.info(
-                    json.dumps(
-                        {
-                            "event": "backup_created",
-                            "board_id": board_id,
-                            "name": created["name"],
-                            "size_bytes": created["size_bytes"],
-                            "integrity": created["verification"]["integrity"],
-                            "pruned": len(removed),
-                        }
-                    )
+                    "backup_created",
+                    extra={
+                        "board_id": board_id,
+                        "backup_name": created["name"],
+                        "size_bytes": created["size_bytes"],
+                        "integrity": created["verification"]["integrity"],
+                        "pruned": len(removed),
+                    },
                 )
             except Exception as exc:  # noqa: BLE001 - one broken board must not stop the rest
                 report["failed"].append({"board_id": board_id, "error": type(exc).__name__})
                 logger.error(
-                    json.dumps(
-                        {
-                            "event": "backup_failed",
-                            "board_id": board_id,
-                            "error_type": type(exc).__name__,
-                        }
-                    )
+                    "backup_failed",
+                    extra={"board_id": board_id, "error_type": type(exc).__name__},
                 )
         return report
 

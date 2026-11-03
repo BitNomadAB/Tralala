@@ -164,7 +164,10 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   `requires-python` allows it; anything newer is untested and needs a CI leg before it is claimed.
   Typed, ruff-clean (line length 100), no blocking work in async paths. The Ruff rule set and its
   few ignores live in `backend/pyproject.toml`, each ignore with its reason; an inline `# noqa`
-  names its rule and says why. No `print` in `app/`: use a logger.
+  names its rule and says why. No `print` in `app/`: use a logger under `tralala`, with the event
+  name as the message and the fields as `extra` (`logger.info("backup_created", extra={...})`).
+  `backend/app/core/logging.py` writes the JSON line, request id included;
+  `backend/tests/unit/test_logging.py` refuses a line built by hand.
 - Routes and FastAPI dependencies are plain `def`, which FastAPI runs in a worker thread, so a
   slow request never holds up another. `async def` is only for a route that awaits (today the
   three that read a raw request body), and such a route calls `get_context` and every service

@@ -16,7 +16,6 @@ board later only requires calling :meth:`migrate_board` from the read path inste
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 import time
@@ -383,9 +382,9 @@ class MigrationManager:
         return validation
 
     def _log(self, event: str, report: MigrationReport | None = None, **fields: Any) -> None:
-        payload: dict[str, Any] = {"event": event, **fields}
+        payload: dict[str, Any] = dict(fields)
         if report is not None:
             payload.update(
                 {key: value for key, value in report.to_dict().items() if value is not None}
             )
-        logger.info(json.dumps(payload, default=str))
+        logger.info(event, extra=payload)

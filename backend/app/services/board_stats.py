@@ -7,7 +7,6 @@ without a database or a wait.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -99,9 +98,7 @@ class BoardStatsCache:
             with self.store.writer() as repos:
                 repos.board_stats.forget(board_id)
         except Exception:  # noqa: BLE001 - a cache that cannot be dropped must not fail the write
-            logger.warning(
-                '{"event": "board_stats_invalidate_failed", "board_id": "%s"}', board_id
-            )
+            logger.warning("board_stats_invalidate_failed", extra={"board_id": board_id})
 
     def _measure(self, board_id: str) -> Counts:
         try:
@@ -120,13 +117,7 @@ class BoardStatsCache:
             return
         self._unreadable.add(board_id)
         logger.error(
-            json.dumps(
-                {
-                    "event": "board_database_unreadable",
-                    "board_id": board_id,
-                    "skipped": "board_counts",
-                }
-            )
+            "board_database_unreadable", extra={"board_id": board_id, "skipped": "board_counts"}
         )
 
     def _is_fresh(self, measured_at: str) -> bool:

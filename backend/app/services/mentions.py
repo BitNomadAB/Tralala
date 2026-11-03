@@ -36,7 +36,7 @@ from .agents import RoleSnapshot
 from .events import AGENT_COMPLETED, AGENT_FAILED, AGENT_STARTED, Event, EventService
 from .orchestrator import AgentCall, usage_tokens
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tralala.mentions")
 
 WORKER_THREADS = 2
 MAX_MENTIONS_PER_COMMENT = 5

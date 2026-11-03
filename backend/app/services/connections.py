@@ -15,7 +15,6 @@ rule refuses.
 from __future__ import annotations
 
 import ipaddress
-import json
 import logging
 import socket
 import time
@@ -224,9 +223,7 @@ class PinnedTransport(httpx.BaseTransport):
 
 def _forbidden(host: str, addresses: list[str], request: httpx.Request) -> ForbiddenAddressError:
     # A saved endpoint passed the same rule, so this is usually a name that changed its answer.
-    logger.warning(
-        json.dumps({"event": "endpoint_address_refused", "host": host, "addresses": addresses})
-    )
+    logger.warning("endpoint_address_refused", extra={"host": host, "addresses": addresses})
     return ForbiddenAddressError(f"{host} is not an allowed endpoint address", request=request)
 
 

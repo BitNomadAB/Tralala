@@ -365,7 +365,10 @@ tool may do.
   latency, how many models the endpoint reported and the provider's reason. The key and the request
   body never appear.
 
-- Structured JSON logs (request id, method, path, status, duration, actor, replay flag).
+- Structured JSON logs: one formatter (`backend/app/core/logging.py`) writes every line as `ts`,
+  `level`, `event`, `logger`, the `request_id` of the request being served, then the event's own
+  fields (the `http_request` line: method, path, status, duration, actor, replay flag). A call names
+  its event and passes its fields as `extra`; a guard test refuses a line built by hand.
 - `GET /api/v1/boards/{id}/validate` runs `PRAGMA integrity_check` and `foreign_key_check` and
   reports the board's `alembic_version` revision.
 - `POST /api/v1/boards/{id}/migrate` retries a failed board migration (admin only) and returns

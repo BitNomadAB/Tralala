@@ -303,9 +303,7 @@ class RepositorySnapshotService:
         rows = self.repositories.for_board(board_id)
         if not rows:
             # Silent here used to look like a successful fetch in the run panel: say so in the log.
-            logger.info(
-                '{"event": "repository_snapshot_none", "board_id": "%s"}', board_id
-            )
+            logger.info("repository_snapshot_none", extra={"board_id": board_id})
             return []
         return [self._one(row) for row in rows]
 
@@ -328,22 +326,24 @@ class RepositorySnapshotService:
             snapshot = read_snapshot(archive)
         except SnapshotError as exc:
             logger.warning(
-                '{"event": "repository_snapshot_failed", "repository_id": "%s", "code": "%s",'
-                ' "duration_ms": %d}',
-                row["id"],
-                exc.code,
-                int((time.monotonic() - started) * 1000),
+                "repository_snapshot_failed",
+                extra={
+                    "repository_id": row["id"],
+                    "code": exc.code,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
             )
             return {**entry, "error": exc.code}
         logger.info(
-            '{"event": "repository_snapshot_captured", "repository_id": "%s", "commit_sha": "%s",'
-            ' "files": %d, "text_bytes": %d, "truncated": %s, "duration_ms": %d}',
-            row["id"],
-            sha,
-            len(snapshot["files"]),
-            snapshot["text_bytes"],
-            "true" if snapshot["truncated"] else "false",
-            int((time.monotonic() - started) * 1000),
+            "repository_snapshot_captured",
+            extra={
+                "repository_id": row["id"],
+                "commit_sha": sha,
+                "files": len(snapshot["files"]),
+                "text_bytes": snapshot["text_bytes"],
+                "truncated": snapshot["truncated"],
+                "duration_ms": int((time.monotonic() - started) * 1000),
+            },
         )
         return {
             **entry,

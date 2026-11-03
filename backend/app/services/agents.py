@@ -10,7 +10,6 @@ they are stored; a response carries only ``has_api_key`` and the hint.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from collections.abc import Callable, Mapping
 from typing import NotRequired, Protocol, TypedDict
@@ -905,7 +904,7 @@ class AgentService:
     def _log_probe(event: str, **fields: object) -> None:
         started_or_finished = event in {"agent_probe_started", "agent_probe_finished"}
         level = logging.INFO if started_or_finished else logging.WARNING
-        logger.log(level, json.dumps({"event": event, **fields}, ensure_ascii=False))
+        logger.log(level, event, extra=fields)
 
 
 __all__ = ["AgentService", "RoleTemplateService"]

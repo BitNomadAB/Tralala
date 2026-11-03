@@ -778,7 +778,7 @@ def test_a_failing_mention_queue_leaves_the_comment_saved(
 ) -> None:
     w = world()
     w.queue.failure = RuntimeError("queue is down")
-    with caplog.at_level(logging.ERROR, logger="app.services.subresources"):
+    with caplog.at_level(logging.ERROR, logger="tralala.subresources"):
         entry = w.comments.create(PERSON, BOARD_ID, "c1", CommentCreate(content="@Helper"))
     assert entry["id"] == "new-1"
     assert "new-1" in w.state.comments

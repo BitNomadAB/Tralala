@@ -8,6 +8,7 @@ open what the service stored. URL parsing and the entry shape are in ``test_repo
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -28,6 +29,7 @@ from tests.unit.fakes.registry import (
     registry_unit_of_work,
     repository_row,
 )
+from tests.unit.log_lines import events, lines
 
 NOW = "2026-11-03T10:00:00Z"
 TOKEN = "ghp-acme-1111"
@@ -208,9 +210,10 @@ def test_a_new_repository_is_named_after_its_url_and_its_token_is_sealed(
         NOW,
     )
     assert (entry["has_token"], entry["boards"]) == (True, [])
-    assert '"repository_created"' in caplog.text
-    assert '"has_token": true' in caplog.text
-    assert "ghp-tool-2222" not in caplog.text
+    assert events(caplog.records) == [
+        {"event": "repository_created", "repository_id": row.id, "has_token": True}
+    ]
+    assert "ghp-tool-2222" not in json.dumps(lines(caplog.records))
 
 
 def test_a_new_repository_takes_its_name_and_branch_trimmed(repos: Repositories) -> None:

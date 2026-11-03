@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 import time
@@ -160,13 +159,7 @@ class BoardDatabaseManager:
                 if not path.exists():
                     # A registry row without its database is an integrity event, not a normal 404.
                     logger.error(
-                        json.dumps(
-                            {
-                                "event": "board_database_missing",
-                                "board_id": board_id,
-                                "path": str(path),
-                            }
-                        )
+                        "board_database_missing", extra={"board_id": board_id, "path": str(path)}
                     )
                     raise NotFound("Board database not found")
                 engine = create_sqlite_engine(path)
@@ -303,11 +296,9 @@ class BoardDatabaseManager:
                 close_maintenance(self.path(board_id))
             except sqlite3.Error as exc:
                 logger.info(
-                    json.dumps(
-                        {
-                            "event": "board_maintenance_skipped",
-                            "board_id": board_id,
-                            "sqlite_error": getattr(exc, "sqlite_errorname", None),
-                        }
-                    )
+                    "board_maintenance_skipped",
+                    extra={
+                        "board_id": board_id,
+                        "sqlite_error": getattr(exc, "sqlite_errorname", None),
+                    },
                 )

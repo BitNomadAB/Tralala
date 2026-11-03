@@ -566,13 +566,7 @@ class BoardService:
                 # archivable, because archiving is the way to delete it; only the board's own
                 # record of the archive is missing, and the log says so.
                 logger.error(
-                    json.dumps(
-                        {
-                            "event": exc.code,
-                            "board_id": board_id,
-                            "skipped": "board_archived_activity",
-                        }
-                    )
+                    exc.code, extra={"board_id": board_id, "skipped": "board_archived_activity"}
                 )
         return self.get(board_id)
 
@@ -832,14 +826,12 @@ class BoardService:
                 remove_tree(self.settings.backups_dir / board_id, profile=profile)
         except OSError as exc:
             logger.warning(
-                json.dumps(
-                    {
-                        "event": "board_import_leftover",
-                        "board_id": board_id,
-                        "leftover": f"boards/{board_id}",
-                        "reason": type(exc).__name__,
-                    }
-                )
+                "board_import_leftover",
+                extra={
+                    "board_id": board_id,
+                    "leftover": f"boards/{board_id}",
+                    "reason": type(exc).__name__,
+                },
             )
             if registered:
                 self._update_row(board_id, {"status": "error"})

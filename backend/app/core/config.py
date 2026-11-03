@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
 
 class Settings(BaseSettings):
     """Runtime configuration. Every value can be overridden with a TRALALA_* env var."""
@@ -55,6 +57,16 @@ class Settings(BaseSettings):
     # How the host filesystem behaves: auto (the real OS), windows, posix, or network for a board
     # directory on NFS/SMB. It selects retry policy, never the locking mechanism.
     platform_profile: str = "auto"
+    # The lowest level the backend log writes: DEBUG, INFO, WARNING or ERROR.
+    log_level: str = "INFO"
+
+    @field_validator("log_level", mode="after")
+    @classmethod
+    def _known_level(cls, value: str) -> str:
+        cleaned = value.strip().upper()
+        if cleaned not in LOG_LEVELS:
+            raise ValueError(f"log_level must be one of {', '.join(LOG_LEVELS)}")
+        return cleaned
 
     @field_validator("platform_profile", mode="after")
     @classmethod

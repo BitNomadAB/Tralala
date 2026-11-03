@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 
 from ..core.config import Settings
@@ -185,16 +184,10 @@ class Services:
         self.role_templates.seed_defaults()
         resealed = self.agent.reseal_credentials()
         if resealed:
-            logger.info(
-                json.dumps({"event": "agent_credentials_resealed", "items": resealed})
-            )
+            logger.info("agent_credentials_resealed", extra={"items": resealed})
         resealed_repositories = self.repository.reseal_tokens()
         if resealed_repositories:
-            logger.info(
-                json.dumps(
-                    {"event": "repository_tokens_resealed", "items": resealed_repositories}
-                )
-            )
+            logger.info("repository_tokens_resealed", extra={"items": resealed_repositories})
         self.board.recover()
         self.migration_reports = self.migrations.migrate_all_boards()
         self.recover_async_work()
