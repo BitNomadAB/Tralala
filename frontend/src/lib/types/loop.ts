@@ -129,6 +129,15 @@ export interface LoopPlanView {
   warnings: { code: string; message: string }[];
 }
 
+/** A Ticket added outside the plan while it executes; it never blocks the plan or completion. */
+export interface UnplannedTicket {
+  id: string;
+  key: string | null;
+  title: string;
+  completed_at: string | null;
+  archived_at: string | null;
+}
+
 export interface LoopReadiness {
   loop_id: string;
   stage: LoopStage;
@@ -136,6 +145,7 @@ export interface LoopReadiness {
   blocked_reason: { code: string; message: string; stage?: string } | null;
   items: PlanTicketView[];
   phases: PlanPhaseView[];
+  unplanned: UnplannedTicket[];
 }
 
 export interface QaCycle {

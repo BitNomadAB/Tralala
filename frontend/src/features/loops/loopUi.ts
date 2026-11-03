@@ -1,5 +1,5 @@
 import type { BadgeTone } from "@/components/ui/badge";
-import type { DocumentKind, LoopDocument, LoopStage } from "@/lib/types";
+import type { DocumentKind, LoopDocument, LoopStage, UnplannedTicket } from "@/lib/types";
 
 export const STAGE_TONES: Record<LoopStage, BadgeTone> = {
   draft: "neutral",
@@ -66,3 +66,8 @@ export function viewAuthorship(document: LoopDocument): string | null {
 
 /** How many cards one column loads; the drag and drop writes to the same query keys. */
 export const LIST_LIMIT = 200;
+
+/** Open work outside the plan: neither completed nor archived. */
+export function openUnplanned(tickets: UnplannedTicket[]): UnplannedTicket[] {
+  return tickets.filter((ticket) => !ticket.completed_at && !ticket.archived_at);
+}

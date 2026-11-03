@@ -10,6 +10,7 @@ import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys, useQaCycle } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
+import { UnplannedWarning } from "./Unplanned";
 
 type QaStatus = "not_tested" | "tested_with_issues" | "passed";
 type ResultStatus = "passed" | "failed" | "blocked" | "not_run" | "not_applicable";
@@ -153,6 +154,7 @@ export function LoopCompletionDialog({
                   are still open; acceptance will be rejected until they are completed.
                 </p>
               ) : null}
+              <UnplannedWarning boardId={boardId} loopId={loop.id} />
               <fieldset className="flex flex-col gap-2">
                 <legend className="text-xs text-[var(--muted-foreground)]">
                   Was QA performed?

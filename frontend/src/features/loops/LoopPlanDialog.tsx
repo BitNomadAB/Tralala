@@ -6,6 +6,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { useReadiness } from "@/lib/queries";
 import type { Loop, PlanPhaseView, PlanTicketView } from "@/lib/types";
+import { OutsideThePlan } from "./Unplanned";
 
 const PHASE_TONES = {
   pending: "neutral",
@@ -91,6 +92,7 @@ export function LoopPlanDialog({
             ))}
           </ol>
         )}
+        <OutsideThePlan tickets={readiness.data?.unplanned ?? []} />
       </DialogContent>
     </Dialog>
   );

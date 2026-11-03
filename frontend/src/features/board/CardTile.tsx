@@ -36,6 +36,8 @@ export function CardTile({
       };
 
   const overdue = isOverdue(card.due_at, card.completed_at);
+  // A manual Ticket with a key was added while the Loop's plan executes: outside the plan.
+  const unplanned = card.kind === "manual" && card.ticket_key !== null;
 
   return (
     <li
@@ -77,7 +79,7 @@ export function CardTile({
         ) : null}
       </div>
 
-      {card.human_action_required || !card.ready || card.kind === "qa" ? (
+      {card.human_action_required || !card.ready || card.kind === "qa" || unplanned ? (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {card.human_action_required ? (
             <span className="inline-flex items-center gap-1 rounded border border-[var(--warning)] px-1.5 py-0.5 text-[10px] text-[var(--warning)]">
@@ -90,6 +92,14 @@ export function CardTile({
               title={card.blockers.map((blocker) => blocker.key ?? blocker.reason).join(", ")}
             >
               <Lock size={10} /> Blocked
+            </span>
+          ) : null}
+          {unplanned ? (
+            <span
+              className="inline-flex items-center rounded border border-dashed border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]"
+              title="Added outside the plan; it never blocks the plan or the Loop's completion"
+            >
+              Unplanned
             </span>
           ) : null}
           {card.kind === "qa" ? (
