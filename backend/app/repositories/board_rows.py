@@ -59,6 +59,10 @@ class BoardRowRepository(Protocol):
         name, ``limit`` of them from ``offset``."""
         ...
 
+    def all(self) -> list[BoardsRow]:
+        """Every board, in the table's own order."""
+        ...
+
     def with_status(self, status: str) -> list[BoardsRow]:
         """Every board in that status, in the table's own order."""
         ...

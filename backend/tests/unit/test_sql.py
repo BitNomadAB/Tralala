@@ -31,7 +31,6 @@ from app.schemas.cards import CardUpdate
 from app.schemas.loops import LoopUpdate
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
 from app.schemas.subresources import ChecklistItemUpdate, LabelUpdate
-from app.services import discussions
 
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 FILTERS: sql.Filters = (("a", "a = :a"), ("b", "b IS NULL"), ("c", "(c LIKE :c OR d LIKE :c)"))
@@ -150,8 +149,9 @@ def test_every_allowlist_holds_plain_identifiers_and_every_filter_list_unique_na
                 assert len(set(names)) == len(names), (module, name)
                 checked += 1
     # A floor, so a scan that silently finds nothing fails; allowlists that moved into
-    # app/repositories/sql are compiled by the build instead (GCS-T00e).
-    assert checked >= 15
+    # app/repositories/sql are compiled by the build instead (GCS-T00e; the event tables and the
+    # thread filter moved with the discussion services).
+    assert checked >= 12
 
 
 def test_the_update_allowlists_cover_every_field_a_request_can_change() -> None:
@@ -249,14 +249,13 @@ def test_each_change_type_names_exactly_the_columns_its_update_may_format() -> N
 # --- the statements are the ones the services wrote before ---------------------------------------
 
 
-def test_thread_and_activity_filters_match_the_former_literals() -> None:
-    # The list queries became fixed statements in app/repositories/sql/lists.py (GCS-T00c).
-    assert sql.where(discussions._THREAD_FILTERS, ["status"]) == " WHERE status = :status"
-    # The agent list's filters moved into app/repositories/sql/agents.py (GCS-T00d), the board
-    # list's and the activity feed's into sql/board_rows.py and sql/activity.py, the card list's
-    # into sql/cards.py, the card search's filters and FTS5 join into sql/search.py and the
-    # checklist siblings into sql/checklists.py (GCS-T00e); the build compiles them against the
-    # schema, and a unit test does not import the SQL repositories.
+# The list queries became fixed statements in app/repositories/sql/lists.py (GCS-T00c), and the
+# thread list's status filter one in sql/discussions.py. The agent list's filters moved into
+# app/repositories/sql/agents.py (GCS-T00d), the board
+# list's and the activity feed's into sql/board_rows.py and sql/activity.py, the card list's
+# into sql/cards.py, the card search's filters and FTS5 join into sql/search.py and the
+# checklist siblings into sql/checklists.py (GCS-T00e); the build compiles them against the
+# schema, and a unit test does not import the SQL repositories.
 
 
 def test_approval_identifiers_are_the_fixed_names() -> None:

@@ -715,6 +715,9 @@ class FakeBoardRowRepository:
         rows.sort(key=lambda row: _board_sort_value(row, sort), reverse=descending)
         return rows[offset : offset + limit]
 
+    def all(self) -> list[BoardsRow]:
+        return list(self._state.boards.values())
+
     def with_status(self, status: str) -> list[BoardsRow]:
         return [row for row in self._state.boards.values() if row.status == status]
 

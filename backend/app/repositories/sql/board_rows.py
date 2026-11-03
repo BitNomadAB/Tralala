@@ -23,6 +23,7 @@ _SELECT_BOARDS = (
     " FROM boards"
 )
 _BOARD = text(f"{_SELECT_BOARDS} WHERE id = :id")
+_ALL_BOARDS = text(_SELECT_BOARDS)
 _WITH_STATUS = text(f"{_SELECT_BOARDS} WHERE status = :status")
 _MOST_RECENT = text(
     f"{_SELECT_BOARDS} WHERE status = :status ORDER BY updated_at DESC LIMIT :limit"
@@ -99,6 +100,10 @@ class SqlBoardRowRepository:
         result = self._connection.execute(
             statement, {**parameters, "limit": limit, "offset": offset}
         ).mappings()
+        return [BoardsRow.from_mapping(row) for row in result]
+
+    def all(self) -> list[BoardsRow]:
+        result = self._connection.execute(_ALL_BOARDS).mappings()
         return [BoardsRow.from_mapping(row) for row in result]
 
     def with_status(self, status: str) -> list[BoardsRow]:

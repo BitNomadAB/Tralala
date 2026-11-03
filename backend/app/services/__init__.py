@@ -152,14 +152,14 @@ class Services:
         )
         self.auth = AuthService(settings, self.registry_store)
         self.discussion = DiscussionService(
-            self.board, self.agent, boards=self.boards, registry=self.registry
+            self.board, self.agent, self.board_store, self.registry_store
         )
         self.event = EventService(self.board, self.board_store)
         self.orchestrator = Orchestrator(
-            settings, self.board, self.event, boards=self.boards, registry=self.registry
+            settings, self.board_store, self.registry_store, self.event
         )
         self.run = RunService(
-            settings, self.board, self.orchestrator, self.event, boards=self.boards
+            settings, self.board, self.orchestrator, self.board_store, self.event
         )
         self.discussion.runs = self.run
         self.discussion.events = self.event
