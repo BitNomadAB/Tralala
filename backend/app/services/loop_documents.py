@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from sqlalchemy import text
@@ -17,6 +18,8 @@ from sqlalchemy import text
 from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, Forbidden, ValidationFailure, VersionConflict
+from ..db.generated.board import LoopsRow
+from ..repositories.sql.board import SqlBoardRepositories
 from ..schemas.loops import (
     AnalysisPayload,
     ApprovalRequest,
@@ -99,7 +102,7 @@ def render_analysis(payload: AnalysisPayload) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def render_roadmap(payload: dict[str, Any]) -> str:
+def render_roadmap(payload: Mapping[str, Any]) -> str:
     """Render the validated plan; prose is additive and structure comes from the server."""
     lines: list[str] = ["# RoadMap", ""]
     if payload.get("summary"):
@@ -322,7 +325,7 @@ class LoopDocumentService:
         loop_id: str,
         kind: str,
         content: str,
-        payload: dict[str, Any] | None,
+        payload: Mapping[str, Any] | None,
         actor: ActorContext,
         status: str = "ready_for_review",
         sources: dict[str, str | None] | None = None,
@@ -584,12 +587,9 @@ class LoopDocumentService:
         info = documents["info"]["current"]
         analysis_ai = documents["analysis_ai"]["current"]
         analysis = documents["analysis"]["current"]
+        # The plan service takes typed repositories; these run on this service's connection.
         draft = self.plans.register_draft(
-            conn,
-            loop,
-            payload,
-            actor,
-            source_revisions={},
+            SqlBoardRepositories(conn), LoopsRow.from_mapping(loop), payload, actor
         )
         canonical = draft["payload"]
         technical = self._write_revision(
@@ -617,7 +617,7 @@ class LoopDocumentService:
             provenance={"plan_id": draft["plan_id"], **submission.provenance},
         )
         self.plans.attach_revisions(
-            conn,
+            SqlBoardRepositories(conn),
             draft["plan_id"],
             roadmap_ai_revision_id=technical["id"],
             roadmap_revision_id=human["id"],
@@ -751,7 +751,11 @@ class LoopDocumentService:
                             code="plan_change_required",
                         )
                     self.plans.publish(
-                        conn, loop, plan_id, actor, approval_id=approval_id
+                        SqlBoardRepositories(conn),
+                        LoopsRow.from_mapping(loop),
+                        plan_id,
+                        actor,
+                        approval_id=approval_id,
                     )
             else:
                 kinds = ANALYSIS_SCOPE_KINDS if scope == "analysis" else ROADMAP_SCOPE_KINDS
@@ -1007,7 +1011,7 @@ class LoopDocumentService:
                 if current
                 else None
             )
-        plan = self.plans.plan_view(conn, loop, include_readiness=True)
+        plan = self.plans.plan_view(SqlBoardRepositories(conn), LoopsRow.from_mapping(loop))
         context["plan"] = {
             "plan_id": plan["plan_id"],
             "revision_number": plan["revision_number"],
@@ -1101,7 +1105,9 @@ class LoopDocumentService:
         info = documents["info"]["current"]
         analysis_ai = documents["analysis_ai"]["current"]
         analysis = documents["analysis"]["current"]
-        draft = self.plans.register_draft(conn, loop, payload, actor, source_revisions={})
+        draft = self.plans.register_draft(
+            SqlBoardRepositories(conn), LoopsRow.from_mapping(loop), payload, actor
+        )
         canonical = draft["payload"]
         technical = self._write_revision(
             conn,
@@ -1130,7 +1136,7 @@ class LoopDocumentService:
             provenance={"plan_id": draft["plan_id"], **provenance},
         )
         self.plans.attach_revisions(
-            conn,
+            SqlBoardRepositories(conn),
             draft["plan_id"],
             roadmap_ai_revision_id=technical["id"],
             roadmap_revision_id=human["id"],

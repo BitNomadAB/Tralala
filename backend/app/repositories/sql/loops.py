@@ -39,6 +39,9 @@ _ARCHIVE = text(
     "UPDATE loops SET archived_at = :now, version = version + 1, updated_at = :now WHERE id = :id"
 )
 _SET_STAGE = text("UPDATE loops SET stage = :stage, updated_at = :now WHERE id = :id")
+_SET_CURRENT_PLAN = text(
+    "UPDATE loops SET current_plan_id = :plan_id, updated_at = :now WHERE id = :id"
+)
 _CLEAR_DELIVERY_APPROVALS = text(
     "UPDATE loops SET implementation_approval_id = NULL, qa_approval_id = NULL,"
     " updated_at = :now WHERE id = :id"
@@ -120,6 +123,9 @@ class SqlLoopRepository:
 
     def set_stage(self, loop_id: str, stage: str, *, now: str) -> None:
         self._connection.execute(_SET_STAGE, {"stage": stage, "now": now, "id": loop_id})
+
+    def set_current_plan(self, loop_id: str, plan_id: str, *, now: str) -> None:
+        self._connection.execute(_SET_CURRENT_PLAN, {"plan_id": plan_id, "now": now, "id": loop_id})
 
     def clear_delivery_approvals(self, loop_id: str, *, now: str) -> None:
         self._connection.execute(_CLEAR_DELIVERY_APPROVALS, {"now": now, "id": loop_id})

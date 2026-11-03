@@ -23,6 +23,7 @@ from app.db.generated.board import (
     LabelsRow,
     ListsRow,
     LoopApprovalsRow,
+    LoopDependenciesRow,
     LoopDocumentsRow,
     LoopPhasesRow,
     LoopPlanItemsRow,
@@ -54,7 +55,14 @@ from app.repositories.idempotency import BoardIdempotencyRepository
 from app.repositories.labels import LabelChanges, LabelRepository
 from app.repositories.lists import ListRepository
 from app.repositories.loop_documents import LoopApprovalRepository, LoopDocumentRepository
-from app.repositories.loop_plans import LoopPlanRepository, PlanTotals
+from app.repositories.loop_plans import (
+    LoopDependencyRepository,
+    LoopPhaseRepository,
+    LoopPlanItemRepository,
+    LoopPlanRepository,
+    PlannedItem,
+    PlanTotals,
+)
 from app.repositories.loop_qa import LoopQaRepository
 from app.repositories.loops import LoopChanges, LoopRepository
 from app.repositories.search import CardSearch, CardSearchRepository
@@ -81,6 +89,7 @@ class BoardState:
     plans: dict[str, LoopPlansRow] = field(default_factory=dict[str, LoopPlansRow])
     phases: dict[str, LoopPhasesRow] = field(default_factory=dict[str, LoopPhasesRow])
     plan_items: dict[str, LoopPlanItemsRow] = field(default_factory=dict[str, LoopPlanItemsRow])
+    dependencies: list[LoopDependenciesRow] = field(default_factory=list[LoopDependenciesRow])
     qa_cycles: dict[str, LoopQaCyclesRow] = field(default_factory=dict[str, LoopQaCyclesRow])
     card_labels: list[CardLabelsRow] = field(default_factory=list[CardLabelsRow])
     checklists: dict[str, ChecklistsRow] = field(default_factory=dict[str, ChecklistsRow])
@@ -107,6 +116,7 @@ class BoardState:
             plans=dict(self.plans),
             phases=dict(self.phases),
             plan_items=dict(self.plan_items),
+            dependencies=list(self.dependencies),
             qa_cycles=dict(self.qa_cycles),
             card_labels=list(self.card_labels),
             checklists=dict(self.checklists),
@@ -129,6 +139,7 @@ class BoardState:
         self.plans = snapshot.plans
         self.phases = snapshot.phases
         self.plan_items = snapshot.plan_items
+        self.dependencies = snapshot.dependencies
         self.qa_cycles = snapshot.qa_cycles
         self.card_labels = snapshot.card_labels
         self.checklists = snapshot.checklists
@@ -525,6 +536,11 @@ class FakeLoopRepository:
     def set_stage(self, loop_id: str, stage: str, *, now: str) -> None:
         self._change(loop_id, lambda loop: loop.__replace__(stage=stage, updated_at=now))
 
+    def set_current_plan(self, loop_id: str, plan_id: str, *, now: str) -> None:
+        self._change(
+            loop_id, lambda loop: loop.__replace__(current_plan_id=plan_id, updated_at=now)
+        )
+
     def clear_delivery_approvals(self, loop_id: str, *, now: str) -> None:
         self._change(
             loop_id,
@@ -568,6 +584,9 @@ class FakeLoopPlanRepository:
     def __init__(self, state: BoardState) -> None:
         self._state = state
 
+    def get(self, plan_id: str) -> LoopPlansRow | None:
+        return self._state.plans.get(plan_id)
+
     def active(self, loop_id: str) -> LoopPlansRow | None:
         return next(
             (
@@ -604,6 +623,186 @@ class FakeLoopPlanRepository:
                 total=before.total + max(len(cards), 1), completed=before.completed + done
             )
         return totals
+
+    def next_revision(self, loop_id: str) -> int:
+        revisions = [
+            plan.revision_number for plan in self._state.plans.values() if plan.loop_id == loop_id
+        ]
+        return max(revisions, default=0) + 1
+
+    def add(self, row: LoopPlansRow) -> None:
+        for plan in self._state.plans.values():
+            if plan.id == row.id or (
+                plan.loop_id == row.loop_id and plan.revision_number == row.revision_number
+            ):
+                raise ConstraintError(f"loop_plans {row.id} breaks the primary or a unique key")
+        if row.loop_id not in self._state.loops:
+            raise ConstraintError(f"loop_plans {row.id} names a Loop that does not exist")
+        self._state.plans[row.id] = row
+
+    def attach_revisions(
+        self, plan_id: str, *, roadmap_ai_revision_id: str, roadmap_revision_id: str
+    ) -> None:
+        plan = self._state.plans.get(plan_id)
+        if plan is not None:
+            self._state.plans[plan_id] = plan.__replace__(
+                roadmap_ai_revision_id=roadmap_ai_revision_id,
+                roadmap_revision_id=roadmap_revision_id,
+            )
+
+    def activate(self, loop_id: str, plan_id: str, *, approval_id: str | None, now: str) -> None:
+        for plan in list(self._state.plans.values()):
+            if plan.loop_id == loop_id and plan.status == "active" and plan.id != plan_id:
+                self._state.plans[plan.id] = plan.__replace__(
+                    status="superseded", superseded_at=now
+                )
+        plan = self._state.plans.get(plan_id)
+        if plan is None:
+            return
+        if plan.status != "active" and self.active(plan.loop_id) is not None:
+            # ux_loop_plans_active: one active plan per Loop.
+            raise ConstraintError(f"loop_plans {plan_id} would be a second active plan")
+        self._state.plans[plan_id] = plan.__replace__(
+            status="active",
+            approval_id=approval_id,
+            activated_at=plan.activated_at if plan.activated_at is not None else now,
+        )
+
+
+class FakeLoopPhaseRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def get(self, loop_id: str, phase_id: str) -> LoopPhasesRow | None:
+        phase = self._state.phases.get(phase_id)
+        return phase if phase is not None and phase.loop_id == loop_id else None
+
+    def for_loop(self, loop_id: str) -> list[LoopPhasesRow]:
+        # ORDER BY number over the (loop_id, number) index: ties keep insertion (rowid) order.
+        found = [phase for phase in self._state.phases.values() if phase.loop_id == loop_id]
+        return sorted(found, key=lambda phase: phase.number)
+
+    def _check_number(self, row: LoopPhasesRow) -> None:
+        for phase in self._state.phases.values():
+            if phase.id != row.id and (phase.plan_id, phase.number) == (row.plan_id, row.number):
+                raise ConstraintError(f"loop_phases {row.id} repeats a number of its plan")
+
+    def add(self, row: LoopPhasesRow) -> None:
+        if row.id in self._state.phases:
+            raise ConstraintError(f"loop_phases.id {row.id} exists")
+        if row.loop_id not in self._state.loops:
+            raise ConstraintError(f"loop_phases {row.id} names a Loop that does not exist")
+        self._check_number(row)
+        self._state.phases[row.id] = row
+
+    def update(self, row: LoopPhasesRow) -> None:
+        phase = self._state.phases.get(row.id)
+        if phase is None:
+            return
+        self._check_number(row)
+        self._state.phases[row.id] = phase.__replace__(
+            plan_id=row.plan_id,
+            number=row.number,
+            name=row.name,
+            objective=row.objective,
+            entry_conditions_json=row.entry_conditions_json,
+            exit_conditions_json=row.exit_conditions_json,
+        )
+
+
+class FakeLoopPlanItemRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def get(self, loop_id: str, item_id: str) -> LoopPlanItemsRow | None:
+        item = self._state.plan_items.get(item_id)
+        return item if item is not None and item.loop_id == loop_id else None
+
+    def next_sequence(self, loop_id: str, phase_number: int) -> int:
+        sequences = [
+            item.ticket_sequence
+            for item in self._state.plan_items.values()
+            if item.loop_id == loop_id and item.phase_number == phase_number
+        ]
+        return max(sequences, default=0) + 1
+
+    def _check_unique(self, row: LoopPlanItemsRow) -> None:
+        for item in self._state.plan_items.values():
+            if item.id == row.id:
+                continue
+            if item.key == row.key or (item.phase_id, item.ticket_sequence) == (
+                row.phase_id,
+                row.ticket_sequence,
+            ):
+                raise ConstraintError(f"loop_plan_items {row.id} repeats a key or a sequence")
+
+    def add(self, row: LoopPlanItemsRow) -> None:
+        if row.id in self._state.plan_items:
+            raise ConstraintError(f"loop_plan_items.id {row.id} exists")
+        if row.loop_id not in self._state.loops:
+            raise ConstraintError(f"loop_plan_items {row.id} names a Loop that does not exist")
+        self._check_unique(row)
+        self._state.plan_items[row.id] = row
+
+    def update(self, row: LoopPlanItemsRow) -> None:
+        item = self._state.plan_items.get(row.id)
+        if item is None:
+            return
+        changed = item.__replace__(
+            plan_id=row.plan_id,
+            phase_id=row.phase_id,
+            phase_number=row.phase_number,
+            title=row.title,
+            objective=row.objective,
+            instructions=row.instructions,
+            required_actor=row.required_actor,
+            execution_mode=row.execution_mode,
+            priority=row.priority,
+            acceptance_criteria_json=row.acceptance_criteria_json,
+            expected_evidence_json=row.expected_evidence_json,
+            human_action_reason=row.human_action_reason,
+            human_instructions=row.human_instructions,
+        )
+        self._check_unique(changed)
+        self._state.plan_items[row.id] = changed
+
+    def with_cards(self, loop_id: str) -> list[PlannedItem]:
+        items = sorted(
+            (item for item in self._state.plan_items.values() if item.loop_id == loop_id),
+            key=lambda item: (item.phase_number, item.ticket_sequence, item.key),
+        )
+        found: list[PlannedItem] = []
+        for item in items:
+            # LEFT JOIN cards: one row per card published from the item, or one without a card.
+            cards = [card for card in self._state.cards.values() if card.plan_item_id == item.id]
+            found += [
+                PlannedItem(item=item, card_id=card.id, completed_at=card.completed_at)
+                for card in cards
+            ] or [PlannedItem(item=item, card_id=None, completed_at=None)]
+        return found
+
+
+class FakeLoopDependencyRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def for_loop(self, loop_id: str) -> list[LoopDependenciesRow]:
+        return [edge for edge in self._state.dependencies if edge.loop_id == loop_id]
+
+    def clear(self, loop_id: str) -> None:
+        self._state.dependencies = [
+            edge for edge in self._state.dependencies if edge.loop_id != loop_id
+        ]
+
+    def add(self, row: LoopDependenciesRow) -> None:
+        def edge(row: LoopDependenciesRow) -> tuple[str, str, str, str, str]:
+            return row.plan_id, row.source_type, row.source_id, row.target_type, row.target_id
+
+        # INSERT OR IGNORE: an edge the plan already has (or a repeated id) is not added again.
+        for known in self._state.dependencies:
+            if known.id == row.id or edge(known) == edge(row):
+                return
+        self._state.dependencies.append(row)
 
 
 QA_OPEN = ("pending", "instructions_ready", "in_progress")
@@ -732,6 +931,10 @@ class FakeCardRepository:
         found.sort(key=lambda card: (card.position, card.id))
         return [(card.id, card.position) for card in found]
 
+    def highest_position(self, list_id: str) -> int:
+        cards = self._state.cards.values()
+        return max((card.position for card in cards if card.list_id == list_id), default=0)
+
     def renumber(self, positions: Sequence[tuple[str, int]]) -> None:
         for card_id, position in positions:
             self._state.cards[card_id] = self._state.cards[card_id].__replace__(position=position)
@@ -752,6 +955,21 @@ class FakeCardRepository:
         if not changes:
             raise ConstraintError("an update without a column is not SQL")
         self._change(card_id, lambda card: card.__replace__(**changes))
+
+    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str) -> None:
+        card = self._state.cards.get(item.id)
+        if card is None or card.plan_item_id != item.id:
+            return
+        self._state.cards[item.id] = card.__replace__(
+            title=item.title,
+            description=item.instructions,
+            required_actor=item.required_actor,
+            execution_mode=item.execution_mode,
+            human_action_reason=item.human_action_reason,
+            human_instructions=item.human_instructions,
+            phase_id=item.phase_id,
+            updated_at=now,
+        )
 
     def move(self, card_id: str, list_id: str, position: int, *, now: str) -> None:
         self._change(
@@ -1252,6 +1470,9 @@ class FakeBoardRepositories:
         self.documents: LoopDocumentRepository = FakeLoopDocumentRepository(state)
         self.approvals: LoopApprovalRepository = FakeLoopApprovalRepository(state)
         self.plans: LoopPlanRepository = FakeLoopPlanRepository(state)
+        self.phases: LoopPhaseRepository = FakeLoopPhaseRepository(state)
+        self.plan_items: LoopPlanItemRepository = FakeLoopPlanItemRepository(state)
+        self.dependencies: LoopDependencyRepository = FakeLoopDependencyRepository(state)
         self.qa: LoopQaRepository = FakeLoopQaRepository(state)
         self.idempotency: BoardIdempotencyRepository = FakeBoardIdempotencyRepository(state)
         self.checklists: ChecklistRepository = FakeChecklistRepository(state)

@@ -29,7 +29,7 @@ from .discussions import DiscussionService
 from .events import EventService
 from .lists import ListService
 from .loop_agents import LoopAgentService
-from .loop_bridge import LoopConnectionHelpers, LoopPlanViews
+from .loop_bridge import LoopConnectionHelpers
 from .loop_documents import LoopDocumentService
 from .loop_generation import LoopGenerationService
 from .loop_history import LoopHistoryService
@@ -86,20 +86,20 @@ class Services:
         )
         self.template = TemplateService(self.registry_store, self.board_store, self.board)
         self.board.templates = self.template
-        # The plan views and the connection helpers are the transitional bridge to the Loop
-        # workflow services, which GCS-T00f converts (services/loop_bridge.py).
-        self.loop_plan_views = LoopPlanViews()
+        # The plan service works inside its caller's unit of work and is the plan views the
+        # Loop, Ticket and search services read.
+        self.loop_plan = LoopPlanService()
         self.card = CardService(
-            settings, self.board, self.board_store, self.registry_store, plans=self.loop_plan_views
+            settings, self.board, self.board_store, self.registry_store, plans=self.loop_plan
         )
         self.loop = LoopService(
-            settings, self.board, self.board_store, plans=self.loop_plan_views, tickets=self.card
+            settings, self.board, self.board_store, plans=self.loop_plan, tickets=self.card
         )
+        # The connection helpers are the transitional bridge to the Loop workflow services that
+        # GCS-T00f converts next (services/loop_bridge.py).
         self.loop_helpers = LoopConnectionHelpers(self.loop)
         # The services below that take ``boards`` (and ``registry``) are not converted to the
-        # repositories yet (GCS-T00e..g) and still open connections themselves.
-        self.loop_plan = LoopPlanService(self.board, self.loop_helpers, boards=self.boards)
-        self.loop_plan_views.service = self.loop_plan
+        # repositories yet (GCS-T00f..g) and still open connections themselves.
         self.loop_document = LoopDocumentService(
             self.board, self.loop_helpers, self.loop_plan, boards=self.boards
         )
@@ -132,7 +132,7 @@ class Services:
             self.board,
             self.board_store,
             self.registry_store,
-            plans=self.loop_plan_views,
+            plans=self.loop_plan,
             index=full_text_index(self.boards),
         )
         self.backup = BackupService(self.board, boards=self.boards)
@@ -204,6 +204,3 @@ class Services:
         self.boards.close_all()
         self.registry.dispose()
         self.data_lock.release()
-
-
-

@@ -9,7 +9,7 @@ from sqlalchemy.engine import Connection
 
 from ...core import sql
 from ...db import values
-from ...db.generated.board import CARDS_COLUMNS, CardsRow, LabelsRow
+from ...db.generated.board import CARDS_COLUMNS, CardsRow, LabelsRow, LoopPlanItemsRow
 from ..cards import (
     CARD_EDITABLE,
     CARD_SORTS,
@@ -56,6 +56,9 @@ _POSITIONS_EXCEPT = text(
     "SELECT id, position FROM cards WHERE list_id = :list_id AND archived_at IS NULL"
     " AND id != :id ORDER BY position, id"
 )
+_HIGHEST_POSITION = text(
+    "SELECT COALESCE(MAX(position), 0) AS position FROM cards WHERE list_id = :list_id"
+)
 _RENUMBER = text("UPDATE cards SET position = :position WHERE id = :id")
 _ADD = text(
     "INSERT INTO cards (id, list_id, title, description, position, priority, due_at,"
@@ -68,6 +71,12 @@ _ADD = text(
     " :assignee_type, :assignee_name, :assigned_at, :assigned_by_actor_id, :loop_id, :phase_id,"
     " :plan_item_id, :ticket_key, :kind, :required_actor, :execution_mode, :human_action_reason,"
     " :human_instructions, :human_confirmed_at, :human_confirmed_by_actor_id, :plan_revision_id)"
+)
+_SYNC_PLAN_ITEM = text(
+    "UPDATE cards SET title = :title, description = :instructions,"
+    " required_actor = :required_actor, execution_mode = :execution_mode,"
+    " human_action_reason = :human_action_reason, human_instructions = :human_instructions,"
+    " phase_id = :phase_id, updated_at = :now WHERE id = :id AND plan_item_id = :id"
 )
 _MOVE = text(
     "UPDATE cards SET list_id = :list_id, position = :position, version = version + 1,"
@@ -237,6 +246,10 @@ class SqlCardRepository:
             (values.text(row, "id"), values.integer(row, "position")) for row in result.mappings()
         ]
 
+    def highest_position(self, list_id: str) -> int:
+        row = self._connection.execute(_HIGHEST_POSITION, {"list_id": list_id}).mappings().one()
+        return values.integer(row, "position")
+
     def renumber(self, positions: Sequence[tuple[str, int]]) -> None:
         for card_id, position in positions:
             self._connection.execute(_RENUMBER, {"position": position, "id": card_id})
@@ -281,6 +294,22 @@ class SqlCardRepository:
         columns = sql.assignments(changes, CARD_EDITABLE)
         statement = text(f"UPDATE cards SET {columns} WHERE id = :id")  # noqa: S608 - from CARD_EDITABLE
         self._connection.execute(statement, {**changes, "id": card_id})
+
+    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str) -> None:
+        self._connection.execute(
+            _SYNC_PLAN_ITEM,
+            {
+                "title": item.title,
+                "instructions": item.instructions,
+                "required_actor": item.required_actor,
+                "execution_mode": item.execution_mode,
+                "human_action_reason": item.human_action_reason,
+                "human_instructions": item.human_instructions,
+                "phase_id": item.phase_id,
+                "now": now,
+                "id": item.id,
+            },
+        )
 
     def move(self, card_id: str, list_id: str, position: int, *, now: str) -> None:
         self._connection.execute(
