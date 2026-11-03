@@ -6,7 +6,9 @@ This guard reads the catalogue, the generated text and payload, and the syntax t
 and of the service methods it calls, and holds each entry to five rules:
 
 1. **Handler.** The handler is a module-level function of the catalogue module taking
-   ``(services, actor, args)``, so the guard can read it.
+   ``(services, actor, args)``, so the guard can read it. The handlers are defined in
+   ``agent_tools_read.py`` and ``agent_tools_write.py`` and re-exported by ``agent_tools.py``, so
+   the guard reads those three files as the catalogue module's source.
 2. **Documented.** ``/llms.txt`` has a ``### name (requires ...)`` section with exactly the entry's
    scopes and its description, and ``tools/list`` for an actor holding every scope carries the
    entry's name, description and input schema. Neither lists a tool the catalogue lacks, and both
@@ -51,7 +53,10 @@ from app.services.agent_tools import AgentTool, tool_catalog
 UNIT_ROOT = Path(__file__).resolve().parent
 BACKEND_ROOT = UNIT_ROOT.parents[1]
 SERVICES_ROOT = BACKEND_ROOT / "app" / "services"
-CATALOGUE_FILE = SERVICES_ROOT / "agent_tools.py"
+CATALOGUE_FILES = tuple(
+    SERVICES_ROOT / name
+    for name in ("agent_tools.py", "agent_tools_read.py", "agent_tools_write.py")
+)
 COMPOSITION_ROOT = SERVICES_ROOT / "__init__.py"
 AGENTS_MD = BACKEND_ROOT.parent / "AGENTS.md"
 CATALOGUE_MODULE = agent_tools.__name__
@@ -157,7 +162,7 @@ class Entry:
 class Code:
     """The syntax the guard reads: the catalogue module, the composition root and the services."""
 
-    functions: Mapping[str, Function]  # module-level functions of the catalogue module
+    functions: Mapping[str, Function]  # module-level functions of the catalogue module's files
     services: Mapping[str, str]  # `Services` attribute -> the class it is built from
     methods: Mapping[str, Function]  # "Class.method" of every class the composition root builds
 
@@ -224,7 +229,10 @@ def composition(source: str) -> tuple[dict[str, str], dict[str, str]]:
     return attributes, imported
 
 
-def build_code(catalogue: str, root: str, read_module: Callable[[str], str]) -> Code:
+def build_code(catalogue: Sequence[str], root: str, read_module: Callable[[str], str]) -> Code:
+    functions: dict[str, Function] = {}
+    for source in catalogue:
+        functions.update(module_functions(source))
     attributes, imported = composition(root)
     trees: dict[str, ast.Module] = {}
     methods: dict[str, Function] = {}
@@ -239,7 +247,7 @@ def build_code(catalogue: str, root: str, read_module: Callable[[str], str]) -> 
                 for item in node.body:
                     if isinstance(item, Function):
                         methods[f"{class_name}.{item.name}"] = item
-    return Code(module_functions(catalogue), attributes, methods)
+    return Code(functions, attributes, methods)
 
 
 def read_service_module(module: str) -> str:
@@ -651,7 +659,7 @@ CATALOGUE = entries(tool_catalog())
 @pytest.fixture(scope="module")
 def code() -> Code:
     return build_code(
-        CATALOGUE_FILE.read_text(encoding="utf-8"),
+        [path.read_text(encoding="utf-8") for path in CATALOGUE_FILES],
         COMPOSITION_ROOT.read_text(encoding="utf-8"),
         read_service_module,
     )
@@ -813,7 +821,7 @@ FIXTURE_DECISIONS = (
 
 def _fixture_code(documents: str = FIXTURE_DOCUMENTS) -> Code:
     modules = {"cards": FIXTURE_CARDS, "documents": documents, "loops": FIXTURE_LOOPS}
-    return build_code(FIXTURE_HANDLERS, FIXTURE_ROOT, modules.__getitem__)
+    return build_code([FIXTURE_HANDLERS], FIXTURE_ROOT, modules.__getitem__)
 
 
 def _entry(name: str, handler: str, *scopes: str) -> Entry:
