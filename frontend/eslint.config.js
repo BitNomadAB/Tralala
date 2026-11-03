@@ -105,6 +105,9 @@ export default allErrors(
         // On: under verbatimModuleSyntax `import { type A } from "m"` still loads "m" at runtime;
         // TypeScript itself requires the `type` marker, so consistent-type-imports stays off.
         "@typescript-eslint/no-import-type-side-effects": "error",
+        // On, for every file including tests and the API catalogue: a file past 300 lines of code
+        // does several things, and each of them reads better in its own module.
+        "max-lines": ["error", { max: 300, skipBlankLines: true, skipComments: true }],
       },
     },
     {

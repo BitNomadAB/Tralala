@@ -140,6 +140,12 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 - ESLint (`frontend/eslint.config.js`): typed typescript-eslint, React hooks, jsx-a11y and import
   rules, every one an error. A rule is switched off or configured only in that file, with its reason
   on the line above; there is no inline `eslint-disable`.
+- A frontend file holds at most 300 lines of code (ESLint `max-lines`; blank lines and comments do
+  not count), tests and the API client included. Split a component by what it shows: each section
+  becomes a component with explicit props, and state stays with the component that owned it, carried
+  by a hook in a `.ts` file when that keeps the owner small. The REST client and the response types
+  are one module per domain, re-exported by `src/lib/api/index.ts` and `src/lib/types/index.ts`, so
+  callers keep importing `@/lib/api` and `@/lib/types`.
 - Formatting is Prettier's, not a reviewer's: `frontend/.prettierrc.json` (100 columns, double
   quotes, trailing commas everywhere; the rest is Prettier's defaults, which match `.editorconfig`)
   covers the frontend's TypeScript, JavaScript, JSON, CSS and HTML. Run `pnpm format` before a

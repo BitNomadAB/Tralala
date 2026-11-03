@@ -1,30 +1,17 @@
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, Bot, GitBranch, History, Pencil, Plus } from "lucide-react";
+import { AlertTriangle, History, Pencil, Plus } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
-import { AgentPicker } from "@/features/boards/AgentPicker";
-import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
 import { ApiError, api, api as apiClient } from "@/lib/api";
 import { keys, useAgents, useBoard, useLoops } from "@/lib/queries";
-import type { Loop, LoopStage } from "@/lib/types";
-
-const STAGE_TONES: Record<LoopStage, BadgeTone> = {
-  draft: "neutral",
-  analysis_review: "brand",
-  planning: "brand",
-  roadmap_review: "brand",
-  ready: "success",
-  in_progress: "brand",
-  replanning: "warning",
-  awaiting_qa: "warning",
-  completed: "success",
-  cancelled: "neutral",
-};
+import { BoardContext } from "./BoardContext";
+import { EditBoardDialog, type BoardEditDraft } from "./EditBoardDialog";
+import { LoopList } from "./LoopList";
 
 export function BoardLoopsPage() {
   const { boardId = "" } = useParams();
@@ -44,10 +31,12 @@ export function BoardLoopsPage() {
   const [goal, setGoal] = useState("");
   const [showCompleted, setShowCompleted] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editDescription, setEditDescription] = useState("");
-  const [editAgentIds, setEditAgentIds] = useState<string[]>([]);
-  const [editRepositoryIds, setEditRepositoryIds] = useState<string[]>([]);
+  const [editDraft, setEditDraft] = useState<BoardEditDraft>({
+    name: "",
+    description: "",
+    repositoryIds: [],
+    agentIds: [],
+  });
 
   const createLoop = useMutation({
     mutationFn: () => api.createLoop(boardId, { name: name.trim(), goal }),
@@ -88,10 +77,10 @@ export function BoardLoopsPage() {
   const saveBoard = useMutation({
     mutationFn: () =>
       api.updateBoard(boardId, {
-        name: editName.trim(),
-        description: editDescription,
-        repository_ids: editRepositoryIds,
-        agent_ids: editAgentIds,
+        name: editDraft.name.trim(),
+        description: editDraft.description,
+        repository_ids: editDraft.repositoryIds,
+        agent_ids: editDraft.agentIds,
       }),
     onSuccess: () => {
       setEditing(false);
@@ -160,10 +149,12 @@ export function BoardLoopsPage() {
             size="sm"
             variant="outline"
             onClick={() => {
-              setEditName(board.name);
-              setEditDescription(board.description);
-              setEditRepositoryIds(board.repository_ids);
-              setEditAgentIds(board.agent_ids);
+              setEditDraft({
+                name: board.name,
+                description: board.description,
+                repositoryIds: board.repository_ids,
+                agentIds: board.agent_ids,
+              });
               setEditing(true);
             }}
           >
@@ -225,56 +216,14 @@ export function BoardLoopsPage() {
         </div>
       ) : null}
 
-      <Dialog open={editing} onOpenChange={setEditing}>
-        <DialogContent
-          title="Edit board"
-          description="Name, description, and the code and agents this board is about."
-        >
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (editName.trim()) saveBoard.mutate();
-            }}
-          >
-            <Field label="Name" htmlFor="board-edit-name">
-              <Input
-                id="board-edit-name"
-                value={editName}
-                onChange={(event) => setEditName(event.target.value)}
-                required
-                maxLength={200}
-              />
-            </Field>
-            <Field label="Description" htmlFor="board-edit-description">
-              <Textarea
-                id="board-edit-description"
-                value={editDescription}
-                onChange={(event) => setEditDescription(event.target.value)}
-                maxLength={20000}
-              />
-            </Field>
-            <RepositoryPicker
-              selected={editRepositoryIds}
-              onChange={setEditRepositoryIds}
-              disabled={saveBoard.isPending}
-            />
-            <AgentPicker
-              selected={editAgentIds}
-              onChange={setEditAgentIds}
-              disabled={saveBoard.isPending}
-            />
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saveBoard.isPending || !editName.trim()}>
-                {saveBoard.isPending ? "Saving?" : "Save board"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <EditBoardDialog
+        open={editing}
+        onOpenChange={setEditing}
+        draft={editDraft}
+        onDraftChange={setEditDraft}
+        saving={saveBoard.isPending}
+        onSave={() => saveBoard.mutate()}
+      />
 
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent
@@ -319,105 +268,5 @@ export function BoardLoopsPage() {
         </DialogContent>
       </Dialog>
     </section>
-  );
-}
-
-function LoopList({ loops, boardId, empty }: { loops: Loop[]; boardId: string; empty: string }) {
-  if (loops.length === 0) {
-    return (
-      <p className="rounded-lg border border-dashed border-[var(--border)] p-4 text-xs text-[var(--muted-foreground)]">
-        {empty}
-      </p>
-    );
-  }
-  return (
-    <ul className="grid gap-2 md:grid-cols-2">
-      {loops.map((loop) => (
-        <li key={loop.id}>
-          <Link
-            to={`/boards/${boardId}/loops/${loop.id}`}
-            className="card-surface flex h-full flex-col gap-2 p-3 transition hover:border-[var(--primary)]"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
-                {loop.key}
-              </span>
-              <span className="text-sm font-medium">{loop.name}</span>
-              <Badge tone={STAGE_TONES[loop.stage]}>{loop.stage.replace("_", " ")}</Badge>
-              <ArrowRight size={14} className="ml-auto text-[var(--muted-foreground)]" />
-            </div>
-            {loop.goal ? (
-              <p className="line-clamp-2 text-xs text-[var(--muted-foreground)]">{loop.goal}</p>
-            ) : null}
-            <div className="mt-auto flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted-foreground)]">
-              <span>
-                {loop.progress.ticket_completed}/{loop.progress.ticket_total} tickets
-              </span>
-              {loop.plan ? <span>· {loop.plan.phase_count} phases</span> : null}
-              {loop.qa ? (
-                <span>
-                  · QA {loop.qa.status.replace("_", " ")}
-                  {loop.qa.open ? " (open)" : ""}
-                </span>
-              ) : null}
-              {loop.warnings.length > 0 ? (
-                <Badge tone="warning">
-                  <AlertTriangle size={11} /> {loop.warnings.length}
-                </Badge>
-              ) : null}
-            </div>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** What this board is about: the code it may read and the agents that may work on it. */
-function BoardContext({
-  agentIds,
-  repositoryIds,
-  agents,
-  repositories,
-}: {
-  agentIds: string[];
-  repositoryIds: string[];
-  agents: { id: string; name: string }[];
-  repositories: { id: string; name: string }[];
-}) {
-  const agentNames = agentIds
-    .map((id) => agents.find((agent) => agent.id === id)?.name)
-    .filter((name): name is string => Boolean(name));
-  const repositoryNames = repositoryIds
-    .map((id) => repositories.find((repository) => repository.id === id)?.name)
-    .filter((name): name is string => Boolean(name));
-
-  return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
-      <span className="flex items-center gap-1 text-[var(--muted-foreground)]">
-        <GitBranch size={11} /> Code
-      </span>
-      {repositoryNames.length > 0 ? (
-        repositoryNames.map((name) => (
-          <Badge key={name} tone="neutral">
-            {name}
-          </Badge>
-        ))
-      ) : (
-        <span className="text-[var(--muted-foreground)]">none selected</span>
-      )}
-      <span className="ml-2 flex items-center gap-1 text-[var(--muted-foreground)]">
-        <Bot size={11} /> Agents
-      </span>
-      {agentNames.length > 0 ? (
-        agentNames.map((name) => (
-          <Badge key={name} tone="brand">
-            {name}
-          </Badge>
-        ))
-      ) : (
-        <span className="text-[var(--muted-foreground)]">any enabled agent</span>
-      )}
-    </div>
   );
 }

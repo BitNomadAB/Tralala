@@ -3,25 +3,14 @@ import { CheckCircle2, GitBranch, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { useAuth } from "@/features/auth/useAuth";
 import { ApiError, api } from "@/lib/api";
-import { RepositoryTokenGuide } from "./RepositoryTokenGuide";
+import { RepositoryDialog, type RepositoryDraft } from "./RepositoryDialog";
 
 const REPOSITORIES_KEY = ["repositories"];
 
-interface Draft {
-  id: string | null;
-  name: string;
-  url: string;
-  branch: string;
-  token: string;
-  enabled: boolean;
-}
-
-const EMPTY: Draft = {
+const EMPTY: RepositoryDraft = {
   id: null,
   name: "",
   url: "",
@@ -35,7 +24,7 @@ export function RepositoriesPage() {
   const isAdmin = actor?.role === "admin";
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draft, setDraft] = useState<RepositoryDraft | null>(null);
   const [checks, setChecks] = useState<Record<string, string>>({});
 
   const repositoriesQuery = useQuery({
@@ -50,7 +39,7 @@ export function RepositoriesPage() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: REPOSITORIES_KEY });
 
   const save = useMutation({
-    mutationFn: (value: Draft) => {
+    mutationFn: (value: RepositoryDraft) => {
       if (value.id) {
         return api.updateRepository(value.id, {
           name: value.name.trim() || undefined,
@@ -230,113 +219,5 @@ export function RepositoriesPage() {
         />
       ) : null}
     </section>
-  );
-}
-
-function RepositoryDialog({
-  draft,
-  saving,
-  hasToken,
-  onChange,
-  onClose,
-  onSave,
-}: {
-  draft: Draft;
-  saving: boolean;
-  hasToken: boolean;
-  onChange: (value: Draft) => void;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const update = (patch: Partial<Draft>) => {
-    onChange({ ...draft, ...patch });
-  };
-
-  return (
-    <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
-      <DialogContent
-        title={draft.id ? "Edit repository" : "New repository"}
-        description="Read-only access for the Analysis agent. Only https://github.com/your-org/your-repo is accepted."
-      >
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (draft.url.trim()) onSave();
-          }}
-        >
-          <Field
-            label="Name"
-            htmlFor="repository-name"
-            hint="Shown in lists; defaults to the repository name."
-          >
-            <Input
-              id="repository-name"
-              value={draft.name}
-              onChange={(event) => update({ name: event.target.value })}
-              maxLength={120}
-            />
-          </Field>
-          <Field label="Repository URL" htmlFor="repository-url">
-            <Input
-              id="repository-url"
-              value={draft.url}
-              onChange={(event) => update({ url: event.target.value })}
-              placeholder="https://github.com/your-org/your-repo"
-              required
-              maxLength={500}
-            />
-          </Field>
-          <Field
-            label="Branch (optional)"
-            htmlFor="repository-branch"
-            hint="Defaults to the default branch."
-          >
-            <Input
-              id="repository-branch"
-              value={draft.branch}
-              onChange={(event) => update({ branch: event.target.value })}
-              placeholder="main"
-              maxLength={200}
-            />
-          </Field>
-          <Field
-            label="Access token"
-            htmlFor="repository-token"
-            hint={
-              hasToken
-                ? "A token is stored. Leave blank to keep it; enter a new one to replace it."
-                : "Fine-grained token with Contents: read for this repository only."
-            }
-          >
-            <Input
-              id="repository-token"
-              type="password"
-              value={draft.token}
-              onChange={(event) => update({ token: event.target.value })}
-              autoComplete="off"
-              maxLength={500}
-            />
-          </Field>
-          <RepositoryTokenGuide url={draft.url} />
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={draft.enabled}
-              onChange={(event) => update({ enabled: event.target.checked })}
-            />
-            Enabled for analysis
-          </label>
-          <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={!draft.url.trim() || saving}>
-              Save repository
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }

@@ -71,7 +71,7 @@ planning groups, not Kanban columns.
 | --- | --- | --- |
 | App shell | `frontend/src/app` | Router, providers, layout |
 | Features | `frontend/src/features` | Boards, Loops, Loop Kanban and planning dialogs, history, discussions, settings, auth |
-| API client | `frontend/src/lib/api.ts` | Typed REST client, envelope unwrapping, CSRF header |
+| API client | `frontend/src/lib/api` | Typed REST client, one module per domain composed into `api`; `client.ts` unwraps the envelope and sends the CSRF header |
 | WebMCP | `frontend/src/webmcp` | Capability detection, registry adapter, contextual tools |
 | Theme | `frontend/src/themes` | Theme kits (`data-theme-kit`) x dark/light/system over semantic CSS variables |
 | Web tier | `frontend/Caddyfile` | Static SPA, one security header policy, reverse proxy, TLS |
