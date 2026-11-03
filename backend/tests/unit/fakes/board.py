@@ -21,7 +21,13 @@ from app.db.generated.board import (
     ChecklistsRow,
     CommentsRow,
     DiscussionEventsRow,
+    DiscussionMessagesRow,
+    DiscussionOutcomesRow,
+    DiscussionParticipantsRow,
+    DiscussionRoundsRow,
+    DiscussionRunsRow,
     DiscussionThreadsRow,
+    DiscussionVotesRow,
     IdempotencyRecordsRow,
     LabelsRow,
     ListsRow,
@@ -55,6 +61,15 @@ from app.repositories.checklists import (
 )
 from app.repositories.comments import CommentRepository
 from app.repositories.counters import BoardCounts, CounterRepository
+from app.repositories.discussions import (
+    DiscussionMessageRepository,
+    DiscussionOutcomeRepository,
+    DiscussionParticipantRepository,
+    DiscussionRoundRepository,
+    DiscussionRunRepository,
+    DiscussionThreadRepository,
+    DiscussionVoteRepository,
+)
 from app.repositories.events import EventRepository, NewEvent
 from app.repositories.idempotency import BoardIdempotencyRepository
 from app.repositories.labels import LabelChanges, LabelRepository
@@ -72,6 +87,15 @@ from app.repositories.loop_plans import (
 from app.repositories.loop_qa import LoopQaRepository
 from app.repositories.loops import ApprovalColumn, LoopChanges, LoopRepository
 from app.repositories.search import CardSearch, CardSearchRepository
+from tests.unit.fakes.discussions import (
+    FakeDiscussionMessageRepository,
+    FakeDiscussionOutcomeRepository,
+    FakeDiscussionParticipantRepository,
+    FakeDiscussionRoundRepository,
+    FakeDiscussionRunRepository,
+    FakeDiscussionThreadRepository,
+    FakeDiscussionVoteRepository,
+)
 from tests.unit.fakes.registry import ConstraintError, like
 
 BOARD_ID = "0b6f3c1e-7a52-4d8e-9c41-2f5a6b7c8d9e"
@@ -115,6 +139,16 @@ class BoardState:
     )
     discussion_events: list[DiscussionEventsRow] = field(default_factory=list[DiscussionEventsRow])
     card_events: list[CardEventsRow] = field(default_factory=list[CardEventsRow])
+    participants: list[DiscussionParticipantsRow] = field(
+        default_factory=list[DiscussionParticipantsRow]
+    )
+    discussion_messages: list[DiscussionMessagesRow] = field(
+        default_factory=list[DiscussionMessagesRow]
+    )
+    votes: list[DiscussionVotesRow] = field(default_factory=list[DiscussionVotesRow])
+    runs: dict[str, DiscussionRunsRow] = field(default_factory=dict[str, DiscussionRunsRow])
+    rounds: list[DiscussionRoundsRow] = field(default_factory=list[DiscussionRoundsRow])
+    outcomes: list[DiscussionOutcomesRow] = field(default_factory=list[DiscussionOutcomesRow])
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -142,6 +176,12 @@ class BoardState:
             discussions=dict(self.discussions),
             discussion_events=list(self.discussion_events),
             card_events=list(self.card_events),
+            participants=list(self.participants),
+            discussion_messages=list(self.discussion_messages),
+            votes=list(self.votes),
+            runs=dict(self.runs),
+            rounds=list(self.rounds),
+            outcomes=list(self.outcomes),
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -169,6 +209,12 @@ class BoardState:
         self.discussions = snapshot.discussions
         self.discussion_events = snapshot.discussion_events
         self.card_events = snapshot.card_events
+        self.participants = snapshot.participants
+        self.discussion_messages = snapshot.discussion_messages
+        self.votes = snapshot.votes
+        self.runs = snapshot.runs
+        self.rounds = snapshot.rounds
+        self.outcomes = snapshot.outcomes
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -1744,6 +1790,15 @@ class FakeBoardRepositories:
         self.search: CardSearchRepository = FakeCardSearchRepository(state)
         self.loop_agents: LoopAgentRepository = FakeLoopAgentRepository(state)
         self.events: EventRepository = FakeEventRepository(state)
+        self.threads: DiscussionThreadRepository = FakeDiscussionThreadRepository(state)
+        self.messages: DiscussionMessageRepository = FakeDiscussionMessageRepository(state)
+        self.participants: DiscussionParticipantRepository = (
+            FakeDiscussionParticipantRepository(state)
+        )
+        self.votes: DiscussionVoteRepository = FakeDiscussionVoteRepository(state)
+        self.runs: DiscussionRunRepository = FakeDiscussionRunRepository(state)
+        self.rounds: DiscussionRoundRepository = FakeDiscussionRoundRepository(state)
+        self.outcomes: DiscussionOutcomeRepository = FakeDiscussionOutcomeRepository(state)
         self.savepoints = 0
 
     @contextmanager

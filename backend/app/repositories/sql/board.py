@@ -18,6 +18,15 @@ from ..cards import CardRepository
 from ..checklists import ChecklistItemRepository, ChecklistRepository
 from ..comments import CommentRepository
 from ..counters import CounterRepository
+from ..discussions import (
+    DiscussionMessageRepository,
+    DiscussionOutcomeRepository,
+    DiscussionParticipantRepository,
+    DiscussionRoundRepository,
+    DiscussionRunRepository,
+    DiscussionThreadRepository,
+    DiscussionVoteRepository,
+)
 from ..events import EventRepository
 from ..idempotency import BoardIdempotencyRepository
 from ..labels import LabelRepository
@@ -40,6 +49,15 @@ from .cards import SqlCardRepository
 from .checklists import SqlChecklistItemRepository, SqlChecklistRepository
 from .comments import SqlCommentRepository
 from .counters import SqlCounterRepository
+from .discussions import (
+    SqlDiscussionMessageRepository,
+    SqlDiscussionOutcomeRepository,
+    SqlDiscussionParticipantRepository,
+    SqlDiscussionRoundRepository,
+    SqlDiscussionRunRepository,
+    SqlDiscussionThreadRepository,
+    SqlDiscussionVoteRepository,
+)
 from .events import SqlEventRepository
 from .idempotency import SqlBoardIdempotencyRepository
 from .labels import SqlLabelRepository
@@ -87,6 +105,15 @@ class SqlBoardRepositories:
         self.search: CardSearchRepository = SqlCardSearchRepository(connection)
         self.loop_agents: LoopAgentRepository = SqlLoopAgentRepository(connection)
         self.events: EventRepository = SqlEventRepository(connection)
+        self.threads: DiscussionThreadRepository = SqlDiscussionThreadRepository(connection)
+        self.messages: DiscussionMessageRepository = SqlDiscussionMessageRepository(connection)
+        self.participants: DiscussionParticipantRepository = (
+            SqlDiscussionParticipantRepository(connection)
+        )
+        self.votes: DiscussionVoteRepository = SqlDiscussionVoteRepository(connection)
+        self.runs: DiscussionRunRepository = SqlDiscussionRunRepository(connection)
+        self.rounds: DiscussionRoundRepository = SqlDiscussionRoundRepository(connection)
+        self.outcomes: DiscussionOutcomeRepository = SqlDiscussionOutcomeRepository(connection)
 
     @contextmanager
     def savepoint(self) -> Generator[None]:

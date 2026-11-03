@@ -18,6 +18,15 @@ from .cards import CardRepository
 from .checklists import ChecklistItemRepository, ChecklistRepository
 from .comments import CommentRepository
 from .counters import CounterRepository
+from .discussions import (
+    DiscussionMessageRepository,
+    DiscussionOutcomeRepository,
+    DiscussionParticipantRepository,
+    DiscussionRoundRepository,
+    DiscussionRunRepository,
+    DiscussionThreadRepository,
+    DiscussionVoteRepository,
+)
 from .events import EventRepository
 from .idempotency import BoardIdempotencyRepository
 from .labels import LabelRepository
@@ -106,6 +115,27 @@ class BoardRepositories(Protocol):
 
     @property
     def events(self) -> EventRepository: ...
+
+    @property
+    def threads(self) -> DiscussionThreadRepository: ...
+
+    @property
+    def messages(self) -> DiscussionMessageRepository: ...
+
+    @property
+    def participants(self) -> DiscussionParticipantRepository: ...
+
+    @property
+    def votes(self) -> DiscussionVoteRepository: ...
+
+    @property
+    def runs(self) -> DiscussionRunRepository: ...
+
+    @property
+    def rounds(self) -> DiscussionRoundRepository: ...
+
+    @property
+    def outcomes(self) -> DiscussionOutcomeRepository: ...
 
     def savepoint(self) -> AbstractContextManager[None]:
         """A nested transaction inside a writer: it keeps its writes when the block ends normally
