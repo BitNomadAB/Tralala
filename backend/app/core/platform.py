@@ -72,7 +72,7 @@ def transient_error(exc: OSError, profile: str) -> str | None:
     return None
 
 
-def retry_io(operation: str, profile: str, func: Callable[[], None]) -> None:
+def retry_io(operation: str, profile: str, func: Callable[[], object]) -> None:
     """Run ``func`` and retry only the errors the host can clear on its own.
 
     Anything considered permanent (`EACCES`, `EPERM`, `EROFS`) raises immediately, because a second

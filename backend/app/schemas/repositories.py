@@ -54,7 +54,7 @@ class RepositoryOut(OutModel):
     enabled: bool = True
     has_token: bool = False
     token_hint: str | None = None
-    boards: list[RepositoryBoardOut] = Field(default_factory=list)
+    boards: list[RepositoryBoardOut] = Field(default_factory=list[RepositoryBoardOut])
     last_checked_at: str | None = None
     last_check_status: str | None = None
     last_check_detail: str | None = None

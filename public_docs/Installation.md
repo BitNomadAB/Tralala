@@ -254,7 +254,7 @@ Run what CI runs:
 cd backend
 ../.venv/bin/python -m tools.dbgen                       # migrations, rows, SQL (always first)
 ../.venv/bin/python -m ruff check app tests migrations tools
-../.venv/bin/python -m pyright                           # strict types
+../.venv/bin/python -m pyright                           # types
 ../.venv/bin/python -m pytest                            # unit tests
 ../.venv/bin/python -m pytest tests/infrastructure       # the small SQLite suite
 cd ../frontend

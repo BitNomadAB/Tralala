@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel
 
 
@@ -11,14 +9,14 @@ class Envelope[T](BaseModel):
     success: bool = True
     data: T
     request_id: str
-    meta: dict[str, Any] | None = None
+    meta: dict[str, object] | None = None
 
 
 class ErrorBody(BaseModel):
     code: str
     message: str
     retryable: bool = False
-    details: Any | None = None
+    details: object | None = None
 
 
 class ErrorEnvelope(BaseModel):

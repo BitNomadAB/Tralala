@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 
 class ApiError(Exception):
@@ -16,7 +16,7 @@ class ApiError(Exception):
         *,
         code: str | None = None,
         status_code: int | None = None,
-        details: Any | None = None,
+        details: Mapping[str, object] | None = None,
         retryable: bool | None = None,
     ) -> None:
         super().__init__(message)

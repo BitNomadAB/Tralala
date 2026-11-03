@@ -126,7 +126,7 @@ Backend (run from `backend/`):
 ```powershell
 ..\.venv\Scripts\python.exe -m tools.dbgen                            # first: migrations, rows, SQL
 ..\.venv\Scripts\python.exe -m ruff check app tests migrations tools  # lint, what CI runs
-..\.venv\Scripts\python.exe -m pyright                                # strict scope: pyrightconfig.json
+..\.venv\Scripts\python.exe -m pyright                                # types: pyrightconfig.json
 ..\.venv\Scripts\python.exe -m pytest                                 # unit tests (primary gate)
 ..\.venv\Scripts\python.exe -m pytest tests/infrastructure            # the minimal SQLite suite
 ..\.venv\Scripts\python.exe -m tools.deps licences                    # every dependency's licence
@@ -178,10 +178,13 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   `from_mapping`. A service returns typed values (a row, a `TypedDict` of its JSON shape), and a
   unit test changes a row with `row.__replace__(...)`, which pyright checks, not
   `dataclasses.replace`.
-- Pyright runs strict on the scope in `backend/pyrightconfig.json`: the generated rows, the
-  repositories, every converted service, the unit tests and the build tools. In that scope there is
-  no `Any`, no `cast` and no `# type: ignore`; `tests/unit/test_strict_scope.py` enforces it. Each
-  converted service joins the scope.
+- Pyright runs strict on the scope in `backend/pyrightconfig.json`: `app/core`, `app/schemas`, the
+  generated rows, the repositories, every converted service, the unit tests and the build tools.
+  In that scope there is no `Any`, no `cast` and no `# type: ignore`. Each converted service joins
+  the scope. `app/api`, `app/main.py` and `app/dev_reset.py` are checked in pyright's `standard`
+  mode while the services they call return untyped values; `app/storage` and the unconverted
+  services are not checked yet. `tests/unit/test_strict_scope.py` enforces all of it, so the
+  scope can only grow.
 - TypeScript: strict, plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
   `noImplicitOverride` and `verbatimModuleSyntax` (`frontend/tsconfig.json`). An index or regex
   result is narrowed, never asserted with `!`; an optional property that may be passed `undefined`

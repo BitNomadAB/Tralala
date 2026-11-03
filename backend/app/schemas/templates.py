@@ -18,7 +18,7 @@ class TemplateCreate(StrictModel):
         max_length=50,
         description="Initial list names, in board order; empty means the default Backlog..Done",
     )
-    labels: list[TemplateLabel] = Field(default_factory=list, max_length=50)
+    labels: list[TemplateLabel] = Field(default_factory=list[TemplateLabel], max_length=50)
 
 
 class TemplateUpdate(StrictModel):
@@ -38,7 +38,7 @@ class TemplateOut(OutModel):
     name: str
     description: str
     lists: list[str] = Field(default_factory=list)
-    labels: list[TemplateLabel] = Field(default_factory=list)
+    labels: list[TemplateLabel] = Field(default_factory=list[TemplateLabel])
     created_at: str
     updated_at: str
     list_count: int = 0

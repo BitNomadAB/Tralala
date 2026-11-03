@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from threading import Lock
 
@@ -71,7 +71,7 @@ class LoginThrottle:
             self._refuse_locked(keys, now)
 
     @contextmanager
-    def attempt(self, *keys: str) -> Iterator[None]:
+    def attempt(self, *keys: str) -> Generator[None]:
         """One sign-in attempt against ``keys``; a failure is recorded inside the block."""
         now = time.monotonic()
         with self._lock:

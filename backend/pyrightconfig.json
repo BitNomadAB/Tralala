@@ -1,5 +1,12 @@
 {
   "include": [
+    "app/api",
+    "app/core",
+    "app/dev_reset.py",
+    "app/main.py",
+    "app/models",
+    "app/schemas",
+    "app/security",
     "app/db",
     "app/repositories",
     "app/services/lists.py",
@@ -8,6 +15,10 @@
     "tools"
   ],
   "strict": [
+    "app/core",
+    "app/models",
+    "app/schemas",
+    "app/security",
     "app/db",
     "app/repositories",
     "app/services/lists.py",
@@ -17,7 +28,7 @@
   ],
   "pythonVersion": "3.13",
   "pythonPlatform": "Linux",
-  "typeCheckingMode": "strict",
+  "typeCheckingMode": "standard",
   "venvPath": "..",
   "venv": ".venv"
 }

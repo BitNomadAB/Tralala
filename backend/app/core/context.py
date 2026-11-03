@@ -68,7 +68,7 @@ class ActorContext:
     actor_id: str
     actor_type: str
     actor_name: str
-    scopes: frozenset[str] = field(default_factory=frozenset)
+    scopes: frozenset[str] = field(default_factory=frozenset[str])
     request_id: str = ""
     role: str | None = None
 
