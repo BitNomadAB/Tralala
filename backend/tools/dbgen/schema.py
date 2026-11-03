@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.pool import StaticPool
 
 from app.storage.schema import ensure_fts, runner
 
 from . import BuildError
-from .rules import Column, ForeignKey, Index, Table
+from .rules import (
+    Column,
+    ForeignKey,
+    Index,
+    Table,
+    migration_hint,
+    python_type,
+    sqlite_problem,
+)
 
 CHAINS = ("registry", "board")
 
@@ -60,13 +71,53 @@ def chain_problems(chain: str) -> list[str]:
     return problems
 
 
-def migrate(chain: str) -> sqlite3.Connection:
-    """A new in-memory database at the chain's head, migrated the way the application does it."""
+@dataclass(frozen=True, slots=True)
+class Migrated:
+    """A chain migrated to its head, and the revision that created each table it holds there."""
+
+    database: sqlite3.Connection
+    created_by: Mapping[str, str]
+
+
+def migrate(chain: str) -> Migrated:
+    """A new in-memory database at the chain's head, migrated the way the application does it.
+
+    The revisions run in one transaction, as the Migration Manager runs them, but one upgrade call
+    each, so the tables present after every revision are known: a table was created by the revision
+    after which its name appears (and appears again, after a revision dropped it). A rebuild by
+    ``batch_alter_table`` keeps the name and is not a creation.
+    """
+    problem = sqlite_problem(sqlite3.sqlite_version_info)
+    if problem:
+        raise BuildError(problem)
     database = sqlite3.connect(":memory:", check_same_thread=False)
+    try:
+        created_by = _upgrade(chain, database)
+    except BaseException:
+        database.close()
+        raise
+    return Migrated(database=database, created_by=created_by)
+
+
+def _upgrade(chain: str, database: sqlite3.Connection) -> dict[str, str]:
+    """Apply the chain revision by revision; each table at the head with its creating revision."""
+    revisions = [revision.revision for revision in runner.script_directory(chain).walk_revisions()]
     engine = create_engine("sqlite://", creator=lambda: database, poolclass=StaticPool)
+    created_by: dict[str, str] = {}
     try:
         with engine.begin() as connection:
-            runner.upgrade(chain, connection)
+            for revision in reversed(revisions):
+                try:
+                    runner.upgrade(chain, connection, revision)
+                except DBAPIError as exc:
+                    error = str(exc.orig)
+                    raise BuildError(
+                        f"{chain}: revision {revision} does not apply: {error}"
+                        f"{migration_hint(error)}"
+                    ) from exc
+                created_by = {
+                    name: created_by.get(name, revision) for name in runner.table_names(connection)
+                }
         if chain == "board" and not ensure_fts(engine):
             raise BuildError(
                 "this Python's SQLite cannot create FTS5 tables, so the board's search statements"
@@ -74,31 +125,10 @@ def migrate(chain: str) -> sqlite3.Connection:
             )
     finally:
         engine.dispose(close=False)
-    return database
+    return created_by
 
 
 # --- tables -------------------------------------------------------------------------------------
-
-
-def python_type(declared: str) -> str | None:
-    """The Python type for a declared column type, by SQLite's affinity rules (datatype3 3.1).
-
-    BOOLEAN is the one name read as more than its affinity: SQLite stores it as 0/1. A type with
-    NUMERIC affinity (DATETIME, DECIMAL, ...) can hand back int, float or str, so it has no single
-    Python type and is refused.
-    """
-    name = declared.upper()
-    if name == "BOOLEAN":
-        return "bool"
-    if "INT" in name:
-        return "int"
-    if any(marker in name for marker in ("CHAR", "CLOB", "TEXT")):
-        return "str"
-    if "BLOB" in name:
-        return "bytes"
-    if any(marker in name for marker in ("REAL", "FLOA", "DOUB")):
-        return "float"
-    return None
 
 
 def _primary_key(database: sqlite3.Connection, table: str) -> tuple[str, ...]:
@@ -155,8 +185,18 @@ def _indexes(database: sqlite3.Connection, table: str) -> list[Index]:
     return found
 
 
-def read_tables(database: sqlite3.Connection) -> list[Table]:
-    """Every table outside the exclusion list: columns in declaration order, keys and indexes."""
+def _strict(database: sqlite3.Connection, table: str) -> bool:
+    """Whether the table was created STRICT (``pragma_table_list``, SQLite 3.37 and later)."""
+    row: tuple[int] | None = database.execute(
+        "SELECT strict FROM pragma_table_list WHERE schema = 'main' AND name = ?", (table,)
+    ).fetchone()
+    return row is not None and bool(row[0])
+
+
+def read_tables(migrated: Migrated) -> list[Table]:
+    """Every table outside the exclusion list: columns in declaration order, keys, indexes, whether
+    it is STRICT and the revision that created it."""
+    database = migrated.database
     names = [
         str(name)
         for (name,) in database.execute(
@@ -201,6 +241,8 @@ def read_tables(database: sqlite3.Connection) -> list[Table]:
                 columns=tuple(columns),
                 foreign_keys=_foreign_keys(database, name),
                 indexes=tuple(indexes),
+                strict=_strict(database, name),
+                created_by=migrated.created_by.get(name, ""),
             )
         )
     return tables

@@ -19,6 +19,17 @@ Most of ``UNENFORCED`` waits for one change: a SQLite table rebuild must run wit
 fires the ``ON DELETE`` action of every row that references it. The migration runner enforces
 foreign keys inside its transaction, where ``PRAGMA foreign_keys`` cannot change, so a revision can
 only rebuild a table that nothing references, and cannot add a self-reference.
+
+**STRICT tables (GCS-T22).** A table is ``STRICT`` (``op.create_table(..., sqlite_strict=True)``)
+unless the revision that created it is on ``NON_STRICT_REVISIONS``, which holds, each with its
+reason, the revisions from before STRICT became the rule. SQLite then refuses a value that does not
+fit the declared type instead of storing it, so a generated row's checked converter cannot meet a
+stray value. ``schema.migrate`` derives the creating revision: the one after which the table's name
+first appears. A rebuild by ``batch_alter_table`` keeps the name and the table's mode (Alembic
+copies the reflected ``sqlite_strict``), so it is not a creation and never converts an older table:
+STRICT accepts only the type names INT, INTEGER, REAL, TEXT, BLOB and ANY, while most older columns
+are VARCHAR, and the copy into a STRICT table fails on every stored value that does not fit, so
+converting a table is a revision of its own.
 """
 
 from __future__ import annotations
@@ -59,10 +70,14 @@ class Index:
 
 @dataclass(frozen=True, slots=True)
 class Table:
+    """A table at the chain's head; ``created_by`` is the revision that created it."""
+
     name: str
     columns: tuple[Column, ...]
     foreign_keys: tuple[ForeignKey, ...] = ()
     indexes: tuple[Index, ...] = ()
+    strict: bool = False
+    created_by: str = ""
 
 
 type Schema = Mapping[str, Sequence[Table]]
@@ -81,10 +96,31 @@ def class_name(table: str) -> str:
 # --- rows ---------------------------------------------------------------------------------------
 
 
+def python_type(declared: str) -> str | None:
+    """The Python type for a declared column type, by SQLite's affinity rules (datatype3 3.1).
+
+    BOOLEAN is the one name read as more than its affinity: SQLite stores it as 0/1. A type with
+    NUMERIC affinity (DATETIME, DECIMAL, ...) can hand back int, float or str, so it has no single
+    Python type and is refused, as is STRICT's ANY, which keeps whatever it is given.
+    """
+    name = declared.upper()
+    if name == "BOOLEAN":
+        return "bool"
+    if "INT" in name:
+        return "int"
+    if any(marker in name for marker in ("CHAR", "CLOB", "TEXT")):
+        return "str"
+    if "BLOB" in name:
+        return "bytes"
+    if any(marker in name for marker in ("REAL", "FLOA", "DOUB")):
+        return "float"
+    return None
+
+
 def rule_every_column_has_a_python_type(schema: Schema) -> list[str]:
     return [
         f"{chain}: {table.name}.{column.name} is declared {column.declared or 'without a type'!r},"
-        " which has no single Python type; declare it TEXT, INTEGER, REAL, BLOB or BOOLEAN"
+        " which has no single Python type; declare it TEXT, INTEGER, REAL or BLOB"
         for chain, tables in schema.items()
         for table in tables
         for column in table.columns
@@ -351,6 +387,99 @@ def rule_foreign_keys_declare_on_delete(schema: Schema) -> list[str]:
     return problems
 
 
+# --- STRICT tables -------------------------------------------------------------------------------
+
+# STRICT tables and pragma_table_list, which reports them, arrived in SQLite 3.37.0.
+MINIMUM_SQLITE: Final = (3, 37, 0)
+
+STRICT_TYPES: Final = ("INT", "INTEGER", "REAL", "TEXT", "BLOB", "ANY")
+
+BEFORE_STRICT: Final = "created before STRICT became the rule for new tables"
+
+# (chain, revision) -> why the tables that revision created may stay without STRICT. Released
+# revisions never change, so an entry goes stale only when its last table without STRICT is dropped
+# or converted, and is then removed. A later revision lands here only with a reason of its own (a
+# rename counts as a creation, so renaming an older table without converting it needs one).
+NON_STRICT_REVISIONS: Final = MappingProxyType(
+    {
+        ("registry", "0001_registry_initial"): BEFORE_STRICT,
+        ("registry", "0003_board_templates"): BEFORE_STRICT,
+        ("registry", "0004_agent_foundation"): BEFORE_STRICT,
+        ("registry", "0005_accounts_and_sessions"): BEFORE_STRICT,
+        ("registry", "0007_board_repositories"): BEFORE_STRICT,
+        ("registry", "0009_board_repository_links"): BEFORE_STRICT,
+        ("registry", "0010_board_agents"): BEFORE_STRICT,
+        ("registry", "0012_user_invites"): BEFORE_STRICT,
+        ("registry", "0014_board_stats"): BEFORE_STRICT,
+        ("board", "0001_board_initial"): BEFORE_STRICT,
+        ("board", "0003_card_assignment_attachments"): BEFORE_STRICT,
+        ("board", "0004_discussions"): BEFORE_STRICT,
+        ("board", "0005_discussion_run_control"): BEFORE_STRICT,
+        ("board", "0006_discussion_events"): BEFORE_STRICT,
+        ("board", "0007_comment_mentions"): BEFORE_STRICT,
+        ("board", "0008_loops"): BEFORE_STRICT,
+        ("board", "0009_loop_agent_preferences"): BEFORE_STRICT,
+    }
+)
+
+
+def sqlite_problem(version: tuple[int, int, int]) -> str | None:
+    """Why this SQLite cannot build the schema, or None."""
+    if version >= MINIMUM_SQLITE:
+        return None
+    found = ".".join(str(part) for part in version)
+    needed = ".".join(str(part) for part in MINIMUM_SQLITE)
+    return (
+        f"SQLite {found} cannot create or describe STRICT tables, which need {needed} or newer;"
+        " build with a Python whose SQLite is newer"
+    )
+
+
+def migration_hint(error: str) -> str:
+    """Advice to append to SQLite's message when a revision does not apply, or ``""``."""
+    if "unknown datatype" in error:
+        return (
+            f"; a STRICT table takes only the types {', '.join(STRICT_TYPES)}: use sa.Text(),"
+            " sa.Integer(), sa.REAL() or sa.LargeBinary() (a flag is an INTEGER 0/1 and a"
+            " timestamp ISO 8601 TEXT, see docs/database.md)"
+        )
+    if "cannot store" in error:
+        return "; a STRICT table refuses a value that does not fit the column's type"
+    return ""
+
+
+def rule_new_tables_are_strict(
+    schema: Schema, exempt: Mapping[tuple[str, str], str] = NON_STRICT_REVISIONS
+) -> list[str]:
+    """Every table is STRICT unless the revision that created it is exempt, and every exemption
+    still covers a table that is not STRICT."""
+    problems: list[str] = []
+    needed: set[tuple[str, str]] = set()
+    for chain, tables in schema.items():
+        for table in tables:
+            if table.strict:
+                continue
+            if (chain, table.created_by) in exempt:
+                needed.add((chain, table.created_by))
+                continue
+            created = (
+                f"revision {table.created_by} created it after STRICT became the rule"
+                if table.created_by
+                else "no revision is known to have created it"
+            )
+            problems.append(
+                f"{chain}: {table.name} is not STRICT, but {created}; create it with"
+                " op.create_table(..., sqlite_strict=True)"
+            )
+    problems.extend(
+        f"{chain}: revision {revision} is on NON_STRICT_REVISIONS, but no table it created is"
+        " left without STRICT; remove the entry from tools/dbgen/rules.py"
+        for chain, revision in exempt
+        if chain in schema and (chain, revision) not in needed
+    )
+    return problems
+
+
 SCHEMA_RULES: tuple[Callable[[Schema], list[str]], ...] = (
     rule_every_column_has_a_python_type,
     rule_names_fit_a_row,
@@ -358,8 +487,8 @@ SCHEMA_RULES: tuple[Callable[[Schema], list[str]], ...] = (
     rule_reference_columns_have_a_foreign_key,
     rule_foreign_keys_are_indexed,
     rule_foreign_keys_declare_on_delete,
+    rule_new_tables_are_strict,
 )
-# GCS-T22 (STRICT tables) adds its rule here.
 
 
 def schema_problems(schema: Schema) -> list[str]:

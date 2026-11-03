@@ -74,8 +74,8 @@ Two independent Alembic chains live under `backend/migrations`:
 
 | Chain | Database | Version table | Head (current) |
 | --- | --- | --- | --- |
-| `registry` | `data/registry.sqlite` | `alembic_version` | `0014_board_stats` |
-| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0009_loop_agent_preferences` |
+| `registry` | `data/registry.sqlite` | `alembic_version` | `0015_registry_foreign_keys` |
+| `board` | every `data/boards/{uuid}/board.sqlite` | `alembic_version` | `0011_board_foreign_keys` |
 
 - The baseline revisions (`0001_registry_initial`, `0001_board_initial`) reproduce the schema that
   shipped before Alembic. A database that predates version tracking (no `alembic_version`) is
@@ -109,10 +109,10 @@ Two independent Alembic chains live under `backend/migrations`:
   index bootstrap in `storage/schema/fts.py` is the single documented exception).
 - The migrations are also the build's source of truth. `python -m tools.dbgen` (run from
   `backend/`, first in every build) refuses a chain with more than one head, a merge or a branch,
-  migrates both chains into an in-memory database, applies the schema rules in
-  `tools/dbgen/rules.py`, writes one frozen dataclass per table to `app/db/generated/` (git-ignored;
-  Alembic's table and the FTS5 tables are excluded by name) and compiles every SQL statement in
-  `app/` against that schema with SQLite's `EXPLAIN`. A table name the two chains share
+  migrates both chains into an in-memory database one revision at a time, applies the schema
+  rules in `tools/dbgen/rules.py`, writes one frozen dataclass per table to `app/db/generated/`
+  (git-ignored; Alembic's table and the FTS5 tables are excluded by name) and compiles every SQL
+  statement in `app/` against that schema with SQLite's `EXPLAIN`. A table name the two chains share
   (`idempotency_records`) must have the same columns in both, because a statement passes when
   either database accepts it.
 
@@ -146,6 +146,42 @@ Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestr
 - Boards require archiving and a name confirmation before physical deletion.
 - All timestamps are ISO 8601 UTC strings with second precision (`2026-10-30T12:00:00Z`).
 - `version` increments on every card mutation and is the optimistic-concurrency token.
+
+### STRICT tables
+
+- Every table a revision creates is `STRICT`: `op.create_table(..., sqlite_strict=True)`.
+  SQLAlchemy renders the option itself, so no helper is needed. SQLite then refuses a value that
+  does not fit the column's declared type instead of storing it under the looser type affinity, so
+  a generated row's checked converter never meets a stray value.
+- A STRICT column takes only the type names `INT`, `INTEGER`, `REAL`, `TEXT`, `BLOB` and `ANY`.
+  In a revision that means `sa.Text()` for text, ids and timestamps, `sa.Integer()` for integers
+  and flags, `sa.REAL()` for floating point and `sa.LargeBinary()` for bytes. `sa.String()`
+  (VARCHAR), `sa.Boolean()`, `sa.DateTime()`, `sa.Float()` (FLOAT), `sa.BigInteger()`,
+  `sa.Numeric()`, `sa.JSON()` and `sa.Uuid()` render names STRICT refuses, and the build stops at
+  that revision with SQLite's message. `ANY` keeps whatever it is given, so it has no single
+  Python type and the rows refuse it.
+- A flag is `sa.Integer()` with `server_default="0"` or `"1"` and a named
+  `CHECK (<column> IN (0, 1))`, as the flags of the older tables are stored (`enabled`,
+  `is_current`); its generated field is `int`. A timestamp is `sa.Text()` holding an ISO 8601 UTC
+  string, validated at the schema boundary; its field is `str`. A length limit that matters is a
+  `CHECK (length(<column>) <= n)`: SQLite never enforced the `n` of `VARCHAR(n)`.
+- `python -m tools.dbgen` applies each chain one revision at a time and takes the revision after
+  which a table's name first appears as the one that created it; a rename counts as a creation. A
+  table that is not STRICT stops the build with its chain, name and revision, unless that revision
+  is on `NON_STRICT_REVISIONS` in `tools/dbgen/rules.py`: the revisions up to
+  `0015_registry_foreign_keys` and `0011_board_foreign_keys`, from before the rule. The list stays
+  exact: an entry with no table left without STRICT stops the build too.
+- The older tables stay as they are. A `batch_alter_table` rebuild keeps a table's name and its
+  mode (Alembic copies the reflected `STRICT` option, which SQLAlchemy 2.0.53 and later read back),
+  so a rebuild neither converts an older table nor loses STRICT on a newer one. Converting an older
+  table is not required and would be a revision of its own: every column needs a STRICT type name,
+  and copying the rows into the STRICT table fails on any stored value that does not fit (a
+  non-STRICT `INTEGER` column can hold text), so the upgrade of a real database would depend on its
+  data.
+- STRICT tables need SQLite 3.37.0 or newer, and an older SQLite cannot read the schema of a
+  database that has one. The build refuses an older SQLite and names the version it migrated with.
+  It runs on the interpreter that later runs the application (the container image runs it while it
+  is built), so an older runtime never gets as far as a migration.
 
 ### FTS5
 

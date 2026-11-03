@@ -49,7 +49,9 @@ message broker.
    statement in `app/` against the result, so nothing hand-written mirrors a table. Every column
    named `*_id` or `*_by` has a foreign key, an index that starts with it and an explicit
    `ON DELETE` (RESTRICT by default, CASCADE or SET NULL with a comment saying why), or an entry
-   with its reason in `tools/dbgen/rules.py`; dbgen stops the build otherwise.
+   with its reason in `tools/dbgen/rules.py`; dbgen stops the build otherwise. Every table a new
+   revision creates is `STRICT` (`op.create_table(..., sqlite_strict=True)`, with the column types
+   `docs/database.md` names); dbgen stops the build on one that is not.
 10. **No new infrastructure** without a documented decision in `docs/decisions/` (a local, untracked
     working document) that proves a requirement.
 11a. **Planning decisions are human decisions.** Approving analysis or a RoadMap, resetting a scope,

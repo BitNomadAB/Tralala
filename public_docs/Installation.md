@@ -31,6 +31,10 @@ example with `uv python install 3.13` or the deadsnakes PPA, and create the venv
 interpreter. The shortest route to the pinned pnpm is `corepack enable`; on Windows that may need
 an elevated shell.
 
+The interpreter's SQLite must be 3.37.0 or newer, because new tables are created `STRICT`; check it
+with `python -c "import sqlite3; print(sqlite3.sqlite_version)"`. The backend build stops with a
+message on an older one. On Linux this is the system library, which Ubuntu 22.04 and newer provide.
+
 ## Docker (recommended)
 
 ```bash

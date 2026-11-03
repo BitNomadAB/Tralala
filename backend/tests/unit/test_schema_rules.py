@@ -1,8 +1,9 @@
-"""The build's reference rules, held to fixed schema descriptions (no database, no migration).
+"""The build's schema rules, held to fixed schema descriptions (no database, no migration).
 
 Every column that names a row has a foreign key or one reasoned list entry, every foreign key
-starts an index and every foreign key declares its ON DELETE rule. ``python -m tools.dbgen`` runs
-the same functions over the migrated schema and stops on the first problem.
+starts an index and every foreign key declares its ON DELETE rule; every table a revision creates
+after the listed ones is STRICT. ``python -m tools.dbgen`` runs the same functions over the migrated
+schema and stops on the first problem.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ def column(name: str, *, nullable: bool = True) -> Column:
 
 
 def parent() -> Table:
-    return Table(name="loops", columns=(column("id", nullable=False),))
+    return Table(name="loops", columns=(column("id", nullable=False),), strict=True)
 
 
 def child(
@@ -36,6 +37,7 @@ def child(
         columns=(column("id", nullable=False), *columns),
         foreign_keys=keys,
         indexes=(Index("sqlite_autoindex_phases_1", ("id",)), *indexes),
+        strict=True,
     )
 
 
@@ -232,12 +234,14 @@ def test_the_reference_rules_are_part_of_the_build() -> None:
 def test_schema_problems_runs_every_rule_and_names_table_and_column() -> None:
     undeclared = key("loop_id", on_delete="NO ACTION")
     table = child(column("plan_id"), column("loop_id"), keys=(undeclared,))
+    loose = Table(name="notes", columns=(column("id", nullable=False),), created_by="0016_notes")
     # A chain the lists do not name, so none of their entries is judged against this table.
-    problems = rules.schema_problems({"scratch": [parent(), table]})
+    problems = rules.schema_problems({"scratch": [parent(), table, loose]})
     assert [problem.split(" ")[1] for problem in problems] == [
         "phases.plan_id",  # no foreign key
         "phases.loop_id",  # no index
         "phases.loop_id",  # no ON DELETE rule
+        "notes",  # not STRICT
     ]
 
 
@@ -261,3 +265,129 @@ def test_every_list_entry_is_a_reference_column_with_a_reason_on_one_list() -> N
 def test_the_lists_are_frozen() -> None:
     for entries in (rules.CROSS_DATABASE, rules.NOT_REFERENCES, rules.UNENFORCED):
         assert isinstance(entries, MappingProxyType)
+
+
+# --- STRICT tables -------------------------------------------------------------------------------
+
+# The last revision of each chain before STRICT became the rule for new tables.
+LAST_BEFORE_STRICT = {"registry": "0015_registry_foreign_keys", "board": "0011_board_foreign_keys"}
+OLDER: Mapping[tuple[str, str], str] = {("board", "0008_loops"): "older"}
+
+
+def table(name: str, created_by: str, *, strict: bool = False) -> Table:
+    return Table(
+        name=name, columns=(column("id", nullable=False),), strict=strict, created_by=created_by
+    )
+
+
+def strict(*tables: Table, exempt: Mapping[tuple[str, str], str] = OLDER) -> list[str]:
+    return rules.rule_new_tables_are_strict({"board": list(tables)}, exempt)
+
+
+def test_a_new_table_without_strict_stops_the_build_naming_chain_table_and_revision() -> None:
+    assert strict(table("loops", "0008_loops"), table("notes", "0012_notes")) == [
+        "board: notes is not STRICT, but revision 0012_notes created it after STRICT became the"
+        " rule; create it with op.create_table(..., sqlite_strict=True)"
+    ]
+
+
+def test_a_new_strict_table_passes() -> None:
+    assert strict(table("loops", "0008_loops"), table("notes", "0012_notes", strict=True)) == []
+
+
+def test_a_table_without_a_creating_revision_must_be_strict() -> None:
+    assert strict(table("loops", "0008_loops"), table("notes", "")) == [
+        "board: notes is not STRICT, but no revision is known to have created it; create it with"
+        " op.create_table(..., sqlite_strict=True)"
+    ]
+    assert strict(table("loops", "0008_loops"), table("notes", "", strict=True)) == []
+
+
+def test_a_table_an_exempt_revision_created_may_stay_without_strict() -> None:
+    assert strict(table("loops", "0008_loops"), table("phases", "0008_loops")) == []
+
+
+def test_an_exemption_is_per_chain() -> None:
+    schema = {"registry": [table("loops", "0008_loops")]}
+    assert rules.rule_new_tables_are_strict(schema, OLDER) == [
+        "registry: loops is not STRICT, but revision 0008_loops created it after STRICT became the"
+        " rule; create it with op.create_table(..., sqlite_strict=True)"
+    ]
+
+
+def test_an_older_table_converted_to_strict_passes() -> None:
+    converted = table("phases", "0008_loops", strict=True)
+    assert strict(table("loops", "0008_loops"), converted) == []
+
+
+def test_an_exemption_with_no_table_left_without_strict_is_stale() -> None:
+    stale = (
+        "board: revision 0008_loops is on NON_STRICT_REVISIONS, but no table it created is left"
+        " without STRICT; remove the entry from tools/dbgen/rules.py"
+    )
+    assert strict(table("loops", "0008_loops", strict=True)) == [stale]
+    assert strict(table("notes", "0012_notes", strict=True)) == [stale]
+
+
+def test_an_exemption_for_another_chain_is_not_judged_without_that_chain() -> None:
+    exempt = {("registry", "0001_registry_initial"): "older"}
+    assert strict(table("notes", "0012_notes", strict=True), exempt=exempt) == []
+
+
+def test_the_strict_rule_is_part_of_the_build() -> None:
+    assert rules.rule_new_tables_are_strict in rules.SCHEMA_RULES
+
+
+def test_the_exempt_revisions_are_frozen_reasoned_and_older_than_the_rule() -> None:
+    assert isinstance(rules.NON_STRICT_REVISIONS, MappingProxyType)
+    assert {chain for chain, _revision in rules.NON_STRICT_REVISIONS} == {"registry", "board"}
+    for (chain, revision), reason in rules.NON_STRICT_REVISIONS.items():
+        assert reason.strip(), revision
+        # A later revision may only be listed with a reason of its own.
+        if reason == rules.BEFORE_STRICT:
+            assert revision <= LAST_BEFORE_STRICT[chain], revision
+
+
+@pytest.mark.parametrize(
+    ("version", "allowed"),
+    [((3, 36, 9), False), ((3, 37, 0), True), ((3, 45, 3), True), ((4, 0, 0), True)],
+)
+def test_the_build_needs_a_sqlite_that_knows_strict_tables(
+    version: tuple[int, int, int], allowed: bool
+) -> None:
+    problem = rules.sqlite_problem(version)
+    if allowed:
+        assert problem is None
+    else:
+        assert problem == (
+            "SQLite 3.36.9 cannot create or describe STRICT tables, which need 3.37.0 or newer;"
+            " build with a Python whose SQLite is newer"
+        )
+
+
+def test_a_type_strict_refuses_gets_the_types_it_takes() -> None:
+    hint = rules.migration_hint('unknown datatype for notes.title: "VARCHAR"')
+    assert hint.startswith(
+        "; a STRICT table takes only the types INT, INTEGER, REAL, TEXT, BLOB, ANY: use sa.Text(),"
+    )
+
+
+def test_a_value_strict_refuses_is_explained_and_other_errors_are_left_alone() -> None:
+    assert rules.migration_hint("cannot store TEXT value in INTEGER column notes.n") == (
+        "; a STRICT table refuses a value that does not fit the column's type"
+    )
+    assert rules.migration_hint("no such table: notes") == ""
+
+
+@pytest.mark.parametrize(
+    ("declared", "python"),
+    [("INT", "int"), ("INTEGER", "int"), ("REAL", "float"), ("TEXT", "str"), ("BLOB", "bytes")],
+)
+def test_every_strict_type_but_any_maps_to_one_python_type(declared: str, python: str) -> None:
+    # The rows' converters check exactly these types, which a STRICT column guarantees.
+    assert declared in rules.STRICT_TYPES
+    assert rules.python_type(declared) == python
+
+
+def test_any_has_no_single_python_type() -> None:
+    assert rules.python_type("ANY") is None

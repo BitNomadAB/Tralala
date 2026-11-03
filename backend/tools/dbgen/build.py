@@ -8,15 +8,18 @@ import json
 import sqlite3
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import TypeAdapter, ValidationError
 
 from app.db import freshness
 
 from . import BuildError, sqlcheck
+
+if TYPE_CHECKING:
+    from .schema import Migrated
 
 # render and schema import SQLAlchemy and Alembic; they are imported where a run needs to migrate.
 
@@ -107,9 +110,9 @@ def _fail(lines: Sequence[str]) -> int:
 class _Databases:
     """The in-memory databases, migrated on first use only: a warm run never needs them."""
 
-    opened: dict[str, sqlite3.Connection] = field(default_factory=dict[str, sqlite3.Connection])
+    opened: dict[str, Migrated] = field(default_factory=dict[str, "Migrated"])
 
-    def get(self) -> dict[str, sqlite3.Connection]:
+    def migrated(self) -> dict[str, Migrated]:
         from . import schema
 
         if not self.opened:
@@ -117,19 +120,22 @@ class _Databases:
                 self.opened[chain] = schema.migrate(chain)
         return self.opened
 
+    def get(self) -> dict[str, sqlite3.Connection]:
+        return {chain: migrated.database for chain, migrated in self.migrated().items()}
+
     def close(self) -> None:
-        for database in self.opened.values():
-            database.close()
+        for migrated in self.opened.values():
+            migrated.database.close()
 
 
-def _generate(databases: Callable[[], dict[str, sqlite3.Connection]]) -> list[str]:
+def _generate(databases: _Databases) -> list[str]:
     """Validate the chains, migrate, apply the schema rules and write the rows; problems or []."""
     from . import render, rules, schema
 
     problems = [problem for chain in schema.CHAINS for problem in schema.chain_problems(chain)]
     if problems:
         return problems
-    tables = {chain: schema.read_tables(database) for chain, database in databases().items()}
+    tables = {chain: schema.read_tables(found) for chain, found in databases.migrated().items()}
     problems = rules.schema_problems(tables)
     if problems:
         return problems
@@ -161,10 +167,10 @@ def run(*, check_only: bool) -> int:
         if current:
             _say("schema unchanged: not migrated, rows not regenerated")
         else:
-            problems = _generate(databases.get)
+            problems = _generate(databases)
             if problems:
                 return _fail(problems)
-            _say(f"migrated and generated in {clock.seconds()}")
+            _say(f"migrated and generated in {clock.seconds()} (SQLite {sqlite_version})")
         # The rows exist now, so the generated column tuples can be followed.
         finder = sqlcheck.Finder(sqlcheck.load_modules(freshness.BACKEND_ROOT))
         statements, problems, exceptions = finder.find()
