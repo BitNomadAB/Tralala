@@ -453,6 +453,7 @@ class LoopGenerationService:
                     error_code=result.error_code,
                     error_message=result.error_message,
                     details=result.details,
+                    error_details=result.error_details,
                     retryable=result.retryable,
                 )
                 return

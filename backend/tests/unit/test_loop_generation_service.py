@@ -21,7 +21,7 @@ from app.core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, V
 from app.db.generated.board import LoopGenerationRunsRow, LoopsRow
 from app.db.generated.registry import BoardsRow
 from app.repositories.board import BoardRepositories
-from app.schemas.loops import AnalysisPayload, GenerationRequest, QaInstructions
+from app.schemas.loops import AnalysisPayload, GenerationRequest, PlanPayload, QaInstructions
 from app.services.agents import EffectiveRole
 from app.services.idempotency import request_fingerprint
 from app.services.loop_documents import LoopDocumentService
@@ -114,27 +114,32 @@ REPOSITORIES: list[dict[str, JsonValue]] = [
     },
     {"id": "repo-2", "name": "docs", "error": "unreachable"},
 ]
-# A RoadMap whose only Phase waits for a Phase that does not exist.
 PHASE = "11111111-1111-4111-8111-111111111111"
 UNKNOWN_PHASE = "99999999-9999-4999-8999-999999999999"
-BROKEN_ROADMAP: dict[str, JsonValue] = {
-    "summary": "One phase",
-    "phases": [
-        {
-            "id": PHASE,
-            "number": 1,
-            "name": "Database",
-            "prerequisite_phase_ids": [UNKNOWN_PHASE],
-            "tickets": [
-                {
-                    "id": "22222222-2222-4222-8222-222222222222",
-                    "title": "Add columns",
-                    "acceptance_criteria": ["ok"],
-                }
-            ],
-        }
-    ],
-}
+
+
+def roadmap(prerequisites: Sequence[str] = ()) -> dict[str, JsonValue]:
+    """A RoadMap of one Phase with one Ticket; the Phase waits for ``prerequisites``."""
+    return {
+        "summary": "One phase",
+        "phases": [
+            {
+                "id": PHASE,
+                "number": 1,
+                "name": "Database",
+                "prerequisite_phase_ids": list(prerequisites),
+                "tickets": [
+                    {
+                        "id": "22222222-2222-4222-8222-222222222222",
+                        "title": "Add columns",
+                        "acceptance_criteria": ["ok"],
+                    }
+                ],
+            }
+        ],
+    }
+
+
 USAGE: dict[str, JsonValue] = {"prompt_tokens": 1200, "completion_tokens": 300}
 # What every result of the first run records about where it came from.
 PROVENANCE = {
@@ -754,18 +759,57 @@ def test_a_provider_that_raises_fails_the_run_without_breaking_the_start(
     )
 
 
-def test_a_roadmap_refused_by_a_plan_rule_keeps_the_rules_code_message_and_details() -> None:
-    w = make(answers=[answer(json.dumps(BROKEN_ROADMAP))])
+def test_a_roadmap_that_breaks_a_plan_rule_is_repaired_with_the_rule_named() -> None:
+    w = make(answers=[answer(json.dumps(roadmap([UNKNOWN_PHASE]))), answer(json.dumps(roadmap()))])
+    approve_analysis(w)
+    start(w, "roadmap")
+    first, repair = w.provider.calls
+    assert repair.messages[:2] == [
+        first.messages[0],
+        {"role": "assistant", "content": json.dumps(roadmap([UNKNOWN_PHASE]))},
+    ]
+    # The repair names the rule, the Phase and the reference that does not resolve.
+    content = repair.messages[2]["content"]
+    assert content.startswith("That response did not validate.")
+    assert "Phase dependency references an unknown Phase" in content
+    assert f'"phase_id": "{PHASE}", "missing": "{UNKNOWN_PHASE}"' in content
+    run = w.run()
+    assert (run.status, run.error_code) == ("completed", None)
+    assert w.kinds() == ["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"]
+
+
+def test_a_roadmap_that_breaks_a_plan_rule_every_time_fails_with_the_last_rule() -> None:
+    answers = [answer(json.dumps(roadmap([UNKNOWN_PHASE])))] * MAX_REPAIRS
+    w = make(answers=[*answers, answer(json.dumps(roadmap([PHASE])))])
     approve_analysis(w)
     start(w, "roadmap")
     run = w.run()
+    assert len(w.provider.calls) == MAX_REPAIRS + 1
     assert (run.status, run.error_code, run.error_message) == (
         "failed",
-        "invalid_dependency_graph",
-        "Phase dependency references an unknown Phase",
+        "invalid_output",
+        "Generated output broke a rule: A Phase cannot depend on itself (not retryable)",
     )
     entry = w.service.get(BOARD_ID, LOOP, "id-1")
-    assert entry["output"] == {"error_details": {"phase_id": PHASE, "missing": UNKNOWN_PHASE}}
+    assert entry["output"] == {
+        "error_details": {"rule": "invalid_dependency_graph", "phase_id": PHASE}
+    }
+    assert w.kinds() == ["info", "analysis_ai", "analysis"]
+
+
+def test_promotion_still_refuses_a_roadmap_that_breaks_a_plan_rule() -> None:
+    """The repair loop checks the rules first; promotion stays the last line of defence."""
+    w = make()
+    approve_analysis(w)
+    broken = PlanPayload.model_validate(roadmap([UNKNOWN_PHASE]))
+    with pytest.raises(ValidationFailure) as refused, w.store.writer(BOARD_ID) as repos:
+        w.service.documents.store_generated_roadmap(
+            repos, w.state.loops[LOOP], broken, ADA, run_id="id-1", provenance={}
+        )
+    assert (refused.value.code, refused.value.details) == (
+        "invalid_dependency_graph",
+        {"phase_id": PHASE, "missing": UNKNOWN_PHASE},
+    )
     assert w.kinds() == ["info", "analysis_ai", "analysis"]
 
 

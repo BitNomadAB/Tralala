@@ -22,7 +22,7 @@ from typing import Protocol
 from pydantic import JsonValue, ValidationError
 
 from ..core.context import ActorContext
-from ..core.errors import ApiError
+from ..core.errors import ApiError, ValidationFailure
 from ..db.generated.board import LoopGenerationRunsRow
 from ..db.generated.registry import AgentsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
@@ -99,6 +99,7 @@ class Outcome:
     error_code: str = ""
     error_message: str = ""
     details: str | None = None
+    error_details: JsonValue = None
     retryable: bool = False
 
 
@@ -277,6 +278,31 @@ def _system_actor(run_row: LoopGenerationRunsRow) -> ActorContext:
     )
 
 
+def _problem(exc: Exception) -> str:
+    """What a repair message and a failed run say about an answer that did not validate: a rule's
+    message with its details (the Phase and the reference that is missing), or the parser's text."""
+    if isinstance(exc, ValidationFailure):
+        details = f" {json.dumps(dict(exc.details), default=str)}" if exc.details else ""
+        return f"{exc.message}{details}"
+    return str(exc)
+
+
+def _invalid(exc: Exception) -> Outcome:
+    if isinstance(exc, ValidationFailure):
+        return Outcome(
+            error_code="invalid_output",
+            error_message=f"Generated output broke a rule: {exc.message}",
+            error_details=error_details({"rule": exc.code, **(exc.details or {})}),
+            retryable=False,
+        )
+    return Outcome(
+        error_code="invalid_output",
+        error_message="Generated output did not match the schema",
+        details=_problem(exc)[:2000],
+        retryable=False,
+    )
+
+
 def generate(
     purpose: str,
     captured: JsonObject,
@@ -306,19 +332,14 @@ def generate(
         try:
             payload = parse_output(purpose, text)
             return Outcome(payload=payload, usage=usage, model=model_name)
-        except (ValueError, ValidationError) as exc:
+        except (ValueError, ValidationError, ValidationFailure) as exc:
             if attempt >= MAX_REPAIRS:
-                return Outcome(
-                    error_code="invalid_output",
-                    error_message="Generated output did not match the schema",
-                    details=str(exc)[:2000],
-                    retryable=False,
-                )
+                return _invalid(exc)
             repair = {
                 "role": "user",
                 "content": (
                     "That response did not validate. Fix it and return the corrected JSON "
-                    f"object only. Error: {str(exc)[:1500]}"
+                    f"object only. Error: {_problem(exc)[:1500]}"
                 ),
             }
             outcome = call_completion(
