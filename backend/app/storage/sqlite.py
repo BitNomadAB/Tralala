@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,12 +8,10 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
+# Re-exported: the clock moved to core so a service can take it without importing storage.
+from ..core.dates import utcnow as utcnow
+
 BUSY_TIMEOUT_MS = 5000
-
-
-def utcnow() -> str:
-    """ISO 8601 UTC timestamp with second precision, e.g. 2026-10-30T12:00:00Z."""
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def create_sqlite_engine(path: Path) -> Engine:

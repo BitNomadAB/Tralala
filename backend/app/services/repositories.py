@@ -106,8 +106,8 @@ class RepositoryService:
             raise ValidationFailure("Repository URL must name an owner and a repository")
         return owner, name
 
+    @staticmethod
     def serialize(
-        self,
         row: dict[str, Any],
         boards: list[dict[str, str]] | None = None,
         *,

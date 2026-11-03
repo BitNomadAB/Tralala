@@ -5,6 +5,7 @@ import logging
 
 from ..core.config import Settings
 from ..core.errors import NotFound, ServiceUnavailable
+from ..repositories.sql.board import SqlBoardUnitOfWork
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.migration_manager import MigrationManager, MigrationReport
 from ..storage.process_lock import DataDirectoryLock
@@ -47,6 +48,8 @@ class Services:
         self.settings = settings
         self.registry = Registry(settings)
         self.boards = BoardDatabaseManager(settings)
+        # The board unit of work for the services converted to repositories (GCS-T00c onwards).
+        self.board_store = SqlBoardUnitOfWork(self.boards)
         self.migrations = MigrationManager(settings, self.registry, self.boards)
         self.board = BoardService(settings, self.registry, self.boards, self.migrations)
         self.template = TemplateService(self.registry, self.boards, self.board)
@@ -80,7 +83,7 @@ class Services:
             apply_qa_instructions=self.loop_qa.apply_instructions,
         )
         self.loop.plans = self.loop_plan
-        self.list = ListService(self.board, self.loop)
+        self.list = ListService(self.board, self.board_store)
         self.card = CardService(self.board, self.loop, self.loop_plan)
         self.loop.cards = self.card
         self.label = LabelService(self.board)

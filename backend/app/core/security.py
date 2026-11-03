@@ -14,8 +14,12 @@ import os
 import secrets
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .platform import PROFILE_WINDOWS, resolve_profile
+
+if TYPE_CHECKING:  # annotation only: config is not imported at run time
+    from .config import Settings
 
 _SCRYPT_N = 2**14
 _SCRYPT_R = 8
@@ -166,7 +170,7 @@ def write_private_file(path: Path, value: str) -> None:
         path.chmod(0o600)
 
 
-def resolve_secret_key(settings) -> str:  # settings untyped: importing config would be a cycle
+def resolve_secret_key(settings: Settings) -> str:
     """Return the session-signing secret, never a weak or published value.
 
     An explicit secret wins only when it is long enough and not a published placeholder. Otherwise

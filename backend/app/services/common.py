@@ -13,8 +13,7 @@ from sqlalchemy.engine import Connection
 from ..core import sql
 from ..core.errors import Conflict, ValidationFailure
 from ..storage.sqlite import utcnow
-
-POSITION_GAP = 1024
+from .ordering import place
 
 # What the helpers below format into SQL text (see core/sql.py). A positioned table's siblings are
 # the rows its filter of the same name selects; ``other`` leaves out the row being moved.
@@ -74,34 +73,6 @@ def one(
     return result[0] if result else None
 
 
-def _ordered(
-    conn: Connection, table: str, siblings: str, params: dict[str, Any]
-) -> list[dict[str, Any]]:
-    table = sql.identifier(table, _POSITIONED_TABLES)
-    return rows(
-        conn,
-        "SELECT id, position"  # noqa: S608 - from _POSITIONED_TABLES and _SIBLING_FILTERS
-        f" FROM {table}{siblings} ORDER BY position, id",
-        params,
-    )
-
-
-def _normalize_positions(
-    conn: Connection, table: str, siblings: str, params: dict[str, Any]
-) -> None:
-    """Rewrite positions to multiples of POSITION_GAP, preserving order."""
-    current = _ordered(conn, table, siblings, params)
-    table = sql.identifier(table, _POSITIONED_TABLES)
-    for index, row in enumerate(current, start=1):
-        conn.execute(
-            text(
-                f"UPDATE {table}"  # noqa: S608 - from _POSITIONED_TABLES
-                " SET position = :position WHERE id = :id"
-            ),
-            {"position": index * POSITION_GAP, "id": row["id"]},
-        )
-
-
 def position_for_index(
     conn: Connection,
     table: str,
@@ -110,37 +81,33 @@ def position_for_index(
     *,
     exclude: str | None = None,
 ) -> int:
-    """Compute a gap-based position for a target index (0-based) among a row's siblings.
+    """A gap-based position for a target index (0-based) among a row's siblings.
 
     ``table`` names which rows are siblings (lists of a Loop, cards of a list, checklists of a
     card, items of a checklist) and ``params`` binds that scope; ``exclude`` is the id of a row
-    being moved, which is not its own sibling. Positions are integers spaced by POSITION_GAP.
-    Inserts target the midpoint between neighbours; when no integer gap remains the scope is
-    normalized first.
+    being moved, which is not its own sibling. The arithmetic is ``ordering.place``; when it asks
+    for the siblings to be renumbered first, that happens here, in the caller's transaction.
     """
     if exclude is not None:
         params = {**params, "id": exclude}
     siblings = sql.where(_SIBLING_FILTERS, [table] if exclude is None else [table, "other"])
-    current = _ordered(conn, table, siblings, params)
-    if not current:
-        return POSITION_GAP
-    target = len(current) if index is None else max(0, min(index, len(current)))
-    if target == len(current):
-        return current[-1]["position"] + POSITION_GAP
-    if target == 0:
-        first = current[0]["position"]
-        if first > 1:
-            return first // 2
-        _normalize_positions(conn, table, siblings, params)
-        return POSITION_GAP // 2
-    previous = current[target - 1]["position"]
-    following = current[target]["position"]
-    if following - previous <= 1:
-        _normalize_positions(conn, table, siblings, params)
-        current = _ordered(conn, table, siblings, params)
-        previous = current[target - 1]["position"]
-        following = current[target]["position"]
-    return (previous + following) // 2
+    table = sql.identifier(table, _POSITIONED_TABLES)
+    current = rows(
+        conn,
+        "SELECT id, position"  # noqa: S608 - from _POSITIONED_TABLES and _SIBLING_FILTERS
+        f" FROM {table}{siblings} ORDER BY position, id",
+        params,
+    )
+    placement = place([(row["id"], row["position"]) for row in current], index)
+    for sibling_id, position in placement.renumbered:
+        conn.execute(
+            text(
+                f"UPDATE {table}"  # noqa: S608 - from _POSITIONED_TABLES
+                " SET position = :position WHERE id = :id"
+            ),
+            {"position": position, "id": sibling_id},
+        )
+    return placement.position
 
 
 def labels_for_cards(conn: Connection, card_ids: list[str]) -> dict[str, list[dict[str, Any]]]:

@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import base64
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from .security import MIN_SECRET_LENGTH, WEAK_SECRETS, resolve_secret_key
+
+if TYPE_CHECKING:  # annotation only: config is not imported at run time
+    from .config import Settings
 
 # Frozen key-derivation material, not a brand name. Changing these bytes would make every
 # credential sealed by an earlier install undecryptable, so they stay as shipped.
@@ -36,11 +40,11 @@ def _fernet_for(secret: str) -> Fernet:
     return Fernet(base64.urlsafe_b64encode(derived))
 
 
-def fernet(settings) -> Fernet:  # settings untyped: importing config here would be a cycle
+def fernet(settings: Settings) -> Fernet:
     return _fernet_for(resolve_secret_key(settings))
 
 
-def previous_fernet(settings) -> Fernet | None:
+def previous_fernet(settings: Settings) -> Fernet | None:
     """The key the installation used before its most recent secret change, when configured."""
     previous = (getattr(settings, "previous_secret_key", None) or "").strip()
     if not previous or previous in WEAK_SECRETS or len(previous) < MIN_SECRET_LENGTH:
@@ -48,11 +52,11 @@ def previous_fernet(settings) -> Fernet | None:
     return _fernet_for(previous)
 
 
-def seal_secret(settings, value: str) -> str:
+def seal_secret(settings: Settings, value: str) -> str:
     return fernet(settings).encrypt(value.encode("utf-8")).decode("ascii")
 
 
-def open_secret_state(settings, token: str) -> tuple[str, bool]:
+def open_secret_state(settings: Settings, token: str) -> tuple[str, bool]:
     """Return ``(value, sealed_with_current_key)``; the previous secret is only a fallback."""
     try:
         return fernet(settings).decrypt(token.encode("ascii")).decode("utf-8"), True
@@ -67,7 +71,7 @@ def open_secret_state(settings, token: str) -> tuple[str, bool]:
     raise CredentialError("Stored credential cannot be decrypted")
 
 
-def open_secret(settings, token: str) -> str:
+def open_secret(settings: Settings, token: str) -> str:
     return open_secret_state(settings, token)[0]
 
 

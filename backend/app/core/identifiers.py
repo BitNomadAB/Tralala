@@ -17,11 +17,13 @@ from .errors import NotFound
 REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 
 
-def canonical_board_id(board_id: str) -> str:
+def canonical_board_id(board_id: object) -> str:
     """The canonical UUID text of ``board_id``; anything else reads as a missing board."""
+    if not isinstance(board_id, str):
+        raise NotFound("Board not found")
     try:
         return str(uuid.UUID(board_id))
-    except (ValueError, AttributeError, TypeError) as exc:
+    except ValueError as exc:
         raise NotFound("Board not found") from exc
 
 

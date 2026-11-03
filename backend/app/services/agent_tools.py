@@ -30,6 +30,7 @@ from ..schemas.subresources import CommentCreate
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
+    from .lists import ListEntry
 
 # A retried call arrives seconds later; a deliberate repeat rarely does. This window is what tells
 # them apart without a shared idempotency store.
@@ -85,13 +86,11 @@ def _require(args: dict[str, Any], key: str) -> str:
     return value
 
 
-def _loop_lists(services: Services, board_id: str, loop_id: str) -> list[dict[str, Any]]:
+def _loop_lists(services: Services, board_id: str, loop_id: str) -> list[ListEntry]:
     return services.list.list(board_id, loop_id)
 
 
-def _resolve_list(
-    services: Services, board_id: str, loop_id: str, wanted: str
-) -> dict[str, Any]:
+def _resolve_list(services: Services, board_id: str, loop_id: str, wanted: str) -> ListEntry:
     """Accept a list id or its name, because a model knows columns by name, not by uuid."""
     available = _loop_lists(services, board_id, loop_id)
     for entry in available:
@@ -99,7 +98,7 @@ def _resolve_list(
             return entry
     folded = wanted.casefold()
     for entry in available:
-        if str(entry["name"]).casefold() == folded:
+        if entry["name"].casefold() == folded:
             return entry
     raise ValidationFailure(
         "Unknown column",

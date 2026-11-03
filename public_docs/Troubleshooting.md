@@ -87,6 +87,12 @@ facts that explain most surprises:
 
 ## Processes, ports and startup
 
+- **"The generated database rows are missing: run python -m tools.dbgen"** — a backend run from
+  source imports typed rows generated from the schema migrations (the unit tests say "... are
+  stale" when a migration is newer than the rows). From `backend/`, run the tool with the venv's
+  interpreter, `../.venv/bin/python -m tools.dbgen` (Windows: `..\.venv\Scripts\python.exe`), after
+  cloning and after every pull that brings a migration. The container image generates them while it
+  is built.
 - **"This data directory is already in use by another Tralala process"** — a second backend is
   running against the same directory, or a container and a local process share a bind mount. Stop
   one. The lock is an OS file lock and is released when the process exits, so there is no stale lock

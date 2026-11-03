@@ -42,6 +42,7 @@ From source:
 ```bash
 python -m venv .venv && .venv/bin/activate
 pip install -r backend/requirements-dev.txt
+(cd backend && ../.venv/bin/python -m tools.dbgen)   # typed rows from the migrations; again after a pull
 (cd frontend && pnpm install)
 
 # terminal 1

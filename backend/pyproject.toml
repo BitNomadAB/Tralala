@@ -15,12 +15,15 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.3",
+  "pytest-xdist==3.8.0",
   "httpx>=0.28",
   "ruff==0.17.3",
+  "pyright==1.1.414",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# The unit suite is the default; the SQLite suite runs on request: pytest tests/infrastructure.
+testpaths = ["tests/unit"]
 addopts = "-q"
 
 [tool.ruff]

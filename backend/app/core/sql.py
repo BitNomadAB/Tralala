@@ -36,6 +36,11 @@ def assignments(names: Iterable[str], allowed: tuple[str, ...]) -> str:
     return ", ".join(f"{column} = :{column}" for column in _chosen(names, allowed))
 
 
+def column_list(columns: tuple[str, ...]) -> str:
+    """``a, b, c``: a select list, such as a generated row's column tuple."""
+    return ", ".join(columns)
+
+
 def insert_columns(names: Iterable[str], allowed: tuple[str, ...]) -> tuple[str, str]:
     """An INSERT's column list and its ``:column`` placeholders, in the order of ``allowed``."""
     columns = _chosen(names, allowed)

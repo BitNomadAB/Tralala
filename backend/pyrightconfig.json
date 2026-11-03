@@ -1,0 +1,23 @@
+{
+  "include": [
+    "app/db",
+    "app/repositories",
+    "app/services/lists.py",
+    "app/services/ordering.py",
+    "tests/unit",
+    "tools"
+  ],
+  "strict": [
+    "app/db",
+    "app/repositories",
+    "app/services/lists.py",
+    "app/services/ordering.py",
+    "tests/unit",
+    "tools"
+  ],
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "strict",
+  "venvPath": "..",
+  "venv": ".venv"
+}

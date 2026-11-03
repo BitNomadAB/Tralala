@@ -104,9 +104,17 @@ Two independent Alembic chains live under `backend/migrations`:
 - Orchestration is idempotent: a database already at head is skipped and only its registry row is
   reconciled; a failed migration can be re-run after the cause is fixed; an interrupted run leaves
   the schema at its previous revision and resumes on the next start.
-- Writes to schemas are only allowed through revisions. `tests/test_migrations.py` scans the
+- Writes to schemas are only allowed through revisions. `tests/unit/test_migrations.py` scans the
   application package and fails if DDL appears outside the migration chain (the optional FTS5
   index bootstrap in `storage/schema/fts.py` is the single documented exception).
+- The migrations are also the build's source of truth. `python -m tools.dbgen` (run from
+  `backend/`, first in every build) refuses a chain with more than one head, a merge or a branch,
+  migrates both chains into an in-memory database, applies the schema rules in
+  `tools/dbgen/schema.py`, writes one frozen dataclass per table to `app/db/generated/` (git-ignored;
+  Alembic's table and the FTS5 tables are excluded by name) and compiles every SQL statement in
+  `app/` against that schema with SQLite's `EXPLAIN`. A table name the two chains share
+  (`idempotency_records`) must have the same columns in both, because a statement passes when
+  either database accepts it.
 
 Runtime control: `app/storage/schema/runner.py` (programmatic Alembic), orchestration:
 `app/storage/migration_manager.py`. Structured events: `migration_completed`,
