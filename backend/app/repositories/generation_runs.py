@@ -43,6 +43,12 @@ class GenerationRunRepository(Protocol):
 
     def set_phase(self, run_id: str, phase: str) -> None: ...
 
+    def set_trace(self, run_id: str, trace_json: str) -> str | None:
+        """The run's steps so far (``trace_json``); answers the run's status after the write, so the
+        run that records a step learns that it was cancelled, or None for a run that does not
+        exist."""
+        ...
+
     def set_input(
         self,
         loop_id: str,

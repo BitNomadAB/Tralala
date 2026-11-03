@@ -132,6 +132,7 @@ class MirrorService:
         hosts: frozenset[str],
         max_bytes: int,
         timeout_seconds: float,
+        archive_max_bytes: int = ARCHIVE_MAX_BYTES,
         clock: Callable[[], str] = utcnow,
     ) -> None:
         self._run_git = run_git
@@ -139,6 +140,7 @@ class MirrorService:
         self._hosts = hosts
         self._max_bytes = max_bytes
         self._timeout = timeout_seconds
+        self._archive_max_bytes = archive_max_bytes
         self._clock = clock
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
@@ -378,7 +380,7 @@ class MirrorService:
             f"refs/heads/{branch}",
             git_dir=self._files.mirror_path(repository_id),
         )
-        tar = self._git(args, max_output_bytes=ARCHIVE_MAX_BYTES)
+        tar = self._git(args, max_output_bytes=self._archive_max_bytes)
         commit = archive_commit(tar)
         if commit is None:
             raise MirrorError("fetch_failed")

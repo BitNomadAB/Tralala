@@ -31,7 +31,9 @@ from app.services.loop_generation_report import MAX_EXCEPTION_TEXT
 from app.services.loop_generation_runs import MAX_OUTPUT_CHARS, stored_output
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_plans import LoopPlanService
-from app.services.runtime import ResponseSchema
+from app.services.repo_snapshot import FetchedRepository
+from app.services.runtime import Completion, ResponseSchema
+from app.services.runtime_tools import Message, ToolChoice, ToolDefinition
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -153,6 +155,7 @@ PROVENANCE = {
 # The columns a run's answer carries: no captured input, role or creator, and parsed JSON.
 RUN_KEYS = {
     "id",
+    "trace",
     "loop_id",
     "purpose",
     "status",
@@ -172,15 +175,22 @@ RUN_KEYS = {
     "usage",
 }
 
-type Answer = Mapping[str, object]
+type Answer = Completion
 
 
 def answer(text: str, *, usage: JsonValue = None) -> Answer:
-    return {"ok": True, "text": text, "usage": usage or {"total_tokens": 42}, "model": "m-2"}
+    return {
+        "ok": True,
+        "error": None,
+        "text": text,
+        "tool_calls": [],
+        "usage": usage or {"total_tokens": 42},
+        "model": "m-2",
+    }
 
 
 VALID = answer(json.dumps(ANALYSIS))
-FAILED: Answer = {"ok": False, "error": "boom", "text": ""}
+FAILED: Answer = {"ok": False, "error": "boom", "text": "", "tool_calls": []}
 
 
 # --- the collaborators ---------------------------------------------------------------------------
@@ -191,7 +201,7 @@ class Call:
     settings: object
     agent_id: object
     system_prompt: str
-    messages: list[dict[str, str]]
+    messages: list[Message]
     running: dict[str, str | None]
     """The phase of every running run when the provider was called."""
     response_schema: ResponseSchema | None = None
@@ -214,9 +224,12 @@ class Provider:
         agent_row: dict[str, object],
         *,
         system_prompt: str,
-        messages: list[dict[str, str]],
+        messages: Sequence[Message],
         response_schema: ResponseSchema | None,
+        tools: Sequence[ToolDefinition] | None = None,
+        tool_choice: ToolChoice = "auto",
     ) -> Answer:
+        del tools, tool_choice  # these agents do not take tools
         runs = self.state.generation_runs.values()
         running = {row.id: row.phase for row in runs if row.status == "running"}
         self.calls.append(
@@ -297,6 +310,16 @@ class Snapshots:
         ]
         self.budgets.append(budget_chars)
         return self.entries
+
+    def fetch(self, board_id: str) -> Sequence[FetchedRepository]:
+        del board_id
+        return [FetchedRepository(dict(entry), None) for entry in self.entries]
+
+    def snapshot_of(
+        self, fetched: Sequence[FetchedRepository], *, budget_chars: int
+    ) -> Sequence[Mapping[str, JsonValue]]:
+        self.budgets.append(budget_chars)
+        return [item.entry for item in fetched]
 
 
 @dataclass
@@ -381,6 +404,7 @@ def run_row(
         started_at=None,
         finished_at=None,
         phase=None,
+        trace_json="[]",
     )
 
 
@@ -901,6 +925,9 @@ def test_a_run_logs_its_start_and_its_end_once(
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "snapshot_chars": len("print('hello')"),
+            # A snapshot run makes no tool call.
+            "tool_calls": 0,
+            "files_read": 0,
         },
     ]
 

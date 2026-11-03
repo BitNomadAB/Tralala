@@ -80,6 +80,7 @@ class Services:
             hosts=settings.allowed_repository_hosts,
             max_bytes=settings.repository_mirror_max_bytes,
             timeout_seconds=settings.repository_fetch_timeout_seconds,
+            archive_max_bytes=settings.repository_archive_max_bytes,
         )
         self.repository = RepositoryService(
             settings, self.registry_store, mirror=self.repository_mirror
@@ -91,6 +92,7 @@ class Services:
                 ArchiveFilesOnDisk(settings.repos_dir),
                 max_bytes=settings.repository_archive_cache_max_bytes,
             ),
+            archive_max_bytes=settings.repository_archive_max_bytes,
         )
         self.board = BoardService(
             settings,
@@ -135,6 +137,8 @@ class Services:
             snapshots=self.repo_snapshot,
             idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
             context_chars=settings.generation_context_chars,
+            tool_steps=settings.generation_tool_steps,
+            tool_result_chars=settings.generation_tool_result_chars,
         )
         self.loop_qa = LoopQaService(
             self.board,

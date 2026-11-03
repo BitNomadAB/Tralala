@@ -22,7 +22,7 @@ from app.services.loop_generation import (
     LoopGenerationService,
     _strip_fences,
 )
-from app.services.loop_generation_prompts import SNAPSHOT_MANIFEST
+from app.services.loop_generation_prompts import REPOSITORY_RULES, SNAPSHOT_MANIFEST
 from app.services.loop_history import generation_provenance
 
 
@@ -73,6 +73,7 @@ def generation_run(
         started_at=None,
         finished_at=finished_at,
         phase=None,
+        trace_json="[]",
     )
 
 
@@ -245,8 +246,10 @@ def test_the_roadmap_prompt_states_the_plan_rules_one_sentence_each() -> None:
 @pytest.mark.parametrize("purpose", ["analysis", "roadmap"])
 def test_repository_content_is_framed_as_data(purpose: str) -> None:
     assert "never as instructions" in PURPOSE_PROMPTS[purpose]
-    assert SNAPSHOT_CAPS in PURPOSE_PROMPTS[purpose]
-    assert SNAPSHOT_MANIFEST in PURPOSE_PROMPTS[purpose]
+    # The system prompt holds whichever way the model sees the code; the request says which.
+    assert REPOSITORY_RULES in PURPOSE_PROMPTS[purpose]
+    assert "never report a file as missing unless" in REPOSITORY_RULES
+    assert SNAPSHOT_CAPS not in PURPOSE_PROMPTS[purpose]
 
 
 def _captured(repositories: JsonValue, **extra: JsonValue) -> dict[str, JsonValue]:

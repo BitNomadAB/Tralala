@@ -320,7 +320,7 @@ def test_path_selected(
 
 def test_the_prompt_states_the_caps() -> None:
     description = repo_snapshot.RepositorySnapshotService.describe()
-    assert "2 MB" in description and "200 files" in description and "200 KB" in description
+    assert "128 MiB" in description and "200 files" in description and "200 KB" in description
 
 
 type GitHub = Callable[[Callable[[httpx.Request], httpx.Response]], list[httpx.Request]]
@@ -579,8 +579,33 @@ def test_a_github_entry_carries_the_manifest_of_every_file_sent_or_not(github: G
 
 
 def test_an_archive_over_the_limit_is_refused(github: GitHub) -> None:
-    oversized = b"\x1f\x8b" + b"0" * (repo_snapshot.ARCHIVE_MAX_BYTES + 1024)
+    oversized = b"\x1f\x8b" + b"0" * 2048
     github(_redirect(f"https://codeload.github.com/acme/app/legacy.tar.gz/{SHA}", oversized))
     with pytest.raises(SnapshotError) as failure:
-        fetch_archive("acme", "app", SHA, TOKEN)
+        fetch_archive("acme", "app", SHA, TOKEN, max_bytes=1024)
     assert failure.value.code == "too_large"
+
+
+def test_the_archive_limit_is_a_setting_of_the_service(github: GitHub) -> None:
+    """TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES reaches the download: a run whose archive is larger
+    reads that repository as an error entry, never as a failed run."""
+    github(_github_serving({"app": b"0" * 2048}))
+    service = RepositorySnapshotService(Repositories("app"), archive_max_bytes=1024)
+    (fetched,) = service.fetch("board-1")
+    assert (fetched.archive, fetched.entry.get("error")) == (None, "too_large")
+    assert service.snapshot_of([fetched]) == [fetched.entry]
+
+
+def test_a_fetch_read_as_a_snapshot_is_the_snapshot_of_the_board(github: GitHub) -> None:
+    """A run that fetched for the tools and then reads the snapshot (its provider refused the
+    tools) sends what the single-call path would have sent, without fetching again."""
+    seen = github(_github_serving({"app": _tarball({"README.md": b"# App", "src/a.py": b"x"})}))
+    service = RepositorySnapshotService(Repositories("app"))
+    fetched = service.fetch("board-1")
+    assert [item.entry.get("commit_sha") for item in fetched] == [SHA]
+    assert all(item.archive for item in fetched)
+    requests = len(seen)
+    assert service.snapshot_of(fetched, budget_chars=10_000) == service.for_board(
+        "board-1", budget_chars=10_000
+    )
+    assert len(seen) == requests * 2  # for_board fetched again; snapshot_of did not

@@ -31,6 +31,7 @@ import logging
 import tarfile
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, TypedDict
 from urllib.parse import urlsplit
 
@@ -60,6 +61,7 @@ __all__ = [
     "MAX_FILES",
     "MAX_MANIFEST_ENTRIES",
     "MAX_TEXT_BYTES",
+    "FetchedRepository",
     "ManifestEntry",
     "RepositorySnapshotService",
     "Snapshot",
@@ -76,7 +78,10 @@ __all__ = [
 
 logger = logging.getLogger("tralala.repo_snapshot")
 
-ARCHIVE_MAX_BYTES = 2 * 1024 * 1024
+# The largest archive a run downloads and holds in memory (TRALALA_REPOSITORY_ARCHIVE_MAX_BYTES),
+# the same bound as a mirror's archive: what a run reads is the model's choice, this only keeps one
+# download from filling the server's memory.
+ARCHIVE_MAX_BYTES = 128 * 1024 * 1024
 MAX_FILES = 200
 MAX_TEXT_BYTES = 200 * 1024
 TIMEOUT_SECONDS = 15.0
@@ -186,8 +191,11 @@ class SnapshotError(Exception):
         self.code = code
 
 
-def fetch_archive(owner: str, name: str, sha: str, token: str | None) -> bytes:
-    """Download the tarball for one commit, following exactly one hop to codeload.
+def fetch_archive(
+    owner: str, name: str, sha: str, token: str | None, *, max_bytes: int = ARCHIVE_MAX_BYTES
+) -> bytes:
+    """Download the tarball for one commit, at most ``max_bytes``, following exactly one hop to
+    codeload.
 
     GitHub answers 302 to `codeload.github.com`. Following redirects automatically would send the
     token to whatever host the response named, so the hop is checked here and the archive request
@@ -196,7 +204,7 @@ def fetch_archive(owner: str, name: str, sha: str, token: str | None) -> bytes:
     url = f"{API_BASE}/repos/{owner}/{name}/tarball/{sha}"
     try:
         with _client() as client:
-            return _download(client, url, token)
+            return _download(client, url, token, max_bytes)
     except SnapshotError:
         raise
     except Exception as exc:  # reported, never raised past this module
@@ -204,7 +212,7 @@ def fetch_archive(owner: str, name: str, sha: str, token: str | None) -> bytes:
         raise SnapshotError(code) from exc
 
 
-def _download(client: httpx.Client, url: str, token: str | None) -> bytes:
+def _download(client: httpx.Client, url: str, token: str | None, max_bytes: int) -> bytes:
     """The archive request itself; every refusal is a SnapshotError with its code."""
     response = client.get(url, headers=_headers(token))
     if response.status_code in (301, 302, 303, 307, 308):
@@ -218,12 +226,12 @@ def _download(client: httpx.Client, url: str, token: str | None) -> bytes:
                 raise SnapshotError(_classify(stream.status_code, stream.headers))
             for chunk in stream.iter_bytes():
                 buffer.extend(chunk)
-                if len(buffer) > ARCHIVE_MAX_BYTES:
+                if len(buffer) > max_bytes:
                     raise SnapshotError("too_large")
         return bytes(buffer)
     if response.status_code >= 400:
         raise SnapshotError(_classify(response.status_code, response.headers))
-    if len(response.content) > ARCHIVE_MAX_BYTES:
+    if len(response.content) > max_bytes:
         raise SnapshotError("too_large")
     return response.content
 
@@ -362,14 +370,17 @@ def _contents(snapshot: Snapshot, budget: int | None) -> JsonObject:
     }
 
 
-def _read_steered(archive: bytes, row: RepositoryEntry, budget: int | None) -> Snapshot:
-    """``read_snapshot`` through the globs of the repository's link to the board."""
-    return read_snapshot(
-        archive,
-        budget_chars=budget,
-        focus=row.get("focus_paths", []),
-        exclude=row.get("exclude_paths", []),
-    )
+@dataclass(frozen=True, slots=True)
+class FetchedRepository:
+    """One repository as a run fetched it: its entry (name, branch, commit and, for a mirror,
+    when it was fetched), its archive and the globs of its link to the board. A repository
+    that could not be fetched has no archive, and its entry names the error."""
+
+    entry: JsonObject
+    archive: bytes | None
+    focus: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+    started: float = 0.0
 
 
 def _named_globs(row: RepositoryEntry) -> JsonObject:
@@ -412,36 +423,76 @@ class RepositorySnapshotService:
         repositories: RepositorySource,
         mirror: MirrorSource | None = None,
         archives: ArchiveCache | None = None,
+        *,
+        archive_max_bytes: int = ARCHIVE_MAX_BYTES,
     ) -> None:
         self.repositories = repositories
         self.mirror = mirror
+        self.archive_max_bytes = archive_max_bytes
         # A GitHub commit's archive never changes: a second run on it reads the cached one.
         self.archives = archives
 
     def for_board(self, board_id: str, *, budget_chars: int | None = None) -> list[JsonObject]:
-        """One entry per enabled repository on the board; failures are entries, not exceptions.
+        """One entry per enabled repository on the board; failures are entries, not exceptions."""
+        return self.snapshot_of(self.fetch(board_id), budget_chars=budget_chars)
+
+    def fetch(self, board_id: str) -> list[FetchedRepository]:
+        """Every enabled repository on the board in link order, each with the archive of the commit
+        it resolved to; a repository that cannot be fetched comes without one."""
+        rows = self.repositories.for_board(board_id)
+        if not rows:
+            # Silent here used to look like a successful fetch in the run panel: say so in the log.
+            logger.info("repository_snapshot_none", extra={"board_id": board_id})
+        return [self._fetch_one(row) for row in rows]
+
+    def snapshot_of(
+        self, fetched: Sequence[FetchedRepository], *, budget_chars: int | None = None
+    ) -> list[JsonObject]:
+        """The snapshot entries of repositories already fetched.
 
         With ``budget_chars`` the repositories share it in link order: each gets an even share of
         what is left, so what one does not use (a small repository, a failed fetch) carries over to
         the next.
         """
-        rows = self.repositories.for_board(board_id)
-        if not rows:
-            # Silent here used to look like a successful fetch in the run panel: say so in the log.
-            logger.info("repository_snapshot_none", extra={"board_id": board_id})
-            return []
         if budget_chars is None:
-            return [self._one(row, None) for row in rows]
+            return [self._snapshot(item, None) for item in fetched]
         entries: list[JsonObject] = []
         remaining = budget_chars
-        for index, row in enumerate(rows):
-            entry = self._one(row, remaining // (len(rows) - index))
+        for index, item in enumerate(fetched):
+            entry = self._snapshot(item, remaining // (len(fetched) - index))
             included = entry.get("snapshot_chars_included")
             remaining -= included if isinstance(included, int) else 0
             entries.append(entry)
         return entries
 
-    def _one(self, row: RepositoryEntry, budget: int | None) -> JsonObject:
+    def _snapshot(self, item: FetchedRepository, budget: int | None) -> JsonObject:
+        if item.archive is None:
+            return item.entry
+        try:
+            snapshot = read_snapshot(
+                item.archive, budget_chars=budget, focus=item.focus, exclude=item.exclude
+            )
+        except SnapshotError as exc:
+            self._failed(item.entry, exc.code, item.started)
+            return {**item.entry, "error": exc.code}
+        _log_captured(str(item.entry["id"]), str(item.entry["commit_sha"]), snapshot, item.started)
+        return {**item.entry, **_contents(snapshot, budget)}
+
+    def _failed(self, entry: JsonObject, code: str, started: float) -> None:
+        mirrored = entry.get("provider") == "git_https"
+        if mirrored:
+            self.repositories.record_mirror_error(str(entry["id"]), code)
+        logger.warning(
+            "repository_snapshot_failed",
+            extra={
+                "repository_id": entry["id"],
+                **({"provider": "git_https"} if mirrored else {}),
+                "code": code,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+            },
+        )
+
+    def _fetch_one(self, row: RepositoryEntry) -> FetchedRepository:
         entry: JsonObject = {
             "id": row["id"],
             "name": row["name"],
@@ -449,30 +500,24 @@ class RepositorySnapshotService:
             "branch": row.get("branch"),
             **_named_globs(row),
         }
+        focus = tuple(row.get("focus_paths", []))
+        exclude = tuple(row.get("exclude_paths", []))
+        started = time.monotonic()
         if row["provider"] == "git_https":
-            return self._from_mirror(row, entry, budget)
+            entry, archive = self._from_mirror(row, entry, started)
+            return FetchedRepository(entry, archive, focus, exclude, started)
         try:
             owner, name = RepositoryService.parse(row["url"])
         except ValidationFailure:
-            return {**entry, "error": "invalid_url"}
+            return FetchedRepository({**entry, "error": "invalid_url"}, None)
         token = self.repositories.token(row["id"])
-        started = time.monotonic()
         try:
             sha = resolve_commit(owner, name, row.get("branch"), token)
             archive = self._archive(row["id"], owner, name, sha, token)
-            snapshot = _read_steered(archive, row, budget)
         except SnapshotError as exc:
-            logger.warning(
-                "repository_snapshot_failed",
-                extra={
-                    "repository_id": row["id"],
-                    "code": exc.code,
-                    "duration_ms": int((time.monotonic() - started) * 1000),
-                },
-            )
-            return {**entry, "error": exc.code}
-        _log_captured(row["id"], sha, snapshot, started)
-        return {**entry, "commit_sha": sha, **_contents(snapshot, budget)}
+            self._failed(entry, exc.code, started)
+            return FetchedRepository({**entry, "error": exc.code}, None)
+        return FetchedRepository({**entry, "commit_sha": sha}, archive, focus, exclude, started)
 
     def _archive(
         self, repository_id: str, owner: str, name: str, sha: str, token: str | None
@@ -480,34 +525,23 @@ class RepositorySnapshotService:
         cached = None if self.archives is None else self.archives.get(repository_id, sha)
         if cached is not None:
             return cached
-        archive = fetch_archive(owner, name, sha, token)
+        archive = fetch_archive(owner, name, sha, token, max_bytes=self.archive_max_bytes)
         if self.archives is not None:
             self.archives.put(repository_id, sha, archive)
         return archive
 
     def _from_mirror(
-        self, row: RepositoryEntry, entry: JsonObject, budget: int | None
-    ) -> JsonObject:
+        self, row: RepositoryEntry, entry: JsonObject, started: float
+    ) -> tuple[JsonObject, bytes | None]:
         """The repository's latest main branch through the mirror, with what the run should know
         of it: the branch, the commit, when it was fetched and whether that fetch failed."""
         entry = {**entry, "provider": "git_https"}
-        started = time.monotonic()
         request = MirrorRequest(repository_id=row["id"], url=row["url"], branch=row["branch"])
         try:
             latest = self._read_latest(request)
-            snapshot = _read_steered(latest.archive, row, budget)
-        except (MirrorError, SnapshotError) as exc:
-            self.repositories.record_mirror_error(row["id"], exc.code)
-            logger.warning(
-                "repository_snapshot_failed",
-                extra={
-                    "repository_id": row["id"],
-                    "provider": "git_https",
-                    "code": exc.code,
-                    "duration_ms": int((time.monotonic() - started) * 1000),
-                },
-            )
-            return {**entry, "error": exc.code}
+        except MirrorError as exc:
+            self._failed(entry, exc.code, started)
+            return {**entry, "error": exc.code}, None
         head = latest.head
         if head.fetch_error is not None:
             self.repositories.record_mirror_error(row["id"], head.fetch_error)
@@ -519,16 +553,15 @@ class RepositorySnapshotService:
                 mirror_bytes=head.mirror_bytes,
             )
             self.repositories.record_fetch(row["id"], record)
-        _log_captured(row["id"], latest.commit_sha, snapshot, started)
-        return {
+        described: JsonObject = {
             **entry,
             "branch": head.branch,
             "commit_sha": latest.commit_sha,
             "fetched_at": head.fetched_at,
             "stale_mirror": head.stale_mirror,
             **({"fetch_error": head.fetch_error} if head.fetch_error else {}),
-            **_contents(snapshot, budget),
         }
+        return described, latest.archive
 
     def _read_latest(self, request: MirrorRequest) -> MirrorSnapshot:
         if self.mirror is None:
@@ -539,7 +572,7 @@ class RepositorySnapshotService:
     def describe() -> str:
         """The caps as a sentence, so the prompt states what it was given and what it was not."""
         return (
-            f"At most {ARCHIVE_MAX_BYTES // (1024 * 1024)} MB of archive, {MAX_FILES} files and "
+            f"At most {ARCHIVE_MAX_BYTES // (1024 * 1024)} MiB of archive, {MAX_FILES} files and "
             f"{MAX_TEXT_BYTES // 1024} KB of text are sent, less when the documents leave less "
             "room; build output, dependencies, lock files, binaries and images are skipped."
         )

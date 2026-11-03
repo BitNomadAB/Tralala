@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # characters (about 100 k tokens by default). The documents come first; the snapshot gets the
     # rest, cut to fit.
     generation_context_chars: int = 400_000
+    # A model that takes tools reads the repositories itself (list_files, read_file, search):
+    # at most this many tool calls per run, after which it is asked for its answer.
+    generation_tool_steps: int = 60
+    # The most characters one tool answer sends the model; a longer file comes in parts.
+    generation_tool_result_chars: int = 60_000
     # Git over HTTPS (the repository provider ``git_https``): the host names a mirror may fetch
     # from, comma-separated. A repository on any other host is refused when it is added and again
     # before every fetch.
@@ -66,6 +71,9 @@ class Settings(BaseSettings):
     # GitHub archives kept per repository and commit, all together at most this many bytes; the
     # oldest go first. 0 keeps none.
     repository_archive_cache_max_bytes: int = 256 * 1024 * 1024
+    # The largest repository archive one run downloads or a mirror writes, held in memory
+    # while the run reads it.
+    repository_archive_max_bytes: int = 128 * 1024 * 1024
     # A file cannot exceed the request body that carries it, so this tracks max_request_bytes
     # rather than promising a size the request ceiling would refuse.
     attachment_max_bytes: int = 8 * 1024 * 1024

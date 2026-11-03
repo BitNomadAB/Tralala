@@ -24,11 +24,9 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
 
-from pydantic import JsonValue
-
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..core.errors import ApiError, Conflict, NotFound
+from ..core.errors import Conflict, NotFound
 from ..core.logging import carry_request_id
 from ..db.generated.board import LoopGenerationRunsRow, LoopsRow
 from ..db.generated.registry import AgentsRow, BoardsRow
@@ -46,6 +44,8 @@ from .loop_generation_agents import (
     resolve_agent,
     role_prompt,
 )
+from .loop_generation_ask import MAX_REPAIRS, CompletionCall
+from .loop_generation_execute import CLOSED_LOOP_CODES, RunContext, execute_run
 from .loop_generation_prompts import (
     DEFAULT_CONTEXT_CHARS,
     FENCE,
@@ -60,20 +60,8 @@ from .loop_generation_prompts import (
     user_message,
 )
 from .loop_generation_prompts import strip_fences as _strip_fences
-from .loop_generation_report import failure_of, log_started
-from .loop_generation_runs import (
-    MAX_REPAIRS,
-    CompletionCall,
-    Outcome,
-    RepositorySnapshots,
-    RunEntry,
-    attach_repositories,
-    finish,
-    generate,
-    promote,
-    record_phase,
-    serialize_run,
-)
+from .loop_generation_runs import Outcome, RepositorySnapshots, RunEntry, serialize_run
+from .loop_generation_tools import DEFAULT_TOOL_RESULT_CHARS, DEFAULT_TOOL_STEPS, ReadingLimits
 from .loop_links import LoopWorkflowLinks
 from .loops import (
     Approvals,
@@ -111,8 +99,6 @@ __all__ = [
 
 logger = logging.getLogger("tralala.loop_generation")
 
-CLOSED_LOOP_CODES = {"loop_read_only", "loop_not_found"}
-
 
 class BoardRows(Protocol):
     """What generation needs from BoardService: the board takes writes, and its name."""
@@ -145,6 +131,8 @@ class LoopGenerationService:
         *,
         idempotency_ttl_seconds: int,
         context_chars: int = DEFAULT_CONTEXT_CHARS,
+        tool_steps: int = DEFAULT_TOOL_STEPS,
+        tool_result_chars: int = DEFAULT_TOOL_RESULT_CHARS,
         call_completion: CompletionCall = runtime.call_completion,
         clock: Callable[[], datetime] = _now,
         new_id: Callable[[], str] = _new_id,
@@ -158,12 +146,19 @@ class LoopGenerationService:
         self.links = links
         self.agents = agents
         self.loop_agents = loop_agents
-        # A bounded, read-only repository snapshot (decision 0011, slice 2). Absent in tests that
-        # only exercise the document flow.
+        # The board's repositories, as a snapshot or as the workspace a model reads through tools
+        # (decisions 0011 and 0025). Absent in tests that only exercise the document flow.
         self.snapshots = snapshots
         self.idempotency_ttl_seconds = idempotency_ttl_seconds
-        # Documents and repository snapshot together (TRALALA_GENERATION_CONTEXT_CHARS).
+        # Documents and repository snapshot together (TRALALA_GENERATION_CONTEXT_CHARS); for a
+        # model that reads the repositories through tools, the whole conversation, with the tool
+        # calls one run answers and the characters of one tool answer.
         self.context_chars = context_chars
+        self.limits = ReadingLimits(
+            context_chars=context_chars,
+            tool_steps=tool_steps,
+            tool_result_chars=tool_result_chars,
+        )
         self._call_completion = call_completion
         self._clock = clock
         self._new_id = new_id
@@ -334,6 +329,7 @@ class LoopGenerationService:
                 started_at=None,
                 finished_at=None,
                 phase=None,
+                trace_json="[]",
             )
             try:
                 repos.generation_runs.add(row)
@@ -407,167 +403,23 @@ class LoopGenerationService:
     _parse = staticmethod(parse_output)
     _response_schema = staticmethod(response_schema_for)
 
-    def _generate(self, purpose: str, captured: JsonObject, agent: AgentsRow) -> Outcome:
-        return generate(
-            purpose,
-            captured,
-            agent,
-            system_prompt=self._system_prompt(purpose, agent),
-            call_completion=self._call_completion,
+    def _run_context(self) -> RunContext:
+        return RunContext(
             settings=self.settings,
-            context_chars=self.context_chars,
+            store=self.store,
+            registry=self.registry,
+            documents=self.documents,
+            links=self.links,
+            snapshots=self.snapshots,
+            call_completion=self._call_completion,
+            system_prompt=self._system_prompt,
+            timestamp=self._now,
+            limits=self.limits,
         )
 
     def _run(self, board_id: str, loop_id: str, run_id: str) -> None:
-        try:
-            with self.store.writer(board_id) as repos:
-                row = repos.generation_runs.get(run_id)
-                if row is None or row.status != "queued":
-                    return
-                repos.generation_runs.start(run_id, now=self._now())
-            log_started(row)
-            captured: JsonObject = json.loads(row.input_json)
-            agent_id = row.agent_id
-            # The archive fetch is network I/O, so it happens here — inside the run, outside every
-            # board lock — and never from the model. What the model saw is then written back to the
-            # run, so a later reader can tell exactly which commit an analysis was based on.
-            if captured.get("purpose") in {"analysis", "roadmap"}:
-                self._phase(board_id, run_id, "analysing_repository")
-                captured = self._attach_repositories(board_id, loop_id, run_id, captured)
-            with self.registry.reader() as registry:
-                agent = registry.agents.get(agent_id) if agent_id else None
-            if agent is None:
-                self._finish(
-                    board_id,
-                    loop_id,
-                    run_id,
-                    status="failed",
-                    error_code="agent_missing",
-                    error_message="The configured generation agent no longer exists",
-                )
-                return
-            self._phase(board_id, run_id, "generating")
-            result = self._generate(str(captured["purpose"]), captured, agent)
-            if result.payload is None:
-                self._finish(
-                    board_id,
-                    loop_id,
-                    run_id,
-                    status="failed",
-                    error_code=result.error_code,
-                    error_message=result.error_message,
-                    details=result.details,
-                    error_details=result.error_details,
-                    retryable=result.retryable,
-                )
-                return
-            self._promote(board_id, loop_id, run_id, captured, result.payload, result)
-
-        except ApiError as exc:
-            if exc.code in CLOSED_LOOP_CODES:
-                # The Loop closed or was archived while the model was working: nothing is wrong
-                # with the provider, so name the real cause instead of a generic failure.
-                self._finish(
-                    board_id,
-                    loop_id,
-                    run_id,
-                    status="failed",
-                    error_code="loop_closed",
-                    error_message=exc.message,
-                    details=None,
-                    retryable=False,
-                )
-                return
-            # A rule refused the result (a RoadMap whose references do not resolve, say): the run
-            # keeps the rule's code, message and details, so a person can read what went wrong.
-            self._fail(board_id, loop_id, run_id, exc)
-        except Exception as exc:  # a run failure must not break the process
-            logger.exception("generation_run_error", extra={"run_id": run_id})
-            self._fail(board_id, loop_id, run_id, exc)
-
-    def _fail(self, board_id: str, loop_id: str, run_id: str, exc: Exception) -> None:
-        failure = failure_of(exc)
-        self._finish(
-            board_id,
-            loop_id,
-            run_id,
-            status="failed",
-            error_code=failure.error_code,
-            error_message=failure.error_message,
-            error_details=failure.error_details,
-            retryable=True,
-        )
-
-    def _phase(self, board_id: str, run_id: str, phase: str) -> None:
-        """Record which step a run is on; best effort, it never fails the run."""
-        record_phase(board_id, run_id, phase, store=self.store)
-
-    def _attach_repositories(
-        self,
-        board_id: str,
-        loop_id: str,
-        run_id: str,
-        captured: JsonObject,
-    ) -> JsonObject:
-        """Fetch the board's repositories into the captured context and record what was seen."""
-        return attach_repositories(
-            board_id,
-            loop_id,
-            run_id,
-            captured,
-            store=self.store,
-            snapshots=self.snapshots,
-            budget_chars=self.context_chars,
-        )
-
-    def _promote(
-        self,
-        board_id: str,
-        loop_id: str,
-        run_id: str,
-        captured: JsonObject,
-        payload: JsonObject,
-        result: Outcome,
-    ) -> None:
-        promote(
-            board_id,
-            loop_id,
-            run_id,
-            captured,
-            payload,
-            result,
-            store=self.store,
-            documents=self.documents,
-            links=self.links,
-            timestamp=self._now,
-        )
-
-    def _finish(
-        self,
-        board_id: str,
-        loop_id: str,
-        run_id: str,
-        *,
-        status: str,
-        error_code: str | None = None,
-        error_message: str | None = None,
-        details: str | None = None,
-        error_details: JsonValue = None,
-        retryable: bool = False,
-    ) -> None:
-        finish(
-            board_id,
-            loop_id,
-            run_id,
-            status=status,
-            error_code=error_code,
-            error_message=error_message,
-            details=details,
-            error_details=error_details,
-            retryable=retryable,
-            store=self.store,
-            timestamp=self._now,
-        )
+        """Execute a queued run (``loop_generation_execute``); it never raises."""
+        execute_run(self._run_context(), board_id, loop_id, run_id)
 
     # --- recovery --------------------------------------------------------------
 

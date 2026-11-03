@@ -6,7 +6,9 @@ repository snapshot, promote the result, or record why there is none. Each step 
 of work, the clock and the collaborators it needs as arguments; the service's private methods
 (``_generate``, ``_phase``, ``_attach_repositories``, ``_promote``, ``_finish``) hand them over.
 
-What a run reports about itself (its failure and its two log lines) is ``loop_generation_report``.
+What a run reports about itself (its failure and its two log lines) is ``loop_generation_report``,
+its process tree ``loop_generation_trace``, asking the model ``loop_generation_ask`` and a run
+whose model reads the repositories through tools ``loop_generation_tools``.
 """
 
 from __future__ import annotations
@@ -17,12 +19,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
-from pydantic import JsonValue, ValidationError
+from pydantic import JsonValue
 
 from ..core.context import ActorContext
-from ..core.errors import ValidationFailure
 from ..db.generated.board import LoopGenerationRunsRow
-from ..db.generated.registry import AgentsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..schemas.loops import AnalysisPayload, PlanPayload, QaInstructions
 from .idempotency import request_fingerprint
@@ -33,19 +33,16 @@ from .loop_generation_prompts import (
     REPOSITORY_OVERHEAD_CHARS,
     JsonObject,
     context_size,
-    parse_output,
-    response_schema_for,
-    user_message,
     without_drafts,
 )
-from .loop_generation_report import Ended, error_details, log_finished
+from .loop_generation_report import Ended, log_finished
+from .loop_generation_trace import RunTrace, note, parse_steps, snapshot_step
 from .loop_links import LoopWorkflowLinks
 from .loops import ensure_writable, refresh_stage, require_loop
-from .runtime import ResponseSchema
+from .repo_snapshot import FetchedRepository
 
 logger = logging.getLogger("tralala.loop_generation")
 
-MAX_REPAIRS = 2
 type RunEntry = dict[str, object]
 
 # What a repository entry says about how it was read, carried into the run's record and its answer.
@@ -60,32 +57,28 @@ _RUN_HIDDEN = (
     "role_snapshot_json",
     "created_by_actor_id",
     "created_by_actor_type",
+    "trace_json",
 )
+# What a repository read through tools says besides the snapshot's fields: how it was read, and
+# how many files the workspace could not hold.
+_READING_FIELDS = ("reading", "left_out")
 
 
 class RepositorySnapshots(Protocol):
-    """``RepositorySnapshotService.for_board``: one entry per enabled repository on the board, the
-    file content of all of them together at most ``budget_chars`` characters of context."""
+    """``RepositorySnapshotService``: ``for_board`` is one entry per enabled repository on the
+    board, the file content of all of them together at most ``budget_chars`` characters of context;
+    ``fetch`` is the same repositories with their archives, for a model that reads them through
+    tools, and ``snapshot_of`` the snapshot of repositories already fetched."""
 
     def for_board(
         self, board_id: str, *, budget_chars: int
     ) -> Sequence[Mapping[str, JsonValue]]: ...
 
+    def fetch(self, board_id: str) -> Sequence[FetchedRepository]: ...
 
-class CompletionCall(Protocol):
-    """``runtime.call_completion`` as a generation calls it: the discussions' ``AgentCall`` plus the
-    schema the answer must follow, which the runtime sends only where the agent's provider takes
-    one (``agents.supports_json_schema``)."""
-
-    def __call__(
-        self,
-        settings: object,
-        agent_row: dict[str, object],
-        *,
-        system_prompt: str,
-        messages: list[dict[str, str]],
-        response_schema: ResponseSchema | None,
-    ) -> Mapping[str, object]: ...
+    def snapshot_of(
+        self, fetched: Sequence[FetchedRepository], *, budget_chars: int
+    ) -> Sequence[Mapping[str, JsonValue]]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +93,8 @@ class Outcome:
     details: str | None = None
     error_details: JsonValue = None
     retryable: bool = False
+    # The run was cancelled while the model worked: nothing is recorded over the cancellation.
+    cancelled: bool = False
 
 
 def stored_output(value: Mapping[str, object]) -> str:
@@ -134,6 +129,7 @@ def _public_sources(sources: JsonValue) -> JsonValue:
                 "file_count": item.get("file_count", 0),
                 "truncated": bool(item.get("truncated")),
                 **_budget_fields(item),
+                **{name: item[name] for name in _READING_FIELDS if name in item},
                 **({"error": item["error"]} if item.get("error") else {}),
             }
             for item in repositories
@@ -166,6 +162,8 @@ def serialize_run(row: LoopGenerationRunsRow) -> RunEntry:
     entry["output"] = _loads(row.output_json)
     entry["source_revisions"] = _public_sources(_loads(row.source_revisions_json))
     entry["usage"] = _loads(row.usage_json)
+    # The run's process tree: one plain-language step per event, never a file's content.
+    entry["trace"] = parse_steps(row.trace_json)
     return entry
 
 
@@ -173,21 +171,6 @@ def _paths(files: JsonValue) -> list[JsonValue]:
     if not isinstance(files, list):
         return []
     return [item["path"] for item in files if isinstance(item, dict)]
-
-
-def _answer_text(outcome: Mapping[str, object]) -> str:
-    text = outcome["text"]
-    if not isinstance(text, str):
-        raise TypeError("The provider answer carries no text")
-    return text
-
-
-def _call_failed(outcome: Mapping[str, object]) -> Outcome:
-    return Outcome(
-        error_code="provider_error",
-        error_message=f"The provider call failed: {outcome['error']}",
-        retryable=True,
-    )
 
 
 def _system_actor(run_row: LoopGenerationRunsRow) -> ActorContext:
@@ -198,86 +181,16 @@ def _system_actor(run_row: LoopGenerationRunsRow) -> ActorContext:
     )
 
 
-def _problem(exc: Exception) -> str:
-    """What a repair message and a failed run say about an answer that did not validate: a rule's
-    message with its details (the Phase and the reference that is missing), or the parser's text."""
-    if isinstance(exc, ValidationFailure):
-        details = f" {json.dumps(dict(exc.details), default=str)}" if exc.details else ""
-        return f"{exc.message}{details}"
-    return str(exc)
-
-
-def _invalid(exc: Exception) -> Outcome:
-    if isinstance(exc, ValidationFailure):
-        return Outcome(
-            error_code="invalid_output",
-            error_message=f"Generated output broke a rule: {exc.message}",
-            error_details=error_details({"rule": exc.code, **(exc.details or {})}),
-            retryable=False,
-        )
-    return Outcome(
-        error_code="invalid_output",
-        error_message="Generated output did not match the schema",
-        details=_problem(exc)[:2000],
-        retryable=False,
-    )
-
-
-def generate(
-    purpose: str,
-    captured: JsonObject,
-    agent: AgentsRow,
-    *,
-    system_prompt: str,
-    call_completion: CompletionCall,
-    settings: object,
-    context_chars: int,
-) -> Outcome:
-    messages = [{"role": "user", "content": user_message(captured, budget_chars=context_chars)}]
-    # The same schema the prompt shows; the runtime sends it only to a provider that takes one.
-    response_schema = response_schema_for(purpose)
-    outcome = call_completion(
-        settings,
-        asdict(agent),
-        system_prompt=system_prompt,
-        messages=messages,
-        response_schema=response_schema,
-    )
-    if not outcome["ok"]:
-        return _call_failed(outcome)
-    usage = outcome.get("usage")
-    model = outcome.get("model")
-    model_name = model if isinstance(model, str) else None
-    text = _answer_text(outcome)
-    for attempt in range(MAX_REPAIRS + 1):
-        try:
-            payload = parse_output(purpose, text)
-            return Outcome(payload=payload, usage=usage, model=model_name)
-        except (ValueError, ValidationError, ValidationFailure) as exc:
-            if attempt >= MAX_REPAIRS:
-                return _invalid(exc)
-            repair = {
-                "role": "user",
-                "content": (
-                    "That response did not validate. Fix it and return the corrected JSON "
-                    f"object only. Error: {_problem(exc)[:1500]}"
-                ),
-            }
-            outcome = call_completion(
-                settings,
-                asdict(agent),
-                system_prompt=system_prompt,
-                messages=[*messages, {"role": "assistant", "content": text}, repair],
-                response_schema=response_schema,
-            )
-            if not outcome["ok"]:
-                return _call_failed(outcome)
-            text = _answer_text(outcome)
-    return Outcome(
-        error_code="invalid_output",
-        error_message="Generated output did not match the schema",
-        retryable=False,
-    )
+def record_trace(
+    board_id: str, run_id: str, trace_json: str, *, store: BoardUnitOfWork
+) -> str | None:
+    """Write the run's steps so far and answer its status; best effort, like ``record_phase``."""
+    try:
+        with store.writer(board_id) as repos:
+            return repos.generation_runs.set_trace(run_id, trace_json)
+    except Exception:  # noqa: BLE001 - progress reporting never breaks a run
+        logger.warning("could not record generation trace", extra={"run_id": run_id})
+        return None
 
 
 def record_phase(board_id: str, run_id: str, phase: str, *, store: BoardUnitOfWork) -> None:
@@ -300,10 +213,15 @@ def attach_repositories(
     captured: JsonObject,
     *,
     store: BoardUnitOfWork,
-    snapshots: RepositorySnapshots | None,
+    read: Callable[[int], Sequence[Mapping[str, JsonValue]]],
     budget_chars: int,
+    trace: RunTrace | None = None,
+    reason: str = "the agent's provider does not take tools",
 ) -> JsonObject:
-    """Fetch the board's repositories into the captured context and record what was seen.
+    """Read the board's repositories into the captured context and record what was seen.
+
+    ``read`` answers the snapshot entries for a budget: ``RepositorySnapshots.for_board``, or
+    ``snapshot_of`` for repositories a run already fetched.
 
     The documents come first; the repositories get what remains of ``budget_chars``, cut to fit.
     When that is under ``MIN_SNAPSHOT_CHARS`` the previous AI drafts go without content, but only
@@ -312,8 +230,6 @@ def attach_repositories(
     received and `source_revisions_json` carries the commit, the file paths and the budget — never
     the file contents, which live only in the run's own input.
     """
-    if snapshots is None:
-        return captured
     source = captured.get("context")
     context: JsonObject = dict(source) if isinstance(source, dict) else {}
     room = budget_chars - context_size(context) - REPOSITORY_OVERHEAD_CHARS
@@ -321,7 +237,7 @@ def attach_repositories(
     if room < MIN_SNAPSHOT_CHARS:
         slim = without_drafts(context, str(captured.get("purpose")))
         room = budget_chars - context_size(slim) - REPOSITORY_OVERHEAD_CHARS
-    entries = snapshots.for_board(board_id, budget_chars=max(room, 0))
+    entries = read(max(room, 0))
     used = sum(_included(entry) for entry in entries)
     if used <= budget_chars - context_size(context) - REPOSITORY_OVERHEAD_CHARS:
         slim = context  # the drafts fit beside what the repositories used
@@ -348,9 +264,30 @@ def attach_repositories(
     sources: JsonObject = dict(known) if isinstance(known, dict) else {}
     sources["repositories"] = described
     captured["source_revisions"] = sources
-    # `context_hash` stays the fingerprint of the *documents*, because that is what the promote
-    # step compares to detect a changed input. The snapshot gets its own hash, which becomes the
-    # run's `input_hash`: two runs over different commits are then visibly different inputs.
+    captured["repository_reading"] = "snapshot"
+    for entry in entries:
+        note(trace, "repository", snapshot_step(entry, reason))
+    if not entries:
+        note(trace, "repository", "No enabled repository is linked to this board; no code was read")
+    write_input(board_id, loop_id, run_id, captured, sources, store=store)
+    return captured
+
+
+def write_input(
+    board_id: str,
+    loop_id: str,
+    run_id: str,
+    captured: JsonObject,
+    sources: JsonObject,
+    *,
+    store: BoardUnitOfWork,
+) -> None:
+    """Write the context as the model receives it, and its sources, back to the run.
+
+    `context_hash` stays the fingerprint of the *documents*, because that is what the promote
+    step compares to detect a changed input. The snapshot gets its own hash, which becomes the
+    run's `input_hash`: two runs over different commits are then visibly different inputs.
+    """
     snapshot_hash = request_fingerprint(captured["context"])
     with store.writer(board_id) as repos:
         repos.generation_runs.set_input(
@@ -360,7 +297,6 @@ def attach_repositories(
             input_hash=snapshot_hash,
             source_revisions_json=json.dumps(sources),
         )
-    return captured
 
 
 def _included(entry: Mapping[str, JsonValue]) -> int:
@@ -380,11 +316,13 @@ def promote(
     documents: LoopDocumentService,
     links: LoopWorkflowLinks,
     timestamp: Callable[[], str],
-) -> None:
+) -> Ended | None:
+    """Store the result as the purpose's draft, unless the documents changed meanwhile or the run
+    was cancelled; answers how the run ended (None for a run that no longer exists)."""
     with store.writer(board_id) as repos:
         row = repos.generation_runs.get(run_id)
         if row is None:
-            return
+            return None
         ended = _promote_run(
             repos,
             row,
@@ -397,6 +335,7 @@ def promote(
             timestamp=timestamp,
         )
     log_finished(row, ended, captured)
+    return ended
 
 
 def _promote_run(
@@ -417,6 +356,7 @@ def _promote_run(
     loop = require_loop(repos, loop_id)
     ensure_writable(loop)
     current = documents.collect_context(repos, loop)
+    usage_json = json.dumps(result.usage or {})
     if request_fingerprint(current) != captured["context_hash"]:
         now = timestamp()
         repos.generation_runs.fail_input_changed(
@@ -428,7 +368,7 @@ def _promote_run(
             output_json=stored_output({"stale_candidate": payload}),
             now=now,
         )
-        return Ended("failed", "generation_input_changed", now)
+        return Ended("failed", "generation_input_changed", now, usage_json)
     provenance = {
         "generation_run_id": run_id,
         "agent_id": row.agent_id,
@@ -463,7 +403,6 @@ def _promote_run(
             provenance=provenance,
         )
     now = timestamp()
-    usage_json = json.dumps(result.usage or {})
     repos.generation_runs.complete(
         run_id,
         output_json=stored_output({**payload, "_references": outputs}),

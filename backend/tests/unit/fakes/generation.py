@@ -71,6 +71,13 @@ class FakeGenerationRunRepository:
         if row is not None:
             self._state.generation_runs[run_id] = row.__replace__(phase=phase)
 
+    def set_trace(self, run_id: str, trace_json: str) -> str | None:
+        row = self._state.generation_runs.get(run_id)
+        if row is None:
+            return None
+        self._state.generation_runs[run_id] = row.__replace__(trace_json=trace_json)
+        return row.status
+
     def set_input(
         self,
         loop_id: str,

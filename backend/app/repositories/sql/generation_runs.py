@@ -25,11 +25,11 @@ _ADD = text(
     "INSERT INTO loop_generation_runs (id, loop_id, purpose, status, input_json, input_hash,"
     " source_revisions_json, output_json, error_code, error_message, attempts, agent_id,"
     " agent_name, model, role_snapshot_json, usage_json, created_by_actor_id,"
-    " created_by_actor_type, created_at, started_at, finished_at, phase)"
+    " created_by_actor_type, created_at, started_at, finished_at, phase, trace_json)"
     " VALUES (:id, :loop_id, :purpose, :status, :input_json, :input_hash,"
     " :source_revisions_json, :output_json, :error_code, :error_message, :attempts, :agent_id,"
     " :agent_name, :model, :role_snapshot_json, :usage_json, :created_by_actor_id,"
-    " :created_by_actor_type, :created_at, :started_at, :finished_at, :phase)"
+    " :created_by_actor_type, :created_at, :started_at, :finished_at, :phase, :trace_json)"
 )
 _CANCEL = text(
     "UPDATE loop_generation_runs SET status = 'cancelled', finished_at = :now WHERE id = :id"
@@ -39,6 +39,8 @@ _START = text(
     " attempts = attempts + 1, phase = 'reading_info' WHERE id = :id"
 )
 _SET_PHASE = text("UPDATE loop_generation_runs SET phase = :phase WHERE id = :id")
+_SET_TRACE = text("UPDATE loop_generation_runs SET trace_json = :trace WHERE id = :id")
+_STATUS = text("SELECT status FROM loop_generation_runs WHERE id = :id")
 _SET_INPUT = text(
     "UPDATE loop_generation_runs SET input_json = :input, input_hash = :hash,"
     " source_revisions_json = :sources WHERE id = :id AND loop_id = :loop_id"
@@ -95,6 +97,11 @@ class SqlGenerationRunRepository:
 
     def set_phase(self, run_id: str, phase: str) -> None:
         self._connection.execute(_SET_PHASE, {"phase": phase, "id": run_id})
+
+    def set_trace(self, run_id: str, trace_json: str) -> str | None:
+        self._connection.execute(_SET_TRACE, {"trace": trace_json, "id": run_id})
+        row = self._connection.execute(_STATUS, {"id": run_id}).mappings().first()
+        return None if row is None else values.text(row, "status")
 
     def set_input(
         self,

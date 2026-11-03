@@ -4,8 +4,8 @@ A failed run keeps an application error's code, message and details, the details
 that names a prompt, the messages or a credential and bounded in size, and any other exception as
 its class name and the start of its text. Every run logs ``generation_run_started`` when it starts
 and one ``generation_run_finished`` when it ends, whichever way, with its status, error code,
-duration, token counts and the repository text it carried; neither line holds a prompt, a message or
-the model's answer.
+duration, token counts, the repository text it carried and the tool calls it made; neither line
+holds a prompt, a message or the model's answer.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from pydantic import JsonValue
 
 from ..core.errors import ApiError
 from ..db.generated.board import LoopGenerationRunsRow
+from .loop_generation_trace import counts_of, parse_steps
 
 logger = logging.getLogger("tralala.loop_generation")
 
@@ -125,6 +126,7 @@ def log_started(row: LoopGenerationRunsRow) -> None:
 
 def log_finished(row: LoopGenerationRunsRow, ended: Ended, captured: JsonValue) -> None:
     usage: JsonValue = json.loads(ended.usage_json)
+    counted = counts_of(parse_steps(row.trace_json))
     logger.info(
         "generation_run_finished",
         extra={
@@ -137,5 +139,8 @@ def log_finished(row: LoopGenerationRunsRow, ended: Ended, captured: JsonValue) 
             "prompt_tokens": _token_count(usage, "prompt_tokens"),
             "completion_tokens": _token_count(usage, "completion_tokens"),
             "snapshot_chars": snapshot_chars(captured),
+            # What a model that reads through tools did: its tool calls and the files it read.
+            "tool_calls": counted["tool_calls"],
+            "files_read": counted["files_read"],
         },
     )
