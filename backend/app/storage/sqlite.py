@@ -106,6 +106,30 @@ def connect_sqlite(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def connect_untrusted(path: Path) -> sqlite3.Connection:
+    """A read-only connection to a database file this installation did not write (an import).
+
+    Set up as SQLite's advice for database files of unknown origin says
+    (https://www.sqlite.org/security.html): the schema is not trusted, triggers and views are off so
+    nothing stored in the file can run, defensive mode, ``cell_size_check`` on and no memory-mapped
+    I/O. The caller runs ``PRAGMA integrity_check`` before anything else. ``immutable=1`` because
+    the file was just written and nothing else has it: no locks, and no ``-wal``/``-shm`` files are
+    created beside it.
+    """
+    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+    try:
+        connection.setconfig(sqlite3.SQLITE_DBCONFIG_DEFENSIVE, True)
+        connection.setconfig(sqlite3.SQLITE_DBCONFIG_TRUSTED_SCHEMA, False)
+        connection.setconfig(sqlite3.SQLITE_DBCONFIG_ENABLE_TRIGGER, False)
+        connection.setconfig(sqlite3.SQLITE_DBCONFIG_ENABLE_VIEW, False)
+        connection.execute("PRAGMA cell_size_check=ON")
+        connection.execute("PRAGMA mmap_size=0")
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
 def snapshot_database(source: Path, target: Path) -> None:
     """Create a transactionally consistent copy using SQLite's online backup API."""
     target.parent.mkdir(parents=True, exist_ok=True)

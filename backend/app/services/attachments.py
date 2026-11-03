@@ -2,26 +2,33 @@
 
 Bytes live outside the database (``data/boards/{uuid}/attachments/{uuid}``) while metadata lives in
 the board database. Original filenames are preserved for display only; paths are never derived from
-user input.
+user input. The service reaches the metadata only through the board unit of work, the directory
+only through ``AttachmentFiles`` and the board's registry row through ``BoardChecks``; a Ticket's
+attachments follow its Loop (``ensure_ticket_writable``). The clock and the id source are passed in,
+so every rule here runs in a unit test without a database.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 from uuid import uuid4
 
-from sqlalchemy import text
-
+from ..core.config import Settings
 from ..core.context import ActorContext
+from ..core.dates import iso_utc
 from ..core.errors import NotFound, ValidationFailure
 from ..core.platform import remove_file, replace_file
-from ..storage.sqlite import utcnow
-from .activity import log_activity
-from .boards import BoardService
-from .common import require_mutable_card
+from ..db.generated.board import AttachmentsRow
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..repositories.board_files import AttachmentFiles
+from .activity import activity_entry
+from .lists import BoardChecks
+from .loops import ensure_ticket_writable
 
 # extension -> (content type, magic-byte predicate name)
 ALLOWED_TYPES: dict[str, str] = {
@@ -73,70 +80,108 @@ def sniff_matches(extension: str, data: bytes) -> bool:
     return False
 
 
-def _rows(conn: Any, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
-    return [dict(row) for row in conn.execute(text(sql), params).mappings()]
+class AttachmentEntry(TypedDict):
+    """An attachment's row as the API returns it."""
+
+    id: str
+    card_id: str | None
+    discussion_id: str | None
+    message_id: str | None
+    original_filename: str
+    stored_filename: str
+    content_type: str
+    size_bytes: int
+    sha256: str
+    uploaded_by_actor_id: str
+    created_at: str
+    deleted_at: str | None
+
+
+def attachment_entry(row: AttachmentsRow) -> AttachmentEntry:
+    return {
+        "id": row.id,
+        "card_id": row.card_id,
+        "discussion_id": row.discussion_id,
+        "message_id": row.message_id,
+        "original_filename": row.original_filename,
+        "stored_filename": row.stored_filename,
+        "content_type": row.content_type,
+        "size_bytes": row.size_bytes,
+        "sha256": row.sha256,
+        "uploaded_by_actor_id": row.uploaded_by_actor_id,
+        "created_at": row.created_at,
+        "deleted_at": row.deleted_at,
+    }
+
+
+def attachment_path(files: AttachmentFiles, board_id: str, stored_filename: str) -> Path:
+    """Where a stored file's bytes are: the board's attachments directory (created when it is
+    missing) and the stored name, sanitized again so a row can never point outside it."""
+    directory = files.attachments_dir(board_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / sanitize_filename(stored_filename)
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _new_id() -> str:
+    return str(uuid4())
 
 
 class AttachmentService:
-    def __init__(self, board_service: BoardService) -> None:
-        self.board_service = board_service
-        self.boards = board_service.boards
-        self.settings = board_service.settings
+    def __init__(
+        self,
+        settings: Settings,
+        boards: BoardChecks,
+        store: BoardUnitOfWork,
+        files: AttachmentFiles,
+        *,
+        clock: Callable[[], datetime] = _now,
+        new_id: Callable[[], str] = _new_id,
+    ) -> None:
+        self.settings = settings
+        self.boards = boards
+        self.store = store
+        self.files = files
+        self._clock = clock
+        self._new_id = new_id
+
+    def _now(self) -> str:
+        return iso_utc(self._clock())
 
     # --- storage -------------------------------------------------------------
 
-    def directory(self, board_id: str) -> Path:
-        path = self.boards.attachments_dir(board_id)
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-
     def file_path(self, board_id: str, stored_filename: str) -> Path:
-        return self.directory(board_id) / sanitize_filename(stored_filename)
+        return attachment_path(self.files, board_id, stored_filename)
 
-    def _board_usage(self, conn: Any) -> int:
-        value = conn.execute(
-            text("SELECT COALESCE(SUM(size_bytes), 0) FROM attachments WHERE deleted_at IS NULL")
-        ).scalar_one()
-        return int(value)
+    @staticmethod
+    def _live(repos: BoardRepositories, attachment_id: str) -> AttachmentsRow:
+        row = repos.attachments.get_live(attachment_id)
+        if row is None:
+            raise NotFound("Attachment not found")
+        return row
 
     # --- queries -------------------------------------------------------------
 
-    def list(self, board_id: str, *, card_id: str | None = None) -> list[dict[str, Any]]:
-        self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            if card_id:
-                return _rows(
-                    conn,
-                    "SELECT * FROM attachments WHERE deleted_at IS NULL AND card_id = :card_id"
-                    " ORDER BY created_at",
-                    {"card_id": card_id},
-                )
-            return _rows(
-                conn,
-                "SELECT * FROM attachments WHERE deleted_at IS NULL ORDER BY created_at",
-                {},
-            )
+    def list(self, board_id: str, *, card_id: str | None = None) -> list[AttachmentEntry]:
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            rows = repos.attachments.live(card_id=card_id or None)
+        return [attachment_entry(row) for row in rows]
 
-    def _row(self, conn: Any, attachment_id: str) -> dict[str, Any]:
-        row = conn.execute(
-            text("SELECT * FROM attachments WHERE id = :id AND deleted_at IS NULL"),
-            {"id": attachment_id},
-        ).mappings().first()
-        if row is None:
-            raise NotFound("Attachment not found")
-        return dict(row)
+    def get(self, board_id: str, attachment_id: str) -> AttachmentEntry:
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            return attachment_entry(self._live(repos, attachment_id))
 
-    def get(self, board_id: str, attachment_id: str) -> dict[str, Any]:
-        self.board_service.require_row(board_id)
-        with self.boards.reader(board_id) as conn:
-            return self._row(conn, attachment_id)
-
-    def read_bytes(self, board_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
-        row = self.get(board_id, attachment_id)
-        path = self.file_path(board_id, row["stored_filename"])
+    def read_bytes(self, board_id: str, attachment_id: str) -> tuple[AttachmentEntry, bytes]:
+        entry = self.get(board_id, attachment_id)
+        path = self.file_path(board_id, entry["stored_filename"])
         if not path.exists():
             raise NotFound("Attachment file is missing")
-        return row, path.read_bytes()
+        return entry, path.read_bytes()
 
     # --- commands ------------------------------------------------------------
 
@@ -149,9 +194,9 @@ class AttachmentService:
         filename: str,
         content_type: str | None,
         data: bytes,
-    ) -> dict[str, Any]:
+    ) -> AttachmentEntry:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
+        self.boards.ensure_active(board_id)
         name = sanitize_filename(filename)
         extension = Path(name).suffix.lower()
         if extension not in ALLOWED_TYPES:
@@ -174,12 +219,24 @@ class AttachmentService:
         declared = (content_type or "").split(";")[0].strip().lower()
         if declared.startswith("image/") and not ALLOWED_TYPES[extension].startswith("image/"):
             raise ValidationFailure("Content type does not match the file extension")
-        attachment_id = str(uuid4())
-        stored = f"{attachment_id}.bin"
-        now = utcnow()
+        attachment_id = self._new_id()
+        row = AttachmentsRow(
+            id=attachment_id,
+            card_id=card_id,
+            discussion_id=None,
+            message_id=None,
+            original_filename=name,
+            stored_filename=f"{attachment_id}.bin",
+            content_type=ALLOWED_TYPES[extension],
+            size_bytes=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+            uploaded_by_actor_id=actor.actor_id,
+            created_at=self._now(),
+            deleted_at=None,
+        )
         # The file lands on disk before the row names it: a crash then leaves an unreferenced file
         # (invisible, prunable) instead of a row whose attachment can never be downloaded.
-        target = self.file_path(board_id, stored)
+        target = self.file_path(board_id, row.stored_filename)
         staging = target.with_name(f".{attachment_id}.uploading")
         profile = self.settings.file_profile
         try:
@@ -189,93 +246,62 @@ class AttachmentService:
             staging.unlink(missing_ok=True)
             raise ValidationFailure("Could not store the uploaded file") from exc
         try:
-            return self._insert_upload(
-                actor, board_id, attachment_id, stored, name, extension, data, now, card_id
-            )
+            self._insert_upload(actor, board_id, card_id, row)
         except Exception:
             target.unlink(missing_ok=True)
             raise
+        return attachment_entry(row)
 
     def _insert_upload(
-        self,
-        actor: ActorContext,
-        board_id: str,
-        attachment_id: str,
-        stored: str,
-        name: str,
-        extension: str,
-        data: bytes,
-        now: str,
-        card_id: str,
-    ) -> dict[str, Any]:
-        with self.boards.session(board_id) as conn:
-            card = conn.execute(
-                text("SELECT id FROM cards WHERE id = :id"), {"id": card_id}
-            ).first()
-            if card is None:
+        self, actor: ActorContext, board_id: str, card_id: str, row: AttachmentsRow
+    ) -> None:
+        with self.store.writer(board_id) as repos:
+            if repos.cards.get(card_id) is None:
                 raise NotFound("Card not found")
-            require_mutable_card(conn, card_id)
-            usage = self._board_usage(conn)
-            if usage + len(data) > self.settings.board_attachment_max_bytes:
+            ensure_ticket_writable(repos, card_id)
+            usage = repos.attachments.live_size()
+            if usage + row.size_bytes > self.settings.board_attachment_max_bytes:
                 raise ValidationFailure(
                     "Board attachment storage limit reached",
                     details={"board_max_bytes": self.settings.board_attachment_max_bytes},
                 )
-            conn.execute(
-                text(
-                    "INSERT INTO attachments"
-                    " (id, card_id, discussion_id, message_id, original_filename,"
-                    "  stored_filename, content_type, size_bytes, sha256, uploaded_by_actor_id,"
-                    "  created_at, deleted_at)"
-                    " VALUES (:id, :card_id, NULL, NULL, :name, :stored, :content_type, :size,"
-                    "         :sha, :actor_id, :now, NULL)"
-                ),
-                {
-                    "id": attachment_id,
-                    "card_id": card_id,
-                    "name": name,
-                    "stored": stored,
-                    "content_type": ALLOWED_TYPES[extension],
-                    "size": len(data),
-                    "sha": hashlib.sha256(data).hexdigest(),
-                    "actor_id": actor.actor_id,
-                    "now": now,
-                },
+            repos.attachments.add(row)
+            repos.activity.add(
+                activity_entry(
+                    actor,
+                    action="attachment.uploaded",
+                    entity_type="card",
+                    entity_id=card_id,
+                    changes={
+                        "attachment_id": row.id,
+                        "filename": row.original_filename,
+                        "size_bytes": row.size_bytes,
+                    },
+                    entry_id=self._new_id(),
+                    timestamp=self._now(),
+                )
             )
-            log_activity(
-                conn,
-                actor,
-                action="attachment.uploaded",
-                entity_type="card",
-                entity_id=card_id,
-                changes={
-                    "attachment_id": attachment_id,
-                    "filename": name,
-                    "size_bytes": len(data),
-                },
-            )
-        return self.get(board_id, attachment_id)
 
     def delete(self, actor: ActorContext, board_id: str, attachment_id: str) -> None:
         actor.require("cards:write")
-        self.board_service.ensure_active(board_id)
-        with self.boards.session(board_id) as conn:
-            row = self._row(conn, attachment_id)
-            if row.get("card_id"):
-                require_mutable_card(conn, row["card_id"])
-            conn.execute(
-                text("UPDATE attachments SET deleted_at = :now WHERE id = :id"),
-                {"now": utcnow(), "id": attachment_id},
-            )
-            if row.get("card_id"):
-                log_activity(
-                    conn,
-                    actor,
-                    action="attachment.deleted",
-                    entity_type="card",
-                    entity_id=row["card_id"],
-                    changes={"attachment_id": attachment_id, "filename": row["original_filename"]},
+        self.boards.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            row = self._live(repos, attachment_id)
+            if row.card_id:
+                ensure_ticket_writable(repos, row.card_id)
+            repos.attachments.mark_deleted(attachment_id, now=self._now())
+            if row.card_id:
+                repos.activity.add(
+                    activity_entry(
+                        actor,
+                        action="attachment.deleted",
+                        entity_type="card",
+                        entity_id=row.card_id,
+                        changes={"attachment_id": attachment_id, "filename": row.original_filename},
+                        entry_id=self._new_id(),
+                        timestamp=self._now(),
+                    )
                 )
-        path = self.file_path(board_id, row["stored_filename"])
+        path = self.file_path(board_id, row.stored_filename)
         if path.exists():
             remove_file(path, profile=self.settings.file_profile)

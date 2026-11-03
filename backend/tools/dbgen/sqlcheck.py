@@ -12,8 +12,8 @@ a module constant (also imported ones), a local assignment (``+=`` adds an optio
 or comprehension takes each element), an ``x if c else y``, ``sql.identifier`` (every allowed
 name unless the name itself is literal), ``sql.where`` (exactly the literal selections, otherwise
 no filter and each filter alone), ``sql.assignments``, ``sql.insert_columns`` and
-``sql.column_list`` (all allowed columns). Anything else stops the build unless the site is in
-``EXCEPTIONS`` with its reason.
+``sql.column_list`` (all allowed columns, with a literal table alias and result prefix). Anything
+else stops the build unless the site is in ``EXCEPTIONS`` with its reason.
 
 **Checking.** Each combination of parts is compiled with ``EXPLAIN`` on Python's own ``sqlite3``,
 parameters bound to NULL, so nothing is executed and no data is needed; SQLAlchemy's expanding
@@ -391,9 +391,33 @@ class Resolver:
         if helper == "assignments" and len(arguments) == 2:
             allowed = self.names(arguments[1], scope)
             return (sql.assignments(allowed, allowed),)
-        if helper == "column_list" and len(arguments) == 1:
-            return (sql.column_list(self.names(arguments[0], scope)),)
+        if helper == "column_list":
+            return self._column_list(call, scope, active)
         raise UnresolvedError(f"{ast.unparse(call)} is not expanded by this check")
+
+    def _column_list(
+        self, call: ast.Call, scope: Scope, active: frozenset[tuple[int, str]]
+    ) -> tuple[str, ...]:
+        """``sql.column_list(columns, table, prefix)``: the columns, with each alias and prefix."""
+        parameters = ("columns", "table", "prefix")
+        if len(call.args) > len(parameters):
+            raise UnresolvedError(f"{ast.unparse(call)} has more arguments than column_list takes")
+        given = dict(zip(parameters, call.args, strict=False))
+        for keyword in call.keywords:
+            if keyword.arg not in parameters or keyword.arg in given:
+                raise UnresolvedError(f"{ast.unparse(call)} names an argument twice or unknown")
+            given[keyword.arg] = keyword.value
+        if "columns" not in given:
+            raise UnresolvedError(f"{ast.unparse(call)} names no columns")
+        columns = self.names(given["columns"], scope)
+        tables = self.texts(given["table"], scope, active) if "table" in given else ("",)
+        prefixes = self.texts(given["prefix"], scope, active) if "prefix" in given else ("",)
+        return _unique(
+            [
+                sql.column_list(columns, table, prefix)
+                for table, prefix in itertools.product(tables, prefixes)
+            ]
+        )
 
     def _item(self, node: ast.expr, index: int, scope: Scope) -> str:
         if (

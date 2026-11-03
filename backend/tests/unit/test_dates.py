@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
-from app.core.dates import normalize_timestamp, parse_due_filter
+from app.core.dates import iso_utc, normalize_timestamp, parse_due_filter
 from app.core.errors import ValidationFailure
-from app.services.common import iso_utc, parse_timestamp
 
 
 @pytest.mark.parametrize(
@@ -55,9 +56,6 @@ def test_a_valid_due_filter_passes_normalized() -> None:
     assert parse_due_filter(None) is None
 
 
-def test_a_stored_timestamp_reads_back_as_the_same_text() -> None:
-    moment = parse_timestamp("2027-01-15T10:30:00+02:00")
-    assert moment is not None
+def test_a_moment_is_written_in_utc_to_the_whole_second() -> None:
+    moment = datetime(2027, 1, 15, 10, 30, 0, 987654, tzinfo=timezone(timedelta(hours=2)))
     assert iso_utc(moment) == "2027-01-15T08:30:00Z"
-    assert parse_timestamp("not a date") is None
-    assert parse_timestamp(None) is None

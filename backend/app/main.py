@@ -280,7 +280,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # anyio keeps one default limiter per event loop, so it is sized here, inside the loop.
         anyio.to_thread.current_default_thread_limiter().total_tokens = THREADPOOL_TOKENS
         app.state.services.initialize()
-        purged = app.state.services.registry.purge_expired_sessions()
+        purged = app.state.services.auth.purge_expired_sessions()
         logger.info(
             json.dumps(
                 {

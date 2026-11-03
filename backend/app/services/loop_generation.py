@@ -21,14 +21,16 @@ from sqlalchemy.exc import IntegrityError
 from ..core.context import ActorContext
 from ..core.errors import ApiError, Conflict, NotFound, ServiceUnavailable, ValidationFailure
 from ..schemas.loops import AnalysisPayload, GenerationRequest, PlanPayload, QaInstructions
+from ..storage.board_db import BoardDatabaseManager
+from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
 from . import runtime
 from .agents import AgentService
 from .boards import BoardService
 from .common import one, request_fingerprint, rows, run_idempotent
+from .loop_bridge import LoopConnectionHelpers
 from .loop_documents import LoopDocumentService
 from .loop_links import LoopWorkflowLinks
-from .loops import LoopService
 from .runtime import EXECUTABLE_CONNECTION_TYPES
 
 logger = logging.getLogger("tralala.loop_generation")
@@ -123,16 +125,19 @@ class LoopGenerationService:
     def __init__(
         self,
         board_service: BoardService,
-        loop_service: LoopService,
+        loop_service: LoopConnectionHelpers,
         document_service: LoopDocumentService,
         links: LoopWorkflowLinks,
         agent_service: AgentService,
         loop_agents: Any | None = None,
         snapshots: Any | None = None,
+        *,
+        boards: BoardDatabaseManager,
+        registry: Registry,
     ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
-        self.registry = board_service.registry
+        self.boards = boards
+        self.registry = registry
         self.settings = board_service.settings
         self.loops = loop_service
         self.documents = document_service
@@ -370,7 +375,7 @@ class LoopGenerationService:
             captured = {
                 "purpose": request.purpose,
                 "instructions": request.instructions,
-                "board_name": self.board_service.require_row(board_id)["name"],
+                "board_name": self.board_service.require_row(board_id).name,
                 "context": context,
                 "context_hash": request_fingerprint(context),
                 "source_revisions": {

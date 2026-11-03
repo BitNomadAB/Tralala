@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -53,10 +54,12 @@ class RunService:
         board_service: BoardService,
         engine: Orchestrator,
         events: EventService | None = None,
+        *,
+        boards: BoardDatabaseManager,
     ) -> None:
         self.settings = settings
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.engine = engine
         self.events = events
         self._executor = ThreadPoolExecutor(

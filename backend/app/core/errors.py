@@ -74,3 +74,14 @@ class ServiceUnavailable(ApiError):
     status_code = 503
     code = "unavailable"
     retryable = True
+
+
+class BoardUnreadable(ServiceUnavailable):
+    """SQLite cannot read a board's database file: it is not a database, or it is damaged.
+
+    A retry gets the same answer, so it is not retryable: the file has to be replaced. Every
+    path that steps past a board it cannot open (``ServiceUnavailable``) steps past this one too.
+    """
+
+    code = "board_database_unreadable"
+    retryable = False

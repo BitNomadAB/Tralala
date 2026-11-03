@@ -226,12 +226,19 @@ integrity-checked on creation, and can be restored by name (validated against
 `^backup-\d{8}T\d{6}Z\.sqlite$`). Restore disposes the board engine, snapshots the backup into the
 live file, then re-runs `integrity_check` and `foreign_key_check`.
 
-### Export format (v1)
+### Export format (v2)
 
 ZIP containing:
 
-- `manifest.json` — `format_version: 1`, `exported_at`, board metadata;
-- `board.sqlite` — consistent snapshot.
+- `manifest.json` — `format_version: 2`, `exported_at`, board metadata, attachment count and bytes;
+- `board.sqlite` — consistent snapshot;
+- `attachments/` — the board's uploaded files.
 
-Import validates the manifest version, runs `PRAGMA quick_check`, rewrites `board_metadata.id` to
-the new board UUID and registers the board as `active`.
+Import validates the manifest version and the member sizes, writes `board.sqlite` into the new
+board's directory and has `MigrationManager.check_imported` judge it before a registry row exists:
+a read-only, untrusted connection (`mode=ro&immutable=1`, triggers, views and the trusted schema
+off, defensive mode, `cell_size_check` on, no memory mapping) runs `PRAGMA integrity_check` first,
+then requires the board tables and a board-chain revision (or none: a legacy board is adopted). Only
+then is the row added; the board is migrated, `board_metadata.id` is rewritten to the new board UUID
+and the board turns `active`. A refusal (`422 board_import_invalid`) or any later failure removes
+the directory, the pre-migration snapshot and the row.

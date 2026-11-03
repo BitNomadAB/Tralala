@@ -4,23 +4,32 @@ import json
 import logging
 
 from ..core.config import Settings
-from ..core.errors import NotFound, ServiceUnavailable
-from ..repositories.sql.board import SqlBoardUnitOfWork
+from ..repositories.sql.board import (
+    SqlBoardUnitOfWork,
+    board_files,
+    board_migrator,
+    full_text_index,
+)
+from ..repositories.sql.registry import SqlRegistryUnitOfWork
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.migration_manager import MigrationManager, MigrationReport
 from ..storage.process_lock import DataDirectoryLock
 from ..storage.registry import Registry
+from ..storage.schema import runner
+from . import recovery
 from .agents import AgentService, RoleTemplateService
 from .attachments import AttachmentService
 from .auth import AuthService
 from .backup_scheduler import BackupScheduler
 from .backups import BackupService
-from .boards import BoardService
+from .board_stats import BoardStatsCache
+from .boards import BoardSchema, BoardService
 from .cards import CardService
 from .discussions import DiscussionService
 from .events import EventService
 from .lists import ListService
 from .loop_agents import LoopAgentService
+from .loop_bridge import LoopConnectionHelpers, LoopPlanViews
 from .loop_documents import LoopDocumentService
 from .loop_generation import LoopGenerationService
 from .loop_history import LoopHistoryService
@@ -47,64 +56,111 @@ class Services:
         settings.ensure_dirs()
         self.settings = settings
         self.registry = Registry(settings)
+        # The registry unit of work for the services converted to repositories (GCS-T00d onwards).
+        self.registry_store = SqlRegistryUnitOfWork(self.registry)
         self.boards = BoardDatabaseManager(settings)
         # The board unit of work for the services converted to repositories (GCS-T00c onwards).
         self.board_store = SqlBoardUnitOfWork(self.boards)
+        self.board_stats = BoardStatsCache(settings, self.registry_store, self.board_store)
+        # The manager has exactly one write choke point, so the cache is told there instead of
+        # asking every service to remember to invalidate.
+        self.boards.on_write = self.board_stats.invalidate
         self.migrations = MigrationManager(settings, self.registry, self.boards)
-        self.board = BoardService(settings, self.registry, self.boards, self.migrations)
-        self.template = TemplateService(self.registry, self.boards, self.board)
-        self.board.templates = self.template
-        self.role_templates = RoleTemplateService(self.registry)
-        self.agent = AgentService(settings, self.registry, self.role_templates)
-        self.repository = RepositoryService(settings, self.registry)
+        self.role_templates = RoleTemplateService(self.registry_store)
+        self.agent = AgentService(settings, self.registry_store)
+        self.repository = RepositoryService(settings, self.registry_store)
         self.repo_snapshot = RepositorySnapshotService(self.repository)
-        self.board.repositories = self.repository
-        self.board.agents = self.agent
-        self.loop = LoopService(self.board)
-        self.loop_plan = LoopPlanService(self.board, self.loop)
-        self.loop_document = LoopDocumentService(self.board, self.loop, self.loop_plan)
+        self.board = BoardService(
+            settings,
+            self.registry_store,
+            self.board_store,
+            board_files(self.boards),
+            migrations=board_migrator(self.migrations),
+            schema=BoardSchema(
+                head_revision=runner.head_revision("board"),
+                version=runner.revision_count("board"),
+            ),
+            stats=self.board_stats,
+            agents=self.agent,
+            repositories=self.repository,
+        )
+        self.template = TemplateService(self.registry_store, self.board_store, self.board)
+        self.board.templates = self.template
+        # The plan views and the connection helpers are the transitional bridge to the Loop
+        # workflow services, which GCS-T00f converts (services/loop_bridge.py).
+        self.loop_plan_views = LoopPlanViews()
+        self.card = CardService(
+            settings, self.board, self.board_store, self.registry_store, plans=self.loop_plan_views
+        )
+        self.loop = LoopService(
+            settings, self.board, self.board_store, plans=self.loop_plan_views, tickets=self.card
+        )
+        self.loop_helpers = LoopConnectionHelpers(self.loop)
+        # The services below that take ``boards`` (and ``registry``) are not converted to the
+        # repositories yet (GCS-T00e..g) and still open connections themselves.
+        self.loop_plan = LoopPlanService(self.board, self.loop_helpers, boards=self.boards)
+        self.loop_plan_views.service = self.loop_plan
+        self.loop_document = LoopDocumentService(
+            self.board, self.loop_helpers, self.loop_plan, boards=self.boards
+        )
         self.loop_links = LoopWorkflowLinks()
         self.loop_agents = LoopAgentService(self.boards, self.agent)
-        self.loop_history = LoopHistoryService(self.board)
+        self.loop_history = LoopHistoryService(self.board, boards=self.boards)
         self.loop_generation = LoopGenerationService(
             self.board,
-            self.loop,
+            self.loop_helpers,
             self.loop_document,
             self.loop_links,
             self.agent,
             self.loop_agents,
             snapshots=self.repo_snapshot,
+            boards=self.boards,
+            registry=self.registry,
         )
         self.loop_qa = LoopQaService(
-            self.board, self.loop, self.loop_history, self.loop_links
+            self.board, self.loop_helpers, self.loop_history, self.loop_links, boards=self.boards
         )
         self.loop_links.bind(
             start_generation=self.loop_generation.start,
             apply_qa_instructions=self.loop_qa.apply_instructions,
         )
-        self.loop.plans = self.loop_plan
         self.list = ListService(self.board, self.board_store)
-        self.card = CardService(self.board, self.loop, self.loop_plan)
-        self.loop.cards = self.card
-        self.label = LabelService(self.board)
-        self.checklist = ChecklistService(self.board)
-        self.comment = CommentService(self.board)
-        self.search = SearchService(self.board, self.card)
-        self.backup = BackupService(self.board)
+        self.label = LabelService(self.board, self.board_store)
+        self.checklist = ChecklistService(self.board, self.board_store)
+        self.comment = CommentService(self.board, self.board_store, self.registry_store)
+        self.search = SearchService(
+            self.board,
+            self.board_store,
+            self.registry_store,
+            plans=self.loop_plan_views,
+            index=full_text_index(self.boards),
+        )
+        self.backup = BackupService(self.board, boards=self.boards)
         self.backup_scheduler = BackupScheduler(
             self.backup,
+            registry=self.registry,
             interval_hours=settings.backup_interval_hours,
             keep=settings.backup_keep,
         )
-        self.attachment = AttachmentService(self.board)
-        self.auth = AuthService(settings, self.registry)
-        self.discussion = DiscussionService(self.board, self.agent)
-        self.event = EventService(self.board)
-        self.orchestrator = Orchestrator(settings, self.board, self.event)
-        self.run = RunService(settings, self.board, self.orchestrator, self.event)
+        self.attachment = AttachmentService(
+            settings, self.board, self.board_store, board_files(self.boards)
+        )
+        self.auth = AuthService(settings, self.registry_store)
+        self.discussion = DiscussionService(
+            self.board, self.agent, boards=self.boards, registry=self.registry
+        )
+        self.event = EventService(self.board, boards=self.boards)
+        self.orchestrator = Orchestrator(
+            settings, self.board, self.event, boards=self.boards, registry=self.registry
+        )
+        self.run = RunService(
+            settings, self.board, self.orchestrator, self.event, boards=self.boards
+        )
         self.discussion.runs = self.run
         self.discussion.events = self.event
-        self.mention = MentionService(settings, self.board, self.agent, self.event)
+        self.mention = MentionService(
+            settings, self.board, self.agent, self.event, boards=self.boards, registry=self.registry
+        )
         self.comment.mentions = self.mention
         self.data_lock = DataDirectoryLock(settings.data_dir)
         self.migration_reports: list[MigrationReport] = []
@@ -113,7 +169,7 @@ class Services:
         """Take the data directory, then migrate, before the application accepts requests."""
         self.data_lock.acquire()
         self.migrations.migrate_registry()
-        self.registry.bootstrap_admin()
+        self.auth.bootstrap_admin()
         self.role_templates.seed_defaults()
         resealed = self.agent.reseal_credentials()
         if resealed:
@@ -134,20 +190,10 @@ class Services:
 
     def recover_async_work(self) -> int:
         """Resolve runs and mention jobs interrupted by the previous process stopping."""
-        recovered = 0
-        for row in self.registry.read("SELECT id FROM boards"):
-            try:
-                recovered += self.run.recover(row["id"])
-                recovered += self.mention.recover(row["id"])
-                recovered += self.loop_generation.recover(row["id"])
-            except (NotFound, ServiceUnavailable):
-                # A board mid-repair is resolved above or on its next start; never block startup.
-                continue
-        if recovered:
-            logger.info(
-                json.dumps({"event": "async_work_recovered", "items": recovered})
-            )
-        return recovered
+        board_ids = [str(row["id"]) for row in self.registry.read("SELECT id FROM boards")]
+        return recovery.recover_async_work(
+            board_ids, (self.run.recover, self.mention.recover, self.loop_generation.recover)
+        )
 
     def shutdown(self) -> None:
         self.backup_scheduler.stop()

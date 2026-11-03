@@ -20,7 +20,7 @@ import logging
 import socket
 import time
 from collections.abc import Callable, Sequence
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 from urllib.parse import urlsplit
 
 import httpx
@@ -40,6 +40,25 @@ BLOCKED_HOSTNAMES = frozenset({"metadata.google.internal", "metadata.goog", "ins
 METADATA_ADDRESSES = frozenset(
     {ipaddress.ip_address("169.254.169.254"), ipaddress.ip_address("fd00:ec2::254")}
 )
+
+
+class EndpointProbe(TypedDict):
+    """What a probe of an endpoint's model list or agent card found."""
+
+    ok: bool
+    status: str
+    message: str
+    latency_ms: int
+    models: list[str]
+
+
+class CompletionProbe(TypedDict):
+    """What the smallest real chat completion found."""
+
+    ok: bool
+    status: str
+    message: str
+    latency_ms: int
 
 
 class ForbiddenAddressError(httpx.ConnectError):
@@ -258,7 +277,7 @@ def _request(
 
 def probe_openai_compatible(
     base_url: str, *, api_key: str | None, timeout: float, allow_private: bool
-) -> dict[str, Any]:
+) -> EndpointProbe:
     """Probe ``GET {base}/models``; the endpoint list is the cheapest liveness signal."""
     headers = {"Accept": "application/json"}
     if api_key:
@@ -313,7 +332,7 @@ def probe_openai_compatible(
 
 def probe_completion(
     base_url: str, *, model: str, api_key: str | None, timeout: float, allow_private: bool
-) -> dict[str, Any]:
+) -> CompletionProbe:
     """Send the smallest real chat completion, to prove the model call actually works.
 
     Listing models shows the endpoint answers; it says nothing about whether the model name exists
@@ -374,7 +393,7 @@ def probe_completion(
 
 def probe_a2a(
     base_url: str, *, api_key: str | None, timeout: float, allow_private: bool
-) -> dict[str, Any]:
+) -> EndpointProbe:
     """Fetch the agent card. A JSON body with a name is treated as a valid A2A agent."""
     url = base_url if base_url.endswith(".json") else f"{base_url}/.well-known/agent.json"
     headers = {"Accept": "application/json"}

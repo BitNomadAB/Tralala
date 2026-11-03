@@ -11,6 +11,8 @@ from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, ValidationFailure
 from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
+from ..storage.board_db import BoardDatabaseManager
+from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -45,9 +47,17 @@ def _rows(conn: Any, statement: str, params: dict[str, Any]) -> list[dict[str, A
 class DiscussionService:
     """Ticket-bound discussions. Participants keep an immutable role snapshot."""
 
-    def __init__(self, board_service: BoardService, agent_service: Any) -> None:
+    def __init__(
+        self,
+        board_service: BoardService,
+        agent_service: Any,
+        *,
+        boards: BoardDatabaseManager,
+        registry: Registry,
+    ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
+        self.registry = registry
         self.agent = agent_service
         self.runs: Any = None
         self.events: Any = None
@@ -317,7 +327,7 @@ class DiscussionService:
                 "status": board["status"],
                 **self._board_counts(board["id"]),
             }
-            for board in self.board_service.registry.read(
+            for board in self.registry.read(
                 "SELECT id, name, status FROM boards"
             )
         ]
@@ -400,7 +410,7 @@ class DiscussionService:
     def _add_participants(
         self, conn: Any, discussion_id: str, participant_ids: list[str], now: str
     ) -> None:
-        agents = self.board_service.registry
+        agents = self.registry
         for participant_id in participant_ids:
             row = agents.read_one(
                 "SELECT id, name, enabled FROM agents WHERE id = :id", {"id": participant_id}

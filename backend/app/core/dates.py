@@ -13,7 +13,12 @@ from .errors import ValidationFailure
 
 def utcnow() -> str:
     """ISO 8601 UTC timestamp with second precision, e.g. 2026-10-30T12:00:00Z."""
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return iso_utc(datetime.now(UTC))
+
+
+def iso_utc(moment: datetime) -> str:
+    """An aware moment as ``utcnow`` writes it: UTC, whole seconds (truncated), a ``Z`` suffix."""
+    return moment.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def normalize_timestamp(value: str | None) -> str | None:

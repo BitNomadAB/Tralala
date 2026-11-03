@@ -32,7 +32,8 @@ Failure (same shape for every status):
 Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_token`,
 `token_revoked`, `token_expired`, `forbidden`, `csrf_failed`, `not_found`, `conflict`,
 `version_conflict`, `board_archived`, `board_migration_failed`, `board_schema_outdated`,
-`board_files_busy`, `idempotency_key_reused`, `creation_in_progress`, `creation_failed`,
+`board_files_busy`, `board_import_invalid`, `board_database_unreadable`, `idempotency_key_reused`,
+`creation_in_progress`, `creation_failed`,
 `validation_failed`, `payload_too_large`, `rate_limited`, and the Loop workflow codes
 `loop_not_found`,
 `loop_required`, `loop_mismatch`, `loop_read_only`, `document_stale`, `approval_required`,
@@ -161,6 +162,21 @@ an interrupted delete leaves a board that can be deleted again. When the host wi
 (Windows, or a share), the removal is retried briefly and then answered with
 `409 board_files_busy`, naming the leftover directory in `details.leftover` together with `errno`,
 `winerror` and `platform_profile`; the board and its data are untouched.
+
+`POST /boards/import` judges the archive's `board.sqlite` before anything uses it. The file is opened
+read only as a file of unknown origin, so nothing stored in it runs; SQLite's `integrity_check` runs
+first, then the board's tables and its schema revision must be ones this release can migrate. A file
+that fails is refused with `422 board_import_invalid`: `details.reason` is `not_a_database`,
+`integrity_check_failed`, `not_a_board_database`, `unknown_schema_revision` (an archive from a newer
+release) or `migration_failed` (the upgrade to the current schema failed), and `details.detail`
+carries SQLite's answer. A refused or failed import leaves nothing behind: no board row, no files and
+no pre-migration snapshot. An archive from an older release is migrated during the import.
+
+A board whose database file SQLite cannot read (not a database, or damaged) never fails the board
+list or startup. The list shows it with zero counters and its status, startup skips its interrupted
+work, and each logs `board_database_unreadable` once with the board id. A request that opens the board
+answers `503 board_database_unreadable` (not retryable), with `details.sqlite_error` naming SQLite's
+code.
 
 Snapshots are also taken automatically: `BackupScheduler` checks every active board and snapshots any
 whose newest `backup-<UTC>.sqlite` is older than `TRALALA_BACKUP_INTERVAL_HOURS` (default 24, `0`

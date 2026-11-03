@@ -6,7 +6,8 @@ Responsibilities:
 * migrate every existing board eagerly, one at a time, before the application serves requests;
 * snapshot each board with SQLite's online backup API before its schema changes;
 * validate ``integrity_check`` and ``foreign_key_check`` after migrating;
-* mark a board ``migration_failed`` on any error, keep the backup, and block writes.
+* mark a board ``migration_failed`` on any error, keep the backup, and block writes;
+* judge an imported board file before anything opens it (:meth:`check_imported`).
 
 The orchestration is idempotent: a database already at head is skipped (and only reconciled in
 the registry), and a failed migration can be re-run once the cause is fixed. Lazily migrating a
@@ -29,12 +30,19 @@ from sqlalchemy.engine import Connection, Engine
 from ..core.config import Settings
 from ..core.errors import NotFound
 from ..core.integrity import foreign_key_problem
+from ..repositories.board_files import DatabaseProblem
 from ..storage.board_db import BoardDatabaseManager
 from ..storage.registry import Registry
 from ..storage.schema import ensure_fts, runner
-from ..storage.sqlite import create_sqlite_engine, snapshot_database
+from ..storage.sqlite import connect_untrusted, create_sqlite_engine, snapshot_database
 
 logger = logging.getLogger("tralala.migrations")
+
+DETAIL_MAX_CHARS = 300
+
+
+def _short(text: str) -> str:
+    return text if len(text) <= DETAIL_MAX_CHARS else text[: DETAIL_MAX_CHARS - 3] + "..."
 
 
 @dataclass(frozen=True)
@@ -198,6 +206,61 @@ class MigrationManager:
             finally:
                 engine.dispose()
                 self.boards.close(board_id)
+
+    def check_imported(self, board_id: str) -> DatabaseProblem | None:
+        """Judge an imported board file before the application opens it (``BoardMigrator``).
+
+        The file is opened read only as one of unknown origin (``connect_untrusted``), the integrity
+        check runs first, and then come the two questions :meth:`migrate_board` asks of a board: are
+        the board's tables there, and at which revision. A file that this manager would otherwise
+        turn into a board (any SQLite file gets the whole schema created in it) or could not upgrade
+        (a revision this release does not know) is refused instead.
+        """
+        path = self.boards.path(board_id)
+        try:
+            connection = connect_untrusted(path)
+        except sqlite3.Error as exc:
+            return DatabaseProblem(reason="not_a_database", detail=_short(str(exc)))
+        try:
+            return self._judge_imported(connection)
+        except sqlite3.Error as exc:
+            return DatabaseProblem(reason="not_a_database", detail=_short(str(exc)))
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _judge_imported(connection: sqlite3.Connection) -> DatabaseProblem | None:
+        findings = [str(row[0]) for row in connection.execute("PRAGMA integrity_check")]
+        if findings != ["ok"]:
+            return DatabaseProblem(
+                reason="integrity_check_failed", detail=_short("; ".join(findings))
+            )
+        objects = {
+            str(name): str(kind)
+            for name, kind in connection.execute("SELECT name, type FROM sqlite_master")
+        }
+        missing = sorted(
+            name for name in runner.LEGACY_TABLE_MARKERS["board"] if objects.get(name) != "table"
+        )
+        if missing:
+            return DatabaseProblem(
+                reason="not_a_board_database", detail=f"missing tables: {', '.join(missing)}"
+            )
+        version_table = objects.get("alembic_version")
+        if version_table is None:
+            # A board from before revision tracking: migrate_board adopts it at the baseline.
+            return None
+        if version_table != "table":
+            return DatabaseProblem(
+                reason="not_a_board_database", detail=f"alembic_version is a {version_table}"
+            )
+        versions = connection.execute("SELECT version_num FROM alembic_version")
+        found = [str(row[0]) for row in versions]
+        if len(found) != 1 or found[0] not in runner.revisions("board"):
+            return DatabaseProblem(
+                reason="unknown_schema_revision", detail=_short(", ".join(found) or "none")
+            )
+        return None
 
     def status(self) -> dict[str, Any]:
         return {

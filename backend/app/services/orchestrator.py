@@ -14,6 +14,8 @@ from uuid import uuid4
 from sqlalchemy import text
 
 from ..core.errors import NotFound
+from ..storage.board_db import BoardDatabaseManager
+from ..storage.registry import Registry
 from ..storage.sqlite import utcnow
 from . import runtime
 from .boards import BoardService
@@ -53,11 +55,18 @@ class Orchestrator:
     """Runs one bounded round per participant and records explicit positions."""
 
     def __init__(
-        self, settings: Any, board_service: BoardService, events: EventService | None = None
+        self,
+        settings: Any,
+        board_service: BoardService,
+        events: EventService | None = None,
+        *,
+        boards: BoardDatabaseManager,
+        registry: Registry,
     ) -> None:
         self.settings = settings
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
+        self.registry = registry
         self.events = events
 
     def _context(self, conn: Any, thread: dict[str, Any], limit: int = 20) -> tuple[str, str]:
@@ -170,7 +179,7 @@ class Orchestrator:
                 {"id": discussion_id},
             ).scalar_one()
 
-        registry = self.board_service.registry
+        registry = self.registry
         _, tokens_before = self._run_state(board_id, run_id)
         answers = 0
         repeats = 0

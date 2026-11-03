@@ -22,6 +22,7 @@ from ..schemas.loops import (
     QaResultSubmission,
     QaScenario,
 )
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
@@ -32,10 +33,10 @@ from .common import (
     rows,
     store_idempotency,
 )
+from .loop_bridge import LoopConnectionHelpers
 from .loop_history import LoopHistoryService
 from .loop_identifiers import format_ticket_key
 from .loop_links import LoopWorkflowLinks
-from .loops import LoopService
 
 QA_PHASE_NAME = "Verification"
 BLOCKING_RESULT_STATUSES = {"failed", "blocked", "not_run"}
@@ -90,12 +91,14 @@ class LoopQaService:
     def __init__(
         self,
         board_service: BoardService,
-        loop_service: LoopService,
+        loop_service: LoopConnectionHelpers,
         history_service: LoopHistoryService,
         links: LoopWorkflowLinks,
+        *,
+        boards: BoardDatabaseManager,
     ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.loops = loop_service
         self.history = history_service
         self.links = links

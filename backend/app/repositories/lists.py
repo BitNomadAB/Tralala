@@ -15,6 +15,11 @@ class ListRepository(Protocol):
         """The Loop's lists in display order (position, then id)."""
         ...
 
+    def active_names(self, loop_id: str) -> list[str]:
+        """Names of the Loop's unarchived lists by position, then creation, as a template takes
+        them."""
+        ...
+
     def positions(self, loop_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:
         """``(id, position)`` of the Loop's unarchived lists in display order, minus ``exclude``."""
         ...

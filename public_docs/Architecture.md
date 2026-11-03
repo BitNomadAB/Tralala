@@ -59,7 +59,7 @@ planning groups, not Kanban columns.
 | --- | --- | --- |
 | API | `backend/app/api` | HTTP routing, authentication dependency, envelopes, status codes |
 | Services | `backend/app/services` | Business rules, transactions, activity logging, ordering |
-| Repositories | `backend/app/repositories` | Typed interfaces a service reads and writes through, and the unit of work that opens a reader or writer on a board; `repositories/sql` implements them over SQL |
+| Repositories | `backend/app/repositories` | Typed interfaces a service reads and writes through, the units of work that open a reader or writer on a board or on the registry, a board's files (its database and attachments) as boards are created, copied, exported, imported and deleted and uploads are stored, and whether a board has its FTS5 card index; `repositories/sql` implements them over SQL |
 | Rows | `backend/app/db` | One typed row class per table, generated from the migrations by `python -m tools.dbgen` |
 | Storage | `backend/app/storage` | SQLite engines, migrations, registry and per-board databases |
 | Schemas | `backend/app/schemas` | Pydantic v2 request/response validation |
@@ -148,6 +148,10 @@ SQLite has no cross-file transactions, so:
 - Board creation inserts a `maintenance` registry row, creates the database at the board chain
   head through Alembic, then flips the row to `active`. Failures set `error`;
   `BoardService.recover()` repairs rows left in `maintenance` during startup.
+- Board import writes the archive's database into the new board's directory and has the Migration
+  Manager judge it (read only, untrusted, `integrity_check` first) before a registry row exists, then
+  adds the row, migrates, and activates. A refusal or any later failure removes the files, the
+  pre-migration snapshot and the row, so a bad archive never becomes a board.
 - Schema upgrades are owned by `MigrationManager`: the registry chain runs first, then every board
   is migrated eagerly and sequentially before requests are served, with a verified pre-migration
   snapshot and post-migration integrity checks. A failed board is marked `migration_failed` and

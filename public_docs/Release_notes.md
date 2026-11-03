@@ -32,6 +32,10 @@ Worth knowing when you look at the dashboard:
   opened, so a tab left open across an upgrade asks for files the new version no longer has. It
   reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it
   shows an error with a Reload page button rather than reloading again.
+- **A bad board archive is refused, not half-imported.** An archive whose `board.sqlite` is not a
+  sound board database answers `422 board_import_invalid` and leaves nothing behind; before, it left
+  a board in `error` that broke the board list and the next start. A board whose file cannot be read
+  is now skipped by the list and at startup (`board_database_unreadable`).
 - **A held file no longer half-deletes a board.** Host filesystem behaviour follows
   `TRALALA_PLATFORM_PROFILE`, and a board delete that cannot remove its files answers
   `409 board_files_busy` with the leftover directory.

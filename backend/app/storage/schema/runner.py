@@ -84,6 +84,12 @@ def revision_count(chain: str) -> int:
     return len(list(script_directory(chain).walk_revisions()))
 
 
+@lru_cache(maxsize=2)
+def revisions(chain: str) -> frozenset[str]:
+    """Every revision id of the chain: the revisions a database of this chain can be at."""
+    return frozenset(script.revision for script in script_directory(chain).walk_revisions())
+
+
 def current_revision(connection: Connection) -> str | None:
     return MigrationContext.configure(connection).get_current_revision()
 

@@ -26,12 +26,14 @@ from ..schemas.loops import (
     QaInstructions,
     ScopeResetRequest,
 )
+from ..storage.board_db import BoardDatabaseManager
 from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
 from .common import one, rows
+from .loop_bridge import LoopConnectionHelpers
 from .loop_plans import LoopPlanService
-from .loops import DOCUMENT_KINDS, LoopService
+from .loops import DOCUMENT_KINDS
 
 ANALYSIS_SCOPE_KINDS = ("info", "analysis_ai", "analysis")
 ROADMAP_SCOPE_KINDS = ("info", "analysis_ai", "analysis", "roadmap_ai", "roadmap")
@@ -173,11 +175,13 @@ class LoopDocumentService:
     def __init__(
         self,
         board_service: BoardService,
-        loop_service: LoopService,
+        loop_service: LoopConnectionHelpers,
         plan_service: LoopPlanService,
+        *,
+        boards: BoardDatabaseManager,
     ) -> None:
         self.board_service = board_service
-        self.boards = board_service.boards
+        self.boards = boards
         self.loops = loop_service
         self.plans = plan_service
 
