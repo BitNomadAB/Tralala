@@ -562,12 +562,18 @@ def test_changing_a_password_revokes_every_session_of_the_person(registry: Regis
 
 
 def test_a_password_change_needs_the_current_password_and_a_person(registry: Registry) -> None:
-    with pytest.raises(Unauthorized) as wrong:
+    # Neither is a 401: the caller is authenticated, and a client ends its session on a 401 (a
+    # mistyped current password used to sign the browser tab out).
+    registry.service.login("Bob", MEMBER_PASSWORD)
+    with pytest.raises(ValidationFailure) as wrong:
         registry.service.change_password(MEMBER, "not-my-password", "a-brand-new-secret")
-    assert wrong.value.code == "invalid_credentials"
+    assert (wrong.value.status_code, wrong.value.code) == (422, "invalid_credentials")
+    assert wrong.value.message == "Current password is incorrect"
+    assert len(registry.live_sessions(MEMBER_ID)) == 1
 
-    with pytest.raises(Unauthorized):
+    with pytest.raises(Forbidden) as token:
         registry.service.change_password(AGENT, "x", "a-brand-new-secret")
+    assert (token.value.status_code, token.value.code) == (403, "forbidden")
 
     ghost = ActorContext(actor_id="gone", actor_type="user", actor_name="Gone")
     with pytest.raises(Unauthorized) as missing:

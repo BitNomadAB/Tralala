@@ -36,7 +36,8 @@ async function field(request: Request, name: string): Promise<string> {
 /**
  * A member's session as the server keeps it, as MSW handlers for `server.use(...)`: the settings
  * page and the dashboard are answered, a password change and a logout end the session, and once it
- * has ended every request except a sign-in is a 401. `state.requests` is everything the app sent,
+ * has ended every request except a sign-in is a 401. A password change with the wrong current
+ * password is refused with a 422 and the session goes on, as the server answers it. `state.requests` is everything the app sent,
  * as "METHOD /path"; a test may end the session itself with `state.signedIn = false`.
  */
 export function memberSession() {
@@ -65,6 +66,9 @@ export function memberSession() {
     http.get(apiPath("/credentials/mine"), () => ok([])),
     http.get(apiPath("/boards"), () => ok([], EMPTY_PAGE)),
     http.post(apiPath("/auth/password"), async ({ request }) => {
+      if ((await field(request.clone(), "current_password")) !== state.password) {
+        return failure(422, "invalid_credentials", "Current password is incorrect");
+      }
       state.password = await field(request, "new_password");
       state.signedIn = false;
       return ok({ changed: true, revoked_sessions: 1 });

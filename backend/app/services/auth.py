@@ -440,14 +440,17 @@ class AuthService:
     def change_password(
         self, actor: ActorContext, current_password: str, new_password: str
     ) -> PasswordChanged:
+        # 401 means the request is not authenticated, and a client signs out on it. The caller here
+        # is: a token is refused as the other person-only settings refuse it, and a wrong current
+        # password is a field of the request the server refuses, like a weak new one.
         if not actor.is_user:
-            raise Unauthorized("Only a user session can change a password")
+            raise Forbidden("Only a user session can change a password")
         with self.store.reader() as repos:
             user = repos.users.get(actor.actor_id)
         if user is None:
             raise Unauthorized("Account not found")
         if not self._verify_password(current_password, user.credentials.password_hash):
-            raise Unauthorized("Current password is incorrect", code="invalid_credentials")
+            raise ValidationFailure("Current password is incorrect", code="invalid_credentials")
         self.validate_password(new_password, username=user.actor.name)
         password_hash = self._hash_password(new_password)
         with self.store.writer() as repos:

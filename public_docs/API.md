@@ -95,7 +95,7 @@ keys. API tokens may hold every scope except `credentials:admin` and `users:admi
 | POST | `/auth/login` | public; throttled per username and client address |
 | POST | `/auth/enrol` (`{"token","password"}`) | public; claims an invitation link, sets the password and starts a session |
 | POST | `/auth/logout` | authenticated; revokes the stored session |
-| POST | `/auth/password` | authenticated user; revokes every session |
+| POST | `/auth/password` | authenticated user; revokes every session. A wrong `current_password` is `422 invalid_credentials` and the session stays; a token gets `403 forbidden` |
 | GET | `/auth/me` | authenticated; returns `role`, effective `scopes` and the account's `preferences` |
 | GET | `/auth/scopes` | authenticated; the caller's effective scopes |
 | GET | `/auth/preferences` | signed-in account; `theme_mode` and `theme_kit` (null when unset) |
@@ -126,6 +126,10 @@ user, `POST /users/{id}/invite` returns a token that is stored only as a hash, a
 (`TRALALA_INVITE_TTL_HOURS`), replaces any unused earlier link, and answers `invite_invalid`,
 `invite_used` or `invite_expired` without revealing whether a token existed. Tralala sends no e-mail;
 the operator delivers the link.
+
+A `401` means the request is not authenticated: no session or token, or one that has expired or
+been revoked. The web client takes it as the end of its session and shows the sign-in page, which is
+why a mistyped current password on `POST /auth/password` answers `422`, not `401`.
 
 Logins are rate limited per client address and backed off per username after repeated failures
 (`429 rate_limited` with `details.retry_after_seconds`). Passwords must be at least

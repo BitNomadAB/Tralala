@@ -92,6 +92,24 @@ describe("signing out in the app", () => {
     expect(await screen.findByRole("button", { name: "Sign out" })).toBeInTheDocument();
   }, 30_000);
 
+  it("keeps the tab signed in when the current password is wrong", async () => {
+    const user = await renderSettings();
+
+    await user.type(screen.getByLabelText("Current password"), "not-my-password");
+    await user.type(screen.getByLabelText("New password"), "new-password-2");
+    await user.type(screen.getByLabelText("Repeat new password"), "new-password-2");
+    await clickAndAwaitServer("Change password");
+
+    expect(screen.getByText("Could not change the password")).toBeInTheDocument();
+    expect(screen.getByText("Current password is incorrect")).toBeInTheDocument();
+    // The session is still valid, so nothing ends it: the page stays, and so does the session.
+    await aMinuteLater();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Sign in" })).not.toBeInTheDocument();
+    expect(session.signedIn).toBe(true);
+  }, 30_000);
+
   it("shows the login page on a burst of 401s and stops every query, retries included", async () => {
     const user = await renderSettings();
     // Every cached query is stale (App's staleTime is 5 s), so the next page refetches as well.

@@ -54,6 +54,11 @@ Worth knowing when you look at the dashboard:
   `503 board_database_unreadable` (or `503 board_schema_outdated`) although the board was already
   archived; it now answers 200. Only the board's own activity entry for the archive is missing, and
   the backend log records that (`skipped: board_archived_activity`).
+- **A mistyped current password no longer signs you out.** Changing your password with the wrong
+  current one answered `401 invalid_credentials`, which the web client takes as the end of the
+  session, so the tab went to the sign-in page although the session was fine. It now answers
+  `422 invalid_credentials`: the form says the current password is incorrect and you stay signed
+  in. An API token calling `POST /auth/password` gets `403 forbidden` (was 401).
 - **The agent form follows the provider you pick.** A preset now fixes the endpoint for hosted
   providers, asks for the key only where one is needed, and says which providers need a model name at
   all — so a local Ollama install is not asked for a key and OpenAI cannot be saved without one.
