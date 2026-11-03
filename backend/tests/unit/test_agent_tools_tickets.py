@@ -18,10 +18,15 @@ from pydantic import JsonValue, ValidationError
 from app.api.mcp import INSTRUCTIONS, render_bootstrap, tool_list
 from app.core.config import Settings
 from app.core.context import ActorContext
-from app.core.errors import Conflict, Forbidden, ValidationFailure
+from app.core.errors import ApiError, Conflict, Forbidden, ValidationFailure
 from app.db.generated.board import CommentsRow
 from app.schemas.subresources import CommentCreate
-from app.services.agent_tools import allowed_actions, complete_ticket, tool_catalog
+from app.services.agent_tools import (
+    allowed_actions,
+    comment_ticket,
+    complete_ticket,
+    tool_catalog,
+)
 from app.services.agent_tools_tickets import completion_comment
 from app.services.cards import CardService
 from app.services.loops import LoopService
@@ -145,11 +150,20 @@ def test_complete_ticket_answers_the_first_result_for_the_same_summary_and_write
     assert again == first | {"deduplicated": True}
     assert comments(world, "m") == ["Shipped."]
     assert world.state.cards["m"].version == 2
-    # Another summary on a completed Ticket only says so.
+
+
+def test_complete_ticket_keeps_another_summary_on_a_completed_ticket_once(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    complete_ticket(world, WORKER, done("m"))
     other = complete_ticket(world, WORKER, done("m", "Shipped, really."))
     assert other["already_completed"] is True
-    assert other["comment_id"] is None
-    assert comments(world, "m") == ["Shipped."]
+    assert other["comment_id"] is not None
+    retried = complete_ticket(world, WORKER, done("m", "Shipped, really."))
+    assert (retried["comment_id"], retried["deduplicated"]) == (other["comment_id"], True)
+    assert comments(world, "m") == ["Shipped.", "Shipped, really."]
+    assert world.state.cards["m"].version == 2
 
 
 def test_complete_ticket_counts_the_dedupe_window_from_the_first_comment(
@@ -168,9 +182,15 @@ def test_complete_ticket_counts_the_dedupe_window_from_the_first_comment(
     answer = complete_ticket(world, WORKER, done("m"))
     assert answer["already_completed"] is True
     assert "deduplicated" not in answer
+    assert comments(world, "m") == ["Shipped.", "Shipped."]
 
 
-def test_complete_ticket_refuses_a_human_only_ticket_naming_who_confirms_it(
+def comment_of(refusal: ApiError) -> object:
+    assert refusal.details is not None
+    return refusal.details["comment_id"]
+
+
+def test_complete_ticket_refuses_a_human_only_ticket_naming_who_confirms_it_and_keeps_the_summary(
     settings: Settings,
 ) -> None:
     world = ticket_world(settings)
@@ -178,13 +198,19 @@ def test_complete_ticket_refuses_a_human_only_ticket_naming_who_confirms_it(
         complete_ticket(world, WORKER, done("h"))
     assert refused.value.code == "human_action_required"
     assert "Grace confirms it" in refused.value.message
+    assert "summary is saved as a comment" in refused.value.message
     assert refused.value.details is not None
     assert {
         key: refused.value.details[key]
         for key in ("ticket_key", "confirmed_by", "human_instructions")
     } == {"ticket_key": "K-2", "confirmed_by": "Grace", "human_instructions": "Sign the contract"}
     assert world.state.cards["h"].completed_at is None
-    assert comments(world, "h") == []
+    assert comments(world, "h") == ["Shipped."]
+    # A retry meets the same refusal and finds the comment it already wrote.
+    with pytest.raises(Forbidden) as again:
+        complete_ticket(world, WORKER, done("h"))
+    assert comment_of(again.value) == comment_of(refused.value)
+    assert comments(world, "h") == ["Shipped."]
 
 
 def test_complete_ticket_refuses_a_blocked_ticket_and_a_loop_that_is_not_executing(
@@ -194,17 +220,61 @@ def test_complete_ticket_refuses_a_blocked_ticket_and_a_loop_that_is_not_executi
     world.views.items = [readiness_item("t", ready=False, blockers=(BLOCKER,))]
     with pytest.raises(Conflict) as blocked:
         complete_ticket(world, WORKER, done("t"))
-    assert (blocked.value.code, blocked.value.details) == (
-        "ticket_blocked",
-        {"blockers": [BLOCKER], "ticket_key": "K-1"},
-    )
+    assert blocked.value.code == "ticket_blocked"
+    assert blocked.value.details == {
+        "blockers": [BLOCKER],
+        "ticket_key": "K-1",
+        "comment_id": comment_of(blocked.value),
+    }
     world.views.items = [readiness_item("t")]
     world.state.loops[LOOP] = world.state.loops[LOOP].__replace__(stage="replanning")
     with pytest.raises(Conflict) as replanning:
-        complete_ticket(world, WORKER, done("t"))
+        complete_ticket(world, WORKER, done("t", "Waiting for the new plan."))
     assert replanning.value.code == "plan_change_required"
     assert world.state.cards["t"].completed_at is None
-    assert comments(world, "t") == []
+    assert comments(world, "t") == ["Shipped.", "Waiting for the new plan."]
+
+
+def test_complete_ticket_writes_nothing_in_a_loop_that_is_read_only(settings: Settings) -> None:
+    world = ticket_world(settings)
+    world.state.loops[LOOP] = world.state.loops[LOOP].__replace__(
+        stage="completed", completed_at=CREATED
+    )
+    with pytest.raises(Conflict) as closed:
+        complete_ticket(world, WORKER, done("m"))
+    assert closed.value.code == "loop_read_only"
+    assert comments(world, "m") == []
+
+
+def note(card_id: str, content: str) -> dict[str, JsonValue]:
+    return {"board_id": BOARD_ID, "card_id": card_id, "content": content}
+
+
+def test_comment_ticket_comments_a_ticket_done_or_not_and_answers_a_retry_with_the_first(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    complete_ticket(world, WORKER, done("m"))
+    later = "Superseded by L-2: the export moved there."
+    first = comment_ticket(world, WORKER, note("m", later))
+    assert (first["actor"], first["content"]) == (None, later)
+    assert comment_ticket(world, WORKER, note("m", later)) == first | {"deduplicated": True}
+    comment_ticket(world, WORKER, note("t", "Started."))
+    assert comments(world, "m") == ["Shipped.", later]
+    assert comments(world, "t") == ["Started."]
+
+
+def test_comment_ticket_is_refused_only_where_nothing_may_be_written(settings: Settings) -> None:
+    world = ticket_world(settings)
+    with pytest.raises(Forbidden):
+        comment_ticket(world, MOVER, note("m", "Hello"))
+    world.state.loops[LOOP] = world.state.loops[LOOP].__replace__(
+        stage="completed", completed_at=CREATED
+    )
+    with pytest.raises(Conflict) as closed:
+        comment_ticket(world, WORKER, note("m", "Hello"))
+    assert closed.value.code == "loop_read_only"
+    assert comments(world, "m") == []
 
 
 def test_complete_ticket_needs_both_scopes_and_list_evidence(settings: Settings) -> None:
@@ -233,10 +303,14 @@ def test_allowed_actions_offer_complete_ticket_only_for_a_ready_open_ticket_of_a
     assert not offered("t")
     world.state.cards["m"] = world.state.cards["m"].__replace__(completed_at=CREATED)
     assert not offered("m")
+    card = world.card.get(BOARD_ID, LOOP, "m")
+    assert "comment_ticket" in allowed_actions(card, execution_allowed=True)
     world.state.cards["m"] = world.state.cards["m"].__replace__(
         completed_at=None, archived_at=CREATED
     )
     assert not offered("m")
+    archived = world.card.get(BOARD_ID, LOOP, "m")
+    assert allowed_actions(archived, execution_allowed=True) == ["comment_ticket"]
 
 
 def test_a_comment_holds_a_completion_summary_not_only_a_title() -> None:

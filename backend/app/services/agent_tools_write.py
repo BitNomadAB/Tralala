@@ -1,4 +1,4 @@
-"""The worker tools that change something: assign, move and comment, a Loop, Info, runs, threads.
+"""The worker tools that change something: assign and move, a Loop, Info, runs, threads.
 
 The catalogue in ``agent_tools`` declares each tool's name, description, scopes and input schema;
 the handlers here run the entries that write. Each takes ``(services, actor, args)``, opens with the
@@ -20,7 +20,6 @@ from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
 from ..schemas.cards import CardMove, CardUpdate
 from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from ..schemas.loops import GenerationRequest, InfoRevisionWrite, LoopCreate
-from ..schemas.subresources import CommentCreate
 from .agent_tools_read import (
     ToolArguments,
     ToolResult,
@@ -155,39 +154,6 @@ def _move_ticket(
             "completed_at": moved["completed_at"],
         }
     raise NotFound("Ticket not found")  # pragma: no cover - loop returns or raises
-
-
-def _comment_ticket(
-    services: Services, actor: ActorContext, args: ToolArguments
-) -> ToolResult:
-    actor.require("comments:write")
-    board_id = _require(args, "board_id")
-    card_id = _require(args, "card_id")
-    content = _require(args, "content")
-    # Resolving the Ticket proves it belongs to this board before anything is written.
-    _ticket_location(services, board_id, card_id)
-    for existing in services.comment.list(board_id, card_id):
-        if (
-            existing["actor_id"] == actor.actor_id
-            and existing["content"] == content
-            and _seconds_since(existing["created_at"]) < DEDUPE_WINDOW_SECONDS
-        ):
-            return {
-                "id": existing["id"],
-                "actor": existing["actor_name"],
-                "content": existing["content"],
-                "created_at": existing["created_at"],
-                "deduplicated": True,
-            }
-    created = services.comment.create(
-        actor, board_id, card_id, CommentCreate(content=content)
-    )
-    return {
-        "id": created["id"],
-        "actor": created["actor_name"],
-        "content": created["content"],
-        "created_at": created["created_at"],
-    }
 
 
 def _create_loop(
@@ -479,7 +445,6 @@ __all__ = [
     "DEDUPE_WINDOW_SECONDS",
     "_ask_agents",
     "_assign_ticket",
-    "_comment_ticket",
     "_create_loop",
     "_move_ticket",
     "_reply_discussion",

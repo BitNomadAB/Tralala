@@ -85,7 +85,7 @@ certificate. `/llms.txt` is plain text at the same origin.
 | `search_tickets` | `cards:read` | find Tickets by words: in one Loop, a board's open Loops or every active board |
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |
-| `comment_ticket` | `comments:write` | add a comment: progress, findings, a blocker |
+| `comment_ticket` | `comments:write` | add a comment, done or not: progress, findings, a blocker |
 | `complete_ticket` | `cards:write`, `comments:write` | finish a Ticket: your summary and evidence as a comment, then completed |
 | `create_loop` | `loops:write` | open a Loop for an agreed intent (idempotent) |
 | `write_info` | `loops:write` | write the Info, only while the Loop is `draft` or `analysis_review` |
@@ -149,7 +149,8 @@ keys when you hand the RoadMap in again. Send `expected_info_revision_id` or
 - Complete a Ticket by moving it: a column named Done completes nothing. `complete_ticket` is the
   way, and it is offered in `read_ticket`'s `allowed_actions` only while the Ticket is ready, open
   and not a person's. A human-only Ticket answers `403 human_action_required` naming who confirms
-  it; an unfinished prerequisite answers `409 ticket_blocked` with the blockers.
+  it; an unfinished prerequisite answers `409 ticket_blocked` with the blockers. Either way your
+  summary is kept as a comment, and the refusal names its `comment_id`.
 - See or change users, credentials or agent configuration.
 
 ## 6. Retries and repeats
@@ -160,7 +161,7 @@ keys when you hand the RoadMap in again. Send `expected_info_revision_id` or
 - `comment_ticket` and `ask_agents` treat an identical call from the same actor within five minutes
   as a retry and return the original object; so does `complete_ticket` with the same summary and
   evidence (`deduplicated: true`). A Ticket somebody already completed answers
-  `already_completed: true` and nothing is written.
+  `already_completed: true` and keeps your summary as a comment.
 - `move_ticket` is version-checked: send the version you read, and a `409 version_conflict` means
   someone else moved it first — re-read rather than retrying blindly.
 

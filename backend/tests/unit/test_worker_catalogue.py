@@ -137,7 +137,6 @@ UNTESTED_TOOLS: Mapping[str, str] = MappingProxyType(
         (
             "assign_ticket",
             "move_ticket",
-            "comment_ticket",
             "create_loop",
             "write_info",
             "run_analysis",

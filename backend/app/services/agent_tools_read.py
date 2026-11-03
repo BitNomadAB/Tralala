@@ -346,10 +346,11 @@ def _read_loop(
 
 
 def allowed_actions(card: CardEntry, *, execution_allowed: bool) -> list[str]:
-    """The tools a worker may call on a Ticket now; ``complete_ticket`` only while it is ready,
-    open and not a person's, and for a planned Ticket only while the Loop executes."""
+    """The tools a worker may call on a Ticket now. ``comment_ticket`` always, done or not, as the
+    service allows (only a read-only Loop or board refuses it); ``complete_ticket`` only while the
+    Ticket is ready, open and not a person's, and for a planned one only while the Loop executes."""
     if card["archived_at"]:
-        return []
+        return ["comment_ticket"]
     if card["human_action_required"] and not card["completed_at"]:
         return ["comment_ticket", "ask_agents"]
     allowed = ["comment_ticket", "assign_ticket", "move_ticket", "ask_agents"]

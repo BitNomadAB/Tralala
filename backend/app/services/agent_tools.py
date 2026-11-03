@@ -48,12 +48,11 @@ from .agent_tools_schema import ArgumentSchema, InputSchema
 from .agent_tools_schema import model_argument as _model
 from .agent_tools_schema import object_schema as _object
 from .agent_tools_schema import string_argument as _string
-from .agent_tools_tickets import complete_ticket
+from .agent_tools_tickets import comment_ticket, complete_ticket
 from .agent_tools_write import (
     DEDUPE_WINDOW_SECONDS,
     _ask_agents,
     _assign_ticket,
-    _comment_ticket,
     _create_loop,
     _move_ticket,
     _reply_discussion,
@@ -242,7 +241,10 @@ def tool_catalog() -> dict[str, AgentTool]:
         ),
         AgentTool(
             name="comment_ticket",
-            description="Add a comment to a Ticket: progress, findings or a blocker.",
+            description=(
+                "Add a comment to a Ticket, done or not: progress, findings, a blocker, or a "
+                "note on later work."
+            ),
             scopes=("comments:write",),
             input_schema=_object(
                 {
@@ -252,14 +254,15 @@ def tool_catalog() -> dict[str, AgentTool]:
                 },
                 required=["board_id", "card_id", "content"],
             ),
-            handler=_comment_ticket,
+            handler=comment_ticket,
         ),
         AgentTool(
             name="complete_ticket",
             description=(
-                "Finish a Ticket: comments your summary and evidence and marks it completed. This "
-                "is the only way a Ticket is done; a column named Done completes nothing. A "
-                "human-only or blocked Ticket is refused with the reason."
+                "Finish a Ticket: marks it completed and comments your summary and evidence. This "
+                "is the only way a Ticket is done; a column named Done completes nothing. The "
+                "summary is kept as a comment even when the Ticket is already done or the "
+                "completion is refused (human-only, blocked), and the refusal says why."
             ),
             scopes=("cards:write", "comments:write"),
             input_schema=_object(
@@ -531,7 +534,6 @@ __all__ = [
     "ToolResult",
     "_ask_agents",
     "_assign_ticket",
-    "_comment_ticket",
     "_create_loop",
     "_loop_lists",
     "_move_ticket",
@@ -550,6 +552,7 @@ __all__ = [
     "_ticket_location",
     "_write_info",
     "allowed_actions",
+    "comment_ticket",
     "complete_ticket",
     "describe_scope",
     "list_boards",
