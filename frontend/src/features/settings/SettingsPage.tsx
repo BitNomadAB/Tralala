@@ -104,7 +104,7 @@ export function SettingsPage() {
       {isAdmin ? (
         <div className="card-surface p-5">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold">GitHub repositories</h2>
+            <h2 className="text-sm font-semibold">Repositories</h2>
             <Link
               to="/settings/repositories"
               className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs hover:bg-[var(--surface-raised)]"
@@ -113,8 +113,9 @@ export function SettingsPage() {
             </Link>
           </div>
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-            Read-only repository access for the Analytics agent. Several repositories can serve one
-            board; the access token is stored sealed and never shown again.
+            Read-only repository access for the Analytics agent, from GitHub or any allowed HTTPS
+            Git host. Several repositories can serve one board; the access token is stored sealed
+            and never shown again.
           </p>
         </div>
       ) : null}

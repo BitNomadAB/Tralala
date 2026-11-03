@@ -43,6 +43,7 @@ from app.services.boards import (
     Counts,
 )
 from app.services.lists import BoardChecks
+from app.services.repo_mirror import MirrorService
 from app.services.repositories import RepositoryService
 from app.services.templates import TemplateService
 from tests.unit.fakes.board import FakeCounterRepository, list_row, loop_row
@@ -52,6 +53,7 @@ from tests.unit.fakes.board_files import (
     as_migrator,
     as_unit_of_work,
 )
+from tests.unit.fakes.mirror import FakeGit, FakeMirror, FakeMirrorFiles
 from tests.unit.fakes.registry import (
     CREATED,
     ConstraintError,
@@ -819,6 +821,30 @@ def test_only_an_archived_board_confirmed_by_name_is_deleted_with_all_its_files(
     assert not boards.databases.path(SOURCE).parent.exists()
     assert not backups.exists()
     assert boards.databases.locked_boards == [SOURCE]
+
+
+def test_deleting_a_board_removes_the_mirror_only_it_linked(boards: Boards) -> None:
+    """The board's links go through RepositoryService, so a mirrored repository this was the last
+    board of loses its mirror; one another board still links keeps it."""
+    other = uuid(2)
+    boards.registry.boards[other] = board_row(other, name="Other")
+    for repository_id in ("mirror-only", "mirror-shared"):
+        boards.registry.code_repositories[repository_id] = repository_row(
+            repository_id, provider="git_https", url=f"https://git.example.com/{repository_id}.git"
+        )
+    files = FakeMirrorFiles()
+    files.mirrors = {key: FakeMirror(complete=True) for key in ("mirror-only", "mirror-shared")}
+    mirror = MirrorService(
+        FakeGit(files, {}), files, hosts=frozenset(), max_bytes=1, timeout_seconds=1
+    )
+    repositories = RepositoryService(boards.settings, boards.store, mirror=mirror)
+    boards.service.repositories = repositories
+    repositories.set_board_links(SOURCE, ["mirror-only", "mirror-shared", "repo-a"])
+    repositories.set_board_links(other, ["mirror-shared"])
+    boards.service.archive(ADMIN, SOURCE)
+    boards.service.delete(ADMIN, SOURCE, "Source")
+    assert files.removed == ["mirror-only"]
+    assert set(boards.registry.repository_links) == {(other, "mirror-shared")}
 
 
 def test_a_board_whose_files_are_held_is_kept_and_the_leftover_is_named(boards: Boards) -> None:

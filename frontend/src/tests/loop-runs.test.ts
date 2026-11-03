@@ -110,6 +110,26 @@ describe("run repository provenance", () => {
     expect(describeRunRepositories(entry)).toBe("acme app (unavailable: unauthorized)");
   });
 
+  it("says when a mirror could not be fetched and how old the copy the run read was", () => {
+    const mirrored = {
+      id: "r1",
+      name: "acme app",
+      branch: "main",
+      commit_sha: "abc123def4567890",
+      provider: "git_https",
+      fetched_at: "2026-11-02T08:00:00Z",
+      file_count: 12,
+      truncated: false,
+    };
+    expect(
+      describeRunRepositories(run({ repositories: [{ ...mirrored, stale_mirror: true }] })),
+    ).toBe("acme app @ abc123de, 12 files (stale mirror from 2026-11-02T08:00:00Z)");
+    // A fresh fetch says nothing more than a GitHub repository does.
+    expect(
+      describeRunRepositories(run({ repositories: [{ ...mirrored, stale_mirror: false }] })),
+    ).toBe("acme app @ abc123de, 12 files");
+  });
+
   it("says out loud when the board had no repository", () => {
     const entry = run({ info: "abc", repositories: [] });
     expect(describeRunRepositories(entry)).toBe("no enabled repository linked to this board");

@@ -48,6 +48,8 @@ logger = logging.getLogger("tralala.loop_generation")
 MAX_REPAIRS = 2
 type RunEntry = dict[str, object]
 
+# What a repository entry says about how it was read, carried into the run's record and its answer.
+MIRROR_FIELDS = ("provider", "fetched_at", "stale_mirror")
 # A run's answer leaves these out: the captured input and role stay in the run's own record, and
 # the JSON columns are answered parsed under names without ``_json``.
 _RUN_HIDDEN = (
@@ -128,6 +130,7 @@ def _public_sources(sources: JsonValue) -> JsonValue:
                 "name": item.get("name"),
                 "branch": item.get("branch"),
                 "commit_sha": item.get("commit_sha"),
+                **_mirror_fields(item),
                 "file_count": item.get("file_count", 0),
                 "truncated": bool(item.get("truncated")),
                 **_budget_fields(item),
@@ -137,6 +140,12 @@ def _public_sources(sources: JsonValue) -> JsonValue:
             if isinstance(item, dict)
         ]
     return sources
+
+
+def _mirror_fields(entry: Mapping[str, JsonValue]) -> JsonObject:
+    """How a repository was read, when the snapshot says: the provider, and for a mirror when it
+    was last fetched and whether this run had to read that older fetch (``stale_mirror``)."""
+    return {name: entry[name] for name in MIRROR_FIELDS if name in entry}
 
 
 def _budget_fields(entry: Mapping[str, JsonValue]) -> JsonObject:
@@ -326,6 +335,7 @@ def attach_repositories(
             "name": entry["name"],
             "branch": entry.get("branch"),
             "commit_sha": entry.get("commit_sha"),
+            **_mirror_fields(entry),
             "file_count": entry.get("file_count", 0),
             "truncated": bool(entry.get("truncated")),
             **_budget_fields(entry),

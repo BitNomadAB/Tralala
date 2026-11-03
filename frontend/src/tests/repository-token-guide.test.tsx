@@ -39,7 +39,7 @@ describe("RepositoryTokenGuide", () => {
 
   it("states that a deploy key is not what this field reads", () => {
     render(<RepositoryTokenGuide url="https://github.com/acme/rocket" />);
-    expect(screen.getByText(/Tralala never uses SSH or a git binary/)).toBeInTheDocument();
+    expect(screen.getByText(/Tralala never uses SSH/)).toBeInTheDocument();
     expect(screen.getAllByText(/Contents/).length).toBeGreaterThan(0);
   });
 

@@ -1114,6 +1114,13 @@ class FakeCodeRepositoryRepository:
         if row is not None:
             self._state.code_repositories[repository_id] = row.__replace__(mirror_error=code)
 
+    def clear_mirror(self, repository_id: str) -> None:
+        row = self._state.code_repositories.get(repository_id)
+        if row is not None:
+            self._state.code_repositories[repository_id] = row.__replace__(
+                last_sha=None, fetched_at=None, mirror_bytes=None, mirror_error=None
+            )
+
     def delete(self, repository_id: str) -> None:
         self._state.code_repositories.pop(repository_id, None)
         self._state.repository_links = {

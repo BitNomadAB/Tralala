@@ -91,6 +91,11 @@ class CodeRepositoryRepository(Protocol):
         """Why the last fetch failed; what the last good fetch recorded stays."""
         ...
 
+    def clear_mirror(self, repository_id: str) -> None:
+        """The mirror was removed: its commit, ``fetched_at``, size and error go. The default
+        branch stays, because it describes the remote."""
+        ...
+
     def delete(self, repository_id: str) -> None:
         """Delete the repository; the boards that linked it lose the link."""
         ...

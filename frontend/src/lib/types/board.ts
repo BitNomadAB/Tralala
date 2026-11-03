@@ -58,10 +58,13 @@ export interface BoardTemplate {
   list_count: number;
 }
 
+/** How a repository is read: the GitHub API, or a Tralala-managed mirror of an HTTPS Git host. */
+export type RepositoryProvider = "github" | "git_https";
+
 export interface Repository {
   id: string;
   name: string;
-  provider: "github";
+  provider: RepositoryProvider;
   url: string;
   branch: string | null;
   enabled: boolean;
@@ -71,6 +74,14 @@ export interface Repository {
   last_checked_at: string | null;
   last_check_status: string | null;
   last_check_detail: string | null;
+  /** The branch the remote's HEAD names, as the last check or fetch found it (git_https). */
+  default_branch?: string | null | undefined;
+  /** The mirror's last good fetch: its commit, when, and its size on disk (git_https). */
+  last_sha?: string | null | undefined;
+  fetched_at?: string | null | undefined;
+  mirror_bytes?: number | null | undefined;
+  /** Why the last fetch failed, or `mirror_cleanup_failed` when the mirror could not be removed. */
+  mirror_error?: string | null | undefined;
   created_at: string;
   updated_at: string;
 }

@@ -59,6 +59,10 @@ _RECORD_FETCH = text(
     " mirror_error = NULL WHERE id = :id"
 )
 _RECORD_MIRROR_ERROR = text("UPDATE repositories SET mirror_error = :code WHERE id = :id")
+_CLEAR_MIRROR = text(
+    "UPDATE repositories SET last_sha = NULL, fetched_at = NULL, mirror_bytes = NULL,"
+    " mirror_error = NULL WHERE id = :id"
+)
 _DELETE_REPOSITORY = text("DELETE FROM repositories WHERE id = :id")
 _SEALED_TOKENS = text(
     "SELECT id, token_ciphertext FROM repositories WHERE token_ciphertext IS NOT NULL"
@@ -165,6 +169,9 @@ class SqlCodeRepositoryRepository:
 
     def record_mirror_error(self, repository_id: str, code: str) -> None:
         self._connection.execute(_RECORD_MIRROR_ERROR, {"code": code, "id": repository_id})
+
+    def clear_mirror(self, repository_id: str) -> None:
+        self._connection.execute(_CLEAR_MIRROR, {"id": repository_id})
 
     def delete(self, repository_id: str) -> None:
         self._connection.execute(_DELETE_REPOSITORY, {"id": repository_id})

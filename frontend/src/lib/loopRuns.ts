@@ -21,6 +21,12 @@ function sentSize(repository: GenerationRunRepository): string {
   return chars < 1024 ? ", <1 KB" : `, ${Math.round(chars / 1024)} KB`;
 }
 
+/** A mirror the run could not bring up to date, and how old the copy it read was. */
+function staleness(repository: GenerationRunRepository): string {
+  if (!repository.stale_mirror) return "";
+  return ` (stale mirror from ${repository.fetched_at ?? "an earlier fetch"})`;
+}
+
 export function describeRunRepositories(run: GenerationRun): string | null {
   const value = run.source_revisions.repositories;
   if (!Array.isArray(value)) return null;
@@ -30,7 +36,7 @@ export function describeRunRepositories(run: GenerationRun): string | null {
     .map((repository) =>
       repository.error
         ? `${repository.name} (unavailable: ${repository.error})`
-        : `${repository.name} @ ${(repository.commit_sha ?? "").slice(0, 8)}, ${repository.file_count} files${sentSize(repository)}${repository.truncated ? ", truncated" : ""}`,
+        : `${repository.name} @ ${(repository.commit_sha ?? "").slice(0, 8)}, ${repository.file_count} files${sentSize(repository)}${repository.truncated ? ", truncated" : ""}${staleness(repository)}`,
     )
     .join("; ");
 }

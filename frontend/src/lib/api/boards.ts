@@ -6,6 +6,7 @@ import type {
   Repository,
   RepositoryPaths,
   RepositoryCheck,
+  RepositoryProvider,
   PageMeta,
 } from "../types";
 import { json, request, type QueryValue } from "./client";
@@ -147,6 +148,7 @@ export const boardsApi = {
 
   async createRepository(payload: {
     name?: string | undefined;
+    provider?: RepositoryProvider;
     url: string;
     branch?: string | null;
     enabled?: boolean;
@@ -181,6 +183,18 @@ export const boardsApi = {
   async checkRepository(repositoryId: string): Promise<RepositoryCheck> {
     return json(
       await request<RepositoryCheck>(`/repositories/${repositoryId}/check`, {
+        method: "POST",
+      }),
+    );
+  },
+
+  /** "Rebuild mirror" (`rebuild`) or "Remove now" (`remove`): the mirror goes; the next run clones. */
+  async resetRepositoryMirror(
+    repositoryId: string,
+    action: "rebuild" | "remove",
+  ): Promise<Repository> {
+    return json(
+      await request<Repository>(`/repositories/${repositoryId}/mirror/${action}`, {
         method: "POST",
       }),
     );

@@ -487,6 +487,9 @@ class BoardService:
                         "platform_profile": profile,
                     },
                 ) from exc
+        # The links go first, through the repository service, so a mirrored repository this was
+        # the last board of loses its mirror too.
+        self.repositories.set_board_links(row.id, [])
         with self.store.writer() as repos:
             repos.boards.delete(board_id)
 

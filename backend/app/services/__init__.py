@@ -218,6 +218,10 @@ class Services:
         resealed_repositories = self.repository.reseal_tokens()
         if resealed_repositories:
             logger.info("repository_tokens_resealed", extra={"items": resealed_repositories})
+        # <data>/repos is a cache: a mirror whose repository row is gone is removed here.
+        swept = self.repository.sweep_mirrors()
+        if swept:
+            logger.info("repository_mirrors_swept", extra={"items": len(swept)})
         self.board.recover()
         self.migration_reports = self.migrations.migrate_all_boards()
         self.recover_async_work()

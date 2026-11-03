@@ -11,7 +11,9 @@ sealed with ``core/secrets.py``, stored as ciphertext plus a short hint, never r
 endpoint and never written to a log. The service also owns the "can I see this repository" check -
 the only way an operator verifies the credential. Its answer names the repository and a failure
 class, never the token. For ``git_https`` the check is ``git ls-remote`` only: it names the remote's
-default branch without cloning anything, and stores it on the row.
+default branch without cloning anything, and stores it on the row. That check and the mirror's life
+(removed with the repository or its last board link, "Rebuild mirror", "Remove now" and the sweep at
+startup) are in ``services.repositories_mirror``.
 
 The service reaches the registry only through the repositories and the registry unit of work
 (``app/repositories``); the clock, the id source and the GitHub call are passed in, with the real
@@ -45,9 +47,29 @@ from ..repositories.code_repositories import MirrorRecord, RepositoryChanges
 from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.boards import RepositoryPaths
 from ..schemas.repositories import RepositoryCreate, RepositoryUpdate
-from .repo_mirror import RemoteHead
-from .repo_mirror_git import ERROR_TEXT, MirrorError, git_url_problem, valid_branch
+from .repo_mirror_git import ERROR_TEXT, git_url_problem, valid_branch
+from .repositories_mirror import (
+    MIRRORED,
+    CheckOutcome,
+    MirrorControl,
+    check_remote,
+    outcome,
+    release_unlinked,
+    remove_mirror,
+    store_check,
+    sweep,
+)
 from .repository_links import link_paths, replace_links, require_selected
+
+__all__ = [
+    "API_BASE",
+    "CheckOutcome",
+    "GitHubGet",
+    "JsonObject",
+    "MirrorControl",
+    "RepositoryEntry",
+    "RepositoryService",
+]
 
 logger = logging.getLogger("tralala.repositories")
 
@@ -93,29 +115,10 @@ class RepositoryEntry(TypedDict):
     exclude_paths: NotRequired[list[str]]
 
 
-class CheckOutcome(TypedDict):
-    """What the host said about the repository, without the token or the host's own text."""
-
-    status: str
-    detail: str
-    default_branch: JsonValue
-    private: bool | None
-    size_kb: int | None
-    checked_at: str
-
-
 class GitHubGet(Protocol):
     """One read-only GitHub API call: the status code and the JSON object it answered, if any."""
 
     def __call__(self, url: str, *, token: str | None) -> tuple[int, JsonObject | None]: ...
-
-
-class RemoteProbe(Protocol):
-    """``MirrorService.ls_remote_default_branch``: the remote's default branch, without a clone."""
-
-    def ls_remote_default_branch(
-        self, url: str, token: str | None, *, branch: str | None = None
-    ) -> RemoteHead: ...
 
 
 def _json_object(value: object) -> TypeIs[JsonObject]:
@@ -167,7 +170,7 @@ class RepositoryService:
         clock: Callable[[], str] = utcnow,
         new_id: Callable[[], str] = _new_id,
         github_get: GitHubGet = _github_get,
-        mirror: RemoteProbe | None = None,
+        mirror: MirrorControl | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -371,9 +374,11 @@ class RepositoryService:
         paths: Mapping[str, RepositoryPaths] | None = None,
     ) -> None:
         """Replace a board's selection; called after the board row exists. Without ``paths`` a
-        repository that stays linked keeps its globs (``repository_links.replace_links``)."""
+        repository that stays linked keeps its globs (``repository_links.replace_links``). A
+        mirrored repository that no board links any more loses its mirror."""
         self.validate_ids(repository_ids, paths)
-        replace_links(self.store, board_id, repository_ids, paths, now=self._clock())
+        dropped = replace_links(self.store, board_id, repository_ids, paths, now=self._clock())
+        release_unlinked(self.store, self._mirror, dropped)
 
     # --- commands --------------------------------------------------------------------------------
 
@@ -458,11 +463,34 @@ class RepositoryService:
         return self.get(repository_id)
 
     def delete(self, actor: ActorContext, repository_id: str) -> bool:
+        """Delete the repository, and its mirror first: a mirror the host will not let go of keeps
+        the row (``409 mirror_cleanup_failed``) until "Remove now" succeeds."""
         actor.require("boards:admin")
-        self._require(repository_id)
+        row = self._require(repository_id)
+        if row.provider == MIRRORED:
+            remove_mirror(self.store, self._mirror, repository_id)
         with self.store.writer() as repos:
             repos.code_repositories.delete(repository_id)
+        logger.info(
+            "repository_deleted", extra={"repository_id": repository_id, "provider": row.provider}
+        )
         return True
+
+    def remove_mirror(self, actor: ActorContext, repository_id: str) -> RepositoryEntry:
+        """What "Remove now" and "Rebuild mirror" do: the mirror goes, and the next run clones
+        it again. Only a ``git_https`` repository has one."""
+        actor.require("boards:admin")
+        row = self._require(repository_id)
+        if row.provider != MIRRORED:
+            raise Conflict(
+                "Only a Git over HTTPS repository has a mirror", code="repository_not_mirrored"
+            )
+        remove_mirror(self.store, self._mirror, repository_id)
+        return self.get(repository_id)
+
+    def sweep_mirrors(self) -> list[str]:
+        """At startup: remove every mirror whose repository has no row; the ids that went."""
+        return sweep(self.store, self._mirror)
 
     # --- verification ----------------------------------------------------------------------------
 
@@ -470,8 +498,8 @@ class RepositoryService:
         """Ask the host whether the token can read the repository; store a sanitized outcome."""
         actor.require("boards:admin")
         row = self._require(repository_id)
-        if row.provider == "git_https":
-            return self._check_remote(row)
+        if row.provider == MIRRORED:
+            return check_remote(self.store, self._mirror, row, self._open_token(row), self._clock())
         owner, name = self.parse(row.url)
         token = self._open_token(row)
         status_code, payload = self._github_get(f"{API_BASE}/repos/{owner}/{name}", token=token)
@@ -484,10 +512,8 @@ class RepositoryService:
                     f"{API_BASE}/repos/{owner}/{name}/branches/{branch}", token=token
                 )
                 if branch_status == 404:
-                    result = self._outcome(
-                        "branch_missing", f"Branch '{branch}' does not exist", now
-                    )
-                    self._store_check(repository_id, result, now)
+                    result = outcome("branch_missing", f"Branch '{branch}' does not exist", now)
+                    store_check(self.store, repository_id, result)
                     return result
             result = {
                 "status": "ok",
@@ -498,53 +524,15 @@ class RepositoryService:
                 "checked_at": now,
             }
         elif status_code == 401:
-            result = self._outcome("unauthorized", "The token was rejected", now)
+            result = outcome("unauthorized", "The token was rejected", now)
         elif status_code == 404:
-            result = self._outcome(
-                "not_found", "Repository not found, or the token cannot see it", now
-            )
+            result = outcome("not_found", "Repository not found, or the token cannot see it", now)
         elif status_code == 403:
-            result = self._outcome(
-                "forbidden", "GitHub refused the request (scope or rate limit)", now
-            )
+            result = outcome("forbidden", "GitHub refused the request (scope or rate limit)", now)
         else:
-            result = self._outcome("unreachable", f"GitHub answered {status_code}", now)
-        self._store_check(repository_id, result, now)
+            result = outcome("unreachable", f"GitHub answered {status_code}", now)
+        store_check(self.store, repository_id, result)
         return result
-
-    def _check_remote(self, row: RepositoriesRow) -> CheckOutcome:
-        """``git ls-remote`` only: the remote's default branch and, when the repository names one,
-        whether that branch exists. Nothing is cloned; the default branch is stored on the row."""
-        now = self._clock()
-        result: CheckOutcome
-        try:
-            head = self._remote_head(row)
-        except MirrorError as exc:
-            result = self._outcome(exc.code, ERROR_TEXT.get(exc.code, exc.code), now)
-        else:
-            with self.store.writer() as repos:
-                repos.code_repositories.record_default_branch(row.id, head.default_branch)
-            if head.branch_found is False:
-                detail = f"Branch '{row.branch}' does not exist"
-                result = self._outcome("branch_missing", detail, now)
-                result["default_branch"] = head.default_branch
-            else:
-                result = {
-                    "status": "ok",
-                    "detail": f"Readable; the main branch is '{head.default_branch}'",
-                    "default_branch": head.default_branch,
-                    "private": None,
-                    "size_kb": None,
-                    "checked_at": now,
-                }
-        self._store_check(row.id, result, now)
-        return result
-
-    def _remote_head(self, row: RepositoriesRow) -> RemoteHead:
-        if self._mirror is None:
-            raise MirrorError("git_missing")
-        token = self._open_token(row)
-        return self._mirror.ls_remote_default_branch(row.url, token, branch=row.branch)
 
     # --- the mirror's outcome on the row ----------------------------------------------------------
 
@@ -557,23 +545,6 @@ class RepositoryService:
         """Why the last fetch of the mirror failed (a code, never git's own words)."""
         with self.store.writer() as repos:
             repos.code_repositories.record_mirror_error(repository_id, code)
-
-    @staticmethod
-    def _outcome(status: str, detail: str, now: str) -> CheckOutcome:
-        return {
-            "status": status,
-            "detail": detail,
-            "default_branch": None,
-            "private": None,
-            "size_kb": None,
-            "checked_at": now,
-        }
-
-    def _store_check(self, repository_id: str, result: CheckOutcome, now: str) -> None:
-        with self.store.writer() as repos:
-            repos.code_repositories.record_check(
-                repository_id, status=result["status"], detail=result["detail"], now=now
-            )
 
     def reseal_tokens(self) -> int:
         """Re-seal tokens that only the previous secret opens, like provider keys."""

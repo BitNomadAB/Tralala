@@ -96,3 +96,24 @@ def check_repository(
     request: Request,
 ) -> dict[str, object]:
     return ok(request, ctx.services.repository.check(ctx.actor, repository_id))
+
+
+@router.post("/repositories/{repository_id}/mirror/remove", response_model=Envelope[RepositoryOut])
+def remove_repository_mirror(
+    repository_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    """Remove now: a ``git_https`` repository's mirror goes; ``409 mirror_cleanup_failed`` when the
+    host still holds a file in it."""
+    return ok(request, ctx.services.repository.remove_mirror(ctx.actor, repository_id))
+
+
+@router.post("/repositories/{repository_id}/mirror/rebuild", response_model=Envelope[RepositoryOut])
+def rebuild_repository_mirror(
+    repository_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    """Rebuild mirror: the mirror goes now, and the next run clones the repository again."""
+    return ok(request, ctx.services.repository.remove_mirror(ctx.actor, repository_id))

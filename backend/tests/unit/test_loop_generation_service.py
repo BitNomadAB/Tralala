@@ -1293,6 +1293,40 @@ def test_the_run_names_each_repositorys_budget_and_what_it_used() -> None:
     ]
 
 
+def test_a_mirrored_repository_says_how_it_was_read_and_that_its_mirror_was_stale() -> None:
+    entry = snapshot_entry("print('hello')", included=75)
+    assert isinstance(entry, dict)
+    stale = {
+        **entry,
+        "provider": "git_https",
+        "fetched_at": "2026-11-02T08:00:00Z",
+        "stale_mirror": True,
+        "fetch_error": "timeout",
+    }
+    w = make(repositories=[stale])
+    start(w)
+    named = {
+        "id": "repo-1",
+        "name": "acme app",
+        "branch": "main",
+        "commit_sha": "abc123",
+        "provider": "git_https",
+        "fetched_at": "2026-11-02T08:00:00Z",
+        "stale_mirror": True,
+        "file_count": 1,
+        "truncated": False,
+        "budget_chars": 0,
+        "snapshot_chars_included": 75,
+        "content_omitted": False,
+    }
+    # The run's own record keeps the file paths beside it; the answer names the repository only.
+    recorded = json.loads(w.run().source_revisions_json)["repositories"]
+    assert recorded == [{**named, "files": ["src/app.py"]}]
+    sources = w.service.get(BOARD_ID, LOOP, "id-1")["source_revisions"]
+    assert isinstance(sources, dict)
+    assert sources["repositories"] == [named]
+
+
 def test_two_commits_of_the_same_repository_are_different_inputs() -> None:
     hashes: list[str] = []
     for sha in ("abc123", "def456"):

@@ -144,6 +144,40 @@ def test_create_archives_the_attachments_next_to_the_snapshot(tmp_path: Path) ->
         assert archive.namelist() == ["attachments/a.txt"]
 
 
+def test_a_backup_is_one_boards_files_and_never_holds_a_repository_mirror(tmp_path: Path) -> None:
+    """``tmp_path`` is the data directory. ``<data>/repos`` caches the repositories' Git mirrors:
+    a backup is per board (its database and its attachments), so it writes beside the board's other
+    backups only, and nothing under ``repos/`` is in it or touched by it."""
+    service, databases, _, _, _ = make(tmp_path)
+    attachments = databases.attachments_dir(BOARD_ID)
+    attachments.mkdir(parents=True)
+    (attachments / "a.txt").write_text("alpha", encoding="utf-8")
+    mirror = tmp_path / "repos" / "8c1f6c5e-2b7d-4e8a-9f3c-0d1e2f3a4b5c" / "mirror.git"
+    mirror.mkdir(parents=True)
+    (mirror / "HEAD").write_bytes(b"ref: refs/heads/main\n")
+    (mirror.parent / "state.json").write_bytes(b"{}\n")
+
+    def tree() -> dict[str, bytes]:
+        return {
+            path.relative_to(tmp_path).as_posix(): path.read_bytes()
+            for path in tmp_path.rglob("*")
+            if path.is_file()
+        }
+
+    before = tree()
+    service.create(WRITER, BOARD_ID)
+    after = tree()
+    written = sorted(set(after) - set(before))
+    assert written == [
+        f"backups/{BOARD_ID}/backup-20261103T100000Z-attachments.zip",
+        f"backups/{BOARD_ID}/backup-20261103T100000Z.sqlite",
+    ]
+    assert {name: after[name] for name in before} == before
+    with zipfile.ZipFile(tmp_path / written[0]) as archive:
+        assert archive.namelist() == ["attachments/a.txt"]
+    assert b"refs/heads" not in after[written[1]]
+
+
 def test_create_needs_the_board_write_scope(tmp_path: Path) -> None:
     service, _, _, _, _ = make(tmp_path)
     reader = ActorContext(actor_id="r", actor_type="agent", actor_name="R", scopes=frozenset())

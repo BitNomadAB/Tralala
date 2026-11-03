@@ -205,6 +205,12 @@ export interface GenerationRunRepository {
   name: string;
   branch: string | null;
   commit_sha: string | null;
+  /** How it was read: `git_https` through the mirror (absent on GitHub entries of older runs). */
+  provider?: string;
+  /** When the mirror was last brought up to date. */
+  fetched_at?: string;
+  /** The fetch before this run failed, so the run read the mirror from `fetched_at`. */
+  stale_mirror?: boolean;
   file_count: number;
   truncated: boolean;
   /** The repository's share of the run's context budget, in characters (runs since AGL-004). */

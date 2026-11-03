@@ -81,10 +81,11 @@ def replace_links(
     paths: Mapping[str, RepositoryPaths] | None,
     *,
     now: str,
-) -> None:
-    """Replace a board's links. ``paths`` gives every link its globs (a repository without an
-    entry reads all of it); ``None`` keeps the globs of each repository that stays linked, so a
-    caller that only sends ``repository_ids`` loses nothing."""
+) -> list[str]:
+    """Replace a board's links and answer the repositories the board no longer links. ``paths``
+    gives every link its globs (a repository without an entry reads all of it); ``None`` keeps the
+    globs of each repository that stays linked, so a caller that only sends ``repository_ids``
+    loses nothing."""
     with store.writer() as repos:
         kept = {link.repository_id: link for link in repos.repository_links.links(board_id)}
         repos.repository_links.clear(board_id)
@@ -99,6 +100,7 @@ def replace_links(
                     exclude_paths=exclude,
                 )
             )
+    return [repository_id for repository_id in kept if repository_id not in repository_ids]
 
 
 def _stored_globs(

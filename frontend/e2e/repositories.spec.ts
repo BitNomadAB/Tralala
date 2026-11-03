@@ -10,9 +10,7 @@ test.describe("repositories", () => {
     await page.getByRole("link", { name: "Settings" }).click();
     await page.getByRole("link", { name: "Manage repositories" }).click();
 
-    await expect(
-      page.getByRole("heading", { name: "GitHub repositories", level: 1 }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Repositories", level: 1 })).toBeVisible();
 
     const name = uniqueName("repo");
     await page.getByRole("button", { name: "New repository" }).click();
@@ -44,6 +42,30 @@ test.describe("repositories", () => {
       .getByRole("button", { name: "Remove" })
       .click();
     await expect(page.getByRole("listitem").filter({ hasText: renamed })).toHaveCount(0);
+  });
+
+  test("adds a Git over HTTPS repository, rebuilds its mirror and removes it", async ({ page }) => {
+    // github.com is the default of TRALALA_REPOSITORY_HOSTS. Saving and rebuilding never reach the
+    // host: the mirror is only fetched by a run, so a rebuild before any run removes nothing.
+    await login(page);
+    await page.goto("/settings/repositories");
+    const name = uniqueName("mirror");
+    const slug = name.replace(/\s+/g, "-").toLowerCase();
+    await page.getByRole("button", { name: "New repository" }).click();
+    const dialog = page.getByRole("dialog", { name: "New repository" });
+    await dialog.getByLabel("Provider").selectOption("git_https");
+    await dialog.getByLabel("Name").fill(name);
+    await dialog.getByLabel("Repository URL").fill(`https://github.com/example/${slug}.git`);
+    await dialog.getByRole("button", { name: "Save repository" }).click();
+
+    const entry = page.getByRole("listitem").filter({ hasText: name });
+    await expect(entry.getByText("Git over HTTPS")).toBeVisible();
+    await expect(entry.getByText("no mirror")).toBeVisible();
+    await entry.getByRole("button", { name: "Rebuild mirror" }).click();
+    await expect(page.getByText("Mirror removed")).toBeVisible();
+
+    await entry.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(page.getByRole("listitem").filter({ hasText: name })).toHaveCount(0);
   });
 
   test("a member is told that only an administrator manages repositories", async ({ page }) => {

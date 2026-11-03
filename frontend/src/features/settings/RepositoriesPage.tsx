@@ -1,32 +1,41 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, GitBranch, KeyRound, Plus, Trash2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/useToast";
 import { useAuth } from "@/features/auth/useAuth";
 import { api } from "@/lib/api";
-import { describeError } from "@/lib/describeError";
+import type { Repository } from "@/lib/types";
 import { RepositoryDialog, type RepositoryDraft } from "./RepositoryDialog";
-
-const REPOSITORIES_KEY = ["repositories"];
+import { RepositoryRow } from "./RepositoryRow";
+import { REPOSITORIES_KEY, useRepositoryActions } from "./useRepositoryActions";
 
 const EMPTY: RepositoryDraft = {
   id: null,
   name: "",
+  provider: "github",
   url: "",
   branch: "",
   token: "",
   enabled: true,
 };
 
+function draftOf(repository: Repository): RepositoryDraft {
+  return {
+    id: repository.id,
+    name: repository.name,
+    provider: repository.provider,
+    url: repository.url,
+    branch: repository.branch ?? "",
+    token: "",
+    enabled: repository.enabled,
+  };
+}
+
 export function RepositoriesPage() {
   const { actor } = useAuth();
   const isAdmin = actor?.role === "admin";
-  const queryClient = useQueryClient();
-  const toast = useToast();
   const [draft, setDraft] = useState<RepositoryDraft | null>(null);
-  const [checks, setChecks] = useState<Record<string, string>>({});
+  const { save, check, remove, mirror, checks } = useRepositoryActions(() => setDraft(null));
 
   const repositoriesQuery = useQuery({
     queryKey: REPOSITORIES_KEY,
@@ -35,79 +44,10 @@ export function RepositoriesPage() {
   });
   const repositories = repositoriesQuery.data ?? [];
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: REPOSITORIES_KEY });
-
-  const save = useMutation({
-    mutationFn: (value: RepositoryDraft) => {
-      if (value.id) {
-        return api.updateRepository(value.id, {
-          name: value.name.trim() || undefined,
-          url: value.url.trim(),
-          branch: value.branch.trim() || null,
-          enabled: value.enabled,
-          ...(value.token ? { token: value.token } : {}),
-        });
-      }
-      return api.createRepository({
-        name: value.name.trim() || undefined,
-        url: value.url.trim(),
-        branch: value.branch.trim() || null,
-        enabled: value.enabled,
-        ...(value.token ? { token: value.token } : {}),
-      });
-    },
-    onSuccess: () => {
-      setDraft(null);
-      void invalidate();
-      toast.push({ title: "Repository saved", variant: "success" });
-    },
-    onError: (error) => {
-      toast.push({ title: "Could not save", description: describeError(error), variant: "error" });
-    },
-  });
-
-  const check = useMutation({
-    mutationFn: (repositoryId: string) => api.checkRepository(repositoryId),
-    onSuccess: (result, repositoryId) => {
-      setChecks((current) => ({
-        ...current,
-        [repositoryId]: `${result.status}: ${result.detail ?? ""}`,
-      }));
-      void invalidate();
-      toast.push({
-        title: result.status === "ok" ? "Access verified" : "Access failed",
-        description: result.detail ?? undefined,
-        variant: result.status === "ok" ? "success" : "error",
-      });
-    },
-    onError: (error) => {
-      toast.push({
-        title: "Could not check access",
-        description: describeError(error),
-        variant: "error",
-      });
-    },
-  });
-
-  const remove = useMutation({
-    mutationFn: (repositoryId: string) => api.deleteRepository(repositoryId),
-    onSuccess: () => {
-      void invalidate();
-      toast.push({ title: "Repository removed", variant: "success" });
-    },
-    onError: (error) => {
-      toast.push({
-        title: "Could not remove",
-        description: describeError(error),
-        variant: "error",
-      });
-    },
-  });
-
   if (!isAdmin) {
     return (
       <section className="flex flex-col gap-4">
-        <h1 className="text-lg font-semibold">GitHub repositories</h1>
+        <h1 className="text-lg font-semibold">Repositories</h1>
         <p className="text-sm text-[var(--muted-foreground)]">
           Only an administrator manages repository access.
         </p>
@@ -119,10 +59,11 @@ export function RepositoriesPage() {
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start gap-3">
         <div>
-          <h1 className="text-lg font-semibold">GitHub repositories</h1>
+          <h1 className="text-lg font-semibold">Repositories</h1>
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-            Read-only access for the Analytics agent. Boards select which repositories they are
-            about; the token is stored sealed and never shown again.
+            Read-only access for the Analytics agent, through the GitHub API or a mirror Tralala
+            keeps of any allowed HTTPS Git host. Boards select which repositories they are about;
+            the token is stored sealed and never shown again.
           </p>
         </div>
         <Button size="sm" className="ml-auto" onClick={() => setDraft({ ...EMPTY })}>
@@ -139,74 +80,20 @@ export function RepositoriesPage() {
       ) : (
         <ul className="flex flex-col gap-2">
           {repositories.map((repository) => (
-            <li key={repository.id} className="card-surface flex flex-col gap-2 p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <GitBranch size={14} className="text-[var(--muted-foreground)]" />
-                <span className="text-sm font-medium">{repository.name}</span>
-                {repository.branch ? <Badge tone="neutral">{repository.branch}</Badge> : null}
-                {repository.boards.length > 0 ? (
-                  repository.boards.map((board) => (
-                    <Badge key={board.id} tone="brand">
-                      {board.name}
-                    </Badge>
-                  ))
-                ) : (
-                  <Badge tone="neutral">no board</Badge>
-                )}
-                {repository.has_token ? (
-                  <Badge tone="success">
-                    <KeyRound size={11} /> {repository.token_hint ?? "token"}
-                  </Badge>
-                ) : (
-                  <Badge tone="warning">no token</Badge>
-                )}
-                {!repository.enabled ? <Badge tone="neutral">disabled</Badge> : null}
-              </div>
-              <p className="break-all text-[11px] text-[var(--muted-foreground)]">
-                {repository.url}
-              </p>
-              {(checks[repository.id] ?? repository.last_check_detail) ? (
-                <p className="flex items-center gap-1.5 text-[11px]">
-                  <CheckCircle2 size={12} className="text-[var(--muted-foreground)]" />
-                  {checks[repository.id] ??
-                    `${repository.last_check_status ?? ""}: ${repository.last_check_detail ?? ""}`}
-                </p>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => check.mutate(repository.id)}
-                  disabled={check.isPending}
-                >
-                  Test access
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    setDraft({
-                      id: repository.id,
-                      name: repository.name,
-                      url: repository.url,
-                      branch: repository.branch ?? "",
-                      token: "",
-                      enabled: repository.enabled,
-                    })
-                  }
-                >
-                  Edit
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => remove.mutate(repository.id)}
-                  disabled={remove.isPending}
-                >
-                  <Trash2 size={13} /> Remove
-                </Button>
-              </div>
-            </li>
+            <RepositoryRow
+              key={repository.id}
+              repository={repository}
+              checkText={checks[repository.id]}
+              busy={{
+                check: check.isPending,
+                remove: remove.isPending,
+                mirror: mirror.isPending,
+              }}
+              onCheck={() => check.mutate(repository.id)}
+              onEdit={() => setDraft(draftOf(repository))}
+              onRemove={() => remove.mutate(repository.id)}
+              onMirror={(action) => mirror.mutate({ repositoryId: repository.id, action })}
+            />
           ))}
         </ul>
       )}

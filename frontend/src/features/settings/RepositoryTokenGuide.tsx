@@ -126,8 +126,9 @@ $env:GITHUB_TOKEN = "github_pat_..."
           </p>
           <p className="mt-1">
             An SSH key gives a <em>git client</em> access and is issued locally with{" "}
-            <span className="font-mono">ssh-keygen</span>. Tralala never uses SSH or a git binary,
-            so it cannot read one. Keep it for your own clone on the machine that runs an agent:
+            <span className="font-mono">ssh-keygen</span>. Tralala never uses SSH, not even for a
+            Git over HTTPS mirror, so it cannot read one. Keep it for your own clone on the machine
+            that runs an agent:
           </p>
           <Code>{`ssh-keygen -t ed25519 -f ~/.ssh/${keyName} -C "analysis-agent"
 # register the .pub file as a Deploy Key at
