@@ -80,9 +80,12 @@ message broker.
 13. **The worker surface is one catalogue.** `services/agent_tools.py` is the only description of
     what an external worker token may call; `/mcp` and `/llms.txt` are generated from it and every
     handler calls a service. Adding a capability is a catalogue entry plus a handler — never a new
-    transport with its own rules — and a tool may be narrower than a scope, never wider. The local
-    role agents stay readers: a run invokes them, they never authenticate, and they never change a
-    Ticket.
+    transport with its own rules — and a tool may be narrower than a scope, never wider.
+    `tests/unit/test_worker_catalogue.py` holds every entry to this: a handler it can read, a
+    section in `/llms.txt` and an entry in the MCP tool list, declared scopes that the opening
+    `actor.require` checks of the handler (or of what it hands the actor to) cover and do not
+    exceed, no rule-11a decision, and a unit test that names the tool. The local role agents stay
+    readers: a run invokes them, they never authenticate, and they never change a Ticket.
 
 ## Repository layout
 

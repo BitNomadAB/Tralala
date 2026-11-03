@@ -12,8 +12,6 @@ from app.core.context import MEMBER_TOKEN_SCOPES, SCOPES, ActorContext
 from app.services.agent_tools import AgentTool, describe_scope, missing_scopes, tool_catalog
 
 CATALOGUE = tool_catalog()
-# Approving, accepting, confirming, finalizing and resetting belong to a signed-in person.
-HUMAN_DECISIONS = ("approve", "accept", "confirm", "finaliz", "finalis", "reset", "review")
 
 
 def _token(*scopes: str) -> ActorContext:
@@ -53,11 +51,6 @@ def test_every_tool_needs_a_known_working_scope(tool: AgentTool) -> None:
     assert not [scope for scope in tool.scopes if scope.endswith(":admin")]
 
 
-@pytest.mark.parametrize("name", list(CATALOGUE))
-def test_no_tool_takes_a_human_decision(name: str) -> None:
-    assert not [word for word in HUMAN_DECISIONS if word in name]
-
-
 def test_a_token_sees_only_the_tools_its_scopes_cover() -> None:
     assert _visible(_token()) == []
     assert _visible(_token("loops:read")) == ["read_loop"]
@@ -79,13 +72,6 @@ def test_a_refusal_names_exactly_the_missing_scopes() -> None:
 @pytest.fixture(scope="module")
 def bootstrap(settings: Settings) -> str:
     return render_bootstrap(settings)
-
-
-def test_the_bootstrap_lists_exactly_the_catalogue_in_order(bootstrap: str) -> None:
-    listed = re.findall(r"^### (\w+) \(requires (.+)\)$", bootstrap, re.MULTILINE)
-    assert [name for name, _ in listed] == list(CATALOGUE)
-    for name, scopes in listed:
-        assert scopes == ", ".join(f"`{scope}`" for scope in CATALOGUE[name].scopes)
 
 
 def test_the_bootstrap_marks_each_argument_required_or_optional(bootstrap: str) -> None:

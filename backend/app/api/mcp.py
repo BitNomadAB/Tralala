@@ -20,10 +20,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from ..core.config import Settings
+from ..core.context import ActorContext
 from ..core.errors import ApiError
 from ..services.agent_tools import missing_scopes, tool_catalog
 from .body import read_limited_json
-from .deps import RequestContext, get_context
+from .deps import get_context
 
 router = APIRouter(tags=["mcp"])
 
@@ -47,7 +48,8 @@ def _error(message_id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": message_id, "error": {"code": code, "message": message}}
 
 
-def _tool_payload(ctx: RequestContext) -> list[dict[str, Any]]:
+def tool_list(actor: ActorContext) -> list[dict[str, Any]]:
+    """The ``tools/list`` payload: each catalogue entry the actor holds the scopes for, in order."""
     return [
         {
             "name": tool.name,
@@ -55,7 +57,7 @@ def _tool_payload(ctx: RequestContext) -> list[dict[str, Any]]:
             "inputSchema": tool.input_schema,
         }
         for tool in tool_catalog().values()
-        if not missing_scopes(tool, ctx.actor)
+        if not missing_scopes(tool, actor)
     ]
 
 
@@ -121,7 +123,7 @@ async def mcp_endpoint(request: Request) -> Response:
         return JSONResponse(_result(message_id, {}))
 
     if method == "tools/list":
-        return JSONResponse(_result(message_id, {"tools": _tool_payload(ctx)}))
+        return JSONResponse(_result(message_id, {"tools": tool_list(ctx.actor)}))
 
     if method == "tools/call":
         name = str(params.get("name") or "")
@@ -274,4 +276,4 @@ def llms_txt(request: Request) -> Response:
     )
 
 
-__all__ = ["PROTOCOL_VERSION", "render_bootstrap", "router"]
+__all__ = ["PROTOCOL_VERSION", "render_bootstrap", "router", "tool_list"]
