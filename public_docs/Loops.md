@@ -85,7 +85,8 @@ analysis, RoadMap and QA. The stored choice only fills in the default of the nex
 is no longer available falls back to the board default.
 
 Which code that agent may look at is decided on the same dialog: the repositories from
-**Settings -> GitHub repositories** (`repository_ids`). A repository can serve several boards, and a
+**Settings -> Repositories** (`repository_ids`), read from GitHub or from a mirror of any allowed
+HTTPS Git host ([Repositories.md](Repositories.md)). A repository can serve several boards, and a
 board can list several. The token behind each repository is read-only and sealed, and an agent sees
 only the repositories of the boards it serves.
 

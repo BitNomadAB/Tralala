@@ -91,9 +91,11 @@ changes code.
 
 ## 4. Connect one repository (optional, but it is what makes analysis concrete)
 
-1. Create a **fine-grained GitHub token** with *Contents: read* for that repository only.
-2. **Settings → Manage repositories → New repository**: name, `https://github.com/your-org/your-repo`,
-   optional branch, and the token. It is stored sealed and never shown again.
+1. Create a **fine-grained GitHub token** with *Contents: read* for that repository only (a public
+   repository needs none).
+2. **Settings → Manage repositories → New repository**: provider *GitHub*, name,
+   `https://github.com/your-org/your-repo`, optional branch, and the token. It is stored sealed and
+   never shown again.
 3. **Test access** proves the token works before you rely on it.
 4. Assign it to the board: open the board → **Edit board → Repositories**. A board may have several;
    the analysis agents read only what is assigned, and the repository page shows which board uses
@@ -106,9 +108,14 @@ changes code.
 Without a repository the analysis still works from the Info you write; with one it cites files and
 revisions, which is what makes the RoadMap reviewable.
 
-What an analysis can actually see is **bounded on purpose**: at most 2 MB of archive, 200 files and
-200 KB of text per repository, with build output, dependencies, lock files, binaries and images
-skipped, and only `github.com` is supported. A file the snapshot cut away is a file the analysis must
+A repository on another Git host (a closed network, a self-hosted server) uses the provider
+*Git over HTTPS*: Tralala keeps a mirror of its main branch and fetches it before every run, once
+the operator has listed the host in `TRALALA_REPOSITORY_HOSTS`. [Repositories.md](Repositories.md)
+has the whole procedure, the token recipe for other hosts and a troubleshooting table.
+
+What an analysis can actually see is **bounded on purpose**: at most 200 files and 200 KB of text
+per repository (and 2 MB of archive from GitHub), with build output, dependencies, lock files,
+binaries and images skipped. A file the snapshot cut away is a file the analysis must
 list under *open questions* instead of guessing. After a run, the Loop's document dialog shows which
 commit each analysis was based on and how many files it read — "based on acme app @ abc123de, 12
 files" — and a repository that could not be read appears there with its reason (`unauthorized`,

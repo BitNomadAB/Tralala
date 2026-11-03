@@ -124,6 +124,23 @@ tools. Approvals bind to exact document revision ids, so a changed input invalid
   directly: `HTTP_PROXY`/`HTTPS_PROXY` do not apply to them, because through a proxy the proxy would
   choose the address.
 
+## Repository code
+
+- **Nothing from a repository is ever executed.** A GitHub repository is read as an archive through
+  the API. A *Git over HTTPS* repository is read from a bare, shallow mirror that `git` maintains
+  with six commands only (`ls-remote`, `clone`, `fetch`, `archive`, `reflog expire` and `gc`), a
+  fixed argument list and no shell; hooks, the file-system monitor and every protocol but HTTPS are
+  switched off, and the system's and the account's Git configuration are ignored. Nothing is checked
+  out. The files reach a prompt as text, and the prompts call them material to analyse, never
+  instructions.
+- A mirror fetches only over HTTPS from the hosts in `TRALALA_REPOSITORY_HOSTS` (default
+  `github.com`), checked when a repository is added and before every fetch; a URL with credentials
+  in it is refused. The sealed token travels in the environment of the one `git` process that needs
+  it: never in a URL, a command line, a log line, the mirror's configuration or a run.
+- A mirror is bounded by `TRALALA_REPOSITORY_MIRROR_MAX_BYTES` and
+  `TRALALA_REPOSITORY_FETCH_TIMEOUT_SECONDS`, is a cache that backups leave out, and is removed with
+  its repository or its last board link. [Repositories.md](Repositories.md) has the details.
+
 ## Requests, responses and errors
 
 - Every request body is bounded (`TRALALA_MAX_REQUEST_BYTES`, default 8 MiB). The bound is counted

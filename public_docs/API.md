@@ -203,10 +203,12 @@ names and labels are applied; an explicit `description` or `lists` in the payloa
 template is rejected with `422 validation_failed` before any board row is written, so an
 `Idempotency-Key` can be reused after correcting the request.
 
-`POST` and `PATCH /boards` accept `repository_ids: [uuid]`: the set of GitHub repositories the board
-is about. The list replaces the board's previous selection (an empty list detaches every
-repository); an unknown id is rejected with `404 repository_not_found` before anything is written.
-Every `BoardOut` carries `repository_ids`, which is what the create/edit dialogs show as checkboxes.
+`POST` and `PATCH /boards` accept `repository_ids: [uuid]`: the set of repositories the board is
+about. The list replaces the board's previous selection (an empty list detaches every repository);
+an unknown id is rejected with `404 repository_not_found` before anything is written. A *Git over
+HTTPS* repository that no board links any more loses its mirror (deleting a board counts too); the
+next board that links it clones it again. Every `BoardOut` carries `repository_ids`, which is what
+the create/edit dialogs show as checkboxes.
 
 Beside it, `repository_paths` steers what a run's snapshot reads of each linked repository:
 `{"<repository_id>": {"focus_paths": ["docs/**"], "exclude_paths": ["docs/archive/**"]}}`. With focus
@@ -327,9 +329,11 @@ to the board, Tralala resolves the commit at the configured branch, reads the ta
 and places a bounded, filtered set of files in the prompt as data — never as instructions. The
 documents come first; the repositories share what remains of `TRALALA_GENERATION_CONTEXT_CHARS`
 (default 400 000 characters), in link order with carry-over, and each snapshot is cut to its share.
-The fixed caps still apply: at most 2 MB of archive, 200 files and 200 KB of text per repository, 15 s timeout,
-`github.com`/`api.github.com`/`codeload.github.com` only, no clone and no `git` binary. Build output,
-dependencies, lock files, binaries and images are skipped.
+The fixed caps still apply: at most 200 files and 200 KB of text per repository. A `github`
+repository is downloaded from `api.github.com`/`codeload.github.com` (at most 2 MB of archive, 15 s
+timeout); a `git_https` repository is fetched into its Tralala-managed mirror first and archived
+there (see [Repositories.md](Repositories.md)). Build output, dependencies, lock files, binaries and
+images are skipped.
 
 A repository that cannot be read does not fail the run: it appears in the snapshot as
 `{id, name, error}` with a class such as `unauthorized`, `not_found`, `rate_limited`, `too_large` or
@@ -337,7 +341,10 @@ A repository that cannot be read does not fail the run: it appears in the snapsh
 keeps the commit and the file paths (`source_revisions.repositories`); the file contents stay in the
 run's own input, and `GET …/generation-runs/{run_id}` returns only the name, branch, commit,
 file count and `truncated` flag, plus `budget_chars` (the repository's share),
-`snapshot_chars_included` (what its files took) and `content_omitted` (not even one file fitted). No token, path or content ever appears in a log line or an error.
+`snapshot_chars_included` (what its files took) and `content_omitted` (not even one file fitted). A
+`git_https` entry also carries `provider`, `fetched_at` (when its mirror was last brought up to date)
+and `stale_mirror`: `true` when this run's fetch failed and it read the last good mirror from
+`fetched_at`. No token, path or content ever appears in a log line or an error.
 
 Every run also reports `phase` — `reading_info`, `analysing_repository` or `generating` — the step it
 last reached, so a caller can show progress instead of one opaque wait. When a run fails, `phase`
@@ -370,21 +377,48 @@ of the template they came from.
 | GET | `/repositories/{id}` | `boards:read` |
 | PATCH | `/repositories/{id}` | `boards:admin` |
 | POST | `/repositories/{id}/check` | `boards:admin` |
+| POST | `/repositories/{id}/mirror/rebuild` (`git_https`) | `boards:admin` |
+| POST | `/repositories/{id}/mirror/remove` (`git_https`) | `boards:admin` |
 | DELETE | `/repositories/{id}` | `boards:admin` |
 
-Repositories are a registry-level list, managed from **Settings -> GitHub repositories**
+Repositories are a registry-level list, managed from **Settings -> Repositories**
 (`/settings/repositories`). A repository is never owned by a board: boards select the ones they are
 about with `repository_ids`, so one repository can serve several boards and a board can list several
-(it resolves to `board_repositories`). The token is a fine-grained personal access token with
-`Contents: read` for that repository; it is sealed with the same mechanism as provider keys,
-returned only as `has_token`/`token_hint`, never logged, and re-sealed when the session secret
-rotates. `check` reports `ok`, `unauthorized`, `not_found`, `forbidden`, `branch_missing` or
-`unreachable` and stores the last outcome on the record.
+(it resolves to `board_repositories`). The token is a read-only access token for that repository
+(for GitHub, a fine-grained personal access token with `Contents: read`); it is sealed with the same
+mechanism as provider keys, returned only as `has_token`/`token_hint`, never logged, and re-sealed
+when the session secret rotates. For a `github` repository `check` reports `ok`, `unauthorized`,
+`not_found`, `forbidden`, `branch_missing` or `unreachable` and stores the last outcome on the record.
+
+`POST /repositories` takes `provider`: `github` (the default) reads a `github.com` repository through
+the GitHub API; `git_https` keeps a Tralala-managed mirror of any `https` URL on a host listed in
+`TRALALA_REPOSITORY_HOSTS` and fetches its main branch before every run. A `git_https` URL on another
+host is refused with `422 host_not_allowed`, at create, on a URL change and before every fetch; a URL
+with credentials, a query or a fragment with `422 validation_failed`. The provider cannot be changed
+later. For a `git_https` repository:
+
+- `check` runs `git ls-remote` only (no clone) and stores the remote's main branch as
+  `default_branch`; it reports `ok`, `branch_missing`, or a mirror code such as `auth_failed`,
+  `not_found`, `timeout` or `git_missing`.
+- The entry carries `default_branch`, and for an administrator the mirror's last good fetch
+  (`last_sha`, `fetched_at`, `mirror_bytes`) and `mirror_error`: why the last fetch failed, or
+  `mirror_cleanup_failed`.
+- `DELETE` removes the mirror in the same operation. When the host still holds a file in it, the
+  repository is kept, `mirror_error` becomes `mirror_cleanup_failed` and the answer is
+  `409 mirror_cleanup_failed` (with `details.leftover`, e.g. `repos/<id>`).
+- `mirror/rebuild` removes the mirror so the next run clones it again; `mirror/remove` is the same
+  removal, the retry after `mirror_cleanup_failed`. Both answer the repository with its mirror fields
+  cleared, `409 mirror_cleanup_failed` when the removal fails again and
+  `409 repository_not_mirrored` for a `github` repository.
+
+[Repositories.md](Repositories.md) is the operator's guide: the procedure, the layout under
+`<data>/repos/`, the settings, stale mirrors, tokens for other hosts and troubleshooting.
 
 `GET /repositories` and `GET /repositories/{id}` are readable with `boards:read`, but a caller without
-`boards:admin` gets the entry without `token_hint`, `last_checked_at`, `last_check_status` and
-`last_check_detail`: the list stays usable for board dialogs while credential hints and access-check
-history remain administration detail.
+`boards:admin` gets the entry without `token_hint`, `last_checked_at`, `last_check_status`,
+`last_check_detail`, `last_sha`, `fetched_at`, `mirror_bytes` and `mirror_error`: the list stays
+usable for board dialogs while credential hints, access-check history and the mirror's state remain
+administration detail.
 
 The dialog carries the same recipe for an operator, and it can be followed before the repository
 exists: GitHub -> Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens,
@@ -398,8 +432,9 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 ```
 
 `200` means it works, `401` that it is wrong or expired, `404` that it cannot see the repository. An
-SSH deploy key (`ssh-keygen`) grants a *git client* read access; Tralala reads the REST API over
-HTTPS and runs no git binary, so a deploy key is not an alternative for this field.
+SSH deploy key (`ssh-keygen`) grants a *git client* read access over SSH; Tralala reads GitHub's REST
+API, and a `git_https` mirror fetches over HTTPS only, so a deploy key is not an alternative for this
+field.
 
 ### Agents
 

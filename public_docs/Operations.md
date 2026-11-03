@@ -134,7 +134,7 @@ Anything written between the upgrade and the rollback is in the `*.after-upgrade
 | What | Where | What to do |
 | --- | --- | --- |
 | Board snapshots | `<data>/backups/<board id>/` | Kept to `TRALALA_BACKUP_KEEP`; lower it, or delete old pre-migration snapshots once an upgrade has proved itself |
-| Repository cache | `<data>/repos/` | Mirrors and archives of linked repositories; a cache only. Safe to delete while the stack is stopped: the next run fetches again |
+| Repository cache | `<data>/repos/` | Mirrors of the *Git over HTTPS* repositories; a cache only, left out of backups. A mirror goes with its repository or its last board link, and at startup when its repository is gone; *Rebuild mirror* removes one at once. Safe to delete while the stack is stopped: the next run fetches again. See [Repositories.md](Repositories.md) |
 | Old images | Docker | `docker image prune` after an upgrade |
 | Container logs | Docker | Bound them with Docker's `json-file` options `max-size` and `max-file` in the daemon configuration |
 

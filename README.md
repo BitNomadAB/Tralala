@@ -16,6 +16,7 @@ App  ->  Board  ->  Loop  ->  Loop-owned Kanban (Tickets) + Info / Analysis / Ro
 | install and run it | [public_docs/Installation.md](public_docs/Installation.md) |
 | start, stop, test, update it day to day | [public_docs/practical_commands.md](public_docs/practical_commands.md) |
 | do the first hour: my account, a person, an agent, a repository, one Loop | [public_docs/Onboarding.md](public_docs/Onboarding.md) |
+| let an analysis read code from GitHub or any HTTPS Git host | [public_docs/Repositories.md](public_docs/Repositories.md) |
 | fix something that broke | [public_docs/Troubleshooting.md](public_docs/Troubleshooting.md) |
 | know what is protected and what is my decision | [public_docs/Security_defaults.md](public_docs/Security_defaults.md) |
 | see what changed for someone upgrading | [public_docs/Release_notes.md](public_docs/Release_notes.md) |
