@@ -349,6 +349,11 @@ def agent_row(
     )
 
 
+def board_agent_row(board_id: str, agent_id: str, *, created_at: str = CREATED) -> BoardAgentsRow:
+    """The link that puts an agent on a board's own list of workers."""
+    return BoardAgentsRow(board_id=board_id, agent_id=agent_id, created_at=created_at)
+
+
 def repository_row(
     repository_id: str,
     *,
