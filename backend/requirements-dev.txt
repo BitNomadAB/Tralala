@@ -1,3 +1,4 @@
 -r requirements.txt
 pytest>=8.3,<10
-ruff>=0.8,<1
+# Exact: a Ruff release can add rules to the selected families, so CI and local runs pin one.
+ruff==0.17.3

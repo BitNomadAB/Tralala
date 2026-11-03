@@ -131,14 +131,14 @@ def _redirect(location: str, archive: bytes = b"") -> Callable[[httpx.Request], 
 
 
 def test_the_commit_is_resolved_with_the_token(github: Any) -> None:
-    seen = github(lambda request: httpx.Response(200, json={"sha": SHA}))
+    seen = github(lambda _request: httpx.Response(200, json={"sha": SHA}))
     assert resolve_commit("acme", "app", "main", TOKEN) == SHA
     assert str(seen[0].url) == "https://api.github.com/repos/acme/app/commits/main"
     assert seen[0].headers["authorization"] == f"Bearer {TOKEN}"
 
 
 def test_without_a_branch_the_default_head_is_read(github: Any) -> None:
-    seen = github(lambda request: httpx.Response(200, json={"sha": SHA}))
+    seen = github(lambda _request: httpx.Response(200, json={"sha": SHA}))
     resolve_commit("acme", "app", None, None)
     assert str(seen[0].url).endswith("/commits/HEAD")
     assert "authorization" not in seen[0].headers
@@ -158,14 +158,14 @@ def test_without_a_branch_the_default_head_is_read(github: Any) -> None:
 def test_a_refusal_is_named_the_way_an_operator_reads_it(
     github: Any, status: int, headers: dict[str, str], code: str
 ) -> None:
-    github(lambda request: httpx.Response(status, headers=headers, json={"message": "nope"}))
+    github(lambda _request: httpx.Response(status, headers=headers, json={"message": "nope"}))
     with pytest.raises(SnapshotError) as failure:
         resolve_commit("acme", "app", "main", TOKEN)
     assert failure.value.code == code
 
 
 def test_an_answer_without_a_sha_is_malformed(github: Any) -> None:
-    github(lambda request: httpx.Response(200, json={"message": "no sha"}))
+    github(lambda _request: httpx.Response(200, json={"message": "no sha"}))
     with pytest.raises(SnapshotError) as failure:
         resolve_commit("acme", "app", "main", TOKEN)
     assert failure.value.code == "malformed_response"

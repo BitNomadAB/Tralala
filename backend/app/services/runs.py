@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
-from typing import Any
+from typing import Any, ClassVar
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
@@ -45,7 +45,7 @@ def _rows(conn: Any, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
 class RunService:
     """Owns run records, the round loop, budgets and the duplicate guard."""
 
-    RUN_STATES = {"paused": "paused", "stopped": "stopped"}
+    RUN_STATES: ClassVar[dict[str, str]] = {"paused": "paused", "stopped": "stopped"}
 
     def __init__(
         self,

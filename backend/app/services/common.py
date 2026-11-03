@@ -7,13 +7,42 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import TextClause, bindparam, text
 from sqlalchemy.engine import Connection
 
+from ..core import sql
 from ..core.errors import Conflict, ValidationFailure
 from ..storage.sqlite import utcnow
 
 POSITION_GAP = 1024
+
+# What the helpers below format into SQL text (see core/sql.py). A positioned table's siblings are
+# the rows its filter of the same name selects; ``other`` leaves out the row being moved.
+_POSITIONED_TABLES = ("lists", "cards", "checklists", "checklist_items")
+_SIBLING_FILTERS: sql.Filters = (
+    ("lists", "loop_id = :loop_id AND archived_at IS NULL"),
+    ("cards", "list_id = :list_id AND archived_at IS NULL"),
+    ("checklists", "card_id = :card_id"),
+    ("checklist_items", "checklist_id = :checklist_id"),
+    ("other", "id != :id"),
+)
+# The join a label filter needs, shared by the card list and the card search.
+LABEL_JOIN = " JOIN card_labels cl ON cl.card_id = c.id JOIN labels l ON l.id = cl.label_id"
+
+_LABELS_FOR_CARDS = text(
+    "SELECT cl.card_id, l.id, l.name, l.color FROM card_labels cl"
+    " JOIN labels l ON l.id = cl.label_id WHERE cl.card_id IN :card_ids"
+    " ORDER BY l.name"
+).bindparams(bindparam("card_ids", expanding=True))
+_CHECKLIST_COUNTS = text(
+    "SELECT ch.card_id, COUNT(i.id) AS total, COALESCE(SUM(i.completed), 0) AS completed"
+    " FROM checklists ch LEFT JOIN checklist_items i ON i.checklist_id = ch.id"
+    " WHERE ch.card_id IN :card_ids GROUP BY ch.card_id"
+).bindparams(bindparam("card_ids", expanding=True))
+_COMMENT_COUNTS = text(
+    "SELECT card_id, COUNT(*) AS total FROM comments WHERE card_id IN :card_ids"
+    " GROUP BY card_id"
+).bindparams(bindparam("card_ids", expanding=True))
 
 
 def parse_timestamp(value: str | None) -> datetime | None:
@@ -29,33 +58,46 @@ def iso_utc(moment: datetime) -> str:
     return moment.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def rows(conn: Connection, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    return [dict(row) for row in conn.execute(text(sql), params or {}).mappings().all()]
+def rows(
+    conn: Connection, statement: str | TextClause, params: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Every row as a dict. A string is SQL text; a prepared statement is passed as it is."""
+    if isinstance(statement, str):
+        statement = text(statement)
+    return [dict(row) for row in conn.execute(statement, params or {}).mappings().all()]
 
 
-def one(conn: Connection, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    result = rows(conn, sql, params)
+def one(
+    conn: Connection, statement: str | TextClause, params: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    result = rows(conn, statement, params)
     return result[0] if result else None
 
 
 def _ordered(
-    conn: Connection, table: str, where_sql: str, params: dict[str, Any]
+    conn: Connection, table: str, siblings: str, params: dict[str, Any]
 ) -> list[dict[str, Any]]:
+    table = sql.identifier(table, _POSITIONED_TABLES)
     return rows(
         conn,
-        f"SELECT id, position FROM {table} WHERE {where_sql} ORDER BY position, id",
+        "SELECT id, position"  # noqa: S608 - from _POSITIONED_TABLES and _SIBLING_FILTERS
+        f" FROM {table}{siblings} ORDER BY position, id",
         params,
     )
 
 
-def normalize_positions(
-    conn: Connection, table: str, where_sql: str, params: dict[str, Any]
+def _normalize_positions(
+    conn: Connection, table: str, siblings: str, params: dict[str, Any]
 ) -> None:
     """Rewrite positions to multiples of POSITION_GAP, preserving order."""
-    current = _ordered(conn, table, where_sql, params)
+    current = _ordered(conn, table, siblings, params)
+    table = sql.identifier(table, _POSITIONED_TABLES)
     for index, row in enumerate(current, start=1):
         conn.execute(
-            text(f"UPDATE {table} SET position = :position WHERE id = :id"),
+            text(
+                f"UPDATE {table}"  # noqa: S608 - from _POSITIONED_TABLES
+                " SET position = :position WHERE id = :id"
+            ),
             {"position": index * POSITION_GAP, "id": row["id"]},
         )
 
@@ -63,16 +105,23 @@ def normalize_positions(
 def position_for_index(
     conn: Connection,
     table: str,
-    where_sql: str,
     params: dict[str, Any],
     index: int | None,
+    *,
+    exclude: str | None = None,
 ) -> int:
-    """Compute a gap-based position for a target index (0-based).
+    """Compute a gap-based position for a target index (0-based) among a row's siblings.
 
-    Positions are integers spaced by POSITION_GAP. Inserts target the midpoint between
-    neighbours; when no integer gap remains the scope is normalized first.
+    ``table`` names which rows are siblings (lists of a Loop, cards of a list, checklists of a
+    card, items of a checklist) and ``params`` binds that scope; ``exclude`` is the id of a row
+    being moved, which is not its own sibling. Positions are integers spaced by POSITION_GAP.
+    Inserts target the midpoint between neighbours; when no integer gap remains the scope is
+    normalized first.
     """
-    current = _ordered(conn, table, where_sql, params)
+    if exclude is not None:
+        params = {**params, "id": exclude}
+    siblings = sql.where(_SIBLING_FILTERS, [table] if exclude is None else [table, "other"])
+    current = _ordered(conn, table, siblings, params)
     if not current:
         return POSITION_GAP
     target = len(current) if index is None else max(0, min(index, len(current)))
@@ -82,13 +131,13 @@ def position_for_index(
         first = current[0]["position"]
         if first > 1:
             return first // 2
-        normalize_positions(conn, table, where_sql, params)
+        _normalize_positions(conn, table, siblings, params)
         return POSITION_GAP // 2
     previous = current[target - 1]["position"]
     following = current[target]["position"]
     if following - previous <= 1:
-        normalize_positions(conn, table, where_sql, params)
-        current = _ordered(conn, table, where_sql, params)
+        _normalize_positions(conn, table, siblings, params)
+        current = _ordered(conn, table, siblings, params)
         previous = current[target - 1]["position"]
         following = current[target]["position"]
     return (previous + following) // 2
@@ -97,16 +146,8 @@ def position_for_index(
 def labels_for_cards(conn: Connection, card_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     if not card_ids:
         return {}
-    placeholders = ", ".join(f":c{i}" for i in range(len(card_ids)))
-    params = {f"c{i}": card_id for i, card_id in enumerate(card_ids)}
     result: dict[str, list[dict[str, Any]]] = {card_id: [] for card_id in card_ids}
-    for row in rows(
-        conn,
-        f"SELECT cl.card_id, l.id, l.name, l.color FROM card_labels cl"
-        f" JOIN labels l ON l.id = cl.label_id WHERE cl.card_id IN ({placeholders})"
-        f" ORDER BY l.name",
-        params,
-    ):
+    for row in rows(conn, _LABELS_FOR_CARDS, {"card_ids": list(card_ids)}):
         result[row["card_id"]].append({"id": row["id"], "name": row["name"], "color": row["color"]})
     return result
 
@@ -114,27 +155,15 @@ def labels_for_cards(conn: Connection, card_ids: list[str]) -> dict[str, list[di
 def card_counts(conn: Connection, card_ids: list[str]) -> dict[str, dict[str, int]]:
     if not card_ids:
         return {}
-    placeholders = ", ".join(f":c{i}" for i in range(len(card_ids)))
-    params = {f"c{i}": card_id for i, card_id in enumerate(card_ids)}
+    params = {"card_ids": list(card_ids)}
     result: dict[str, dict[str, int]] = {
         card_id: {"checklist_total": 0, "checklist_completed": 0, "comment_count": 0}
         for card_id in card_ids
     }
-    for row in rows(
-        conn,
-        f"SELECT ch.card_id, COUNT(i.id) AS total, COALESCE(SUM(i.completed), 0) AS completed"
-        f" FROM checklists ch LEFT JOIN checklist_items i ON i.checklist_id = ch.id"
-        f" WHERE ch.card_id IN ({placeholders}) GROUP BY ch.card_id",
-        params,
-    ):
+    for row in rows(conn, _CHECKLIST_COUNTS, params):
         result[row["card_id"]]["checklist_total"] = int(row["total"])
         result[row["card_id"]]["checklist_completed"] = int(row["completed"])
-    for row in rows(
-        conn,
-        f"SELECT card_id, COUNT(*) AS total FROM comments WHERE card_id IN ({placeholders})"
-        f" GROUP BY card_id",
-        params,
-    ):
+    for row in rows(conn, _COMMENT_COUNTS, params):
         result[row["card_id"]]["comment_count"] = int(row["total"])
     return result
 

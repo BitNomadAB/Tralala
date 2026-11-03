@@ -154,15 +154,19 @@ def layout_problems(agents: str, root: Path) -> list[str]:
     tracked, _ = layout_entries(agents)
     problems: list[str] = []
     for entry in tracked:
-        for path in expand(entry):
-            if not (root / path).is_dir():
-                problems.append(f"{path}: listed in the layout block but not a directory")
+        problems.extend(
+            f"{path}: listed in the layout block but not a directory"
+            for path in expand(entry)
+            if not (root / path).is_dir()
+        )
         if "{" in entry:
             head = entry.split("{")[0]
             if (root / head).is_dir():
                 listed = {Path(path).name for path in expand(entry)}
-                for name in sorted(_parts(root / head) - listed):
-                    problems.append(f"{entry}: does not list {head}{name}")
+                problems.extend(
+                    f"{entry}: does not list {head}{name}"
+                    for name in sorted(_parts(root / head) - listed)
+                )
     return problems
 
 
@@ -277,9 +281,12 @@ def link_problems(document: Path, root: Path, local: list[str]) -> list[str]:
             problems.append(f"{target}: no such file")
         elif _inside(resolved, root, local):
             problems.append(f"{target}: a local working document, missing for everyone else")
-        elif fragment and resolved.suffix == ".md":
-            if unquote(fragment).lower() not in anchors(resolved.read_text(encoding="utf-8")):
-                problems.append(f"{target}: no heading with that id")
+        elif (
+            fragment
+            and resolved.suffix == ".md"
+            and unquote(fragment).lower() not in anchors(resolved.read_text(encoding="utf-8"))
+        ):
+            problems.append(f"{target}: no heading with that id")
     return problems
 
 
@@ -367,7 +374,7 @@ def test_runtime_and_working_paths_are_ignored_by_git() -> None:
         # A file inside the directory: a directory-only pattern cannot match a path that does
         # not exist yet, but it does match everything below it.
         probe = path.rstrip("/") + "/probe"
-        ignored = subprocess.run(
+        ignored = subprocess.run(  # noqa: S603 - git with fixed arguments
             [git, "check-ignore", "--no-index", "--quiet", probe], cwd=REPO_ROOT, check=False
         )
         assert ignored.returncode == 0, f"{path} is not git-ignored"

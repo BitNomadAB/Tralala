@@ -26,7 +26,8 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     return fake
 
 
-def test_the_limit_holds_per_actor_within_the_window(clock: Clock) -> None:
+@pytest.mark.usefixtures("clock")
+def test_the_limit_holds_per_actor_within_the_window() -> None:
     limiter = RateLimiter(3)
     for _ in range(3):
         limiter.check("actor-a")
@@ -49,7 +50,8 @@ def test_the_window_slides(clock: Clock) -> None:
         limiter.check("actor-a")
 
 
-def test_a_limit_of_zero_disables_the_limiter(clock: Clock) -> None:
+@pytest.mark.usefixtures("clock")
+def test_a_limit_of_zero_disables_the_limiter() -> None:
     limiter = RateLimiter(0)
     for _ in range(1000):
         limiter.check("actor-a")
@@ -73,7 +75,8 @@ def test_sign_in_is_locked_after_repeated_failures(clock: Clock) -> None:
     throttle.check("user:alice")
 
 
-def test_the_lock_doubles_and_stops_at_the_ceiling(clock: Clock) -> None:
+@pytest.mark.usefixtures("clock")
+def test_the_lock_doubles_and_stops_at_the_ceiling() -> None:
     throttle = LoginThrottle(max_failures=1, base_seconds=30, max_seconds=100)
     waits = []
     for _ in range(4):
@@ -84,7 +87,8 @@ def test_the_lock_doubles_and_stops_at_the_ceiling(clock: Clock) -> None:
     assert waits == [31, 61, 101, 101]
 
 
-def test_a_successful_sign_in_clears_the_record(clock: Clock) -> None:
+@pytest.mark.usefixtures("clock")
+def test_a_successful_sign_in_clears_the_record() -> None:
     throttle = LoginThrottle(max_failures=1, base_seconds=30, max_seconds=100)
     throttle.record_failure("user:alice")
     throttle.reset("user:alice")

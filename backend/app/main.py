@@ -117,17 +117,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.middleware("http")
-    async def observability(request: Request, call_next):  # noqa: ANN001, ANN202
+    async def observability(request: Request, call_next):
         incoming = request.headers.get("x-request-id", "")
         request.state.request_id = (
             incoming if REQUEST_ID_PATTERN.match(incoming) else str(uuid.uuid4())
         )
         content_length = request.headers.get("content-length")
-        if content_length and content_length.isdigit():
-            if int(content_length) > settings.max_request_bytes:
-                return _error_response(
-                    request, 413, "payload_too_large", "Request body exceeds the configured limit"
-                )
+        if (
+            content_length
+            and content_length.isdigit()
+            and int(content_length) > settings.max_request_bytes
+        ):
+            return _error_response(
+                request, 413, "payload_too_large", "Request body exceeds the configured limit"
+            )
         started = time.perf_counter()
         response = await call_next(request)
         duration_ms = round((time.perf_counter() - started) * 1000, 2)

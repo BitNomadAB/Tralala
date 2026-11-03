@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, ValidationFailure
 from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
@@ -16,6 +17,9 @@ from .boards import BoardService
 from .common import require_mutable_card
 from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED
 from .mentions import extract_mentions
+
+# What the thread list formats into SQL text (see core/sql.py).
+_THREAD_FILTERS: sql.Filters = (("status", "status = :status"),)
 
 REVIEW_DECISIONS = {"approve": "approved", "veto": "vetoed", "rework": "rework_requested"}
 # A human message starts one round in these modes; manual threads wait for an explicit run.
@@ -34,8 +38,8 @@ def requests_agent_reply(content: str, participants: list[dict[str, Any]]) -> bo
     return bool(extract_mentions(content, names))
 
 
-def _rows(conn: Any, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
-    return [dict(row) for row in conn.execute(text(sql), params).mappings()]
+def _rows(conn: Any, statement: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+    return [dict(row) for row in conn.execute(text(statement), params).mappings()]
 
 
 class DiscussionService:
@@ -244,15 +248,15 @@ class DiscussionService:
         self, board_id: str, *, status: str | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:
         self.board_service.require_row(board_id)
-        clause = " WHERE status = :status" if status else ""
         params: dict[str, Any] = {"limit": limit}
         if status:
             params["status"] = status
+        where = sql.where(_THREAD_FILTERS, ["status"] if status else [])
         with self.boards.reader(board_id) as conn:
             threads = _rows(
                 conn,
-                f"SELECT * FROM discussion_threads{clause}"
-                " ORDER BY last_activity_at DESC LIMIT :limit",
+                "SELECT * FROM discussion_threads"  # noqa: S608 - from _THREAD_FILTERS
+                f"{where} ORDER BY last_activity_at DESC LIMIT :limit",
                 params,
             )
             return [self.serialize(conn, thread) for thread in threads]

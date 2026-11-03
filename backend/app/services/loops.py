@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
 from ..schemas.loops import DOCUMENT_KINDS, LOOP_STAGES, LoopCancel, LoopCreate, LoopUpdate
@@ -25,6 +26,13 @@ from .loop_identifiers import format_loop_key, loop_prefix
 OPEN_STAGES = tuple(stage for stage in LOOP_STAGES if stage not in {"completed", "cancelled"})
 EXECUTION_STAGES = ("ready", "in_progress", "awaiting_qa")
 QA_OPEN_STATUSES = ("pending", "instructions_ready", "in_progress")
+# What the Loop queries format into SQL text (see core/sql.py).
+_LOOP_FILTERS: sql.Filters = (
+    ("unarchived", "archived_at IS NULL"),
+    ("open", "completed_at IS NULL"),
+    ("stage", "stage = :stage"),
+)
+_LOOP_EDITABLE = ("name", "goal", "version", "updated_at")
 
 
 def _decode(raw: Any, fallback: Any) -> Any:
@@ -136,19 +144,20 @@ class LoopService:
         self.board_service.require_row(board_id)
         if not self.boards.exists(board_id):
             raise NotFound("Board database not found")
-        clauses = ["1 = 1"]
+        filters: list[str] = []
         params: dict[str, Any] = {}
         if not include_archived:
-            clauses.append("archived_at IS NULL")
+            filters.append("unarchived")
         if not include_completed:
-            clauses.append("completed_at IS NULL")
+            filters.append("open")
         if stage:
-            clauses.append("stage = :stage")
+            filters.append("stage")
             params["stage"] = stage
+        where = sql.where(_LOOP_FILTERS, filters)
         with self.boards.reader(board_id) as conn:
             records = rows(
                 conn,
-                f"SELECT * FROM loops WHERE {' AND '.join(clauses)}"
+                f"SELECT * FROM loops{where}"  # noqa: S608 - from _LOOP_FILTERS
                 " ORDER BY CASE WHEN completed_at IS NULL THEN 0 ELSE 1 END, sequence, id",
                 params,
             )
@@ -270,9 +279,12 @@ class LoopService:
             if updates:
                 assignments = {**updates, "version": existing["version"] + 1,
                 "updated_at": utcnow()}
-                columns = ", ".join(f"{column} = :{column}" for column in assignments)
+                columns = sql.assignments(assignments, _LOOP_EDITABLE)
                 conn.execute(
-                    text(f"UPDATE loops SET {columns} WHERE id = :id"),
+                    text(
+                        "UPDATE loops"  # noqa: S608 - from _LOOP_EDITABLE
+                        f" SET {columns} WHERE id = :id"
+                    ),
                     {**assignments, "id": loop_id},
                 )
                 log_activity(

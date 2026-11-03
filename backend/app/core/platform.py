@@ -82,13 +82,14 @@ def retry_io(operation: str, profile: str, func: Callable[[], None]) -> None:
     for attempt in range(1, ATTEMPTS + 1):
         try:
             func()
-            return
         except OSError as exc:
             if transient_error(exc, profile) is None:
                 raise
             last = exc
             if attempt < ATTEMPTS:
                 time.sleep(DELAY_SECONDS)
+        else:
+            return
     raise last if last is not None else OSError(f"{operation} failed")
 
 
@@ -108,7 +109,7 @@ def remove_file(path: Path | str, *, profile: str) -> bool:
     def unlink() -> None:
         nonlocal gone
         try:
-            os.unlink(target)
+            target.unlink()
         except FileNotFoundError:
             gone = True
 
@@ -119,7 +120,7 @@ def remove_file(path: Path | str, *, profile: str) -> bool:
 def replace_file(source: Path | str, destination: Path | str, *, profile: str) -> None:
     """Move a finished file into place atomically, retrying a transient Windows lock."""
     src, dst = Path(source), Path(destination)
-    retry_io("replace_file", profile, lambda: os.replace(src, dst))
+    retry_io("replace_file", profile, lambda: src.replace(dst))
 
 
 def copy_file(source: Path | str, destination: Path | str, *, profile: str) -> None:

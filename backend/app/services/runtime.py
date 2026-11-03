@@ -117,9 +117,11 @@ def _text_parts(value: Any) -> list[str]:
     if isinstance(value, dict):
         parts = value.get("parts")
         if isinstance(parts, list):
-            for part in parts:
-                if isinstance(part, dict) and isinstance(part.get("text"), str):
-                    texts.append(part["text"])
+            texts.extend(
+                part["text"]
+                for part in parts
+                if isinstance(part, dict) and isinstance(part.get("text"), str)
+            )
         for key in ("artifacts", "status", "message"):
             nested = value.get(key)
             if isinstance(nested, dict):

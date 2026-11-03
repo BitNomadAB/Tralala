@@ -9,6 +9,7 @@ from uuid import uuid4
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure
 from ..schemas.agents import (
@@ -26,6 +27,29 @@ from . import connections
 from .role_defaults import BUILTIN_ROLES
 
 ROLE_PROMPT_LIMIT = 20_000
+
+# The only column names these services format into SQL text (see core/sql.py).
+_ROLE_TEMPLATE_EDITABLE = ("name", "description", "system_prompt")
+_AGENT_EDITABLE = (
+    "name",
+    "description",
+    "role_template_id",
+    "role_prompt_override",
+    "connection_type",
+    "base_url",
+    "model",
+    "temperature",
+    "max_output_tokens",
+    "timeout_seconds",
+    "enabled",
+    "api_key_ciphertext",
+    "api_key_hint",
+)
+_AGENT_COLUMNS = ("id", *_AGENT_EDITABLE, "created_at", "updated_at")
+_AGENT_FILTERS: sql.Filters = (
+    ("q", "(name LIKE :q OR description LIKE :q)"),
+    ("enabled", "enabled = :enabled"),
+)
 
 logger = logging.getLogger("tralala.agents")
 
@@ -201,15 +225,15 @@ class RoleTemplateService:
         updates = payload.model_dump(exclude_none=True)
         if not updates:
             return current
-        assignments = ", ".join(f"{key} = :{key}" for key in updates)
+        assignments = sql.assignments(updates, _ROLE_TEMPLATE_EDITABLE)
+        statement = (
+            "UPDATE role_templates"  # noqa: S608 - from _ROLE_TEMPLATE_EDITABLE
+            f" SET {assignments}, updated_at = :updated_at WHERE id = :id"
+        )
         try:
             with self.registry.connect() as conn:
                 conn.execute(
-                    text(
-                        f"UPDATE role_templates SET {assignments}, updated_at = :updated_at"
-                        " WHERE id = :id"
-                    ),
-                    {**updates, "updated_at": utcnow(), "id": role_id},
+                    text(statement), {**updates, "updated_at": utcnow(), "id": role_id}
                 )
         except IntegrityError as exc:
             raise Conflict(
@@ -311,16 +335,17 @@ class AgentService:
         return row
 
     def list(self, *, q: str | None = None, enabled: bool | None = None) -> list[dict[str, Any]]:
-        clauses: list[str] = []
         params: dict[str, Any] = {}
         if q:
-            clauses.append("(name LIKE :q OR description LIKE :q)")
             params["q"] = f"%{q}%"
         if enabled is not None:
-            clauses.append("enabled = :enabled")
             params["enabled"] = 1 if enabled else 0
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self.registry.read(f"SELECT * FROM agents{where} ORDER BY name", params)
+        where = sql.where(_AGENT_FILTERS, params)
+        rows = self.registry.read(
+            "SELECT * FROM agents"  # noqa: S608 - from _AGENT_FILTERS
+            f"{where} ORDER BY name",
+            params,
+        )
         roles = self._role_map()
         return [self.serialize(row, roles) for row in rows]
 
@@ -474,13 +499,14 @@ class AgentService:
             "updated_at": now,
             **self._credential_columns(payload.api_key),
         }
-        columns = ", ".join(values)
-        placeholders = ", ".join(f":{key}" for key in values)
+        columns, placeholders = sql.insert_columns(values, _AGENT_COLUMNS)
+        statement = (
+            "INSERT INTO agents"  # noqa: S608 - from _AGENT_COLUMNS
+            f" ({columns}) VALUES ({placeholders})"
+        )
         try:
             with self.registry.connect() as conn:
-                conn.execute(
-                    text(f"INSERT INTO agents ({columns}) VALUES ({placeholders})"), values
-                )
+                conn.execute(text(statement), values)
         except IntegrityError as exc:
             raise Conflict(
                 "An agent with this name already exists",
@@ -512,16 +538,14 @@ class AgentService:
             updates.update({"api_key_ciphertext": None, "api_key_hint": None})
         if not updates:
             return self.get(agent_id)
-        assignments = ", ".join(f"{key} = :{key}" for key in updates)
+        assignments = sql.assignments(updates, _AGENT_EDITABLE)
+        statement = (
+            "UPDATE agents"  # noqa: S608 - from _AGENT_EDITABLE
+            f" SET {assignments}, updated_at = :updated_at WHERE id = :id"
+        )
         try:
             with self.registry.connect() as conn:
-                conn.execute(
-                    text(
-                        f"UPDATE agents SET {assignments}, updated_at = :updated_at"
-                        " WHERE id = :id"
-                    ),
-                    {**updates, "updated_at": utcnow(), "id": agent_id},
-                )
+                conn.execute(text(statement), {**updates, "updated_at": utcnow(), "id": agent_id})
         except IntegrityError as exc:
             raise Conflict(
                 "An agent with this name already exists",
@@ -555,13 +579,14 @@ class AgentService:
             "api_key_ciphertext": None,
             "api_key_hint": None,
         }
-        columns = ", ".join(values)
-        placeholders = ", ".join(f":{key}" for key in values)
+        columns, placeholders = sql.insert_columns(values, _AGENT_COLUMNS)
+        statement = (
+            "INSERT INTO agents"  # noqa: S608 - from _AGENT_COLUMNS
+            f" ({columns}) VALUES ({placeholders})"
+        )
         try:
             with self.registry.connect() as conn:
-                conn.execute(
-                    text(f"INSERT INTO agents ({columns}) VALUES ({placeholders})"), values
-                )
+                conn.execute(text(statement), values)
         except IntegrityError as exc:
             raise Conflict(
                 "An agent with this name already exists",
@@ -747,7 +772,7 @@ class AgentService:
         )
         try:
             result = probe(validated, api_key=api_key, timeout=timeout)
-        except Exception as exc:  # noqa: BLE001 - the probe reports, it does not raise
+        except Exception as exc:  # the probe reports, it does not raise
             self._log_probe(
                 "agent_probe_failed",
                 agent_id=agent_id,

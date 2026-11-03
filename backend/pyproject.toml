@@ -16,7 +16,7 @@ dependencies = [
 dev = [
   "pytest>=8.3",
   "httpx>=0.28",
-  "ruff>=0.8",
+  "ruff==0.17.3",
 ]
 
 [tool.pytest.ini_options]
@@ -28,5 +28,27 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "ASYNC"]
-ignore = ["B008"]
+select = [
+  "E", "F", "I", "UP", "B", "ASYNC",
+  "S", "BLE", "T20", "DTZ", "PTH", "SIM", "RUF", "TRY", "ARG", "C4", "PERF", "PIE", "RET", "N",
+]
+ignore = [
+  # FastAPI declares dependencies as `Depends(...)` defaults.
+  "B008",
+  # ApiError takes its human message at the raise site by design; the class carries the code.
+  "TRY003",
+  # Handlers log the exception type only: a traceback can carry SQL values and secrets.
+  "TRY400",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+  "S101",  # pytest asserts
+  "S105",  # fixed fake passwords and tokens are test data
+  "S106",
+]
+# The ApiError subclasses are named after the HTTP status they render, and `type(exc).__name__`
+# is recorded in run, generation and backup reports, so an `Error` suffix would change stored values.
+"app/core/errors.py" = ["N818"]
+# A released revision is never edited; its table names come from a literal tuple.
+"migrations/board/versions/0008_loops.py" = ["S608"]

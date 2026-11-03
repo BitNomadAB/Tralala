@@ -137,9 +137,11 @@ def probe_openai_compatible(
     if isinstance(payload, dict):
         data = payload.get("data")
         if isinstance(data, list):
-            for entry in data:
-                if isinstance(entry, dict) and isinstance(entry.get("id"), str):
-                    models.append(entry["id"])
+            models.extend(
+                entry["id"]
+                for entry in data
+                if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+            )
     return {
         "ok": True,
         "status": "connected",
@@ -221,7 +223,7 @@ def probe_a2a(base_url: str, *, api_key: str | None, timeout: float) -> dict[str
     started = time.monotonic()
     try:
         status, payload = _request(url, headers=headers, timeout=timeout)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - network failures are reported, not raised
         return {
             "ok": False,
             "status": "unreachable",

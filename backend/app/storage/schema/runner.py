@@ -57,7 +57,7 @@ def revision_count(chain: str) -> int:
     return len(list(ScriptDirectory.from_config(_config(chain)).walk_revisions()))
 
 
-def current_revision(chain: str, connection: Connection) -> str | None:
+def current_revision(connection: Connection) -> str | None:
     return MigrationContext.configure(connection).get_current_revision()
 
 

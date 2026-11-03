@@ -126,7 +126,13 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 - Python: **3.13 is the version of record** — the container image, CI's primary job and your
   virtual environment all run it, so a local run means what CI means. CI also runs 3.14, and
   `requires-python` allows it; anything newer is untested and needs a CI leg before it is claimed.
-  Typed, ruff-clean (line length 100), no blocking work in async paths.
+  Typed, ruff-clean (line length 100), no blocking work in async paths. The Ruff rule set and its
+  few ignores live in `backend/pyproject.toml`, each ignore with its reason; an inline `# noqa`
+  names its rule and says why. No `print` in `app/`: use a logger.
+- SQL text is literal and values are bind parameters (a list is an expanding parameter,
+  `IN :ids`). The only things formatted into a statement are identifiers and fragments taken from
+  a module-level tuple of string literals through `app/core/sql.py`; such a line carries
+  `# noqa: S608 - from <TUPLE>`.
 - Text files are UTF-8 without a byte-order mark and use LF line endings (`.gitattributes`,
   `.editorconfig`). Backend code writes text with `newline=""` or writes bytes, so a file written on
   Windows is byte-identical to one written on Linux; `tests/test_text_files.py` enforces both.

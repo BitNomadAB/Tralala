@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.engine import Engine
+
 from ..core.config import Settings
 from ..core.errors import NotFound
 from ..storage.board_db import BoardDatabaseManager
@@ -66,7 +68,7 @@ class MigrationManager:
         engine = self.registry.engine
         head = runner.head_revision("registry")
         with engine.connect() as connection:
-            current = runner.current_revision("registry", connection)
+            current = runner.current_revision(connection)
             has_schema = runner.has_legacy_schema("registry", connection)
         backup: str | None = None
         if has_schema and current != head:
@@ -75,8 +77,7 @@ class MigrationManager:
             )
         from_revision, to_revision, adopted = self._upgrade_chain("registry", engine)
         validation = self._validate(engine)
-        if not validation["ok"]:
-            raise RuntimeError(f"registry failed post-migration validation: {validation}")
+        self._require_valid(validation, "registry failed post-migration validation")
         report = MigrationReport(
             chain="registry",
             board_id=None,
@@ -98,7 +99,7 @@ class MigrationManager:
         for row in rows:
             try:
                 reports.append(self.migrate_board(row["id"]))
-            except Exception as exc:  # noqa: BLE001 - one board must not stop the others
+            except Exception as exc:  # one board must not stop the others
                 logger.exception("unexpected error while migrating board %s", row["id"])
                 reports.append(
                     MigrationReport(
@@ -153,7 +154,7 @@ class MigrationManager:
             engine = create_sqlite_engine(path)
             try:
                 with engine.connect() as connection:
-                    from_revision = runner.current_revision("board", connection)
+                    from_revision = runner.current_revision(connection)
                     has_schema = runner.has_legacy_schema("board", connection)
                 head = runner.head_revision("board")
                 needs_change = has_schema and from_revision != head
@@ -161,8 +162,7 @@ class MigrationManager:
                     backup = self._backup(self.settings.backups_dir / board_id, path)
                 from_revision, to_revision, adopted = self._upgrade_chain("board", engine)
                 validation = self._validate(engine)
-                if not validation["ok"]:
-                    raise RuntimeError(f"post-migration validation failed: {validation}")
+                self._require_valid(validation, "post-migration validation failed")
                 ensure_fts(engine)
                 self._reconcile_registry(row, to_revision, previous_status)
                 report = MigrationReport(
@@ -178,8 +178,7 @@ class MigrationManager:
                     adopted=adopted,
                 )
                 self._log("migration_completed", report, validation=validation)
-                return report
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - a failure marks the board migration_failed
                 self._mark_failed(board_id, exc, previous_status)
                 report = MigrationReport(
                     chain="board",
@@ -192,6 +191,8 @@ class MigrationManager:
                     error=str(exc),
                 )
                 self._log("migration_failed", report)
+                return report
+            else:
                 return report
             finally:
                 engine.dispose()
@@ -206,7 +207,7 @@ class MigrationManager:
 
     # --- internals ------------------------------------------------------------
 
-    def _upgrade_chain(self, chain: str, engine) -> tuple[str | None, str, bool]:  # noqa: ANN001
+    def _upgrade_chain(self, chain: str, engine: Engine) -> tuple[str | None, str, bool]:
         """Stamp a legacy database, then upgrade to head. Safe to repeat."""
         baseline = runner.CHAIN_BASELINES[chain]
         head = runner.head_revision(chain)
@@ -214,7 +215,7 @@ class MigrationManager:
         # One transaction: Alembic participates in it, so a failure leaves the version and
         # schema untouched and the next start can resume from the same point.
         with engine.begin() as connection:
-            from_revision = runner.current_revision(chain, connection)
+            from_revision = runner.current_revision(connection)
             if from_revision is None and runner.has_legacy_schema(chain, connection):
                 runner.stamp(chain, connection, baseline)
                 from_revision = baseline
@@ -232,9 +233,9 @@ class MigrationManager:
                         adopted=True,
                     ),
                 )
-            if runner.current_revision(chain, connection) != head:
+            if runner.current_revision(connection) != head:
                 runner.upgrade(chain, connection, "head")
-            to_revision = runner.current_revision(chain, connection)
+            to_revision = runner.current_revision(connection)
         if to_revision != head:
             raise RuntimeError(f"{chain} schema did not reach head ({to_revision!r} != {head!r})")
         return from_revision, to_revision, adopted
@@ -292,7 +293,12 @@ class MigrationManager:
         return {"integrity": integrity, "ok": integrity == "ok"}
 
     @staticmethod
-    def _validate(engine) -> dict[str, Any]:  # noqa: ANN001
+    def _require_valid(validation: dict[str, Any], message: str) -> None:
+        if not validation["ok"]:
+            raise RuntimeError(f"{message}: {validation}")
+
+    @staticmethod
+    def _validate(engine: Engine) -> dict[str, Any]:
         with engine.connect() as connection:
             integrity = connection.exec_driver_sql("PRAGMA integrity_check").scalar_one()
             violations = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()

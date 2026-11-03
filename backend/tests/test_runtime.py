@@ -86,7 +86,7 @@ def _completion(text: str) -> httpx.Response:
 def test_a_completion_sends_the_system_prompt_first(
     settings: Settings, provider: Callable[[Handler], Provider]
 ) -> None:
-    recorder = provider(lambda request: _completion("AGREE"))
+    recorder = provider(lambda _request: _completion("AGREE"))
     result = runtime.call_completion(
         settings,
         _agent(),
@@ -117,7 +117,7 @@ def test_a_completion_sends_the_system_prompt_first(
 def test_the_agent_settings_and_its_sealed_key_reach_the_request(
     settings: Settings, provider: Callable[[Handler], Provider]
 ) -> None:
-    recorder = provider(lambda request: _completion("ok"))
+    recorder = provider(lambda _request: _completion("ok"))
     agent = _agent(
         model="example-model",
         temperature=0.0,
@@ -133,7 +133,7 @@ def test_the_agent_settings_and_its_sealed_key_reach_the_request(
 def test_a_refused_completion_carries_the_provider_sentence(
     settings: Settings, provider: Callable[[Handler], Provider]
 ) -> None:
-    provider(lambda request: httpx.Response(400, json={"error": {"message": "Model Not Exist"}}))
+    provider(lambda _request: httpx.Response(400, json={"error": {"message": "Model Not Exist"}}))
     result = runtime.call_completion(settings, _agent(), system_prompt="s", messages=[])
     assert result == {"ok": False, "error": "HTTP 400: Model Not Exist", "text": ""}
 
@@ -141,7 +141,7 @@ def test_a_refused_completion_carries_the_provider_sentence(
 def test_an_answer_that_is_not_a_completion_is_malformed(
     settings: Settings, provider: Callable[[Handler], Provider]
 ) -> None:
-    provider(lambda request: httpx.Response(200, json={"choices": []}))
+    provider(lambda _request: httpx.Response(200, json={"choices": []}))
     result = runtime.call_completion(settings, _agent(), system_prompt="s", messages=[])
     assert result == {"ok": False, "error": "malformed_response", "text": ""}
 
@@ -160,11 +160,11 @@ def test_an_unreachable_provider_is_named_by_its_failure(
 def test_a_discussion_call_adds_the_position(
     settings: Settings, provider: Callable[[Handler], Provider]
 ) -> None:
-    provider(lambda request: _completion("The plan holds.\nVerdict: AGREE"))
+    provider(lambda _request: _completion("The plan holds.\nVerdict: AGREE"))
     result = runtime.call_agent(settings, _agent(), system_prompt="s", messages=[])
     assert (result["verdict"], result["justification"]) == ("agree", "The plan holds.")
 
-    provider(lambda request: httpx.Response(503, text="busy"))
+    provider(lambda _request: httpx.Response(503, text="busy"))
     failed = runtime.call_agent(settings, _agent(), system_prompt="s", messages=[])
     assert (failed["ok"], failed["verdict"]) == (False, "abstain")
     assert failed["error"] == "HTTP 503: busy"
@@ -199,7 +199,7 @@ def _task(*texts: str) -> dict[str, Any]:
 def test_an_a2a_agent_is_called_over_message_send(
     settings: Settings, provider: Callable[[Handler], Provider]
 ) -> None:
-    recorder = provider(_a2a(lambda message: _task("AGREE", "Echo"), "http://a2a.example.com/rpc"))
+    recorder = provider(_a2a(lambda _message: _task("AGREE", "Echo"), "http://a2a.example.com/rpc"))
     result = runtime.call_completion(
         settings,
         _agent("a2a"),
@@ -224,7 +224,7 @@ def test_an_a2a_agent_is_called_over_message_send(
 def test_without_a_card_the_base_url_is_the_endpoint(
     settings: Settings, provider: Callable[[Handler], Provider]
 ) -> None:
-    recorder = provider(_a2a(lambda message: _task("ok"), None))
+    recorder = provider(_a2a(lambda _message: _task("ok"), None))
     runtime.call_a2a(settings, _agent("a2a"), system_prompt="", messages=[])
     assert str(recorder.requests[-1].url) == "http://llm.example.com/v1"
 
@@ -243,7 +243,7 @@ def test_an_a2a_failure_is_reported_not_invented(
     answer: dict[str, Any],
     error: str,
 ) -> None:
-    provider(_a2a(lambda message: answer, None))
+    provider(_a2a(lambda _message: answer, None))
     result = runtime.call_a2a(settings, _agent("a2a"), system_prompt="", messages=[])
     assert result == {"ok": False, "error": error, "text": ""}
 

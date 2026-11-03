@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure
 from ..schemas.lists import ListCreate, ListMove, ListUpdate
@@ -18,6 +19,9 @@ from ..storage.sqlite import utcnow
 from .activity import log_activity
 from .boards import BoardService
 from .common import one, position_for_index, rows
+
+# What the list query formats into SQL text (see core/sql.py).
+_LIST_FILTERS: sql.Filters = (("loop", "loop_id = :loop_id"), ("unarchived", "archived_at IS NULL"))
 
 
 class ListService:
@@ -56,12 +60,13 @@ class ListService:
         self.board_service.require_row(board_id)
         if not self.boards.exists(board_id):
             raise NotFound("Board database not found")
-        clause = "" if include_archived else " AND archived_at IS NULL"
+        where = sql.where(_LIST_FILTERS, ["loop"] if include_archived else ["loop", "unarchived"])
         with self.boards.reader(board_id) as conn:
             self._loop_row(conn, board_id, loop_id)
             lists = rows(
                 conn,
-                f"SELECT * FROM lists WHERE loop_id = :loop_id{clause} ORDER BY position, id",
+                "SELECT * FROM lists"  # noqa: S608 - from _LIST_FILTERS
+                f"{where} ORDER BY position, id",
                 {"loop_id": loop_id},
             )
             counts = {
@@ -96,13 +101,7 @@ class ListService:
         with self.boards.session(board_id) as conn:
             loop = self._loop_row(conn, board_id, loop_id)
             self._require_writable(loop)
-            position = position_for_index(
-                conn,
-                "lists",
-                "loop_id = :loop_id AND archived_at IS NULL",
-                {"loop_id": loop_id},
-                payload.position,
-            )
+            position = position_for_index(conn, "lists", {"loop_id": loop_id}, payload.position)
             conn.execute(
                 text(
                     "INSERT INTO lists (id, loop_id, name, position, created_at, updated_at)"
@@ -174,11 +173,7 @@ class ListService:
             self._require_writable(loop)
             self._row(conn, board_id, loop_id, list_id)
             position = position_for_index(
-                conn,
-                "lists",
-                "loop_id = :loop_id AND archived_at IS NULL AND id != :id",
-                {"loop_id": loop_id, "id": list_id},
-                payload.position,
+                conn, "lists", {"loop_id": loop_id}, payload.position, exclude=list_id
             )
             conn.execute(
                 text("UPDATE lists SET position = :position, updated_at = :now WHERE id = :id"),
@@ -229,13 +224,7 @@ class ListService:
             self._require_writable(loop)
             existing = self._row(conn, board_id, loop_id, list_id)
             if existing["archived_at"] is not None:
-                position = position_for_index(
-                    conn,
-                    "lists",
-                    "loop_id = :loop_id AND archived_at IS NULL",
-                    {"loop_id": loop_id},
-                    None,
-                )
+                position = position_for_index(conn, "lists", {"loop_id": loop_id}, None)
                 conn.execute(
                     text(
                         "UPDATE lists SET archived_at = NULL, position = :position,"

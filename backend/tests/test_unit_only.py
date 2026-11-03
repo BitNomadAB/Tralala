@@ -82,9 +82,11 @@ def violations(source: str, filename: str = "<source>") -> list[str]:
     found: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                if _forbidden_module(alias.name):
-                    found.append(f"{filename}:{node.lineno}: imports {alias.name}")
+            found.extend(
+                f"{filename}:{node.lineno}: imports {alias.name}"
+                for alias in node.names
+                if _forbidden_module(alias.name)
+            )
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             for alias in node.names:
                 full = f"{node.module}.{alias.name}"
@@ -96,9 +98,12 @@ def violations(source: str, filename: str = "<source>") -> list[str]:
                 found.append(f"{filename}:{node.lineno}: calls {target[0]}.{target[1]}")
             elif target in DYNAMIC_IMPORTS and node.args:
                 first = node.args[0]
-                if isinstance(first, ast.Constant) and isinstance(first.value, str):
-                    if _forbidden_module(first.value):
-                        found.append(f"{filename}:{node.lineno}: imports {first.value}")
+                if (
+                    isinstance(first, ast.Constant)
+                    and isinstance(first.value, str)
+                    and _forbidden_module(first.value)
+                ):
+                    found.append(f"{filename}:{node.lineno}: imports {first.value}")
     return found
 
 

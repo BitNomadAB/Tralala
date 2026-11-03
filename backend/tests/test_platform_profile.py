@@ -100,7 +100,7 @@ def test_remove_tree_gives_up_immediately_on_a_permanent_error(
     target.mkdir()
     calls = {"n": 0}
 
-    def denied(path: Any, **kwargs: Any) -> None:
+    def denied(path: Any, **_kwargs: Any) -> None:
         calls["n"] += 1
         raise OSError(errno.EACCES, "denied", str(path))
 

@@ -36,11 +36,11 @@ def _fernet_for(secret: str) -> Fernet:
     return Fernet(base64.urlsafe_b64encode(derived))
 
 
-def fernet(settings) -> Fernet:  # noqa: ANN001 - avoids a config import cycle
+def fernet(settings) -> Fernet:  # settings untyped: importing config here would be a cycle
     return _fernet_for(resolve_secret_key(settings))
 
 
-def previous_fernet(settings) -> Fernet | None:  # noqa: ANN001
+def previous_fernet(settings) -> Fernet | None:
     """The key the installation used before its most recent secret change, when configured."""
     previous = (getattr(settings, "previous_secret_key", None) or "").strip()
     if not previous or previous in WEAK_SECRETS or len(previous) < MIN_SECRET_LENGTH:
@@ -48,11 +48,11 @@ def previous_fernet(settings) -> Fernet | None:  # noqa: ANN001
     return _fernet_for(previous)
 
 
-def seal_secret(settings, value: str) -> str:  # noqa: ANN001
+def seal_secret(settings, value: str) -> str:
     return fernet(settings).encrypt(value.encode("utf-8")).decode("ascii")
 
 
-def open_secret_state(settings, token: str) -> tuple[str, bool]:  # noqa: ANN001
+def open_secret_state(settings, token: str) -> tuple[str, bool]:
     """Return ``(value, sealed_with_current_key)``; the previous secret is only a fallback."""
     try:
         return fernet(settings).decrypt(token.encode("ascii")).decode("utf-8"), True
@@ -67,7 +67,7 @@ def open_secret_state(settings, token: str) -> tuple[str, bool]:  # noqa: ANN001
     raise CredentialError("Stored credential cannot be decrypted")
 
 
-def open_secret(settings, token: str) -> str:  # noqa: ANN001
+def open_secret(settings, token: str) -> str:
     return open_secret_state(settings, token)[0]
 
 

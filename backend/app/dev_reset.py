@@ -12,12 +12,16 @@ from application startup.
 from __future__ import annotations
 
 import argparse
+import logging
+import sys
 from pathlib import Path
 from typing import Any
 
 from .core.config import Settings, get_settings
 from .core.platform import remove_tree
 from .core.security import SECRET_FILE_NAME
+
+logger = logging.getLogger("tralala.dev_reset")
 
 
 def _resolve_settings(data_dir: str | None) -> Settings:
@@ -77,20 +81,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--data-dir", default=None, help="Data directory to reset")
     args = parser.parse_args(argv)
+    # The command talks to a person: plain lines on stdout, as print wrote them. A no-op when the
+    # caller has configured logging already.
+    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
     settings = _resolve_settings(args.data_dir)
     overview = plan(settings)
-    print(f"Tralala data directory: {overview['data_dir']}")
-    print("Will remove:")
+    logger.info("Tralala data directory: %s", overview["data_dir"])
+    logger.info("Will remove:")
     for target in overview["targets"] or ["(nothing — already empty)"]:
-        print(f"  - {target}")
-    print("Will keep:")
+        logger.info("  - %s", target)
+    logger.info("Will keep:")
     for target in overview["keeps"]:
-        print(f"  - {target}")
+        logger.info("  - %s", target)
     if not args.confirm:
-        print("Not confirmed. Re-run with --confirm to erase this data directory.")
+        logger.info("Not confirmed. Re-run with --confirm to erase this data directory.")
         return 2
     result = reset(settings, confirm=True)
-    print(f"Removed {len(result['removed'])} item(s). The next start creates a clean schema.")
+    logger.info(
+        "Removed %d item(s). The next start creates a clean schema.", len(result["removed"])
+    )
     return 0
 
 

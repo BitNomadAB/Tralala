@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import re
 import zipfile
@@ -13,6 +14,9 @@ from ..core.platform import remove_file, retry_io
 from ..storage.sqlite import snapshot_database, utcnow
 from .boards import BoardService
 from .common import archive_file_name
+
+# The tables a validation report counts; the names are formatted into SQL text (see core/sql.py).
+_COUNTED_TABLES = ("lists", "cards", "labels", "checklists", "comments", "activity_log")
 
 BACKUP_PATTERN = re.compile(r"^backup-\d{8}T\d{6}Z(?:-[a-z0-9-]+)?\.sqlite$")
 
@@ -34,7 +38,7 @@ class BackupService:
         items = []
         for file in sorted(directory.glob("*.sqlite"), reverse=True):
             stat = file.stat()
-            sidecar = self._attachments_sidecar(board_id, file)
+            sidecar = self._attachments_sidecar(file)
             items.append(
                 {
                     "name": file.name,
@@ -66,7 +70,8 @@ class BackupService:
             "verification": self._check_file(target),
         }
 
-    def _attachments_sidecar(self, board_id: str, snapshot: Path) -> Path:
+    @staticmethod
+    def _attachments_sidecar(snapshot: Path) -> Path:
         """The files that belong to a snapshot, as one zip next to it."""
         return snapshot.with_name(f"{snapshot.stem}-attachments.zip")
 
@@ -77,7 +82,7 @@ class BackupService:
             if directory.exists()
             else []
         )
-        sidecar = self._attachments_sidecar(board_id, snapshot)
+        sidecar = self._attachments_sidecar(snapshot)
         if not files:
             if sidecar.exists():
                 sidecar.unlink()
@@ -95,7 +100,7 @@ class BackupService:
         return {"files": len(files), "size_bytes": sidecar.stat().st_size}
 
     def _restore_attachments(self, board_id: str, snapshot_name: str) -> dict[str, Any]:
-        sidecar = self._attachments_sidecar(board_id, self._directory(board_id) / snapshot_name)
+        sidecar = self._attachments_sidecar(self._directory(board_id) / snapshot_name)
         if not sidecar.exists():
             # Older snapshots carry no files; existing ones are left alone rather than deleted.
             return {"restored": 0, "skipped": True, "reason": "snapshot_has_no_file_archive"}
@@ -141,12 +146,10 @@ class BackupService:
             except OSError:
                 continue
             removed.append(file.name)
-            sidecar = self._attachments_sidecar(board_id, file)
+            sidecar = self._attachments_sidecar(file)
             if sidecar.exists():
-                try:
+                with contextlib.suppress(OSError):
                     remove_file(sidecar, profile=profile)
-                except OSError:
-                    pass
         return removed
 
     def newest_age_hours(self, board_id: str) -> float | None:
@@ -220,18 +223,13 @@ class BackupService:
             ]
             from ..storage.schema import runner
 
-            revision = runner.current_revision("board", conn)
+            revision = runner.current_revision(conn)
             version = runner.revision_count("board")
             counts = {
-                table: conn.exec_driver_sql(f"SELECT COUNT(*) FROM {table}").scalar_one()
-                for table in (
-                    "lists",
-                    "cards",
-                    "labels",
-                    "checklists",
-                    "comments",
-                    "activity_log",
-                )
+                table: conn.exec_driver_sql(
+                    f"SELECT COUNT(*) FROM {table}"  # noqa: S608 - from _COUNTED_TABLES
+                ).scalar_one()
+                for table in _COUNTED_TABLES
             }
         return {
             "board_id": board_id,

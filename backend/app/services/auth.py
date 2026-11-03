@@ -247,7 +247,8 @@ class AuthService:
         elif disabled is False:
             self.registry.enable_actor(user_id)
         updated = self.registry.user_by_id(user_id)
-        assert updated is not None
+        if updated is None:
+            raise NotFound("User not found")
         counts = self.registry.credential_owner_counts().get(str(user_id)) or {}
         return {
             "id": updated["id"],
@@ -357,7 +358,7 @@ class AuthService:
         credential["token"] = token
         return credential
 
-    def _member_policy(self, actor: ActorContext, payload: CredentialCreate) -> int | None:
+    def _member_policy(self, actor: ActorContext, payload: CredentialCreate) -> int:
         """A person's own agent access: within the member vocabulary, capped and time-boxed."""
         outside = [scope for scope in payload.scopes if scope not in MEMBER_TOKEN_SCOPES]
         if outside:
@@ -399,7 +400,6 @@ class AuthService:
         if actor.is_admin:
             return self._issue(actor, payload)
         days = self._member_policy(actor, payload)
-        assert days is not None
         return self._issue(
             actor,
             payload,

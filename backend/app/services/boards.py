@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure
@@ -31,6 +32,12 @@ MANIFEST_MAX_BYTES = 1024 * 1024
 EXPORT_FORMAT_VERSION = 2
 BOARD_SCHEMA_VERSION = runner.revision_count("board")
 ALLOWED_STATUSES = {"active", "archived", "maintenance", "error", "migration_failed"}
+# What the board list formats into SQL text (see core/sql.py).
+_BOARD_FILTERS: sql.Filters = (
+    ("status", "status = :status"),
+    ("q", "(name LIKE :q OR description LIKE :q)"),
+)
+_BOARD_SORTS = ("name", "status", "created_at", "updated_at")
 
 
 def _archive_member(archive: zipfile.ZipFile, name: str, limit: int) -> bytes:
@@ -53,6 +60,21 @@ def _archive_member(archive: zipfile.ZipFile, name: str, limit: int) -> bytes:
             details={"entry": name, "max_bytes": limit},
         )
     return payload
+
+
+def _require_intact(quick_check: str) -> None:
+    if quick_check != "ok":
+        raise ValidationFailure(
+            "Imported database failed integrity check", details={"result": quick_check}
+        )
+
+
+def _require_migrated(status: str) -> None:
+    if status == "failed":
+        raise ValidationFailure(
+            "Imported board could not be migrated to the current schema",
+            details={"status": "migration_failed"},
+        )
 
 
 class BoardService:
@@ -166,7 +188,6 @@ class BoardService:
         offset: int = 0,
         with_counts: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
-        clauses: list[str] = []
         params: dict[str, Any] = {}
         if status:
             if status not in ALLOWED_STATUSES:
@@ -174,21 +195,19 @@ class BoardService:
                     "Unknown board status",
                     details={"allowed": sorted(ALLOWED_STATUSES)},
                 )
-            clauses.append("status = :status")
             params["status"] = status
         if q:
-            clauses.append("(name LIKE :q OR description LIKE :q)")
             params["q"] = f"%{q}%"
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        sort_column = (
-            sort if sort in {"name", "status", "created_at", "updated_at"} else "updated_at"
-        )
+        where = sql.where(_BOARD_FILTERS, params)
+        sort_column = sql.identifier(sort if sort in _BOARD_SORTS else "updated_at", _BOARD_SORTS)
         direction = "DESC" if order.lower() != "asc" else "ASC"
-        total = self.registry.read_one(f"SELECT COUNT(*) AS total FROM boards{where}", params)
+        total = self.registry.read_one(
+            f"SELECT COUNT(*) AS total FROM boards{where}",  # noqa: S608 - from _BOARD_FILTERS
+            params,
+        )
         page = self.registry.read(
-            f"SELECT * FROM boards{where}"
-            f" ORDER BY {sort_column} {direction}, name"
-            " LIMIT :limit OFFSET :offset",
+            "SELECT * FROM boards"  # noqa: S608 - from _BOARD_FILTERS and _BOARD_SORTS
+            f"{where} ORDER BY {sort_column} {direction}, name LIMIT :limit OFFSET :offset",
             {**params, "limit": limit, "offset": offset},
         )
         repository_map = self._repository_ids_by_board()
@@ -628,18 +647,9 @@ class BoardService:
                 for name, payload in attachments:
                     (directory / name).write_bytes(payload)
             with self.boards.reader(new_id) as conn:
-                quick_check = conn.exec_driver_sql("PRAGMA quick_check").scalar_one()
-                if quick_check != "ok":
-                    raise ValidationFailure(
-                        "Imported database failed integrity check", details={"result": quick_check}
-                    )
+                _require_intact(conn.exec_driver_sql("PRAGMA quick_check").scalar_one())
             if self.migrations is not None:
-                migration = self.migrations.migrate_board(new_id)
-                if migration.status == "failed":
-                    raise ValidationFailure(
-                        "Imported board could not be migrated to the current schema",
-                        details={"status": "migration_failed"},
-                    )
+                _require_migrated(self.migrations.migrate_board(new_id).status)
             with self.boards.session(new_id) as conn:
                 conn.execute(
                     text("UPDATE board_metadata SET id = :id, updated_at = :now WHERE rowid = 1"),
@@ -700,7 +710,4 @@ class BoardService:
 
     def default_position(self, board_id: str, loop_id: str) -> int:
         with self.boards.reader(board_id) as conn:
-            return position_for_index(
-                conn, "lists", "loop_id = :loop_id AND archived_at IS NULL", {"loop_id": loop_id},
-                None
-            )
+            return position_for_index(conn, "lists", {"loop_id": loop_id}, None)

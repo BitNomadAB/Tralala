@@ -49,14 +49,14 @@ def test_an_unknown_role_gets_member_scopes_never_admin(role: str | None) -> Non
 
 def test_the_grantable_token_scopes_exclude_review_and_administration() -> None:
     """Approving and accepting are human decisions: no token can hold a usable review grant."""
-    assert GRANTABLE <= set(SCOPES)
+    assert set(SCOPES) >= GRANTABLE
     assert "loops:review" not in GRANTABLE
     assert not GRANTABLE & ADMINISTRATION
     assert {"loops:read", "loops:write", "loops:generate", "history:read"} <= GRANTABLE
 
 
 def test_the_service_never_issues_an_administration_scope() -> None:
-    assert GRANTABLE <= _token_scopes()
+    assert _token_scopes() >= GRANTABLE
     assert not _token_scopes() & ADMINISTRATION
 
 

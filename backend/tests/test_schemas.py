@@ -25,13 +25,13 @@ def _schema_models() -> list[type[BaseModel]]:
     models: list[type[BaseModel]] = []
     for module_info in pkgutil.iter_modules(app.schemas.__path__):
         module = importlib.import_module(f"app.schemas.{module_info.name}")
-        for value in vars(module).values():
-            if (
-                inspect.isclass(value)
-                and issubclass(value, BaseModel)
-                and value.__module__ == module.__name__
-            ):
-                models.append(value)
+        models.extend(
+            value
+            for value in vars(module).values()
+            if inspect.isclass(value)
+            and issubclass(value, BaseModel)
+            and value.__module__ == module.__name__
+        )
     return models
 
 

@@ -142,13 +142,14 @@ class LoopPlanService:
                     code="invalid_dependency_graph",
                     details={"ticket_id": ticket.id, "missing": reference},
                 )
-        if ticket.required_actor == "human":
-            if not ticket.human_action_reason.strip() or not ticket.human_instructions.strip():
-                raise ValidationFailure(
-                    "A human-only Ticket needs a reason and instructions",
-                    code="invalid_dependency_graph",
-                    details={"ticket_id": ticket.id},
-                )
+        if ticket.required_actor == "human" and (
+            not ticket.human_action_reason.strip() or not ticket.human_instructions.strip()
+        ):
+            raise ValidationFailure(
+                "A human-only Ticket needs a reason and instructions",
+                code="invalid_dependency_graph",
+                details={"ticket_id": ticket.id},
+            )
         if ticket.execution_mode == "pre_phase_gate" and ticket.prerequisite_phase_ids:
             own_phase_gate = ticket.id
             del own_phase_gate
@@ -181,13 +182,13 @@ class LoopPlanService:
                 raise ValidationFailure(
                     "Plan dependency graph contains a cycle",
                     code="invalid_dependency_graph",
-                    details={"cycle": path + [node]},
+                    details={"cycle": [*path, node]},
                 )
             if state.get(node) == 2:
                 return
             state[node] = 1
             for target in sorted(graph.get(node, ())):
-                visit(target, path + [node])
+                visit(target, [*path, node])
             state[node] = 2
 
         for node in sorted(graph):
@@ -460,9 +461,9 @@ class LoopPlanService:
                 ),
                 values,
             )
-            self._sync_card(conn, ticket["id"], values)
+            self._sync_card(conn, values)
 
-    def _sync_card(self, conn: Any, item_id: str, values: dict[str, Any]) -> None:
+    def _sync_card(self, conn: Any, values: dict[str, Any]) -> None:
         """Keep an already-materialised card aligned with its retained plan identity."""
         conn.execute(
             text(
@@ -695,7 +696,7 @@ class LoopPlanService:
         readiness = (
             self._evaluate(loop_row, phases, items, dependencies) if include_readiness else {}
         )
-        view = {
+        return {
             "loop_id": loop_id,
             "plan_id": plan["id"],
             "revision_number": plan["revision_number"],
@@ -705,7 +706,6 @@ class LoopPlanService:
             "phases": readiness.get("phases", []),
             "warnings": readiness.get("warnings", []),
         }
-        return view
 
     def readiness(self, conn: Any, loop_row: dict[str, Any]) -> dict[str, Any]:
         plan = self.active_plan(conn, loop_row["id"])
@@ -820,17 +820,17 @@ class LoopPlanService:
                         }
                     )
             if include_gates_of is not None:
-                for gate in gates_in(include_gates_of):
-                    if gate["completed_at"] is None:
-                        blockers.append(
-                            {
-                                "type": "ticket",
-                                "id": gate["id"],
-                                "key": gate["key"],
-                                "title": gate["title"],
-                                "reason": "pre_phase_gate_incomplete",
-                            }
-                        )
+                blockers.extend(
+                    {
+                        "type": "ticket",
+                        "id": gate["id"],
+                        "key": gate["key"],
+                        "title": gate["title"],
+                        "reason": "pre_phase_gate_incomplete",
+                    }
+                    for gate in gates_in(include_gates_of)
+                    if gate["completed_at"] is None
+                )
             return blockers
 
         # Phases are evaluated in dependency order; validation guarantees the graph is acyclic.

@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from ..core import sql
 from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.errors import Conflict, NotFound, ValidationFailure
@@ -33,6 +34,17 @@ API_BASE = "https://api.github.com"
 CHECK_TIMEOUT_SECONDS = 10.0
 
 _SELECT = "SELECT r.* FROM repositories r"
+# The columns a repository write formats into SQL text (see core/sql.py).
+_REPOSITORY_EDITABLE = (
+    "name",
+    "url",
+    "branch",
+    "enabled",
+    "token_ciphertext",
+    "token_hint",
+    "updated_at",
+)
+_REPOSITORY_COLUMNS = ("id", "provider", "created_at", *_REPOSITORY_EDITABLE)
 
 
 def _github_get(
@@ -223,7 +235,7 @@ class RepositoryService:
 
     def create(self, actor: ActorContext, payload: RepositoryCreate) -> dict[str, Any]:
         actor.require("boards:admin")
-        owner, name = self.parse(payload.url)
+        _owner, name = self.parse(payload.url)
         now = utcnow()
         columns: dict[str, Any] = {
             "id": str(uuid4()),
@@ -242,11 +254,12 @@ class RepositoryService:
             "SELECT id FROM repositories WHERE url = :url", {"url": columns["url"]}
         ):
             raise Conflict("That repository is already in the list", code="repository_duplicate")
+        names, placeholders = sql.insert_columns(columns, _REPOSITORY_COLUMNS)
         with self.registry.connect() as conn:
             conn.execute(
                 text(
-                    f"INSERT INTO repositories ({', '.join(columns)})"
-                    f" VALUES ({', '.join(f':{key}' for key in columns)})"
+                    "INSERT INTO repositories"  # noqa: S608 - from _REPOSITORY_COLUMNS
+                    f" ({names}) VALUES ({placeholders})"
                 ),
                 columns,
             )
@@ -294,12 +307,12 @@ class RepositoryService:
         elif payload.clear_token:
             values["token_ciphertext"] = None
             values["token_hint"] = None
+        assignments = sql.assignments(values, _REPOSITORY_EDITABLE)
         with self.registry.connect() as conn:
             conn.execute(
                 text(
-                    "UPDATE repositories SET "
-                    + ", ".join(f"{key} = :{key}" for key in values)
-                    + " WHERE id = :id"
+                    "UPDATE repositories"  # noqa: S608 - from _REPOSITORY_EDITABLE
+                    f" SET {assignments} WHERE id = :id"
                 ),
                 {**values, "id": repository_id},
             )

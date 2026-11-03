@@ -985,4 +985,4 @@ def run_tool(
     return tool.handler(services, actor, args or {})
 
 
-__all__ = ["AgentTool", "tool_catalog", "run_tool", "describe_scope", "missing_scopes"]
+__all__ = ["AgentTool", "describe_scope", "missing_scopes", "run_tool", "tool_catalog"]

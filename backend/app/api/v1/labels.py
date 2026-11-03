@@ -156,4 +156,4 @@ async def delete_comment(
     return ok(request, {"id": comment_id, "deleted": True})
 
 
-__all__ = ["router", "checklists", "comments", "ChecklistCreate"]
+__all__ = ["ChecklistCreate", "checklists", "comments", "router"]

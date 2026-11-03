@@ -144,7 +144,7 @@ def _tracked_files() -> list[tuple[str, str]]:
     git = shutil.which("git")
     if git is None or not (REPO_ROOT / ".git").exists():
         pytest.skip("not running from a Git checkout")
-    listing = subprocess.run(
+    listing = subprocess.run(  # noqa: S603 - git with fixed arguments
         [git, "ls-files", "--eol", "-z"],
         cwd=REPO_ROOT,
         capture_output=True,

@@ -10,9 +10,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import TextClause, bindparam, text
 from sqlalchemy.engine import Connection
 
+from ..core import sql
 from ..core.config import Settings
 from ..core.context import ROLE_ADMIN
 from ..core.security import (
@@ -22,6 +23,20 @@ from ..core.security import (
     write_private_file,
 )
 from .sqlite import create_sqlite_engine, utcnow
+
+# What the registry formats into SQL text (see core/sql.py).
+_CREDENTIAL_FILTERS: sql.Filters = (("owner", "c.owner_actor_id = :owner"),)
+_BOARD_EDITABLE = (
+    "name",
+    "description",
+    "status",
+    "archived_at",
+    "schema_version",
+    "schema_revision",
+)
+_BOARD_STATS = text("SELECT * FROM board_stats WHERE board_id IN :board_ids").bindparams(
+    bindparam("board_ids", expanding=True)
+)
 
 logger = logging.getLogger("tralala.registry")
 
@@ -47,12 +62,19 @@ class Registry:
         with self.engine.begin() as conn:
             yield conn
 
-    def read(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def read(
+        self, statement: str | TextClause, params: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
+        """Every row as a dict. A string is SQL text; a prepared statement is passed as it is."""
+        if isinstance(statement, str):
+            statement = text(statement)
         with self.engine.connect() as conn:
-            return [dict(row) for row in conn.execute(text(sql), params or {}).mappings()]
+            return [dict(row) for row in conn.execute(statement, params or {}).mappings()]
 
-    def read_one(self, sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        rows = self.read(sql, params)
+    def read_one(
+        self, statement: str | TextClause, params: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        rows = self.read(statement, params)
         return rows[0] if rows else None
 
     # --- actors and credentials -------------------------------------------------
@@ -407,14 +429,15 @@ class Registry:
 
     def list_credentials(self, owner_actor_id: str | None = None) -> list[dict[str, Any]]:
         """Tokens with their owner; ``owner_actor_id`` narrows the list to one person."""
-        clause = " WHERE c.owner_actor_id = :owner" if owner_actor_id else ""
+        where = sql.where(_CREDENTIAL_FILTERS, ["owner"] if owner_actor_id else [])
         rows = self.read(
-            "SELECT c.id, c.actor_id, c.owner_actor_id, a.name AS actor_name,"
+            "SELECT c.id, c.actor_id,"  # noqa: S608 - from _CREDENTIAL_FILTERS
+            " c.owner_actor_id, a.name AS actor_name,"
             " o.name AS owner_name, c.name, c.scopes, c.created_at,"
             " c.expires_at, c.last_used_at, c.revoked_at"
             " FROM api_credentials c JOIN actors a ON a.id = c.actor_id"
             " LEFT JOIN actors o ON o.id = c.owner_actor_id"
-            f"{clause}"
+            f"{where}"
             " ORDER BY c.created_at DESC",
             {"owner": owner_actor_id} if owner_actor_id else {},
         )
@@ -527,23 +550,17 @@ class Registry:
             )
 
     def update_board(self, board_id: str, **fields: Any) -> None:
-        allowed = {
-            "name",
-            "description",
-            "status",
-            "archived_at",
-            "schema_version",
-            "schema_revision",
-        }
-        updates = {key: value for key, value in fields.items() if key in allowed}
+        updates = {key: value for key, value in fields.items() if key in _BOARD_EDITABLE}
         if not updates:
             return
-        updates["updated_at"] = utcnow()
-        assignments = ", ".join(f"{key} = :{key}" for key in updates)
+        assignments = sql.assignments(updates, _BOARD_EDITABLE)
         with self.connect() as conn:
             conn.execute(
-                text(f"UPDATE boards SET {assignments} WHERE id = :board_id"),
-                {**updates, "board_id": board_id},
+                text(
+                    "UPDATE boards"  # noqa: S608 - from _BOARD_EDITABLE
+                    f" SET {assignments}, updated_at = :updated_at WHERE id = :board_id"
+                ),
+                {**updates, "updated_at": utcnow(), "board_id": board_id},
             )
 
     def delete_board_row(self, board_id: str) -> None:
@@ -555,9 +572,7 @@ class Registry:
     def board_stats(self, board_ids: list[str]) -> dict[str, dict[str, Any]]:
         if not board_ids:
             return {}
-        placeholders = ", ".join(f":id{index}" for index in range(len(board_ids)))
-        params = {f"id{index}": value for index, value in enumerate(board_ids)}
-        rows = self.read(f"SELECT * FROM board_stats WHERE board_id IN ({placeholders})", params)
+        rows = self.read(_BOARD_STATS, {"board_ids": list(board_ids)})
         return {row["board_id"]: row for row in rows}
 
     def store_board_stats(

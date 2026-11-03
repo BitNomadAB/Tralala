@@ -28,7 +28,7 @@ def create_sqlite_engine(path: Path) -> Engine:
     )
 
     @event.listens_for(engine, "connect")
-    def _set_pragmas(dbapi_connection, _record) -> None:  # noqa: ANN001
+    def _set_pragmas(dbapi_connection: sqlite3.Connection, _record: object) -> None:
         dbapi_connection.execute("PRAGMA foreign_keys=ON")
         dbapi_connection.execute("PRAGMA journal_mode=WAL")
         dbapi_connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
@@ -65,6 +65,6 @@ def sqlite_supports_fts5() -> bool:
     try:
         with sqlite3.connect(":memory:") as probe:
             probe.execute("CREATE VIRTUAL TABLE probe USING fts5(value)")
-        return True
     except sqlite3.Error:
         return False
+    return True
