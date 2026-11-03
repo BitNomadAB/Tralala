@@ -495,12 +495,17 @@ class LoopGenerationService:
         }
 
     def _system_prompt(self, purpose: str, agent_row: dict[str, Any]) -> str:
+        return self._compose_system_prompt(purpose, self._role_prompt(agent_row)["system_prompt"])
+
+    @staticmethod
+    def _compose_system_prompt(purpose: str, role: str) -> str:
+        """The agent's role first, then the purpose, then the machine contract (the schema)."""
         schema = json.dumps(SCHEMAS[purpose].model_json_schema(), ensure_ascii=False)
-        role = self._role_prompt(agent_row)["system_prompt"]
         persona = f"{role}\n\n" if role else ""
         return f"{persona}{PURPOSE_PROMPTS[purpose]}\n\nJSON schema:\n{schema}"
 
-    def _user_message(self, captured: dict[str, Any]) -> str:
+    @staticmethod
+    def _user_message(captured: dict[str, Any]) -> str:
         context = dict(captured["context"])
         repositories = context.get("repositories")
         context_json = json.dumps(context, ensure_ascii=False)
@@ -542,7 +547,8 @@ class LoopGenerationService:
         lines.append(context_json)
         return "\n".join(lines)
 
-    def _parse(self, purpose: str, text: str) -> dict[str, Any]:
+    @staticmethod
+    def _parse(purpose: str, text: str) -> dict[str, Any]:
         if len(text) > MAX_OUTPUT_CHARS:
             raise ValidationFailure("Generation output exceeds the size limit")
         payload = json.loads(_strip_fences(text))

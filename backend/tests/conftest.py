@@ -1,119 +1,20 @@
+"""Inputs shared by the unit tests, each built once per session and never changed by a test."""
+
 from __future__ import annotations
 
-from collections.abc import Iterator
-from pathlib import Path
-from typing import Any
-
 import pytest
-from fastapi.testclient import TestClient
 
 from app.core.config import Settings
-from app.main import create_app
+
+# Long enough and unpublished, so nothing generates or writes a replacement secret.
+UNIT_SECRET = "unit-test-installation-secret-" + "s" * 24
 
 
-@pytest.fixture()
-def settings(tmp_path: Path) -> Settings:
+@pytest.fixture(scope="session")
+def settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
+    """A fixed, strong secret; `.env` is ignored so every machine sees the same values."""
     return Settings(
-        data_dir=tmp_path / "data",
-        secret_key="test-secret-key-with-at-least-32-chars",
-        bootstrap_username="admin",
-        bootstrap_password="test-password",
-        rate_limit_per_minute=100000,
-        board_idle_close_seconds=1,
-        enable_docs=True,
+        _env_file=None,  # type: ignore[call-arg]
+        data_dir=tmp_path_factory.mktemp("data"),
+        secret_key=UNIT_SECRET,
     )
-
-
-class Api:
-    """Thin test client that supplies CSRF headers and unwraps the response envelope."""
-
-    def __init__(self, client: TestClient) -> None:
-        self.client = client
-
-    def _headers(self) -> dict[str, str]:
-        csrf = self.client.cookies.get("tralala_csrf")
-        return {"X-CSRF-Token": csrf} if csrf else {}
-
-    def request(self, method: str, url: str, **kwargs: Any) -> Any:
-        headers = {**self._headers(), **kwargs.pop("headers", {})}
-        response = self.client.request(method, url, headers=headers, **kwargs)
-        return response
-
-    def get(self, url: str, **kwargs: Any) -> Any:
-        return self.request("GET", url, **kwargs)
-
-    def post(self, url: str, **kwargs: Any) -> Any:
-        return self.request("POST", url, **kwargs)
-
-    def put(self, url: str, **kwargs: Any) -> Any:
-        return self.request("PUT", url, **kwargs)
-
-    def patch(self, url: str, **kwargs: Any) -> Any:
-        return self.request("PATCH", url, **kwargs)
-
-    def delete(self, url: str, **kwargs: Any) -> Any:
-        return self.request("DELETE", url, **kwargs)
-
-    def data(self, response: Any) -> Any:
-        assert response.status_code < 400, response.text
-        body = response.json()
-        assert body["success"] is True, body
-        return body["data"]
-
-
-@pytest.fixture()
-def client(settings: Settings) -> Iterator[TestClient]:
-    app = create_app(settings)
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-@pytest.fixture()
-def login(client: TestClient) -> TestClient:
-    response = client.post(
-        "/api/v1/auth/login", json={"username": "admin", "password": "test-password"}
-    )
-    assert response.status_code == 200, response.text
-    return client
-
-
-@pytest.fixture()
-def api(login: TestClient) -> Api:
-    return Api(login)
-
-
-@pytest.fixture()
-def board(api: Api) -> dict[str, Any]:
-    response = api.post("/api/v1/boards", json={"name": "Test board"})
-    return api.data(response)
-
-
-def loop_id(api: Api, board_id: str, *, name: str = "Loop") -> str:
-    """Return the first Loop of a board, creating one when the board has none."""
-    loops = api.data(api.get(f"/api/v1/boards/{board_id}/loops"))
-    if loops:
-        return loops[0]["id"]
-    created = api.data(
-        api.post(f"/api/v1/boards/{board_id}/loops", json={"name": name})
-    )
-    return created["id"]
-
-
-@pytest.fixture()
-def loop(api: Api, board: dict[str, Any]) -> dict[str, Any]:
-    created = api.data(
-        api.post(f"/api/v1/boards/{board['id']}/loops", json={"name": "Test loop"})
-    )
-    return created
-
-
-@pytest.fixture()
-def second_loop(api: Api, board: dict[str, Any]) -> dict[str, Any]:
-    return api.data(
-        api.post(f"/api/v1/boards/{board['id']}/loops", json={"name": "Second loop"})
-    )
-
-
-@pytest.fixture()
-def board_lists(api: Api, board: dict[str, Any], loop: dict[str, Any]) -> list[dict[str, Any]]:
-    return api.data(api.get(f"/api/v1/boards/{board['id']}/loops/{loop['id']}/lists"))

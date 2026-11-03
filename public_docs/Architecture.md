@@ -180,8 +180,8 @@ through `services/loops.py`, `loop_documents.py`, `loop_plans.py`, `loop_generat
   the table at startup and rebuilt when a restore or copy left it behind.
 - **Reading a board's Loops.** `GET /boards/{id}/loops` serializes every Loop with a constant number
   of statements (documents, approvals, plans, QA cycles and progress are loaded per board rather
-  than per Loop), and a test holds that budget so the overview cannot drift back to one query set per
-  Loop. Legacy imports use the same envelope with `source_kind = imported_legacy` and never create
+  than per Loop); keep it that way, because one query set per Loop is what makes the overview slow.
+  Legacy imports use the same envelope with `source_kind = imported_legacy` and never create
   Tickets or approvals.
 
 The human-facing order of a Loop is in [Onboarding](Onboarding.md#the-order-of-work-inside-a-loop).

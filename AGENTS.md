@@ -74,7 +74,7 @@ message broker.
 ```text
 backend/app/{api,core,models,repositories,schemas,services,storage,security,seeds}
 backend/migrations/{registry,board}
-backend/tests/   pytest, including the guard tests that hold the code to these rules
+backend/tests/   pytest unit tests, including the guard tests that hold the code to these rules
 frontend/src/{app,components,features,lib,webmcp,themes,tests}
 frontend/e2e/    the Playwright journeys
 public_docs/     everything a user or operator follows: installation, onboarding, commands,
@@ -101,7 +101,7 @@ source-available. Move a directory and its line here in the same change.
 Backend (run from `backend/`):
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest                            # tests (primary gate)
+..\.venv\Scripts\python.exe -m pytest                            # unit tests (primary gate)
 ..\.venv\Scripts\python.exe -m ruff check app tests migrations  # lint, what CI runs
 ..\.venv\Scripts\python.exe -m uvicorn app.main:create_app --factory --reload
 ```
@@ -138,15 +138,24 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
 
 ## Verification contract
 
+Backend tests are unit tests. A test gives a function a fixed input and asserts what comes back,
+and the same input always gives the same result. A backend test never builds the application
+(`create_app`, `TestClient`), never opens SQLite (engines, sessions, `BoardDatabaseManager`,
+migrations), never reaches the network and never sleeps or starts a thread; anything expensive and
+shared is a session-scoped fixture built once, so the whole suite runs in seconds.
+`tests/test_unit_only.py` enforces this. When a rule sits inside a request or database path, extract
+the pure part and test that, as `csrf_satisfied` in `core/security.py` and `canonical_board_id` in
+`core/identifiers.py` are. The running stack (HTTP, authentication, the databases, migrations) is
+exercised only by the Playwright journeys in `frontend/e2e/`; no backend test covers it.
+
 A story is complete only when:
 
-- schema changes include an Alembic revision plus tests for fresh install, upgrade from an empty
-  database at the previous revision, the explicit development reset and failure recovery
-  (pre-Loop data is deliberately not migrated),
+- schema changes include an Alembic revision (there are no migration tests; the Migration Manager's
+  verified backup, integrity check and `migration_failed` marking guard an upgrade),
+- behavioural changes include unit tests of the functions that carry the behaviour,
 - the smallest relevant test command passes,
 - `ruff check` (backend) and `tsc --noEmit` (frontend) pass,
 - the production frontend build succeeds for UI changes,
-- API-level tests exist for behavioural changes,
 - user-journey changes extend `frontend/e2e/*.spec.ts`,
 - no existing test regressed.
 

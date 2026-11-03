@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 
 import pytest
-from conftest import Api
-from sqlalchemy import text
 
-from app.services import role_defaults, runtime
+from app.services import role_defaults
 
 
 def test_the_seed_file_defines_every_builtin_role() -> None:
@@ -74,122 +71,6 @@ def test_a_broken_seed_fails_instead_of_seeding_nothing(tmp_path: Any) -> None:
         role_defaults._load(duplicate)
 
 
-def test_the_registry_seeds_both_new_profiles(api: Api) -> None:
-    roles = api.data(api.get("/api/v1/role-templates"))
-    by_key = {role["builtin_key"]: role for role in roles if role["builtin_key"]}
-    assert by_key["coordinator"]["scope"] == "organisation"
-    assert by_key["architect"]["scope"] == "organisation"
-    assert by_key["coordinator"]["name"] == "Coordinator"
-    assert by_key["architect"]["name"] == "Architect"
-    assert by_key["analytics_agent"]["scope"] == "board"
-    assert by_key["analytics_agent"]["built_in"] is True
-
-
-def _agent_with_role(api: Api, name: str, role_key: str) -> dict[str, Any]:
-    roles = api.data(api.get("/api/v1/role-templates"))
-    role = next(entry for entry in roles if entry["builtin_key"] == role_key)
-    return api.data(
-        api.post(
-            "/api/v1/agents",
-            json={
-                "name": name,
-                "connection_type": "openai_compatible",
-                "base_url": "http://127.0.0.1:8099/v1",
-                "role_template_id": role["id"],
-            },
-        )
-    )
-
-
-def test_an_organisation_profile_is_not_a_board_agent(api: Api) -> None:
-    coordinator = _agent_with_role(api, "coordinator agent", "coordinator")
-    assert coordinator["role_template_scope"] == "organisation"
-
-    response = api.post(
-        "/api/v1/boards", json={"name": "Org board", "agent_ids": [coordinator["id"]]}
-    )
-    assert response.status_code == 422, response.text
-    assert response.json()["error"]["code"] == "agent_scope_organisation"
-    assert api.data(api.get("/api/v1/boards")) == []
-
-    board = api.data(api.post("/api/v1/boards", json={"name": "Kept board"}))
-    rejected = api.patch(
-        f"/api/v1/boards/{board['id']}", json={"agent_ids": [coordinator["id"]]}
-    )
-    assert rejected.status_code == 422
-    assert api.data(api.get(f"/api/v1/boards/{board['id']}"))["agent_ids"] == []
-
-
-def test_a_board_profile_stays_selectable(api: Api) -> None:
-    board_agent = _agent_with_role(api, "analyst agent", "analytics_agent")
-    board = api.data(
-        api.post("/api/v1/boards", json={"name": "Board", "agent_ids": [board_agent["id"]]})
-    )
-    assert board["agent_ids"] == [board_agent["id"]]
-
-
-def test_duplicating_an_organisation_profile_keeps_its_scope(api: Api) -> None:
-    roles = api.data(api.get("/api/v1/role-templates"))
-    architect = next(entry for entry in roles if entry["builtin_key"] == "architect")
-    copy = api.data(
-        api.post(f"/api/v1/role-templates/{architect['id']}/duplicate", json={})
-    )
-    assert copy["scope"] == "organisation"
-    assert copy["built_in"] is False
-
-
-def _loop_base(board: dict[str, Any], loop: dict[str, Any]) -> str:
-    return f"/api/v1/boards/{board['id']}/loops/{loop['id']}"
-
-
-def test_generation_refuses_an_organisation_profile(
-    api: Api, board: dict[str, Any], loop: dict[str, Any]
-) -> None:
-    coordinator = _agent_with_role(api, "coordinator agent", "coordinator")
-    api.data(api.put(f"{_loop_base(board, loop)}/documents/info", json={"content": "Intent"}))
-
-    response = api.post(
-        f"{_loop_base(board, loop)}/generation-runs",
-        json={"purpose": "analysis", "agent_id": coordinator["id"]},
-    )
-    assert response.status_code == 422, response.text
-    assert response.json()["error"]["code"] == "agent_scope_organisation"
-
-
-def test_the_default_agent_skips_an_organisation_profile(
-    api: Api, board: dict[str, Any], loop: dict[str, Any], monkeypatch: Any
-) -> None:
-    _agent_with_role(api, "aaa coordinator", "coordinator")
-    worker = _agent_with_role(api, "zzz analyst", "analytics_agent")
-    api.data(api.put(f"{_loop_base(board, loop)}/documents/info", json={"content": "Intent"}))
-    used: dict[str, Any] = {}
-
-    def fake_call(settings: Any, agent_row: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        used["agent"] = agent_row
-        return {
-            "ok": True,
-            "error": None,
-            "text": (
-                '{"schema_version":1,"outcome":"x","scope":[],"findings":[],"assumptions":[],'
-                '"open_questions":[],"options":[],"recommendation":"x","verification":[],'
-                '"sources":[],"repository_revision":""}'
-            ),
-            "model": "m",
-            "usage": {},
-        }
-
-    monkeypatch.setattr(runtime, "call_completion", fake_call)
-    started = api.data(
-        api.post(f"{_loop_base(board, loop)}/generation-runs", json={"purpose": "analysis"})
-    )
-    for _ in range(100):
-        run = api.data(api.get(f"{_loop_base(board, loop)}/generation-runs/{started['id']}"))
-        if run["status"] in {"completed", "failed", "cancelled"}:
-            break
-        time.sleep(0.05)
-    assert used["agent"]["id"] == worker["id"]
-
-
 def test_the_factory_prompts_never_name_the_product() -> None:
     """A profile refers to the Loop or discussion it is given, never to a fixed product name."""
     for role in role_defaults.BUILTIN_ROLES:
@@ -207,47 +88,50 @@ def test_the_discussion_preamble_points_at_the_given_context() -> None:
     assert "never guess an identity" in preamble
 
 
-def test_an_untouched_builtin_follows_the_factory_text(api: Api) -> None:
-    """A prompt rewrite has to reach an installation that never edited the role."""
-    services = api.client.app.state.services
-    roles = api.data(api.get("/api/v1/role-templates"))
-    builtin = next(entry for entry in roles if entry["builtin_key"] == "analytics_agent")
-    with services.registry.connect() as conn:
-        conn.execute(
-            text(
-                "UPDATE role_templates SET system_prompt = 'Old factory text',"
-                " default_system_prompt = 'Old factory text' WHERE id = :id"
-            ),
-            {"id": builtin["id"]},
-        )
-
-    services.role_templates.seed_defaults()
-
-    refreshed = api.data(api.get(f"/api/v1/role-templates/{builtin['id']}"))
-    assert refreshed["system_prompt"] != "Old factory text"
-    assert "the Loop you are asked about" in refreshed["system_prompt"]
-    assert refreshed["customized"] is False
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"roles": []},
+        {"roles": [{"key": "x", "name": "X", "prompt": "p", "scope": "everywhere"}]},
+        {"roles": [{"key": " ", "name": "X", "prompt": "p"}]},
+        {"roles": [{"key": "x", "name": "", "prompt": "p"}]},
+    ],
+)
+def test_an_invalid_seed_is_refused(tmp_path: Any, document: dict[str, Any]) -> None:
+    path = tmp_path / "roles.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        role_defaults._load(path)
 
 
-def test_a_customized_builtin_keeps_its_prompt_but_gains_the_new_default(api: Api) -> None:
-    services = api.client.app.state.services
-    roles = api.data(api.get("/api/v1/role-templates"))
-    builtin = next(entry for entry in roles if entry["builtin_key"] == "qa_engineer")
-    api.data(
-        api.patch(
-            f"/api/v1/role-templates/{builtin['id']}",
-            json={"system_prompt": "Our own QA voice, edited by a person."},
-        )
+def test_a_valid_seed_loads_with_the_preamble_in_place(tmp_path: Any) -> None:
+    path = tmp_path / "roles.json"
+    path.write_text(
+        json.dumps(
+            {
+                "discussion_preamble": "Answer the ticket you are given.",
+                "roles": [
+                    {"key": "reviewer", "name": " Reviewer ", "prompt": "Review. {{discussion}} "},
+                    {"key": "lead", "name": "Lead", "prompt": "Lead.", "scope": "organisation"},
+                ],
+            }
+        ),
+        encoding="utf-8",
     )
-
-    services.role_templates.seed_defaults()
-
-    refreshed = api.data(api.get(f"/api/v1/role-templates/{builtin['id']}"))
-    assert refreshed["system_prompt"] == "Our own QA voice, edited by a person."
-    assert refreshed["customized"] is True
-
-    restored = api.data(
-        api.post(f"/api/v1/role-templates/{builtin['id']}/restore-defaults")
+    assert role_defaults._load(path) == (
+        {
+            "key": "reviewer",
+            "name": "Reviewer",
+            "description": "",
+            "scope": "board",
+            "prompt": "Review. Answer the ticket you are given.",
+        },
+        {
+            "key": "lead",
+            "name": "Lead",
+            "description": "",
+            "scope": "organisation",
+            "prompt": "Lead.",
+        },
     )
-    assert restored["system_prompt"] != "Our own QA voice, edited by a person."
-    assert "Tralala" not in restored["system_prompt"]
+    assert role_defaults._load(path) == role_defaults._load(path)

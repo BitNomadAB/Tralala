@@ -51,6 +51,8 @@ INSECURE_BOOTSTRAP_PASSWORDS = frozenset(
 SESSION_COOKIE = "tralala_session"
 CSRF_COOKIE = "tralala_csrf"
 CSRF_HEADER = "x-csrf-token"
+# Methods that never change state, so a cookie session may use them without the CSRF header.
+CSRF_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def hash_password(password: str) -> str:
@@ -97,6 +99,18 @@ def hash_token(token: str) -> str:
 
 def new_csrf_token() -> str:
     return secrets.token_urlsafe(24)
+
+
+def csrf_satisfied(method: str, header_token: str, cookie_token: str) -> bool:
+    """The double-submit rule for a cookie-authenticated request.
+
+    A safe method needs nothing; any other method needs the header to repeat the cookie exactly.
+    """
+    if method in CSRF_SAFE_METHODS:
+        return True
+    if not header_token or not cookie_token:
+        return False
+    return hmac.compare_digest(header_token, cookie_token)
 
 
 def _sign(secret: str, payload: str) -> str:
