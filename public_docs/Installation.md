@@ -132,6 +132,11 @@ connection test says the endpoint speaks plain HTTP. When Tralala runs from sour
 Docker, `127.0.0.1` is your machine again and the presets' host name does not resolve: use
 `http://127.0.0.1:<port>/v1`.
 
+The connection test leaves sampling, thinking and maximum answer length to the provider,
+just as an agent with blank generation settings does. Its brief schema and tool requests each
+keep the test's own 30-second timeout. A reasoning model needs room to think before its answer;
+a tiny output limit can fail the test even though the model supports schemas and tools.
+
 ### How much a generation sends the model
 
 `TRALALA_GENERATION_CONTEXT_CHARS` (default 400 000 characters, about 100 k tokens) is what one

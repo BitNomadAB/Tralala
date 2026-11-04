@@ -404,8 +404,10 @@ def probe_completion(
 
     Listing models shows the endpoint answers; it says nothing about whether the model name exists
     or whether the parameters Tralala sends are accepted. That gap is exactly a green test next to a
-    generation that fails with ``HTTP 400``, so the answer is one tiny request that costs a handful
-    of tokens. The provider's own sentence is carried through when it refuses.
+    generation that fails with ``HTTP 400``, so the answer is one brief request. Sampling,
+    thinking and output length use the provider's defaults: a small output cap can exhaust
+    a reasoning model before it answers. The caller's timeout still bounds each request.
+    The provider's own sentence is carried through when it refuses.
 
     The call also asks for a JSON schema as the answer's format (``response_format``): a model that
     answers it takes one (``supports_json_schema``), and a generation then sends the purpose's
@@ -424,7 +426,6 @@ def probe_completion(
             {"role": "system", "content": "Answer with the single word: ok"},
             {"role": "user", "content": "ping"},
         ],
-        "max_tokens": 16,
     }
     url = f"{base_url}/chat/completions"
     supports_json_schema = True
@@ -498,8 +499,6 @@ PROBE_TOOL: ToolDefinition = {
     "description": "Report that the connection test reached you.",
     "parameters": {"type": "object", "properties": {}},
 }
-# Room for a model that reasons before it answers: a thinking model spends tokens before the call.
-PROBE_TOOL_MAX_TOKENS = 512
 
 
 def probe_tool_call(
@@ -520,7 +519,6 @@ def probe_tool_call(
         ],
         "tools": tool_definitions([PROBE_TOOL]),
         "tool_choice": "auto",
-        "max_tokens": PROBE_TOOL_MAX_TOKENS,
     }
     try:
         with endpoint_client(timeout=timeout, allow_private=allow_private) as client:

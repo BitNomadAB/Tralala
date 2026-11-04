@@ -604,12 +604,40 @@ def test_a_model_the_plain_call_cannot_reach_fails_the_test_with_its_own_refusal
     assert len(upstream.requests) == 2
 
 
-def test_the_model_call_sends_no_temperature(upstream: Upstream) -> None:
-    upstream.answer = _answers(_chat('{"answer": "ok"}'))
-    _trial()
-    sent, tool_call = upstream.requests
-    assert ("temperature" in _sent(sent), _sent(sent)["max_tokens"]) == (False, 16)
-    assert "temperature" not in _sent(tool_call)
+def test_reasoning_probes_keep_provider_generation_defaults(upstream: Upstream) -> None:
+    def reasoning_model(request: httpx.Request) -> httpx.Response:
+        if "max_tokens" in _sent(request):
+            return httpx.Response(
+                502,
+                json={
+                    "error": {"message": "structured output was incomplete (finish_reason=length)"}
+                },
+            )
+        return _tool_answer("report_ok") if _offers_tools(request) else _chat('{"answer": "ok"}')
+
+    upstream.answer = reasoning_model
+    result = _trial()
+    assert (result["ok"], result["supports_json_schema"], result["supports_tools"]) == (
+        True,
+        True,
+        True,
+    )
+    assert len(upstream.requests) == 2
+    overrides = {
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "presence_penalty",
+        "repetition_penalty",
+        "reasoning_effort",
+        "reasoning",
+        "chat_template_kwargs",
+        "max_tokens",
+        "max_completion_tokens",
+        "max_output_tokens",
+    }
+    assert all(overrides.isdisjoint(_sent(request)) for request in upstream.requests)
 
 
 def test_a_model_that_runs_out_of_time_names_the_tests_own_limit(upstream: Upstream) -> None:
