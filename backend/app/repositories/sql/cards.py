@@ -65,18 +65,24 @@ _ADD = text(
     " completed_at, created_at, updated_at, archived_at, version, assignee_actor_id,"
     " assignee_type, assignee_name, assigned_at, assigned_by_actor_id, loop_id, phase_id,"
     " plan_item_id, ticket_key, kind, required_actor, execution_mode, human_action_reason,"
-    " human_instructions, human_confirmed_at, human_confirmed_by_actor_id, plan_revision_id)"
+    " human_instructions, human_confirmed_at, human_confirmed_by_actor_id, plan_revision_id,"
+    " summary, summary_source, summary_basis_sha256)"
     " VALUES (:id, :list_id, :title, :description, :position, :priority, :due_at,"
     " :completed_at, :created_at, :updated_at, :archived_at, :version, :assignee_actor_id,"
     " :assignee_type, :assignee_name, :assigned_at, :assigned_by_actor_id, :loop_id, :phase_id,"
     " :plan_item_id, :ticket_key, :kind, :required_actor, :execution_mode, :human_action_reason,"
-    " :human_instructions, :human_confirmed_at, :human_confirmed_by_actor_id, :plan_revision_id)"
+    " :human_instructions, :human_confirmed_at, :human_confirmed_by_actor_id, :plan_revision_id,"
+    " :summary, :summary_source, :summary_basis_sha256)"
 )
 _SYNC_PLAN_ITEM = text(
     "UPDATE cards SET title = :title, description = :instructions,"
     " required_actor = :required_actor, execution_mode = :execution_mode,"
     " human_action_reason = :human_action_reason, human_instructions = :human_instructions,"
-    " phase_id = :phase_id, updated_at = :now WHERE id = :id AND plan_item_id = :id"
+    " phase_id = :phase_id, updated_at = :now,"
+    " summary = CASE WHEN :summary = '' THEN summary ELSE :summary END,"
+    " summary_source = CASE WHEN :summary = '' THEN summary_source ELSE 'plan' END,"
+    " summary_basis_sha256 = CASE WHEN :summary = '' THEN summary_basis_sha256 ELSE :basis END"
+    " WHERE id = :id AND plan_item_id = :id"
 )
 _MOVE = text(
     "UPDATE cards SET list_id = :list_id, position = :position, version = version + 1,"
@@ -291,6 +297,9 @@ class SqlCardRepository:
                 "human_confirmed_at": row.human_confirmed_at,
                 "human_confirmed_by_actor_id": row.human_confirmed_by_actor_id,
                 "plan_revision_id": row.plan_revision_id,
+                "summary": row.summary,
+                "summary_source": row.summary_source,
+                "summary_basis_sha256": row.summary_basis_sha256,
             },
         )
 
@@ -299,7 +308,7 @@ class SqlCardRepository:
         statement = text(f"UPDATE cards SET {columns} WHERE id = :id")  # noqa: S608 - from CARD_EDITABLE
         self._connection.execute(statement, {**changes, "id": card_id})
 
-    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str) -> None:
+    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str, summary_basis: str) -> None:
         self._connection.execute(
             _SYNC_PLAN_ITEM,
             {
@@ -310,6 +319,8 @@ class SqlCardRepository:
                 "human_action_reason": item.human_action_reason,
                 "human_instructions": item.human_instructions,
                 "phase_id": item.phase_id,
+                "summary": item.summary,
+                "basis": summary_basis,
                 "now": now,
                 "id": item.id,
             },

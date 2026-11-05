@@ -11,7 +11,7 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import Field, field_validator
 
-from .common import Id, LongText, Name, OutModel, Priority, StrictModel
+from .common import Id, LongText, Name, OutModel, Priority, StrictModel, Summary
 
 DocumentKind = Literal["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"]
 DOCUMENT_KINDS: tuple[str, ...] = get_args(DocumentKind)
@@ -135,6 +135,13 @@ class AnalysisPayload(StrictModel):
 class PlanTicket(StrictModel):
     id: Id
     title: Name
+    summary: Summary = Field(
+        default="",
+        description=(
+            "What the Ticket is about in one or two plain sentences, for a list of Tickets; "
+            "no file paths or code"
+        ),
+    )
     objective: LongText = ""
     instructions: LongText = ""
     required_actor: RequiredActor = "any"

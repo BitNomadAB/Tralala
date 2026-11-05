@@ -200,6 +200,7 @@ def create_ticket(
     loop_id = _require(args, "loop_id")
     title = _require(args, "title")
     description = _text(args.get("description")) or ""
+    summary = _text(args.get("summary")) or ""
     priority = _priority(args)
     origin_id = _text(args.get("follow_up_of"))
     origin: CardEntry | None = None
@@ -212,7 +213,11 @@ def create_ticket(
         raise ValidationFailure("The Loop has no column to add a Ticket to")
     try:
         payload = CardCreate(
-            list_id=columns[0]["id"], title=title, description=description, priority=priority
+            list_id=columns[0]["id"],
+            title=title,
+            description=description,
+            summary=summary,
+            priority=priority,
         )
     except ValidationError as error:
         raise ValidationFailure(

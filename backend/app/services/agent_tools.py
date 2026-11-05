@@ -20,13 +20,14 @@ The handlers live beside this module, in ``agent_tools_read``, ``agent_tools_wri
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound
 from ..schemas.loops import AnalysisPayload, PlanPayload
+from .agent_tools_documents import document_tools, read_document, read_loop
+from .agent_tools_identity import identity_tools, whoami
+from .agent_tools_listing import list_tickets, listing_tools, write_ticket_summaries
 from .agent_tools_notes import read_notes, write_note
 from .agent_tools_plan import map_plan_ids, write_analysis, write_roadmap
 from .agent_tools_read import (
@@ -34,13 +35,18 @@ from .agent_tools_read import (
     ToolResult,
     _read_board,
     _read_discussion,
-    _read_loop,
     _read_ticket,
     allowed_actions,
     list_boards,
     search_tickets,
 )
-from .agent_tools_schema import ArgumentSchema, InputSchema
+from .agent_tools_schema import (
+    AgentTool,
+    ArgumentSchema,
+    InputSchema,
+    describe_scope,
+    missing_scopes,
+)
 from .agent_tools_schema import model_argument as _model
 from .agent_tools_schema import object_schema as _object
 from .agent_tools_schema import string_argument as _string
@@ -58,17 +64,6 @@ from .agent_tools_write import (
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
-
-
-@dataclass(frozen=True, slots=True)
-class AgentTool:
-    """One callable capability: wire contract plus the handler that runs it."""
-
-    name: str
-    description: str
-    scopes: tuple[str, ...]
-    input_schema: InputSchema
-    handler: Callable[[Services, ActorContext, ToolArguments], ToolResult]
 
 
 _BOARD_ID = _string("Board identifier from list_boards")
@@ -108,6 +103,7 @@ def tool_catalog() -> dict[str, AgentTool]:
         "a Ticket a person must do has required_actor human, a reason and instructions",
     )
     tools = [
+        *identity_tools(),
         AgentTool(
             name="list_boards",
             description=(
@@ -148,28 +144,7 @@ def tool_catalog() -> dict[str, AgentTool]:
             ),
             handler=_read_board,
         ),
-        AgentTool(
-            name="read_loop",
-            description=(
-                "Read one Loop: its goal, the Info/Analysis/RoadMap documents, the plan with "
-                "phase and Ticket readiness, the Kanban columns and the Tickets. Use this to "
-                "understand the task before touching a Ticket."
-            ),
-            scopes=("loops:read",),
-            input_schema=_object(
-                {
-                    "board_id": _BOARD_ID,
-                    "loop_id": _string("Loop identifier from read_board"),
-                    "document_kinds": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Limit the documents, for example [\"info\"]",
-                    },
-                },
-                required=["board_id", "loop_id"],
-            ),
-            handler=_read_loop,
-        ),
+        *document_tools(_BOARD_ID, _LOOP_ID),
         AgentTool(
             name="read_ticket",
             description=(
@@ -211,6 +186,7 @@ def tool_catalog() -> dict[str, AgentTool]:
             ),
             handler=search_tickets,
         ),
+        *listing_tools(_BOARD_ID),
         AgentTool(
             name="assign_ticket",
             description=(
@@ -267,6 +243,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                     "loop_id": _string("Loop identifier from read_board"),
                     "title": _string("Short title of the work"),
                     "description": _string("Markdown: what was found and what is to be done"),
+                    "summary": _string("Optional: what it is about in a sentence or two"),
                     "follow_up_of": _string("Optional id of the Ticket this work came out of"),
                     "priority": _string("Optional: none, low, medium, high or urgent"),
                 },
@@ -534,15 +511,6 @@ def tool_catalog() -> dict[str, AgentTool]:
     return {tool.name: tool for tool in tools}
 
 
-def missing_scopes(tool: AgentTool, actor: ActorContext) -> tuple[str, ...]:
-    """Scopes the tool needs that the actor does not hold; empty means it may run."""
-    return tuple(scope for scope in tool.scopes if not actor.has_scope(scope))
-
-
-def describe_scope(tool: AgentTool) -> str:
-    return "Requires " + ", ".join(f"`{scope}`" for scope in tool.scopes) + "."
-
-
 def run_tool(
     services: Services, actor: ActorContext, name: str, args: ToolArguments
 ) -> ToolResult:
@@ -575,7 +543,6 @@ __all__ = [
     "_move_ticket",
     "_read_board",
     "_read_discussion",
-    "_read_loop",
     "_read_ticket",
     "_reply_discussion",
     "_run_analysis",
@@ -587,13 +554,18 @@ __all__ = [
     "create_ticket",
     "describe_scope",
     "list_boards",
+    "list_tickets",
     "map_plan_ids",
     "missing_scopes",
+    "read_document",
+    "read_loop",
     "read_notes",
     "run_tool",
     "search_tickets",
     "tool_catalog",
+    "whoami",
     "write_analysis",
     "write_note",
     "write_roadmap",
+    "write_ticket_summaries",
 ]

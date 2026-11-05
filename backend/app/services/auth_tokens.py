@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import datetime
 from typing import Protocol, TypedDict, TypeIs
 
 from ..core.config import Settings
@@ -44,6 +45,51 @@ class CredentialEntry(TypedDict):
     expires_at: str | None
     last_used_at: str | None
     revoked_at: str | None
+
+
+class KeyIdentity(TypedDict):
+    """The key a request authenticated with, as its own holder may see it: never the token, never
+    its hash, and nothing about any other key."""
+
+    id: str
+    name: str
+    issued_by: str | None
+    created_at: str
+    expires_at: str | None
+    days_left: int | None
+    expires_soon: bool
+    last_used_at: str | None
+
+
+EXPIRES_SOON_DAYS = 7
+"""A key with fewer whole days left than this is reported as expiring soon."""
+
+
+def current_key(
+    store: RegistryUnitOfWork, actor: ActorContext, *, now: datetime
+) -> KeyIdentity | None:
+    """The key ``actor`` authenticated with; None for a session cookie or a key that is gone."""
+    if actor.credential_id is None:
+        return None
+    with store.reader() as repos:
+        found = repos.credentials.get(actor.credential_id)
+    if found is None:
+        return None
+    credential = found.credential
+    days_left: int | None = None
+    if credential.expires_at:
+        remaining = datetime.fromisoformat(credential.expires_at) - now
+        days_left = max(0, remaining.days)
+    return {
+        "id": credential.id,
+        "name": credential.name,
+        "issued_by": found.owner_name,
+        "created_at": credential.created_at,
+        "expires_at": credential.expires_at,
+        "days_left": days_left,
+        "expires_soon": days_left is not None and days_left < EXPIRES_SOON_DAYS,
+        "last_used_at": credential.last_used_at,
+    }
 
 
 class CredentialIssued(TypedDict):
@@ -120,6 +166,7 @@ def actor_from_token(store: RegistryUnitOfWork, token: str, *, stamp: Stamp) -> 
         actor_type=found.actor.type,
         actor_name=found.actor.name,
         scopes=scopes,
+        credential_id=credential.id,
     )
 
 

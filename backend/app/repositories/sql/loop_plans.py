@@ -103,10 +103,10 @@ _ADD_ITEM = text(
     "INSERT INTO loop_plan_items (id, loop_id, plan_id, phase_id, phase_number, key,"
     " ticket_sequence, title, objective, instructions, required_actor, execution_mode, priority,"
     " acceptance_criteria_json, expected_evidence_json, human_action_reason, human_instructions,"
-    " created_at) VALUES (:id, :loop_id, :plan_id, :phase_id, :phase_number, :key,"
+    " created_at, summary) VALUES (:id, :loop_id, :plan_id, :phase_id, :phase_number, :key,"
     " :ticket_sequence, :title, :objective, :instructions, :required_actor, :execution_mode,"
     " :priority, :acceptance_criteria_json, :expected_evidence_json, :human_action_reason,"
-    " :human_instructions, :created_at)"
+    " :human_instructions, :created_at, :summary)"
 )
 _UPDATE_ITEM = text(
     "UPDATE loop_plan_items SET plan_id = :plan_id, phase_id = :phase_id,"
@@ -115,8 +115,8 @@ _UPDATE_ITEM = text(
     " execution_mode = :execution_mode, priority = :priority,"
     " acceptance_criteria_json = :acceptance_criteria_json,"
     " expected_evidence_json = :expected_evidence_json,"
-    " human_action_reason = :human_action_reason, human_instructions = :human_instructions"
-    " WHERE id = :id"
+    " human_action_reason = :human_action_reason, human_instructions = :human_instructions,"
+    " summary = :summary WHERE id = :id"
 )
 _ITEMS_WITH_CARDS = text(
     f"SELECT {sql.column_list(LOOP_PLAN_ITEMS_COLUMNS, 'i')},"  # noqa: S608 - from LOOP_PLAN_ITEMS_COLUMNS
@@ -272,6 +272,7 @@ def _item_values(row: LoopPlanItemsRow) -> dict[str, str | int]:
         "human_action_reason": row.human_action_reason,
         "human_instructions": row.human_instructions,
         "created_at": row.created_at,
+        "summary": row.summary,
     }
 
 

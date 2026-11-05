@@ -8,6 +8,11 @@ export interface Card {
   list_id: string;
   title: string;
   description: string;
+  /** What the Ticket is about in a sentence or two; empty when nobody has written one. */
+  summary: string;
+  summary_source: "" | "plan" | "person" | "agent";
+  /** The title or description changed after the summary was written. */
+  summary_stale: boolean;
   position: number;
   priority: Priority;
   due_at: string | null;

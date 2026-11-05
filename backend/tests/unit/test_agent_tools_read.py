@@ -353,14 +353,18 @@ def test_search_tickets_refuses_a_bad_limit_a_loop_without_its_board_and_no_word
 
 
 def test_tools_list_offers_the_listing_tools_to_the_scopes_they_declare() -> None:
-    assert [tool["name"] for tool in tool_list(_token("boards:read"))] == ["list_boards"]
-    assert [tool["name"] for tool in tool_list(_token("loops:read"))] == ["read_loop", "read_notes"]
+    assert [tool["name"] for tool in tool_list(_token("boards:read"))] == ["whoami", "list_boards"]
+    assert [tool["name"] for tool in tool_list(_token("loops:read"))] == [
+        "read_loop",
+        "read_document",
+        "read_notes",
+    ]
     assert [tool["name"] for tool in tool_list(_token("cards:read"))] == [
         "read_ticket",
         "search_tickets",
     ]
     catalogue = tool_catalog()
-    assert next(iter(catalogue)) == "list_boards"
+    assert list(catalogue)[:2] == ["whoami", "list_boards"]
     assert catalogue["list_boards"].handler is list_boards
     assert catalogue["search_tickets"].handler is search_tickets
 
@@ -368,7 +372,8 @@ def test_tools_list_offers_the_listing_tools_to_the_scopes_they_declare() -> Non
 def test_the_bootstrap_starts_the_work_at_list_boards(settings: Settings) -> None:
     bootstrap = render_bootstrap(settings)
     section = bootstrap.split("## 3. ", 1)[1].split("\n## 4. ", 1)[0]
-    assert section.startswith("Understand the work before you touch it\n\nStart with `list_boards`")
-    assert section.index("`list_boards`") < section.index("`read_board`")
+    assert section.startswith("Understand the work before you touch it\n\nStart with `whoami`")
+    order = [section.index(f"`{name}`") for name in ("whoami", "list_boards", "read_board")]
+    assert order == sorted(order)
     assert "never from a prompt" in section
     assert "`search_tickets`" in section

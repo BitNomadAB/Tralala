@@ -705,6 +705,17 @@ missing; a rejected upload removes what it staged. A board's directory is the un
 duplication: deleting a board removes `board.sqlite` and `attachments/` together, and duplicating it
 copies both.
 
+### Ticket summaries
+
+A Ticket carries `summary`: what it is about in one or two plain sentences, at most 400 characters
+(whitespace, line breaks included, becomes single spaces). `POST .../cards` and
+`PATCH .../cards/{card_id}` (with `version`) accept it, and an empty string removes it. A planned
+Ticket's summary comes from its RoadMap (`PlanTicket.summary`) and may be edited like any other,
+because it is not part of the approved work definition; a re-registered plan with a summary replaces
+it, one without keeps it. The card answers `summary`, `summary_source` (`plan`, `person` or `agent`;
+empty without one) and `summary_stale`, which is `true` once the title or description changed after
+the summary was written.
+
 ### Ticket assignment
 
 `PATCH /boards/{board_id}/cards/{card_id}` accepts `assignee_actor_id` (a human actor id or an
@@ -792,11 +803,15 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 
 | Tool | Scope | What it does |
 | --- | --- | --- |
+| `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, and the rule-11a decisions only a person makes; never the token or its hash |
 | `list_boards` | `boards:read` | The boards the token may read, by name, with status and Loop count; a board id comes from here |
 | `read_board` | `boards:read`, `loops:read` | Loops with stage, `execution_allowed` and `blocked_reason`, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | Goal, Info/Analysis/RoadMap documents, plan with per-Ticket readiness, Kanban columns and the Loop's Tickets |
+| `read_loop` | `loops:read` | The Loop's overview: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases, the columns with their Ticket counts, one `list_tickets` row per Ticket (at most 200), the work outside the plan and the newest five notes cut to 500 characters |
+| `read_document` | `loops:read` | One document by `kind` (`info`, `analysis`, `analysis_ai`, `roadmap`, `roadmap_ai`): as numbered lines, at most 60 000 characters, with `continue_from` for the rest; `analysis_ai` and `roadmap_ai` also as `view: structured`, an outline of the findings or the Phases and Tickets, and one of them in full with `item` |
 | `read_ticket` | `cards:read` | Acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
 | `search_tickets` | `cards:read` | Tickets by words in one Loop, a board's open Loops or every active board, each with board, Loop key, key and column |
+| `list_tickets` | `cards:read`, `loops:read` | A board's Tickets (or one Loop's) as short rows in board order: key, title, summary, Loop key, column, Phase, `ready`, `human_action_required`, assignee; never the description. A Ticket without a written summary shows an excerpt of its description (`summary_kind: excerpt`); `summary_stale` marks one written before the title or description changed. Completed Tickets and Loops only with `include_completed` |
+| `write_ticket_summaries` | `cards:write` | Write up to 100 Ticket summaries; each is a versioned edit that reads the version itself and retries once on a race, and each Ticket answers `written` or its refusal |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
 | `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
 | `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
@@ -808,7 +823,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket; only a read-only Loop or board refuses it |
 | `write_note` | `loops:write` | Add a note to the Loop's log: what belongs to the Loop and to no single Ticket; refused on a completed Loop |
 | `read_notes` | `loops:read` | The Loop's notes, oldest first, a page at a time (`older` is the next `before`) |
-| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`; `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
+| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`; `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id` |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the messages and positions |
 | `read_discussion` | `discussions:read` | Read a thread with its messages and each agent's position |

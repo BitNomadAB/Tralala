@@ -2,10 +2,22 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints
+
+SUMMARY_MAX_CHARS = 400
+
+
+def _one_paragraph(value: object) -> object:
+    """A summary is one paragraph: every run of whitespace, line breaks included, is one space."""
+    return " ".join(value.split()) if isinstance(value, str) else value
+
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 LongText = Annotated[str, StringConstraints(max_length=20_000)]
+# What a Ticket is about, in a sentence or two: what a list of Tickets shows instead of everything.
+Summary = Annotated[
+    str, StringConstraints(max_length=SUMMARY_MAX_CHARS), BeforeValidator(_one_paragraph)
+]
 # A comment carries a progress note or a completion summary with its evidence, not a title.
 CommentText = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20_000)

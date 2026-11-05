@@ -71,6 +71,8 @@ class ActorContext:
     scopes: frozenset[str] = field(default_factory=frozenset[str])
     request_id: str = ""
     role: str | None = None
+    # The API token the request authenticated with; None for a session cookie or an internal actor.
+    credential_id: str | None = None
 
     @property
     def is_user(self) -> bool:

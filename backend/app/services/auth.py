@@ -495,6 +495,10 @@ class AuthService:
         """The caller's own agent access, or every token when an administrator asks."""
         return auth_tokens.list_credentials(self.store, actor, owner_id=owner_id)
 
+    def current_key(self, actor: ActorContext) -> auth_tokens.KeyIdentity | None:
+        """The key this request authenticated with, for its holder; None for a session cookie."""
+        return auth_tokens.current_key(self.store, actor, now=self._clock())
+
     def revoke_credential(self, actor: ActorContext, credential_id: str) -> bool:
         """Revoke the token and disable the agent actor it acted as."""
         return auth_tokens.revoke_credential(self.store, actor, credential_id, stamp=self._stamp)

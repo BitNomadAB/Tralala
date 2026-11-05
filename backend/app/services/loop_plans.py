@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -61,6 +61,7 @@ from .loop_plans_readiness import (
 from .loop_plans_validation import validate_plan
 from .loops import EXECUTION_STAGES
 from .plan_views import BlockedReason, PhaseView, PlanView, PlanViews, Readiness
+from .ticket_summaries import summary_basis
 
 
 # What publishing reads back from a stored payload; any other key is left alone.
@@ -68,6 +69,7 @@ class _StoredTicket(TypedDict):
     id: str
     key: str
     title: str
+    summary: NotRequired[str]  # absent from a plan stored before Tickets had summaries
     instructions: str
     priority: str
     required_actor: str
@@ -432,6 +434,7 @@ def _project_item(
         title=ticket["title"],
         objective=ticket["objective"],
         instructions=ticket["instructions"],
+        summary=ticket["summary"],
         required_actor=ticket["required_actor"],
         execution_mode=ticket["execution_mode"],
         priority=ticket["priority"],
@@ -445,7 +448,9 @@ def _project_item(
         repos.plan_items.add(row)
     else:
         repos.plan_items.update(row)
-        repos.cards.sync_plan_item(row, now=now)
+        repos.cards.sync_plan_item(
+            row, now=now, summary_basis=summary_basis(row.title, row.instructions)
+        )
 
 
 def _planned_card(
@@ -458,7 +463,9 @@ def _planned_card(
     plan_id: str,
     now: str,
 ) -> CardsRow:
-    """The Ticket card a planned Ticket becomes; it carries the plan item's identity."""
+    """The Ticket card a planned Ticket becomes; it carries the plan item's identity and the
+    RoadMap's summary of it."""
+    summary = ticket.get("summary", "")
     return CardsRow(
         id=ticket["id"],
         list_id=list_id,
@@ -489,6 +496,11 @@ def _planned_card(
         human_confirmed_at=None,
         human_confirmed_by_actor_id=None,
         plan_revision_id=plan_id,
+        summary=summary,
+        summary_source="plan" if summary else "",
+        summary_basis_sha256=(
+            summary_basis(ticket["title"], ticket["instructions"]) if summary else ""
+        ),
     )
 
 

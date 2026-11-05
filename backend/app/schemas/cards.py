@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import Field, field_validator
 
 from ..core.dates import normalize_timestamp
-from .common import Id, LongText, Name, OutModel, Priority, StrictModel
+from .common import Id, LongText, Name, OutModel, Priority, StrictModel, Summary
 from .subresources import LabelOut
 
 
@@ -11,6 +11,9 @@ class CardCreate(StrictModel):
     list_id: Id
     title: Name
     description: LongText = ""
+    summary: Summary = Field(
+        default="", description="What the Ticket is about in a sentence or two (plain text)"
+    )
     priority: Priority = "none"
     due_at: str | None = None
     labels: list[str] = Field(default_factory=list, max_length=20)
@@ -25,6 +28,9 @@ class CardUpdate(StrictModel):
     version: int = Field(ge=1, description="Expected current version for optimistic concurrency")
     title: Name | None = None
     description: LongText | None = None
+    summary: Summary | None = Field(
+        default=None, description="Replace the summary; an empty string removes it"
+    )
     priority: Priority | None = None
     due_at: str | None = None
     clear_due_at: bool = False
@@ -71,6 +77,11 @@ class CardOut(OutModel):
     list_id: str
     title: str
     description: str
+    summary: str = ""
+    summary_source: str = Field(default="", description="plan, person, agent; empty without one")
+    summary_stale: bool = Field(
+        default=False, description="The title or description changed after the summary was written"
+    )
     position: int
     priority: Priority
     due_at: str | None = None

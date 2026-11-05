@@ -114,7 +114,7 @@ Run these from `backend/`.
 | `python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log --no-server-header` | What the container runs: no reload, no banner advertising the server. |
 | `python -m pytest` | The unit suite (`tests/unit`) — the primary gate. No app, no database, no network: services run against in-memory repository fakes, so it finishes in seconds. It refuses to start when the generated rows are older than the migrations. |
 | `python -m pytest -n auto` | The same, spread over every core; what CI runs, and proof that no test depends on another. |
-| `python -m pytest tests/infrastructure` | The small SQLite suite: connection set-up, migrations, commit and rollback, a board releasing its file. Its own command and CI job. |
+| `python -m pytest tests/infrastructure` | The small SQLite suite: migrations, a failed revision rolled back, commit and rollback, snapshot restore. Its own command and CI job. |
 | `python -m pytest tests/unit/test_hardening.py` | One file. |
 | `python -m pytest tests/unit/test_hardening.py::test_explicit_secret_wins` | One test. |
 | `python -m pytest -k "csrf or session"` | Tests matching a keyword. |

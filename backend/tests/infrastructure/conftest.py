@@ -1,8 +1,9 @@
 """The minimal infrastructure suite: one real SQLite data directory for the whole session.
 
-These tests check only what a fake cannot: that connections are initialised, that the migrations
-run to completion, that the unit of work commits and rolls back, that a closed board lets go of its
-file and that the databases answer. They never test business rules, tables or columns (the unit
+These tests check only what protects real data on an upgrade, which a fake cannot: that the
+migrations run to completion, that a failed revision rolls back whole and a rebuilt table keeps its
+children, that the unit of work commits and rolls back and a second writer waits, and that only a
+sound snapshot is restored. They never test business rules, tables or columns (the unit
 suite and ``python -m tools.dbgen`` do that). The registry and one board are migrated once per
 session (per worker under pytest-xdist) into a real file, not ``:memory:``, so WAL, file locks and
 handle release are the real ones; each test cleans up what it wrote, and the directory goes with the

@@ -35,6 +35,7 @@ from app.services.loop_plans import (
     validate_plan,
 )
 from app.services.plan_views import PlanViews, Readiness
+from app.services.ticket_summaries import summary_basis
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
@@ -517,6 +518,7 @@ def test_a_draft_projects_its_phases_and_items_and_keeps_known_rows_creation() -
         human_action_reason="Legal",
         human_instructions="Sign",
         created_at=STAMP,
+        summary="",
     )
     state.phases[P1] = state.phases[P1].__replace__(created_at=CREATED, is_qa_phase=1)
     state.plan_items[T1] = state.plan_items[T1].__replace__(created_at=CREATED)
@@ -592,6 +594,37 @@ def test_a_new_item_does_not_touch_a_card_with_its_id() -> None:
     state.cards = {T1: stranger}
     register(w, payload(phase(P1, 1, ticket(T1, "Planned"))))
     assert state.cards[T1] == stranger
+
+
+def test_a_published_ticket_carries_the_roadmap_summary_and_a_replan_updates_or_keeps_it() -> None:
+    w = board()
+    state = w.state
+    first = ticket(T1, "First", summary="Adds  the\ncolumns.", instructions="Do it.")
+    plan_id = register(w, payload(phase(P1, 1, first, ticket(T2, "Second"))))
+    assert state.plan_items[T1].summary == "Adds the columns."
+    publish(w, plan_id)
+    card = state.cards[T1]
+    assert (card.summary, card.summary_source) == ("Adds the columns.", "plan")
+    assert card.summary_basis_sha256 == summary_basis("First", "Do it.")
+    unsummarised = state.cards[T2]
+    assert (unsummarised.summary, unsummarised.summary_source) == ("", "")
+    assert unsummarised.summary_basis_sha256 == ""
+    # A worker summarised the second Ticket; a replan without a summary for it keeps that one,
+    # and a new plan summary replaces the first one's.
+    state.cards[T2] = unsummarised.__replace__(
+        summary="Written later.", summary_source="agent", summary_basis_sha256="kept"
+    )
+    renamed = ticket(T1, "First", summary="Adds two columns.", instructions="Do it twice.")
+    register(w, payload(phase(P1, 1, renamed, ticket(T2, "Second"))))
+    card = state.cards[T1]
+    assert (card.summary, card.summary_source) == ("Adds two columns.", "plan")
+    assert card.summary_basis_sha256 == summary_basis("First", "Do it twice.")
+    kept = state.cards[T2]
+    assert (kept.summary, kept.summary_source, kept.summary_basis_sha256) == (
+        "Written later.",
+        "agent",
+        "kept",
+    )
 
 
 def test_the_edges_are_the_newest_drafts_in_order_and_a_repeated_edge_is_kept_once() -> None:

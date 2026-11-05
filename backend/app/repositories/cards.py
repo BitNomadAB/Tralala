@@ -11,6 +11,9 @@ from ..db.generated.board import CardsRow, LabelsRow, LoopPlanItemsRow
 CARD_EDITABLE: Final = (
     "title",
     "description",
+    "summary",
+    "summary_source",
+    "summary_basis_sha256",
     "priority",
     "due_at",
     "completed_at",
@@ -37,6 +40,9 @@ class CardChanges(TypedDict, total=False):
 
     title: str
     description: str
+    summary: str
+    summary_source: str
+    summary_basis_sha256: str
     priority: str
     due_at: str | None
     completed_at: str | None
@@ -129,10 +135,11 @@ class CardRepository(Protocol):
 
     def update(self, card_id: str, changes: CardChanges) -> None: ...
 
-    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str) -> None:
+    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str, summary_basis: str) -> None:
         """The card published from ``item`` (its id, and the item as its plan item) takes the
         item's title, instructions as description, actor, mode, human texts and Phase; its version
-        stays. Any other card is left alone."""
+        stays. A non-empty plan summary replaces the card's (source ``plan``, written from
+        ``summary_basis``); an empty one keeps it. Any other card is left alone."""
         ...
 
     def move(self, card_id: str, list_id: str, position: int, *, now: str) -> None:

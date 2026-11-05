@@ -56,8 +56,8 @@ jobs:
           if-no-files-found: ignore
 
   backend-infrastructure:
-    # The one place a backend test opens SQLite: connections, migrations to completion, commit and
-    # rollback, a released board file, availability. One real database per run, never per test.
+    # The one place a backend test opens SQLite: migrations to completion, a failed revision rolled
+    # back, commit and rollback, a waiting writer, snapshot restore. One real database per run.
     name: Backend infrastructure (SQLite)
     runs-on: ubuntu-latest
     defaults:

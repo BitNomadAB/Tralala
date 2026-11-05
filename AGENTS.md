@@ -283,9 +283,10 @@ tests/infrastructure`.
   suite refuses to start on rows generated from an older schema. When a rule sits inside a request
   path, extract the pure part and test that, as `csrf_satisfied` in `core/security.py` is.
 - **The infrastructure suite** (`tests/infrastructure/`) is the only backend test that opens SQLite,
-  and it stays minimal: connection set-up, migrations to completion, each unit of work's commit and
-  rollback, a board releasing its file, availability. One real database per session, never per
-  test; no test per table, column, constraint or repository, and no business rule against a real
+  and it stays minimal: what protects real data on an upgrade and nothing else. Both chains migrate
+  to their head on a real file; a revision that fails rolls back whole, and a rebuilt table keeps its
+  children and its keys; each unit of work commits and rolls back, and a second writer waits; only a
+  sound snapshot is restored. One real database per session, never per test; no test per table, column, constraint or repository, and no business rule against a real
   database.
 - The running stack (HTTP, authentication, the databases together) is exercised by the Playwright
   journeys in `frontend/e2e/`.

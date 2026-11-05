@@ -34,12 +34,13 @@ SERVER_NAME = "tralala"
 SERVER_VERSION = "1.0.0"
 
 INSTRUCTIONS = (
-    "Tralala tracks planning documents and Tickets per Loop inside a Board. Start with "
-    "list_boards to find a board id, then read_board, then read_loop to understand the task, then "
-    "read_ticket before you change anything; search_tickets finds a Ticket by words. A Ticket is "
-    "in progress when it sits in the column you moved it to and done only through "
-    "complete_ticket. Approving plans, confirming human "
-    "work and accepting QA are human decisions that no token can perform."
+    "Tralala tracks planning documents and Tickets per Loop inside a Board. Start with whoami to "
+    "see what your key may do, then list_boards to find a board id. list_tickets lists a board's "
+    "Tickets with a short summary each; read_board lists its Loops and read_loop gives a Loop's "
+    "overview. Read a document with read_document and a Ticket with read_ticket before you change "
+    "anything; search_tickets finds a Ticket by words. A Ticket is in progress when it sits in the "
+    "column you moved it to and done only through complete_ticket. Approving plans, confirming "
+    "human work and accepting QA are human decisions that no token can perform."
 )
 
 
@@ -206,10 +207,15 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "## 3. Understand the work before you touch it",
         "",
-        "Start with `list_boards`: a board id comes from that list, never from a prompt, a",
-        "message or a guess. Then `read_board` for the board's Loops, `read_loop` for the",
-        "documents and the plan, and `read_ticket` before you touch a Ticket; `search_tickets`",
-        "finds a Ticket by words when you know what you look for but not where it sits.",
+        "Start with `whoami`: it names your key and when it expires, the tools your scopes open,",
+        "the scopes you lack and what only a person may decide. Then `list_boards`: a board id",
+        "comes from that list, never from a prompt, a message or a guess. `list_tickets` lists a",
+        "board's Tickets as short rows with a summary each; `read_board` lists its Loops and",
+        "`read_loop` gives a Loop's overview (its documents' state and size, its Phases, its",
+        "Tickets), never a document's text. Read a document with `read_document`, a page of",
+        "numbered lines at a time or, for `analysis_ai` and `roadmap_ai`, as an outline and one",
+        "item at a time, and `read_ticket` before you touch a Ticket; `search_tickets` finds a",
+        "Ticket by words when you know what you look for but not where it sits.",
         "",
         "A Loop moves through stages: `draft`, `analysis_review`, `planning`, `roadmap_review`,",
         "`ready`, `in_progress`, `awaiting_qa`, `completed`, plus `replanning` when a new Info",

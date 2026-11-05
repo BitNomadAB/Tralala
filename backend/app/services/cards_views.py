@@ -14,6 +14,7 @@ from ..db.generated.board import CardsRow, LabelsRow
 from ..repositories.cards import CardCounts, CardSort
 from .plan_views import Blocker, ReadinessItem
 from .subresources import ChecklistEntry, CommentEntry, LabelEntry, label_entries
+from .ticket_summaries import summary_stale
 
 
 class CardRecord(TypedDict):
@@ -23,6 +24,9 @@ class CardRecord(TypedDict):
     list_id: str
     title: str
     description: str
+    summary: str
+    summary_source: str
+    summary_stale: bool
     position: int
     priority: str
     due_at: str | None
@@ -100,6 +104,9 @@ def card_record(row: CardsRow) -> CardRecord:
         "list_id": row.list_id,
         "title": row.title,
         "description": row.description,
+        "summary": row.summary,
+        "summary_source": row.summary_source,
+        "summary_stale": summary_stale(row),
         "position": row.position,
         "priority": row.priority,
         "due_at": row.due_at,

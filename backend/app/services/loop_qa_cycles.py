@@ -150,6 +150,9 @@ def ensure_qa_cycle(
             human_confirmed_at=None,
             human_confirmed_by_actor_id=None,
             plan_revision_id=loop.current_plan_id,
+            summary="",
+            summary_source="",
+            summary_basis_sha256="",
         )
     )
     cycle = LoopQaCyclesRow(

@@ -16,6 +16,7 @@ import { CardChecklists } from "./CardChecklists";
 import { CardComments } from "./CardComments";
 import { CardDialogForm, type CardDraft } from "./CardDialogForm";
 import { CardHistory } from "./CardHistory";
+import { CardSummaryNote } from "./CardSummaryNote";
 import { CardTicketSummary } from "./CardTicketSummary";
 import { useCardChecklists } from "./useCardChecklists";
 import { useCardComments } from "./useCardComments";
@@ -167,6 +168,7 @@ export function CardDialog({
           </p>
         ) : (
           <div className="flex flex-col gap-4">
+            <CardSummaryNote card={card} />
             <CardTicketSummary card={card} />
             <CardDialogForm
               draft={draft}

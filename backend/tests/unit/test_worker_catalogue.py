@@ -47,7 +47,7 @@ import pytest
 from app.api.mcp import render_bootstrap, tool_list
 from app.core.config import Settings
 from app.core.context import SCOPES, ActorContext
-from app.services import agent_tools
+from app.services import agent_tools, agent_tools_identity
 from app.services.agent_tools import AgentTool, tool_catalog
 
 UNIT_ROOT = Path(__file__).resolve().parent
@@ -57,6 +57,9 @@ CATALOGUE_FILES = tuple(
     SERVICES_ROOT / name
     for name in (
         "agent_tools.py",
+        "agent_tools_documents.py",
+        "agent_tools_identity.py",
+        "agent_tools_listing.py",
         "agent_tools_notes.py",
         "agent_tools_read.py",
         "agent_tools_write.py",
@@ -708,6 +711,12 @@ def test_the_human_decisions_are_rule_11a() -> None:
     assert [text.casefold() for text in listed] == [
         decision.action.casefold() for decision in HUMAN_DECISIONS
     ]
+
+
+def test_whoami_names_the_rule_11a_decisions() -> None:
+    assert tuple(
+        decision.action for decision in HUMAN_DECISIONS
+    ) == agent_tools_identity.HUMAN_DECISIONS
 
 
 def test_every_tool_is_named_by_a_unit_test() -> None:

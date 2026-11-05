@@ -474,6 +474,7 @@ def test_a_live_token_is_its_agent_with_the_stored_scopes_and_records_its_use(
         actor_type="agent",
         actor_name="Agent t-1",
         scopes=frozenset({"boards:read", "cards:read"}),
+        credential_id="t-1",
     )
     assert registry.state.credentials["t-1"].last_used_at == NOW_TEXT
 

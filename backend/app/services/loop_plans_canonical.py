@@ -21,6 +21,7 @@ class CanonicalTicket(TypedDict):
 
     id: str
     title: str
+    summary: str
     objective: str
     instructions: str
     required_actor: str
@@ -87,6 +88,7 @@ def canonical_ticket(
     return {
         "id": ticket.id,
         "title": ticket.title,
+        "summary": ticket.summary,
         "objective": ticket.objective,
         "instructions": ticket.instructions,
         "required_actor": ticket.required_actor,

@@ -345,6 +345,9 @@ def card_row(
         human_confirmed_at=None,
         human_confirmed_by_actor_id=None,
         plan_revision_id=None,
+        summary="",
+        summary_source="",
+        summary_basis_sha256="",
     )
 
 
@@ -498,6 +501,7 @@ def plan_item_row(item_id: str, loop_id: str, plan_id: str, phase_id: str) -> Lo
         human_action_reason="",
         human_instructions="",
         created_at=CREATED,
+        summary="",
     )
 
 
@@ -1340,10 +1344,14 @@ class FakeCardRepository:
             raise ConstraintError("an update without a column is not SQL")
         self._change(card_id, lambda card: card.__replace__(**changes))
 
-    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str) -> None:
+    def sync_plan_item(self, item: LoopPlanItemsRow, *, now: str, summary_basis: str) -> None:
         card = self._state.cards.get(item.id)
         if card is None or card.plan_item_id != item.id:
             return
+        if item.summary:  # an empty plan summary keeps the card's, as the SQL CASE does
+            card = card.__replace__(
+                summary=item.summary, summary_source="plan", summary_basis_sha256=summary_basis
+            )
         self._state.cards[item.id] = card.__replace__(
             title=item.title,
             description=item.instructions,

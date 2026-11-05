@@ -21,6 +21,7 @@ from .activity import activity_entry
 from .loop_identifiers import format_unplanned_key, next_unplanned_sequence
 from .loops import refresh_stage
 from .ordering import place
+from .ticket_summaries import summary_basis, summary_source
 
 NEW_LABEL_COLOR = "#64748b"
 SYSTEM_ACTOR = ActorContext(actor_id="system", actor_type="system", actor_name="Tralala")
@@ -109,6 +110,27 @@ def label_ids(
 # --- creating ----------------------------------------------------------------------------------
 
 
+def _summary_changes(
+    actor: ActorContext,
+    existing: CardsRow,
+    summary: str,
+    changes: CardChanges,
+    logged: dict[str, object],
+) -> None:
+    """Write ``summary`` as the actor's, from the title and description the edit leaves; an empty
+    one removes it. The same text written again over a changed Ticket confirms it (fresh basis)."""
+    title = changes.get("title", existing.title)
+    description = changes.get("description", existing.description)
+    wanted = ("", "", "")
+    if summary:
+        wanted = (summary, summary_source(actor), summary_basis(title, description))
+    current = (existing.summary, existing.summary_source, existing.summary_basis_sha256)
+    if wanted == current:
+        return
+    changes["summary"], changes["summary_source"], changes["summary_basis_sha256"] = wanted
+    logged["summary"] = {"changed": True, "source": wanted[1]}
+
+
 def insert_card(
     repos: BoardRepositories,
     actor: ActorContext,
@@ -171,6 +193,11 @@ def insert_card(
             human_confirmed_at=None,
             human_confirmed_by_actor_id=None,
             plan_revision_id=None,
+            summary=payload.summary,
+            summary_source=summary_source(actor) if payload.summary else "",
+            summary_basis_sha256=(
+                summary_basis(payload.title, payload.description) if payload.summary else ""
+            ),
         )
     )
     if payload.labels:
@@ -307,6 +334,8 @@ def apply_update(
                 "name": assignee.name,
                 "type": assignee.type,
             }
+    if payload.summary is not None:
+        _summary_changes(actor, existing, payload.summary, changes, logged)
     if changes:
         changes["version"] = existing.version + 1
         changes["updated_at"] = now()

@@ -6,9 +6,17 @@ own, only the shape MCP and ``/llms.txt`` read.
 
 from __future__ import annotations
 
-from typing import NotRequired, Required, TypedDict
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NotRequired, Required, TypedDict
 
 from pydantic import BaseModel
+
+from ..core.context import ActorContext
+from .agent_tools_read import ToolArguments, ToolResult
+
+if TYPE_CHECKING:  # the composition root imports the catalogue lazily, so keep the cycle out
+    from . import Services
 
 
 class ArgumentSchema(TypedDict, total=False):
@@ -77,9 +85,34 @@ def model_argument(
     return argument, definitions
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class AgentTool:
+    """One callable capability: wire contract plus the handler that runs it."""
+
+    name: str
+    description: str
+    scopes: tuple[str, ...]
+    input_schema: InputSchema
+    handler: Callable[[Services, ActorContext, ToolArguments], ToolResult]
+
+
+def missing_scopes(tool: AgentTool, actor: ActorContext) -> tuple[str, ...]:
+    """Scopes the tool needs that the actor does not hold; empty means it may run."""
+    return tuple(scope for scope in tool.scopes if not actor.has_scope(scope))
+
+
+def describe_scope(tool: AgentTool) -> str:
+    return "Requires " + ", ".join(f"`{scope}`" for scope in tool.scopes) + "."
+
+
 __all__ = [
+    "AgentTool",
     "ArgumentSchema",
     "InputSchema",
+    "describe_scope",
+    "missing_scopes",
     "model_argument",
     "object_schema",
     "string_argument",

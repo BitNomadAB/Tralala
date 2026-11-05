@@ -118,7 +118,9 @@ PURPOSE_PROMPTS = {
         "identity retention); never guess identity from similar text. Use a new UUID for a new "
         "item. Mark work that a human must perform with required_actor='human' and fill in "
         "human_action_reason and human_instructions. Model a human check that gates a later "
-        f"Phase as execution_mode='pre_phase_gate'. {REPOSITORY_RULES} "
+        f"Phase as execution_mode='pre_phase_gate'. Give every Ticket a summary: what it is "
+        "about in one or two plain sentences for a list of Tickets, without file paths or code. "
+        f"{REPOSITORY_RULES} "
         # The plan rules validate_plan holds every answer to, one sentence each; an answer that
         # breaks one is sent back for repair with the rule's message.
         "Every id in prerequisite_phase_ids or prerequisite_ticket_ids must be the id of a "

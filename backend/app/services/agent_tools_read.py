@@ -1,7 +1,7 @@
 """The worker tools that only read, and the helpers every tool handler shares.
 
 The catalogue in ``agent_tools`` declares each tool's name, description, scopes and input schema;
-the handlers here run the read-only entries (``list_boards``, ``read_board``, ``read_loop``,
+the handlers here run the read-only entries (``list_boards``, ``read_board``,
 ``read_ticket``, ``search_tickets`` and ``read_discussion``). Each takes
 ``(services, actor, args)``, opens with the ``actor.require`` checks of the scopes its entry
 declares and calls the same services as the REST routes.
@@ -40,8 +40,6 @@ type ToolResult = dict[str, object]
 BOARD_LIST_LIMIT = 100
 SEARCH_LIMIT = 100
 SEARCH_DEFAULT = 25
-# read_loop carries the newest notes; read_notes pages through the rest.
-READ_LOOP_NOTES = 20
 
 
 class BoardListing(Protocol):
@@ -307,48 +305,9 @@ def _read_board(
         "people": services.agent.assignable_people(),
         "agents": services.agent.askable_agents(board_id),
         "next_step": (
-            "Call read_loop with one of these loop ids to read its documents and Tickets."
+            "Call read_loop with one of these loop ids for its overview, or list_tickets for the "
+            "board's Tickets with a short summary each."
         ),
-    }
-
-
-def _read_loop(
-    services: Services, actor: ActorContext, args: ToolArguments
-) -> ToolResult:
-    actor.require("loops:read")
-    board_id = _require(args, "board_id")
-    loop_id = _require(args, "loop_id")
-    context = services.loop_document.context(board_id, loop_id)
-    readiness = services.loop.readiness(board_id, loop_id)
-    notes = services.loop_notes.list(actor, board_id, loop_id, limit=READ_LOOP_NOTES)
-    kinds = args.get("document_kinds")
-    wanted = [str(kind) for kind in kinds] if isinstance(kinds, list) and kinds else None
-    documents = {
-        kind: value
-        for kind, value in context["documents"].items()
-        if wanted is None or kind in wanted
-    }
-    return {
-        "loop": {
-            "id": context["loop_id"],
-            "key": context["loop_key"],
-            "name": context["loop_name"],
-            "goal": context["goal"],
-            "stage": context["stage"],
-        },
-        "execution_allowed": readiness["execution_allowed"],
-        "blocked_reason": readiness["blocked_reason"],
-        "documents": documents,
-        "plan": context["plan"],
-        "columns": [
-            {"id": entry["id"], "name": entry["name"]}
-            for entry in _loop_lists(services, board_id, loop_id)
-        ],
-        "tickets": services.card.list(board_id, loop_id, limit=200)[0],
-        # Work added outside the plan (create_ticket): it never blocks readiness or completion.
-        "unplanned_tickets": readiness["unplanned"],
-        "notes": notes["notes"],
-        "note_count": notes["count"],
     }
 
 
@@ -450,7 +409,6 @@ __all__ = [
     "_loop_lists",
     "_read_board",
     "_read_discussion",
-    "_read_loop",
     "_read_ticket",
     "_require",
     "_rows",
