@@ -280,21 +280,11 @@ def _read_board(
         include_completed=bool(args.get("include_completed", False)),
         include_archived=False,
     )
-    summaries: list[ToolResult] = []
-    for entry in loops:
-        readiness = services.loop.readiness(board_id, entry["id"])
-        summaries.append(
-            {
-                "id": entry["id"],
-                "key": entry["key"],
-                "name": entry["name"],
-                "stage": entry["stage"],
-                "goal": entry["goal"],
-                "progress": entry.get("progress", {}),
-                "execution_allowed": readiness["execution_allowed"],
-                "blocked_reason": readiness["blocked_reason"],
-            }
-        )
+    # Where each Loop stands, and what comes next, is loop_summaries' answer; this one names them.
+    summaries: list[ToolResult] = [
+        {"id": entry["id"], "key": entry["key"], "name": entry["name"], "stage": entry["stage"]}
+        for entry in loops
+    ]
     return {
         "board": {
             "id": board["id"],
@@ -305,8 +295,8 @@ def _read_board(
         "people": services.agent.assignable_people(),
         "agents": services.agent.askable_agents(board_id),
         "next_step": (
-            "Call read_loop with one of these loop ids for its overview, or list_tickets for the "
-            "board's Tickets with a short summary each."
+            "Call loop_summaries for where each Loop stands and what comes next, list_tickets for "
+            "the Tickets, or read_loop with a loop id (or key) for one Loop's overview."
         ),
     }
 
@@ -354,6 +344,9 @@ def _read_ticket(
             "id": card["id"],
             "key": card["ticket_key"],
             "title": card["title"],
+            "summary": card["summary"],
+            "summary_source": card["summary_source"],
+            "summary_stale": card["summary_stale"],
             "description": card["description"],
             "column": column,
             "list_id": card["list_id"],

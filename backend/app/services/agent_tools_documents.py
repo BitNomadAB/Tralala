@@ -1,10 +1,11 @@
 """``read_loop`` as an overview, and ``read_document`` for the text a worker chooses to read.
 
-``read_loop`` answers what a Loop is and where it stands without one line of its documents: each
-document's state, revision, author and size, the Phases, the columns, one short row per Ticket and
-the newest notes cut short. The documents themselves are read with ``read_document``: as numbered
-lines a page at a time, or, for the technical analysis and RoadMap, as an outline whose items (a
-finding, a Phase, a Ticket) are read one at a time. No answer carries a document twice.
+``read_loop`` answers what a Loop is and where it stands without one line of its documents and
+without one Ticket: each document's state, revision, author and size, the Phases and the columns
+with their counts, and the newest notes cut short; ``list_tickets`` lists the Tickets. The
+documents themselves are read with ``read_document``: as numbered lines a page at a time, or, for
+the technical analysis and RoadMap, as an outline whose items (a finding, a Phase, a Ticket) are
+read one at a time. Both take a Loop by its id or by its key. No answer carries a document twice.
 
 The handlers are public and typed on the attributes of the composition root they use, so a unit
 test runs them with the real services on the typed fakes. Their catalogue entries are built here
@@ -20,12 +21,11 @@ from pydantic import JsonValue
 from ..core.context import ActorContext
 from ..core.errors import NotFound, ValidationFailure
 from ..schemas.loops import DOCUMENT_KINDS
-from .agent_tools_listing import LOOP_CARD_LIMIT, board_rows
+from .agent_tools_listing import loop_id_of
 from .agent_tools_read import ToolArguments, ToolResult, _require, _text, _whole_number
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
-    from .cards import CardService
     from .lists import ListService
     from .loop_documents import LoopDocumentService
     from .loop_documents_views import DocumentView
@@ -34,7 +34,6 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
 
 PAGE_CHARS: Final = 60_000
 """The most text one ``read_document`` answer carries; the rest is read from ``continue_from``."""
-OVERVIEW_TICKETS: Final = 200
 OVERVIEW_NOTES: Final = 5
 NOTE_PREVIEW_CHARS: Final = 500
 MAX_START_LINE: Final = 10_000_000
@@ -66,15 +65,15 @@ class LoopReading(Protocol):
     @property
     def list(self) -> ListService: ...
 
-    @property
-    def card(self) -> CardService: ...
-
 
 class DocumentReading(Protocol):
     """What ``read_document`` uses of the composition root."""
 
     @property
     def loop_document(self) -> LoopDocumentService: ...
+
+    @property
+    def loop(self) -> LoopService: ...
 
 
 # --- read_loop -----------------------------------------------------------------------------------
@@ -104,14 +103,12 @@ def read_loop(services: LoopReading, actor: ActorContext, args: ToolArguments) -
             details={"argument": "document_kinds"},
         )
     board_id = _require(args, "board_id")
-    loop_id = _require(args, "loop_id")
+    loop_id = loop_id_of(services, args)
     context = services.loop_document.context(board_id, loop_id)
     documents = services.loop_document.documents(board_id, loop_id)["documents"]
     readiness = services.loop.readiness(board_id, loop_id)
     notes = services.loop_notes.list(actor, board_id, loop_id, limit=OVERVIEW_NOTES)
     columns = services.list.list(board_id, loop_id)
-    cards, total = services.card.list(board_id, loop_id, limit=LOOP_CARD_LIMIT)
-    tickets = board_rows(cards, columns, loop_key=context["loop_key"])[:OVERVIEW_TICKETS]
     return {
         "loop": {
             "id": context["loop_id"],
@@ -138,9 +135,7 @@ def read_loop(services: LoopReading, actor: ActorContext, args: ToolArguments) -
             {"id": column["id"], "name": column["name"], "tickets": column["card_count"]}
             for column in columns
         ],
-        "tickets": tickets,
-        "ticket_count": total,
-        "tickets_truncated": total > len(tickets),
+        "ticket_count": sum(column["card_count"] for column in columns),
         # Work added outside the plan (create_ticket): it never blocks readiness or completion.
         "unplanned_tickets": readiness["unplanned"],
         "notes": [
@@ -154,7 +149,8 @@ def read_loop(services: LoopReading, actor: ActorContext, args: ToolArguments) -
         "note_count": notes["count"],
         "next_step": (
             "Read a document with read_document (kind info, analysis, analysis_ai, roadmap or "
-            "roadmap_ai), a Ticket with read_ticket, the older notes with read_notes."
+            "roadmap_ai), list the Tickets with list_tickets and this loop_id, the older notes "
+            "with read_notes."
         ),
     }
 
@@ -264,7 +260,7 @@ def read_document(
 ) -> ToolResult:
     actor.require("loops:read")
     board_id = _require(args, "board_id")
-    loop_id = _require(args, "loop_id")
+    loop_id = loop_id_of(services, args)
     kind = _require(args, "kind")
     if kind not in DOCUMENT_KINDS:
         raise ValidationFailure(
@@ -312,9 +308,9 @@ def document_tools(board_id: ArgumentSchema, loop_id: ArgumentSchema) -> list[Ag
             name="read_loop",
             description=(
                 "Read one Loop as an overview: its goal and stage, whether execution is allowed, "
-                "each document's state and size (not its text), the Phases, the columns, one "
-                "short row per Ticket with its summary, and the newest notes. Read a document "
-                "with read_document and a Ticket with read_ticket."
+                "each document's state and size (not its text), the Phases and the columns with "
+                "their Ticket counts, and the newest notes. Read a document with read_document; "
+                "list the Tickets with list_tickets."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(

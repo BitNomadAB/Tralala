@@ -101,11 +101,12 @@ def test_whoami_names_the_key_its_expiry_its_scopes_and_the_tools_they_open(
     }
     assert answer["scopes"] == ["boards:read", "cards:read", "loops:read"]
     tools = section(answer, "tools")
-    assert list(tools)[:4] == ["whoami", "list_boards", "read_board", "read_loop"]
+    assert list(tools)[:4] == ["whoami", "list_boards", "loop_summaries", "read_board"]
     assert "list_tickets" in tools
     assert "write_ticket_summaries" not in tools
     assert str(tools["whoami"]).endswith(".")
     assert "Call list_boards" in str(answer["next_step"])
+    assert "loop_summaries" in str(answer["next_step"])
 
 
 def test_whoami_says_what_each_missing_scope_would_open(settings: Settings) -> None:

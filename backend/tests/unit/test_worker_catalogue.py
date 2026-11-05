@@ -60,6 +60,7 @@ CATALOGUE_FILES = tuple(
         "agent_tools_documents.py",
         "agent_tools_identity.py",
         "agent_tools_listing.py",
+        "agent_tools_loops.py",
         "agent_tools_notes.py",
         "agent_tools_read.py",
         "agent_tools_write.py",

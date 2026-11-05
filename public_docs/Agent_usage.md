@@ -80,13 +80,14 @@ certificate. `/llms.txt` is plain text at the same origin.
 | --- | --- | --- |
 | `whoami` | `boards:read` | your key, when it expires, what your scopes open, what you lack and what only a person decides |
 | `list_boards` | `boards:read` | the boards you may read, by name, with status and Loop count: the way in |
-| `read_board` | `boards:read`, `loops:read` | a board's Loops, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | a Loop's overview: documents' state and size, Phases, columns, Tickets, newest notes |
+| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who does it, its Tickets by what they wait for |
+| `read_board` | `boards:read`, `loops:read` | a board's Loops by id and key, the people you may assign, the agents you may ask |
+| `read_loop` | `loops:read` | a Loop's overview (by id or key): documents' state and size, Phases, columns, newest notes |
 | `read_document` | `loops:read` | one document's text a page at a time, or the technical analysis and RoadMap as an outline |
-| `read_ticket` | `cards:read` | one Ticket with its blockers and what you may do next |
+| `read_ticket` | `cards:read` | one Ticket in full: its summary, description, blockers and what you may do next |
 | `search_tickets` | `cards:read` | find Tickets by words: in one Loop, a board's open Loops or every active board |
-| `list_tickets` | `cards:read`, `loops:read` | a board's (or a Loop's) Tickets as short rows with a summary each: choose here, then `read_ticket` |
-| `write_ticket_summaries` | `cards:write` | write the short summaries the list shows, up to 100 at a time |
+| `list_tickets` | `cards:read`, `loops:read` | which Tickets there are and where they stand, never their text; filter by column, `assignee: me`, Phase, `ready` and more, then `read_ticket` |
+| `write_ticket_summaries` | `cards:write` | write the short summaries `read_ticket` shows, up to 100 at a time |
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |
 | `comment_ticket` | `comments:write` | add a comment, done or not: progress, findings, a blocker |
@@ -112,12 +113,12 @@ Tools are filtered by the key's scopes, so a key without `loops:generate` does n
 ```text
 whoami                          -> what this key may do, when it expires, what only a person decides
 list_boards                     -> pick the board; its id comes from here, never from a prompt
-read_board                      -> pick the Loop
-list_tickets                    -> the Tickets as short rows with a summary each: choose one
-read_loop                       -> the Loop's overview: stage, documents, Phases, blockers
+loop_summaries                  -> where each Loop stands, what comes next and who does it
+list_tickets(loop_id, filters)  -> the Tickets by key and title, e.g. assignee me or column Todo
+read_ticket                     -> read the one you chose in full, including its version
+read_loop                       -> a Loop's overview when you need its documents or Phases
 read_document                   -> the Info, the analysis or the RoadMap you need, a page at a time
 search_tickets                  -> find a Ticket by words when you know what, not where
-read_ticket                     -> read the one you are about to touch, including its version
   ... do the work ...
 comment_ticket                  -> what you found or what you changed
 assign_ticket / move_ticket     -> hand it on, or move it to the column that means "in progress"
@@ -126,11 +127,13 @@ create_ticket(follow_up_of)     -> anything you found that is not this Ticket's 
 write_note                      -> what belongs to the Loop: baseline, checks, merge, deploy
 ```
 
-Every Ticket carries a short summary so `list_tickets` reads like a table of contents. A RoadMap
-gives each planned Ticket its summary (`summary` on every Ticket in `write_roadmap`); a Ticket you
-create takes one in `create_ticket`. When the list shows `summary_kind: excerpt` or `none`, or
-`summary_stale: true`, write the summaries with `write_ticket_summaries`: one or two plain sentences
-each, no file paths or code.
+`list_tickets` never carries a Ticket's text, so a list costs the same however long the Tickets
+are: narrow it with its filters until the rows you choose from are few, then read one with
+`read_ticket`. Every Ticket carries a short summary, the first thing `read_ticket` and the Ticket
+dialog show. A RoadMap gives each planned Ticket its summary (`summary` on every Ticket in
+`write_roadmap`); a Ticket you create takes one in `create_ticket`. `list_tickets` with
+`summary: missing` or `summary: stale` lists the ones that need one; write them with
+`write_ticket_summaries`: one or two plain sentences each, no file paths or code.
 
 To start something new together:
 

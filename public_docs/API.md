@@ -714,7 +714,8 @@ Ticket's summary comes from its RoadMap (`PlanTicket.summary`) and may be edited
 because it is not part of the approved work definition; a re-registered plan with a summary replaces
 it, one without keeps it. The card answers `summary`, `summary_source` (`plan`, `person` or `agent`;
 empty without one) and `summary_stale`, which is `true` once the title or description changed after
-the summary was written.
+the summary was written. A summary is part of a Ticket's content: `read_ticket` shows it, and
+`list_tickets` never does.
 
 ### Ticket assignment
 
@@ -805,12 +806,13 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | --- | --- | --- |
 | `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, and the rule-11a decisions only a person makes; never the token or its hash |
 | `list_boards` | `boards:read` | The boards the token may read, by name, with status and Loop count; a board id comes from here |
-| `read_board` | `boards:read`, `loops:read` | Loops with stage, `execution_allowed` and `blocked_reason`, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | The Loop's overview: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases, the columns with their Ticket counts, one `list_tickets` row per Ticket (at most 200), the work outside the plan and the newest five notes cut to 500 characters |
-| `read_document` | `loops:read` | One document by `kind` (`info`, `analysis`, `analysis_ai`, `roadmap`, `roadmap_ai`): as numbered lines, at most 60 000 characters, with `continue_from` for the rest; `analysis_ai` and `roadmap_ai` also as `view: structured`, an outline of the findings or the Phases and Tickets, and one of them in full with `item` |
-| `read_ticket` | `cards:read` | Acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
+| `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent`, `anyone` or `nobody`), `execution_allowed`, its Tickets by what they wait for (`ready_for_agent`, `ready_for_person`, `waiting`) and by column, and each document's state and revision. Computed from what the Loop records, never written by anyone |
+| `read_board` | `boards:read`, `loops:read` | The board's Loops by id, key, name and stage, the people you may assign, the agents you may ask |
+| `read_loop` | `loops:read` | The Loop's overview, by its id or its key: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases and the columns with their Ticket counts, the work outside the plan and the newest five notes cut to 500 characters; the Tickets themselves are `list_tickets`' answer |
+| `read_document` | `loops:read` | One document of a Loop named by its id or its key, by `kind` (`info`, `analysis`, `analysis_ai`, `roadmap`, `roadmap_ai`): as numbered lines, at most 60 000 characters, with `continue_from` for the rest; `analysis_ai` and `roadmap_ai` also as `view: structured`, an outline of the findings or the Phases and Tickets, and one of them in full with `item` |
+| `read_ticket` | `cards:read` | The Ticket's summary (with `summary_source` and `summary_stale`), description, acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
 | `search_tickets` | `cards:read` | Tickets by words in one Loop, a board's open Loops or every active board, each with board, Loop key, key and column |
-| `list_tickets` | `cards:read`, `loops:read` | A board's Tickets (or one Loop's) as short rows in board order: key, title, summary, Loop key, column, Phase, `ready`, `human_action_required`, assignee; never the description. A Ticket without a written summary shows an excerpt of its description (`summary_kind: excerpt`); `summary_stale` marks one written before the title or description changed. Completed Tickets and Loops only with `include_completed` |
+| `list_tickets` | `cards:read`, `loops:read` | Which Tickets there are and where each stands, never what one says: id, key, title, Loop key, column, Phase, `ready`, `human_action_required`, assignee and `completed` (`fields: brief` keeps id, key and title). Column by column, then by Phase and key. Filters: `loop_id` (an id or a key), `column` (names), `assignee` (`me`, `none` or an id), `phase`, `ready`, `human_action_required`, `label`, `priority`, `due_before`, `overdue`, `summary` (`missing` or `stale`), `query`; completed Tickets and Loops only with `include_completed`. The answer repeats the filters, maps each Loop key to its id and pages with `limit` (at most 200) and `continue_from`; an unknown column is refused with the column names there are |
 | `write_ticket_summaries` | `cards:write` | Write up to 100 Ticket summaries; each is a versioned edit that reads the version itself and retries once on a race, and each Ticket answers `written` or its refusal |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
 | `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
@@ -830,7 +832,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |
 
 The flow a person and their worker use to start work is `create_loop` → `write_info` →
-`run_analysis` → the person approves the analysis → `read_loop`/`read_ticket` to work the Tickets it
+`run_analysis` → the person approves the analysis → `list_tickets`/`read_ticket` to work the Tickets it
 produces. Every step stays inside the same gates: the analysis and the RoadMap are candidates until a
 signed-in person approves them, and a cancelled or completed Loop is read-only.
 

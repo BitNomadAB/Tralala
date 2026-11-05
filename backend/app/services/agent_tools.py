@@ -28,6 +28,7 @@ from ..schemas.loops import AnalysisPayload, PlanPayload
 from .agent_tools_documents import document_tools, read_document, read_loop
 from .agent_tools_identity import identity_tools, whoami
 from .agent_tools_listing import list_tickets, listing_tools, write_ticket_summaries
+from .agent_tools_loops import loop_summaries, loop_tools
 from .agent_tools_notes import read_notes, write_note
 from .agent_tools_plan import map_plan_ids, write_analysis, write_roadmap
 from .agent_tools_read import (
@@ -67,8 +68,9 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
 
 
 _BOARD_ID = _string("Board identifier from list_boards")
-_CARD_ID = _string("Ticket identifier from read_loop or search_tickets")
+_CARD_ID = _string("Ticket identifier from list_tickets or search_tickets")
 _LOOP_ID = _string("Loop identifier from read_board")
+_LOOP_REF = _string("Loop id or key (AN001), from loop_summaries or read_board")
 
 
 def _run_arguments() -> InputSchema:
@@ -125,11 +127,12 @@ def tool_catalog() -> dict[str, AgentTool]:
             ),
             handler=list_boards,
         ),
+        *loop_tools(_BOARD_ID),
         AgentTool(
             name="read_board",
             description=(
-                "List the Loops of a board with their stage, whether execution is allowed, the "
-                "people you can assign, and the agents you can ask."
+                "Name a board's Loops (id, key, name and stage), the people you can assign and "
+                "the agents you can ask. Where each Loop stands is loop_summaries."
             ),
             scopes=("boards:read", "loops:read"),
             input_schema=_object(
@@ -144,7 +147,7 @@ def tool_catalog() -> dict[str, AgentTool]:
             ),
             handler=_read_board,
         ),
-        *document_tools(_BOARD_ID, _LOOP_ID),
+        *document_tools(_BOARD_ID, _LOOP_REF),
         AgentTool(
             name="read_ticket",
             description=(
@@ -555,6 +558,7 @@ __all__ = [
     "describe_scope",
     "list_boards",
     "list_tickets",
+    "loop_summaries",
     "map_plan_ids",
     "missing_scopes",
     "read_document",

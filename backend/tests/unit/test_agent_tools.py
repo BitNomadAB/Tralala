@@ -54,10 +54,16 @@ def test_every_tool_needs_a_known_working_scope(tool: AgentTool) -> None:
 def test_a_token_sees_only_the_tools_its_scopes_cover() -> None:
     assert _visible(_token()) == []
     assert _visible(_token("boards:read")) == ["whoami", "list_boards"]
-    assert _visible(_token("loops:read")) == ["read_loop", "read_document", "read_notes"]
+    assert _visible(_token("loops:read")) == [
+        "loop_summaries",
+        "read_loop",
+        "read_document",
+        "read_notes",
+    ]
     assert _visible(_token("boards:read", "loops:read")) == [
         "whoami",
         "list_boards",
+        "loop_summaries",
         "read_board",
         "read_loop",
         "read_document",

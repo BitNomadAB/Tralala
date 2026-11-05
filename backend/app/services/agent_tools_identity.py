@@ -85,9 +85,9 @@ def whoami(services: IdentityReading, actor: ActorContext, args: ToolArguments) 
         "missing_scopes": gaps,
         "human_only": {"decisions": list(HUMAN_DECISIONS), "note": _HUMAN_NOTE},
         "next_step": (
-            "Call list_boards to find a board, then list_tickets for its Tickets with a short "
-            "summary each, or read_board for its Loops. A scope you lack is granted by the "
-            "person who issued this key, with a new key."
+            "Call list_boards to find a board, then loop_summaries for where its Loops stand "
+            "and list_tickets (with assignee me, a column or ready) for the Tickets to choose "
+            "from. A scope you lack is granted by the person who issued this key, with a new key."
         ),
     }
 

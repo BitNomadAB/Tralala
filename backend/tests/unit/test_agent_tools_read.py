@@ -355,6 +355,7 @@ def test_search_tickets_refuses_a_bad_limit_a_loop_without_its_board_and_no_word
 def test_tools_list_offers_the_listing_tools_to_the_scopes_they_declare() -> None:
     assert [tool["name"] for tool in tool_list(_token("boards:read"))] == ["whoami", "list_boards"]
     assert [tool["name"] for tool in tool_list(_token("loops:read"))] == [
+        "loop_summaries",
         "read_loop",
         "read_document",
         "read_notes",
@@ -373,7 +374,10 @@ def test_the_bootstrap_starts_the_work_at_list_boards(settings: Settings) -> Non
     bootstrap = render_bootstrap(settings)
     section = bootstrap.split("## 3. ", 1)[1].split("\n## 4. ", 1)[0]
     assert section.startswith("Understand the work before you touch it\n\nStart with `whoami`")
-    order = [section.index(f"`{name}`") for name in ("whoami", "list_boards", "read_board")]
+    names = ("whoami", "list_boards", "loop_summaries", "list_tickets", "read_ticket")
+    order = [section.index(f"`{name}`") for name in names]
     assert order == sorted(order)
+    assert "`assignee: me`" in section
+    assert "never their text" in section
     assert "never from a prompt" in section
     assert "`search_tickets`" in section

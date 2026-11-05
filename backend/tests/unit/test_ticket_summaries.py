@@ -1,5 +1,5 @@
-"""A Ticket's summary: the excerpt a list shows without one, the hash that marks it stale, the
-schema bound, and CardService writing it on create and update with the source of the actor."""
+"""A Ticket's summary: the hash that marks it stale, the schema bound, and CardService writing it
+on create and update with the source of the actor."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from app.core.config import Settings
 from app.core.context import ActorContext
 from app.schemas.cards import CardCreate, CardUpdate
 from app.services.cards import CardService
-from app.services.ticket_summaries import excerpt, summary_basis, summary_source, summary_stale
+from app.services.ticket_summaries import summary_basis, summary_source, summary_stale
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -30,33 +30,12 @@ LOOP = "loop-a"
 AGENT = ActorContext(
     actor_id="agent-1", actor_type="agent", actor_name="Worker", scopes=frozenset({"cards:write"})
 )
-SENTENCE = "A first sentence long enough to end the excerpt. "  # 49 characters
 PERSON = ActorContext(
     actor_id="user-1", actor_type="user", actor_name="Ada", scopes=frozenset({"cards:write"})
 )
 
 
 # --- the pure rules ------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("description", "expected"),
-    [
-        ("", ""),
-        ("Make search fast.", "Make search fast."),
-        (
-            "## Goal\n\n- Make **search** fast, see [the notes](https://example.com).\n- `x` too",
-            "Goal Make search fast, see the notes. x too",
-        ),
-        (SENTENCE * 3, (SENTENCE * 3).strip()),
-        (SENTENCE * 5, (SENTENCE * 4).strip()),  # 196 characters: the last whole sentence
-        ("Short. " + "word " * 60, "Short. " + ("word " * 38).strip() + "…"),
-        ("word " * 60, ("word " * 40).strip() + "…"),
-    ],
-)
-def test_an_excerpt_is_the_plain_start_of_the_description(description: str, expected: str) -> None:
-    assert excerpt(description) == expected
-    assert len(excerpt(description)) <= 200
 
 
 def test_a_summary_is_stale_once_the_title_or_description_it_was_written_from_changes() -> None:

@@ -35,12 +35,14 @@ SERVER_VERSION = "1.0.0"
 
 INSTRUCTIONS = (
     "Tralala tracks planning documents and Tickets per Loop inside a Board. Start with whoami to "
-    "see what your key may do, then list_boards to find a board id. list_tickets lists a board's "
-    "Tickets with a short summary each; read_board lists its Loops and read_loop gives a Loop's "
-    "overview. Read a document with read_document and a Ticket with read_ticket before you change "
-    "anything; search_tickets finds a Ticket by words. A Ticket is in progress when it sits in the "
-    "column you moved it to and done only through complete_ticket. Approving plans, confirming "
-    "human work and accepting QA are human decisions that no token can perform."
+    "see what your key may do, then list_boards to find a board id. loop_summaries says where "
+    "each Loop stands and what comes next; list_tickets lists Tickets by id, key and title, "
+    "narrowed by column, assignee (me), Phase or readiness, never with their text. Read the one "
+    "you chose with read_ticket before you change anything; read_loop and read_document give a "
+    "Loop's overview and its documents; search_tickets finds a Ticket by words. A Ticket is in "
+    "progress when it sits in the column you moved it to and done only through complete_ticket. "
+    "Approving plans, confirming human work and accepting QA are human decisions that no token "
+    "can perform."
 )
 
 
@@ -209,13 +211,18 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "Start with `whoami`: it names your key and when it expires, the tools your scopes open,",
         "the scopes you lack and what only a person may decide. Then `list_boards`: a board id",
-        "comes from that list, never from a prompt, a message or a guess. `list_tickets` lists a",
-        "board's Tickets as short rows with a summary each; `read_board` lists its Loops and",
-        "`read_loop` gives a Loop's overview (its documents' state and size, its Phases, its",
-        "Tickets), never a document's text. Read a document with `read_document`, a page of",
-        "numbered lines at a time or, for `analysis_ai` and `roadmap_ai`, as an outline and one",
-        "item at a time, and `read_ticket` before you touch a Ticket; `search_tickets` finds a",
-        "Ticket by words when you know what you look for but not where it sits.",
+        "comes from that list, never from a prompt, a message or a guess. `loop_summaries` says",
+        "where each Loop stands, what has to happen next and who does it; `read_board` names its",
+        "Loops, the people you can assign and the agents you can ask. `list_tickets` lists",
+        "Tickets by id, key, title and where they stand, never their text; narrow it (`loop_id`,",
+        "`column`, `assignee: me`, `phase`, `ready`, `human_action_required`, `label`,",
+        "`priority`, `due_before`, `summary`) and read the one you chose with `read_ticket`",
+        "before you touch it. `read_loop` gives a Loop's overview (its documents' state and size,",
+        "its Phases and columns with their counts), never a document's text; read a document with",
+        "`read_document`, a page of numbered lines at a time or, for `analysis_ai` and",
+        "`roadmap_ai`, as an outline and one item at a time. Both take a Loop's id or its key.",
+        "`search_tickets` finds a Ticket by words when you know what you look for but not where",
+        "it sits.",
         "",
         "A Loop moves through stages: `draft`, `analysis_review`, `planning`, `roadmap_review`,",
         "`ready`, `in_progress`, `awaiting_qa`, `completed`, plus `replanning` when a new Info",

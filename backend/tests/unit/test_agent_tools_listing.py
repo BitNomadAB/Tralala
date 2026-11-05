@@ -36,7 +36,7 @@ from tests.unit.fakes.board import (
     list_row,
     loop_row,
 )
-from tests.unit.fakes.plans import FakePlanViews, plan_views
+from tests.unit.fakes.plans import FakePlanViews, plan_views, readiness_item
 from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState
 
 NOW = datetime(2026, 11, 5, 10, 0, tzinfo=UTC)
@@ -65,12 +65,13 @@ class ListingWorld:
 
 
 def listing_world(settings: Settings) -> ListingWorld:
-    """Loop L-1 (open): ``a`` summarised, ``b`` with only a Markdown description, ``c`` completed,
-    ``d`` with a summary its description has since outgrown, all in Todo, ``e`` in Doing. Loop L-2
-    (completed): ``f`` in Done."""
+    """Loop L-1 (open): in Todo ``a`` (Phase 2, Grace's, summarised), ``b`` (Phase 1, a person's,
+    no summary), ``c`` (completed) and ``d`` (Phase 1, not ready, high priority, a summary its
+    description has outgrown); in Doing ``e`` (the reader's, no summary). Loop L-2 (completed):
+    ``f`` in Done."""
     state = BoardState()
     state.loops = {
-        "open": loop_row("open").__replace__(key="L-1"),
+        "open": loop_row("open").__replace__(key="L-1", current_plan_id="plan-1"),
         "done": loop_row("done", stage="completed", completed_at=CREATED).__replace__(
             sequence=2, key="L-2"
         ),
@@ -91,19 +92,31 @@ def listing_world(settings: Settings) -> ListingWorld:
             summary="Adds a login page.",
             summary_source="plan",
             summary_basis_sha256=summary_basis("Login", "Build the page."),
+            assignee_actor_id="user-7",
             assignee_name="Grace",
         ),
         "b": card("b", "todo", "open", 2, "Search", "## Goal\n\nMake **search** fast."),
-        "c": card("c", "todo", "open", 3, "Old", "Done before.").__replace__(
-            completed_at=CREATED
-        ),
+        "c": card("c", "todo", "open", 3, "Old", "Done before.").__replace__(completed_at=CREATED),
         "d": card("d", "todo", "open", 4, "Docs", "Rewritten.").__replace__(
-            summary="Writes the guide.", summary_source="agent", summary_basis_sha256="old"
+            summary="Writes the guide.",
+            summary_source="agent",
+            summary_basis_sha256="old",
+            priority="high",
         ),
-        "e": card("e", "doing", "open", 1, "Empty", ""),
+        "e": card("e", "doing", "open", 1, "Empty", "").__replace__(
+            assignee_actor_id="agent-1", assignee_name="Reader"
+        ),
         "f": card("f", "finished", "done", 1, "Archive", "Kept for history."),
     }
-    views = plan_views(FakePlanViews(items=[]))
+    views = plan_views(
+        FakePlanViews(
+            items=[
+                readiness_item("a", phase_number=2),
+                readiness_item("b", human=True),
+                readiness_item("d", ready=False),
+            ]
+        )
+    )
     checks = FakeBoardChecks()
     store = FakeBoardUnitOfWork(state)
     cards = CardService(
@@ -147,64 +160,100 @@ def ask(**arguments: JsonValue) -> dict[str, JsonValue]:
 # --- list_tickets --------------------------------------------------------------------------------
 
 
-def test_list_tickets_answers_a_short_row_per_open_ticket_of_the_open_loops(
+def test_list_tickets_names_the_tickets_and_where_they_stand_never_what_they_say(
     settings: Settings,
 ) -> None:
     world = listing_world(settings)
     answer = list_tickets(world, READER, ask())
-    assert ids(answer) == ["a", "b", "d", "e"]
-    first, search, docs, empty = rows(answer, "tickets")
-    assert first == {
+    # Todo by Phase, then by key; then Doing. The completed Ticket and the completed Loop are out.
+    assert ids(answer) == ["b", "d", "a", "e"]
+    assert rows(answer, "tickets")[2] == {
         "id": "a",
         "key": "K-a",
         "title": "Login",
-        "summary": "Adds a login page.",
-        "summary_kind": "written",
-        "summary_stale": False,
-        "loop_key": "L-1",
+        "loop": "L-1",
         "column": "Todo",
-        "phase_number": None,
+        "phase": 2,
         "ready": True,
         "human_action_required": False,
         "assignee": "Grace",
-        "completed_at": None,
+        "completed": False,
     }
-    assert (search["summary"], search["summary_kind"]) == ("Goal Make search fast.", "excerpt")
-    assert (docs["summary"], docs["summary_kind"], docs["summary_stale"]) == (
-        "Writes the guide.",
-        "written",
-        True,
-    )
-    assert (empty["summary"], empty["summary_kind"], empty["column"]) == ("", "none", "Doing")
-    assert all("description" not in row for row in rows(answer, "tickets"))
-    assert (answer["count"], answer["truncated"]) == (4, False)
-    assert (answer["without_summary"], answer["stale_summaries"]) == (2, 1)
+    for row in rows(answer, "tickets"):
+        assert not {"summary", "description", "summary_kind"} & set(row)
+    assert (answer["count"], answer["total"], answer["continue_from"]) == (4, 4, None)
+    assert (answer["filters"], answer["loops"]) == ({}, {"L-1": "open"})
     assert "read_ticket" in str(answer["next_step"])
-    assert "write_ticket_summaries" in str(answer["next_step"])
+    brief = rows(list_tickets(world, READER, ask(fields="brief")), "tickets")
+    assert brief[0] == {"id": "b", "key": "K-b", "title": "Search"}
 
 
-def test_list_tickets_narrows_to_a_loop_takes_completed_work_on_request_and_stops_at_the_limit(
-    settings: Settings,
+@pytest.mark.parametrize(
+    ("filters", "expected"),
+    [
+        ({"column": ["doing"]}, ["e"]),
+        ({"column": "Todo"}, ["b", "d", "a"]),
+        ({"column": ["Todo", "Doing"]}, ["b", "d", "a", "e"]),
+        ({"assignee": "me"}, ["e"]),
+        ({"assignee": "none"}, ["b", "d"]),
+        ({"assignee": "user-7"}, ["a"]),
+        ({"phase": 1}, ["b", "d"]),
+        ({"ready": False}, ["d"]),
+        ({"human_action_required": True}, ["b"]),
+        ({"human_action_required": False}, ["d", "a", "e"]),
+        ({"summary": "missing"}, ["b", "e"]),
+        ({"summary": "stale"}, ["d"]),
+        ({"priority": "high"}, ["d"]),
+        ({"query": "search"}, ["b"]),
+        ({"column": ["Todo"], "phase": 1, "ready": True}, ["b"]),
+        ({"include_completed": True}, ["b", "d", "a", "c", "e", "f"]),
+        # A Loop named by its key (in any case) or its id is listed even when it is completed.
+        ({"loop_id": "l-2"}, ["f"]),
+        ({"loop_id": "done"}, ["f"]),
+    ],
+)
+def test_list_tickets_keeps_what_the_filters_ask_for(
+    settings: Settings, filters: dict[str, JsonValue], expected: list[str]
 ) -> None:
+    answer = list_tickets(listing_world(settings), READER, ask(**filters))
+    assert ids(answer) == expected
+    assert answer["total"] == len(expected)
+
+
+def test_list_tickets_says_what_it_was_narrowed_by_and_pages_on(settings: Settings) -> None:
     world = listing_world(settings)
-    assert ids(list_tickets(world, READER, ask(include_completed=True))) == [
-        "a",
-        "b",
-        "c",
-        "d",
-        "e",
-        "f",
+    first = list_tickets(world, READER, ask(limit=2, assignee="none", column=["Todo"]))
+    assert first["filters"] == {"assignee": "none", "column": ["Todo"]}
+    assert (ids(first), first["total"], first["continue_from"]) == (["b", "d"], 2, None)
+    page = list_tickets(world, READER, ask(limit=3))
+    assert (ids(page), page["continue_from"]) == (["b", "d", "a"], 4)
+    rest = list_tickets(world, READER, ask(limit=3, continue_from=4))
+    assert (ids(rest), rest["count"], rest["continue_from"]) == (["e"], 1, None)
+
+
+def test_list_tickets_refuses_a_filter_it_cannot_apply_by_name(settings: Settings) -> None:
+    world = listing_world(settings)
+    with pytest.raises(ValidationFailure, match="column") as refused:
+        list_tickets(world, READER, ask(column=["Shipped"]))
+    assert refused.value.details == {"argument": "column", "columns": ["Doing", "Todo"]}
+    with pytest.raises(NotFound) as missing:
+        list_tickets(world, READER, ask(loop_id="L-9"))
+    assert missing.value.details == {"loop_id": "L-9", "loop_keys": ["L-1", "L-2"]}
+    malformed: list[dict[str, JsonValue]] = [
+        {"ready": "yes"},
+        {"priority": "huge"},
+        {"summary": "old"},
+        {"fields": "all"},
+        {"column": [1]},
+        {"phase": 0},
+        {"limit": 500},
+        {"continue_from": 0},
     ]
-    # A Loop named outright is listed even when it is completed; its open Tickets show.
-    assert ids(list_tickets(world, READER, ask(loop_id="done"))) == ["f"]
-    assert ids(list_tickets(world, READER, ask(loop_id="open"))) == ["a", "b", "d", "e"]
-    assert ids(list_tickets(world, READER, ask(query="search"))) == ["b"]
-    limited = list_tickets(world, READER, ask(limit=2))
-    assert (ids(limited), limited["truncated"]) == (["a", "b"], True)
-    with pytest.raises(NotFound):
-        list_tickets(world, READER, ask(loop_id="missing"))
-    with pytest.raises(ValidationFailure, match="limit must be between 1 and 200"):
-        list_tickets(world, READER, ask(limit=500))
+    for arguments in malformed:
+        with pytest.raises(ValidationFailure) as refused:
+            list_tickets(world, READER, ask(**arguments))
+        assert refused.value.details is not None
+        assert refused.value.details["argument"] == next(iter(arguments))
     with pytest.raises(Forbidden):
         list_tickets(world, WRITER.__replace__(scopes=frozenset({"cards:read"})), ask())
 
@@ -250,11 +299,9 @@ def test_write_ticket_summaries_writes_each_as_a_versioned_edit_and_reports_each
         "agent",
         2,
     )
-    listed = {row["id"]: row for row in rows(list_tickets(world, READER, ask()), "tickets")}
-    assert (listed["d"]["summary"], listed["d"]["summary_stale"]) == (
-        "Writes the rewritten guide.",
-        False,
-    )
+    assert world.state.cards["d"].summary == "Writes the rewritten guide."
+    stale = list_tickets(world, READER, ask(summary="stale"))
+    assert ids(stale) == []
     assert world.state.cards["f"].summary == ""
 
 

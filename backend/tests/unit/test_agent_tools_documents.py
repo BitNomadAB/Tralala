@@ -198,16 +198,18 @@ def test_read_loop_is_an_overview_without_document_text(settings: Settings) -> N
     assert len(json.dumps(answer)) < 5_000
 
 
-def test_read_loop_lists_the_tickets_in_board_order_and_the_newest_notes_cut_short(
+def test_read_loop_counts_the_tickets_by_column_and_cuts_the_newest_notes_short(
     settings: Settings,
 ) -> None:
-    answer = read_loop(document_world(settings), READER, ask())
-    tickets = rows(answer, "tickets")
-    assert [(row["id"], row["column"], row["summary"]) for row in tickets] == [
-        ("a", "Todo", "Short."),
-        ("b", "Doing", ""),
-    ]
-    assert (answer["ticket_count"], answer["tickets_truncated"]) == (2, False)
+    world = document_world(settings)
+    answer = read_loop(world, READER, ask())
+    # The Tickets themselves are list_tickets' answer; the overview only counts them.
+    assert "tickets" not in answer
+    assert "Long text." not in json.dumps(answer)
+    assert answer["ticket_count"] == 2
+    assert "list_tickets" in str(answer["next_step"])
+    # The Loop's key names it as well as its id does, in any case.
+    assert read_loop(world, READER, ask(loop_id="l-1"))["loop"] == answer["loop"]
     assert rows(answer, "columns") == [
         {"id": "todo", "name": "Todo", "tickets": 1},
         {"id": "doing", "name": "Doing", "tickets": 1},
@@ -320,3 +322,8 @@ def test_read_document_refuses_what_it_cannot_answer_and_says_when_a_document_is
         read_document(world, READER, ask(kind="info", view="structured"))
     with pytest.raises(Forbidden):
         read_document(world, READER.__replace__(scopes=frozenset()), ask(kind="info"))
+    by_key = read_document(world, READER, ask(kind="info", loop_id="L-1"))
+    assert by_key["revision_id"] == "i1"
+    with pytest.raises(NotFound) as unknown:
+        read_document(world, READER, ask(kind="info", loop_id="L-7"))
+    assert unknown.value.details == {"loop_id": "L-7", "loop_keys": ["L-1"]}
