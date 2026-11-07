@@ -18,6 +18,7 @@ import pytest
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
 from app.db.generated.board import LoopGenerationRunsRow, LoopsRow
+from app.schemas.briefs import BriefWrite, HumanBrief, RoadmapBrief
 from app.schemas.loops import (
     AnalysisPayload,
     ApprovalRequest,
@@ -285,7 +286,13 @@ def test_the_context_carries_documents_the_plan_and_the_schemas() -> None:
     )
     assert context["documents"]["analysis"] is None
     assert context["plan"] == {"plan_id": None, "revision_number": None, "phases": []}
-    assert sorted(context.get("schemas", {})) == ["analysis", "qa", "roadmap"]
+    assert sorted(context.get("schemas", {})) == [
+        "analysis",
+        "analysis_brief",
+        "qa",
+        "roadmap",
+        "roadmap_brief",
+    ]
 
 
 # --- Info ----------------------------------------------------------------------------------------
@@ -503,7 +510,7 @@ def test_a_roadmap_candidate_registers_its_plan_and_links_both_revisions() -> No
         current(w, "analysis"),
     )
     assert human.source_roadmap_ai_revision_id == technical.id
-    assert json.loads(human.provenance_json) == {"plan_id": plan.id}
+    assert json.loads(human.provenance_json) == {"plan_id": plan.id, "rendered": True}
     assert human.content.startswith("# RoadMap\n\nTwo phases\n")
     # The analysis approval stands; a new RoadMap only invalidates what follows it.
     assert w.loop.analysis_approval_id is not None
@@ -777,25 +784,30 @@ def test_a_roadmap_without_a_registered_plan_cannot_be_approved() -> None:
     assert all(plan.status == "draft" for plan in w.state.plans.values())
 
 
-# --- the analysis written for people -------------------------------------------------------------
+# --- the brief for people ------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
 class HumanViews:
-    """The composition root's ``start_human_view``, recorded: who asked, for which Loop."""
+    """The composition root's ``start_human_view``, recorded: who asked, for which Loop and
+    scope."""
 
-    calls: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
+    calls: list[tuple[str, str, str, str]] = field(
+        default_factory=list[tuple[str, str, str, str]]
+    )
 
-    def __call__(self, actor: ActorContext, board_id: str, loop_id: str) -> HumanViewStart:
-        self.calls.append((actor.actor_id, board_id, loop_id))
+    def __call__(
+        self, actor: ActorContext, board_id: str, loop_id: str, kind: str
+    ) -> HumanViewStart:
+        self.calls.append((actor.actor_id, board_id, loop_id, kind))
         return {"status": "queued", "run_id": "run-9"}
 
 
-def human_run(status: str) -> LoopGenerationRunsRow:
+def human_run(status: str, purpose: str = "analysis_human") -> LoopGenerationRunsRow:
     return LoopGenerationRunsRow(
         id="run-9",
         loop_id=LOOP,
-        purpose="analysis_human",
+        purpose=purpose,
         status=status,
         input_json="{}",
         input_hash="",
@@ -819,7 +831,34 @@ def human_run(status: str) -> LoopGenerationRunsRow:
     )
 
 
-def test_an_analysis_candidate_is_handed_on_to_be_written_for_people_once() -> None:
+BRIEF = HumanBrief.model_validate(
+    {
+        "pros": [{"text": "The sign-in can be extended.", "finding_ids": ["F-01"]}],
+        "verdict": "yes",
+        "verdict_reason": "Nothing stands in the way.",
+        "summary": "People confirm their address by e-mail.",
+        "recommendation": "Go ahead.",
+    }
+)
+ROADMAP_BRIEF = RoadmapBrief.model_validate(
+    {
+        "order": [
+            {"phase_id": P1, "what_happens": "The data is prepared.", "done_when": "Ready."},
+            {"phase_id": P2, "what_happens": "People confirm.", "done_when": "Signed off."},
+        ],
+        "your_part": [{"text": "Sign the legal text.", "phase_ids": [P2], "ticket_ids": [T2]}],
+        "summary": "Two Phases, the second waits for the first.",
+    }
+)
+
+
+def brief_for(kind: str, **fields: object) -> BriefWrite:
+    return BriefWrite.model_validate(
+        {"kind": kind, "brief": BRIEF if kind == "analysis" else ROADMAP_BRIEF, **fields}
+    )
+
+
+def test_a_candidate_without_a_brief_is_handed_on_to_be_written_for_people() -> None:
     w = world()
     info(w)
     views = HumanViews()
@@ -828,13 +867,15 @@ def test_an_analysis_candidate_is_handed_on_to_be_written_for_people_once() -> N
         HUMAN, BOARD_ID, LOOP, CandidateSubmission(kind="analysis", analysis=ANALYSIS)
     )
     assert view.get("human_view") == {"status": "queued", "run_id": "run-9"}
-    assert views.calls == [("actor-1", BOARD_ID, LOOP)]
-    # The rendered view says what it is until a board agent writes one.
+    assert views.calls == [("actor-1", BOARD_ID, LOOP, "analysis")]
+    # The rendered view says what it is until somebody writes the brief.
     analysis_view = view["documents"]["analysis"]
     assert analysis_view["current_provenance"] == {"submitted": True, "rendered": True}
     review(w, "analysis")
     roadmap(w)
-    assert len(views.calls) == 1
+    assert views.calls[1:] == [("actor-1", BOARD_ID, LOOP, "roadmap")]
+    rendered = w.service.documents(BOARD_ID, LOOP)["documents"]["roadmap"]
+    assert rendered["current_provenance"].get("rendered") is True
 
 
 def test_without_a_writer_the_rendered_view_stays_and_the_answer_says_so() -> None:
@@ -850,40 +891,162 @@ def test_without_a_writer_the_rendered_view_stays_and_the_answer_says_so() -> No
     }
 
 
-def test_a_written_view_becomes_the_current_analysis_from_the_current_sources() -> None:
+def test_a_candidate_with_its_brief_stores_it_and_asks_no_board_agent() -> None:
+    w = world()
+    info(w)
+    views = HumanViews()
+    w.service.human_view = views
+    submission = CandidateSubmission(
+        kind="analysis", analysis=ANALYSIS, analysis_brief=BRIEF, provenance={"through": "mcp"}
+    )
+    view = w.service.submit_candidate(AGENT, BOARD_ID, LOOP, submission)
+    assert views.calls == []
+    assert "human_view" not in view
+    human = w.repos.documents.current(LOOP, "analysis")
+    assert human is not None
+    assert json.loads(human.payload_json or "{}") == BRIEF.model_dump()
+    assert human.content.startswith("# Analysis\n\n**Can it be done?** Yes. Nothing stands")
+    assert json.loads(human.provenance_json) == {
+        "submitted": True,
+        "through": "mcp",
+        "written": True,
+    }
+    assert human.source_analysis_ai_revision_id == current(w, "analysis_ai")
+    assert w.loop.stage == "analysis_review"
+
+
+def test_a_candidates_brief_that_breaks_a_rule_stores_nothing() -> None:
+    w = world()
+    info(w)
+    noisy = BRIEF.model_copy(update={"summary": "See app/auth.py [F-01]."})
+    with pytest.raises(ValidationFailure) as refused:
+        w.service.submit_candidate(
+            AGENT,
+            BOARD_ID,
+            LOOP,
+            CandidateSubmission(kind="analysis", analysis=ANALYSIS, analysis_brief=noisy),
+        )
+    assert refused.value.code == "brief_rejected"
+    assert refused.value.details is not None
+    assert refused.value.details["fields"] == ["summary"]
+    with pytest.raises(ValidationFailure, match="never a roadmap_brief"):
+        w.service.submit_candidate(
+            AGENT,
+            BOARD_ID,
+            LOOP,
+            CandidateSubmission(kind="analysis", analysis=ANALYSIS, roadmap_brief=ROADMAP_BRIEF),
+        )
+
+
+def test_a_roadmap_candidate_with_its_brief_covers_every_phase_and_the_persons_part() -> None:
+    w = world()
+    approved_analysis(w)
+    submission = CandidateSubmission(kind="roadmap", plan=PLAN, roadmap_brief=ROADMAP_BRIEF)
+    w.service.submit_candidate(AGENT, BOARD_ID, LOOP, submission)
+    human = w.repos.documents.current(LOOP, "roadmap")
+    assert human is not None
+    (plan,) = w.state.plans.values()
+    assert json.loads(human.provenance_json) == {"plan_id": plan.id, "written": True}
+    assert "### Phase 2 — Sign-in" in human.content
+    assert plan.roadmap_revision_id == human.id
+    partial = ROADMAP_BRIEF.model_copy(update={"your_part": []})
+    with pytest.raises(ValidationFailure) as refused:
+        w.service.submit_candidate(
+            AGENT,
+            BOARD_ID,
+            LOOP,
+            CandidateSubmission(kind="roadmap", plan=PLAN, roadmap_brief=partial),
+        )
+    assert refused.value.details is not None
+    assert refused.value.details["missing_ids"] == [T2]
+
+
+def test_write_brief_rewrites_the_brief_of_the_current_technical_revision() -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    technical = current(w, "analysis_ai")
+    view = w.service.write_brief(
+        AGENT, BOARD_ID, LOOP, brief_for("analysis", expected_revision_id=technical), through="mcp"
+    )
+    written = view["documents"]["analysis"]
+    assert written["current_provenance"] == {
+        "author": "Bot",
+        "actor_id": "agent-1",
+        "through": "mcp",
+        "written": True,
+    }
+    assert written["current_payload"] == BRIEF.model_dump()
+    assert written["source_revisions"].get("analysis_ai") == technical
+    assert w.state.activity[-1].action == "loop.analysis_brief_written"
+    with pytest.raises(VersionConflict) as stale:
+        w.service.write_brief(
+            AGENT, BOARD_ID, LOOP, brief_for("analysis", expected_revision_id="old"), through="mcp"
+        )
+    assert stale.value.code == "document_stale"
+    with pytest.raises(ValidationFailure, match="analysis brief schema"):
+        w.service.write_brief(
+            AGENT,
+            BOARD_ID,
+            LOOP,
+            BriefWrite(kind="analysis", brief=ROADMAP_BRIEF),
+            through="mcp",
+        )
+
+
+def test_a_brief_needs_a_technical_revision_and_the_generate_scope() -> None:
+    w = world()
+    info(w)
+    with pytest.raises(Conflict) as empty:
+        w.service.write_brief(HUMAN, BOARD_ID, LOOP, brief_for("roadmap"), through="api")
+    assert (empty.value.code, empty.value.details) == ("document_empty", {"kind": "roadmap_ai"})
+    reader = ActorContext(
+        actor_id="r", actor_type="agent", actor_name="R", scopes=frozenset({"loops:read"})
+    )
+    with pytest.raises(Forbidden):
+        w.service.write_brief(reader, BOARD_ID, LOOP, brief_for("analysis"), through="mcp")
+
+
+def test_over_an_approval_a_token_is_refused_and_a_person_is_not() -> None:
+    w = world()
+    approved_analysis(w)
+    with pytest.raises(Forbidden) as refused:
+        w.service.write_brief(AGENT, BOARD_ID, LOOP, brief_for("analysis"), through="mcp")
+    assert refused.value.code == "human_action_required"
+    w.service.write_brief(HUMAN, BOARD_ID, LOOP, brief_for("analysis"), through="api")
+    view = w.service.documents(BOARD_ID, LOOP)["documents"]["analysis"]
+    # Writing a brief is not approving it: the person reviews the new pair again.
+    assert view["current_provenance"]["through"] == "api"
+    assert w.loop.analysis_approval_id is None
+    assert w.loop.stage == "analysis_review"
+
+
+def test_a_written_brief_becomes_the_current_view_from_the_current_sources() -> None:
     w = world()
     info(w)
     analysis(w)
     with w.store.writer(BOARD_ID) as repos:
-        stored = w.service.store_human_analysis(
-            repos, w.loop, "For people [F-01].", AGENT, run_id="run-9", provenance={"model": "m"}
+        stored = w.service.store_written_brief(
+            repos, w.loop, BRIEF, AGENT, run_id="run-9", provenance={"model": "m"}
         )
     human = w.repos.documents.current(LOOP, "analysis")
     assert human is not None
     assert stored == {"analysis": human.id}
-    assert (human.content, human.generation_run_id, human.revision_number) == (
-        "For people [F-01].",
-        "run-9",
-        2,
-    )
+    assert (human.generation_run_id, human.revision_number) == ("run-9", 2)
     assert (human.source_analysis_ai_revision_id, human.source_info_revision_id) == (
         current(w, "analysis_ai"),
         current(w, "info"),
     )
     assert json.loads(human.provenance_json) == {"model": "m", "written": True}
-    assert w.state.activity[-1].action == "loop.analysis_written_for_people"
     state = w.service.documents(BOARD_ID, LOOP)["documents"]["analysis"]
-    assert (state["state"], state["current_provenance"]) == (
-        "ready_for_review",
-        {"model": "m", "written": True},
-    )
+    assert state["state"] == "ready_for_review"
 
 
-def test_a_view_is_never_written_without_a_technical_analysis() -> None:
+def test_a_brief_is_never_written_without_a_technical_analysis() -> None:
     w = world()
     info(w)
     with pytest.raises(Conflict) as refused, w.store.writer(BOARD_ID) as repos:
-        w.service.store_human_analysis(repos, w.loop, "text", AGENT, run_id="r", provenance={})
+        w.service.store_written_brief(repos, w.loop, BRIEF, AGENT, run_id="r", provenance={})
     assert refused.value.code == "document_empty"
     assert refused.value.details == {"kind": "analysis_ai"}
 
@@ -903,6 +1066,16 @@ def test_the_analysis_is_not_approved_while_it_is_being_written_for_people() -> 
     w.state.generation_runs = {"run-9": human_run("failed")}
     review(w, "analysis")
     assert w.loop.analysis_approval_id is not None
+
+
+def test_the_roadmap_is_not_approved_while_its_brief_is_being_written() -> None:
+    w = world()
+    approved_analysis(w)
+    roadmap(w)
+    w.state.generation_runs = {"run-9": human_run("queued", "roadmap_human")}
+    with pytest.raises(Conflict) as refused:
+        review(w, "roadmap")
+    assert refused.value.details == {"purpose": "roadmap_human", "run_id": "run-9"}
 
 
 # --- resets --------------------------------------------------------------------------------------
@@ -1031,7 +1204,11 @@ def test_a_generated_roadmap_needs_an_approved_analysis_and_registers_its_plan()
     }
     human = w.repos.documents.current(LOOP, "roadmap")
     assert human is not None
-    assert json.loads(human.provenance_json) == {"plan_id": plan.id, "model": "m"}
+    assert json.loads(human.provenance_json) == {
+        "plan_id": plan.id,
+        "model": "m",
+        "rendered": True,
+    }
     assert human.generation_run_id == "run-2"
     assert plan.roadmap_ai_revision_id == outputs["roadmap_ai"]
     assert plan.roadmap_revision_id == human.id

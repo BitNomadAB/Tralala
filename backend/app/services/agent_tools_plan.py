@@ -1,5 +1,12 @@
 """The worker tools that hand in a Loop's analysis and RoadMap (``write_analysis``,
-``write_roadmap``).
+``write_roadmap``) and the brief a person reads of either (``write_brief``, or the optional
+``brief`` of the other two).
+
+A connected worker may hold its organisation's own sources, policies and decisions that a board
+agent does not, so it may write the brief itself: with ``brief`` the candidate's human view is that
+brief and no board agent is asked; ``write_brief`` rewrites the brief of the current technical
+revision. Either way the brief is held to the rules every brief keeps
+(``loop_documents_human``), and over an approval a token is refused (the gate below).
 
 A worker writes its own analysis and plan, and they go through the one route Tralala already has
 for a candidate, ``LoopDocumentService.submit_candidate``: the same schemas (``AnalysisPayload``,
@@ -27,8 +34,16 @@ from pydantic import BaseModel, JsonValue, ValidationError
 
 from ..core.context import ActorContext
 from ..core.errors import ValidationFailure
+from ..schemas.briefs import BRIEF_KINDS, BriefWrite, HumanBrief, RoadmapBrief
 from ..schemas.loops import AnalysisPayload, CandidateSubmission, PlanPayload
 from .agent_tools_read import ToolArguments, ToolResult, _require, _text
+from .agent_tools_schema import (
+    AgentTool,
+    ArgumentSchema,
+    model_argument,
+    object_schema,
+    string_argument,
+)
 from .loops import DOCUMENT_KINDS
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
@@ -196,6 +211,55 @@ def _plan_id(view: DocumentsView) -> str | None:
     return None
 
 
+def _mapped_id(namespace: uuid.UUID, value: str, kind: str) -> str:
+    return value if _is_uuid(value) else str(uuid.uuid5(namespace, f"{kind}:{value}"))
+
+
+def map_brief_ids(brief: RoadmapBrief, loop_id: str) -> RoadmapBrief:
+    """The RoadMap brief with its Phase and Ticket ids mapped as ``map_plan_ids`` maps the plan's,
+    so a brief written with the short ids of its plan (``p1``, ``t1``) names the same items."""
+    namespace = _namespace(loop_id)
+
+    def phases(values: list[str]) -> list[str]:
+        return [_mapped_id(namespace, value, "phase") for value in values]
+
+    return brief.model_copy(
+        update={
+            "order": [
+                step.model_copy(
+                    update={"phase_id": _mapped_id(namespace, step.phase_id, "phase")}
+                )
+                for step in brief.order
+            ],
+            "your_part": [
+                part.model_copy(
+                    update={
+                        "phase_ids": phases(part.phase_ids),
+                        "ticket_ids": [
+                            _mapped_id(namespace, value, "ticket") for value in part.ticket_ids
+                        ],
+                    }
+                )
+                for part in brief.your_part
+            ],
+            "could_block": [
+                risk.model_copy(update={"phase_ids": phases(risk.phase_ids)})
+                for risk in brief.could_block
+            ],
+        }
+    )
+
+
+def _optional_brief[Model: BaseModel](model: type[Model], args: ToolArguments) -> Model | None:
+    return None if args.get("brief") is None else parse_payload(model, args, "brief")
+
+
+def _brief_answer(view: DocumentsView, kind: str) -> ToolResult:
+    """Whether the human view is a brief, and who wrote it."""
+    provenance = view["documents"][kind]["current_provenance"]
+    return {"written": provenance.get("written") is True, "through": provenance.get("through")}
+
+
 # --- handlers ------------------------------------------------------------------------------------
 
 
@@ -205,10 +269,12 @@ def write_analysis(services: PlanWriting, actor: ActorContext, args: ToolArgumen
     board_id = _require(args, "board_id")
     loop_id = _require(args, "loop_id")
     analysis = parse_payload(AnalysisPayload, args, "analysis")
+    brief = _optional_brief(HumanBrief, args)
     submission = _submission(
         {
             "kind": "analysis",
             "analysis": analysis,
+            "analysis_brief": brief,
             "expected_info_revision_id": _text(args.get("expected_info_revision_id")),
             "provenance": _provenance(actor),
         }
@@ -216,7 +282,8 @@ def write_analysis(services: PlanWriting, actor: ActorContext, args: ToolArgumen
     view = services.loop_document.submit_candidate(actor, board_id, loop_id, submission)
     return {
         **_documents(view, ("info", "analysis_ai", "analysis")),
-        # A board agent writes the analysis for people next; without one it stays rendered.
+        "brief": _brief_answer(view, "analysis"),
+        # Without your brief, a board agent writes one next; without an agent it stays rendered.
         "human_view": view.get("human_view"),
         "next_step": (
             "A person reviews the analysis in the Loop's Analysis tab. Once it is approved, "
@@ -231,10 +298,12 @@ def write_roadmap(services: PlanWriting, actor: ActorContext, args: ToolArgument
     board_id = _require(args, "board_id")
     loop_id = _require(args, "loop_id")
     plan, id_map = map_plan_ids(parse_payload(PlanPayload, args, "plan"), loop_id)
+    brief = _optional_brief(RoadmapBrief, args)
     submission = _submission(
         {
             "kind": "roadmap",
             "plan": plan,
+            "roadmap_brief": None if brief is None else map_brief_ids(brief, loop_id),
             "expected_analysis_revision_id": _text(args.get("expected_analysis_revision_id")),
             "provenance": _provenance(actor),
         }
@@ -255,6 +324,8 @@ def write_roadmap(services: PlanWriting, actor: ActorContext, args: ToolArgument
             "tickets": sum(len(phase.tickets) for phase in plan.phases),
         },
         "id_map": id_map,
+        "brief": _brief_answer(view, "roadmap"),
+        "human_view": view.get("human_view"),
         "next_step": (
             "A person reviews the RoadMap in the Loop's RoadMap tab; the approval publishes the "
             "Tickets with their keys, which read_loop then lists."
@@ -262,13 +333,164 @@ def write_roadmap(services: PlanWriting, actor: ActorContext, args: ToolArgument
     }
 
 
+def write_brief(services: PlanWriting, actor: ActorContext, args: ToolArguments) -> ToolResult:
+    """The worker's brief for people as the human view of the current technical revision."""
+    actor.require("loops:generate")
+    board_id = _require(args, "board_id")
+    loop_id = _require(args, "loop_id")
+    kind = _require(args, "kind")
+    if kind not in BRIEF_KINDS:
+        raise ValidationFailure(
+            "kind is analysis or roadmap", details={"argument": "kind", "allowed": [*BRIEF_KINDS]}
+        )
+    brief: HumanBrief | RoadmapBrief = (
+        parse_payload(HumanBrief, args, "brief")
+        if kind == "analysis"
+        else map_brief_ids(parse_payload(RoadmapBrief, args, "brief"), loop_id)
+    )
+    write = BriefWrite.model_validate(
+        {
+            "kind": kind,
+            "brief": brief,
+            "expected_revision_id": _text(args.get("expected_revision_id")),
+        }
+    )
+    view = services.loop_document.write_brief(actor, board_id, loop_id, write, through="mcp")
+    scope = "analysis" if kind == "analysis" else "RoadMap"
+    return {
+        **_documents(view, (f"{kind}_ai", kind)),
+        "brief": _brief_answer(view, kind),
+        "next_step": (
+            f"A person reads the brief in the Loop's {scope} tab (For people) and decides; "
+            "writing a brief approves nothing."
+        ),
+    }
+
+
+def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentTool]:
+    """The catalogue entries of ``write_analysis``, ``write_roadmap`` and ``write_brief``."""
+    analysis, analysis_definitions = model_argument(
+        AnalysisPayload,
+        "The analysis as one JSON object, written in the order of its fields: outcome, "
+        "scope, findings with technical_detail and plain_language, recommendation and the rest",
+    )
+    plan, plan_definitions = model_argument(
+        PlanPayload,
+        "The RoadMap as one JSON object: a summary and the Phases in order with their Tickets; "
+        "a Ticket a person must do has required_actor human, a reason and instructions",
+    )
+    human_brief, human_definitions = model_argument(
+        HumanBrief,
+        "Optional: your brief for the person who decides (the human view), naming in "
+        "finding_ids every risk, blocker, legal, security, question and decision finding; "
+        "plain text without ids, paths or code. Without it a board agent writes one",
+    )
+    roadmap_brief, roadmap_definitions = model_argument(
+        RoadmapBrief,
+        "Optional: your brief of the RoadMap for the person who approves it: every Phase once in "
+        "order, every Ticket a person must do in your_part; plain text without ids, paths or "
+        "code. Without it a board agent writes one",
+    )
+    loop_id = string_argument("Loop identifier from read_board or create_loop")
+    write_analysis_tool = AgentTool(
+        name="write_analysis",
+        description=(
+            "Hand in your own analysis of a Loop that has Info, in Tralala's structure: the "
+            "same schema, validation, rendering and review as an analysis a board agent "
+            "writes. technical_detail is for engineers; plain_language is for a project "
+            "manager and every risk, blocker, legal, security or question finding needs it. "
+            "With brief, your decision brief for people is the human view; without it a board "
+            "agent writes one. A person approves it; an approved analysis is replaced only "
+            "after that person requests changes or resets it."
+        ),
+        scopes=("loops:generate",),
+        input_schema=object_schema(
+            {
+                "board_id": board_id,
+                "loop_id": loop_id,
+                "analysis": analysis,
+                "brief": human_brief,
+                "expected_info_revision_id": string_argument(
+                    "Optional Info revision id you wrote from (read_loop); a mismatch returns "
+                    "document_stale"
+                ),
+            },
+            required=["board_id", "loop_id", "analysis"],
+            definitions={**analysis_definitions, **human_definitions},
+        ),
+        handler=write_analysis,
+    )
+    write_roadmap_tool = AgentTool(
+        name="write_roadmap",
+        description=(
+            "Hand in your own RoadMap for a Loop whose analysis is approved: the Phases in "
+            "order with their Tickets, in the same schema, validation and review as a "
+            "generated RoadMap. Ids may be short (p1, t1): they become stable UUIDs, listed "
+            "in id_map, so the same ids keep the same Tickets when you hand it in again; a "
+            "brief may use the same short ids. A person approves it, and the approval "
+            "publishes the Tickets with their keys."
+        ),
+        scopes=("loops:generate",),
+        input_schema=object_schema(
+            {
+                "board_id": board_id,
+                "loop_id": loop_id,
+                "plan": plan,
+                "brief": roadmap_brief,
+                "expected_analysis_revision_id": string_argument(
+                    "Optional technical analysis (analysis_ai) revision id you planned from; "
+                    "a mismatch returns document_stale"
+                ),
+            },
+            required=["board_id", "loop_id", "plan"],
+            definitions={**plan_definitions, **roadmap_definitions},
+        ),
+        handler=write_roadmap,
+    )
+    write_brief_tool = AgentTool(
+        name="write_brief",
+        description=(
+            "Write the brief for people (the human view) of the Loop's current analysis or "
+            "RoadMap, for example from your organisation's own sources: can it be done, what "
+            "stands in the way, for and against, what a person must decide. The schema is "
+            "write_analysis's or write_roadmap's brief argument. Over an approved analysis or "
+            "RoadMap a person requests changes or resets it first; a brief approves nothing."
+        ),
+        scopes=("loops:generate",),
+        input_schema=object_schema(
+            {
+                "board_id": board_id,
+                "loop_id": loop_id,
+                "kind": string_argument("analysis or roadmap"),
+                "brief": {
+                    "type": "object",
+                    "description": (
+                        "The brief as one JSON object: the schema of write_analysis's brief for "
+                        "analysis, of write_roadmap's brief for roadmap"
+                    ),
+                },
+                "expected_revision_id": string_argument(
+                    "Optional technical revision id (analysis_ai or roadmap_ai) you wrote the "
+                    "brief from; a mismatch returns document_stale"
+                ),
+            },
+            required=["board_id", "loop_id", "kind", "brief"],
+        ),
+        handler=write_brief,
+    )
+    return write_analysis_tool, write_roadmap_tool, write_brief_tool
+
+
 __all__ = [
     "MAX_ERROR_LINES",
     "IdMap",
     "PlanWriting",
+    "map_brief_ids",
     "map_plan_ids",
     "parse_payload",
     "payload_errors",
+    "plan_tools",
     "write_analysis",
+    "write_brief",
     "write_roadmap",
 ]

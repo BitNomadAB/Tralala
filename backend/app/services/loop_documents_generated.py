@@ -1,9 +1,11 @@
 """An analysis or a RoadMap an agent wrote: a submitted candidate, or a generation run's output.
 
 Each is stored as a pair of revisions, the technical one holding the validated structure and the
-human one rendered from it, and invalidates what was approved downstream of it. A RoadMap needs a
-current approved analysis and registers its plan as a draft. The functions run inside the unit of
-work of ``LoopDocumentService``, with its clock and id source.
+human one: the brief the candidate brought (``loop_documents_human.store_brief``), or else a view
+rendered from the structure until somebody writes the brief. A new pair invalidates what was
+approved downstream of it. A RoadMap needs a current approved analysis and registers its plan as a
+draft. The functions run inside the unit of work of ``LoopDocumentService``, with its clock and id
+source.
 """
 
 from __future__ import annotations
@@ -11,10 +13,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from ..core.context import ActorContext
-from ..core.errors import Conflict, ValidationFailure
+from ..core.errors import Conflict, ValidationFailure, VersionConflict
 from ..db.generated.board import LoopsRow
 from ..repositories.board import BoardRepositories
+from ..schemas.briefs import HumanBrief, RoadmapBrief
 from ..schemas.loops import AnalysisPayload, CandidateSubmission, PlanPayload
+from .loop_documents_human import MATERIAL_FINDING_CATEGORIES, store_brief
 from .loop_documents_render import (
     render_analysis,
     render_analysis_technical,
@@ -37,8 +41,6 @@ from .loops import (
     stale_reasons,
 )
 
-MATERIAL_FINDING_CATEGORIES = {"risk", "blocker", "legal", "security", "question"}
-
 
 def validate_analysis(payload: AnalysisPayload) -> None:
     missing = [
@@ -52,6 +54,30 @@ def validate_analysis(payload: AnalysisPayload) -> None:
             code="validation_failed",
             details={"finding_ids": missing},
         )
+
+
+def check_expected_sources(
+    repos: BoardRepositories, loop_id: str, submission: CandidateSubmission
+) -> None:
+    """A candidate written from an Info or an analysis that has changed since is refused."""
+    expected = (
+        ("info", submission.expected_info_revision_id),
+        ("analysis_ai", submission.expected_analysis_revision_id),
+    )
+    for kind, revision_id in expected:
+        if revision_id is None:
+            continue
+        current = repos.documents.current(loop_id, kind)
+        if current is None or current.id != revision_id:
+            raise VersionConflict(
+                "The candidate was written from a revision that is no longer current",
+                code="document_stale",
+                details={
+                    "kind": kind,
+                    "expected_revision_id": revision_id,
+                    "current_revision_id": current.id if current else None,
+                },
+            )
 
 
 def store_analysis_candidate(
@@ -85,20 +111,33 @@ def store_analysis_candidate(
         sources={"info": info_id},
         provenance={"submitted": True, **submission.provenance},
     )
-    human = write_revision(
-        repos,
-        clock=clock,
-        new_id=new_id,
-        loop_id=loop.id,
-        kind="analysis",
-        content=render_analysis(payload),
-        payload=None,
-        actor=actor,
-        sources={"analysis_ai": technical.id, "info": info_id},
-        # Rendered from the structure until a board agent writes it for people.
-        provenance={"submitted": True, "rendered": True, **submission.provenance},
-    )
     invalidate_downstream(repos, loop.id, "analysis_ai", clock=clock)
+    brief = submission.analysis_brief
+    if brief is not None:
+        # The brief came with the analysis: it is the human view, checked against the analysis.
+        human = store_brief(
+            repos,
+            loop,
+            brief,
+            actor,
+            provenance={"submitted": True, **submission.provenance},
+            clock=clock,
+            new_id=new_id,
+        )
+    else:
+        human = write_revision(
+            repos,
+            clock=clock,
+            new_id=new_id,
+            loop_id=loop.id,
+            kind="analysis",
+            content=render_analysis(payload),
+            payload=None,
+            actor=actor,
+            sources={"analysis_ai": technical.id, "info": info_id},
+            # Rendered from the structure until somebody writes the brief for people.
+            provenance={"submitted": True, "rendered": True, **submission.provenance},
+        )
     log_loop_activity(
         repos,
         actor,
@@ -151,25 +190,25 @@ def store_roadmap_candidate(
         },
         provenance={"plan_id": draft["plan_id"], **submission.provenance},
     )
-    human = write_revision(
+    invalidate_downstream(repos, loop.id, "roadmap_ai", clock=clock)
+    human = _roadmap_view(
         repos,
+        loop,
+        canonical_id=technical.id,
+        plan_id=draft["plan_id"],
+        rendered=render_roadmap(canonical),
+        brief=submission.roadmap_brief,
+        actor=actor,
+        provenance=submission.provenance,
         clock=clock,
         new_id=new_id,
-        loop_id=loop.id,
-        kind="roadmap",
-        content=render_roadmap(canonical),
-        payload=None,
-        actor=actor,
-        sources={"roadmap_ai": technical.id},
-        provenance={"plan_id": draft["plan_id"], **submission.provenance},
     )
     plans.attach_revisions(
         repos,
         draft["plan_id"],
         roadmap_ai_revision_id=technical.id,
-        roadmap_revision_id=human.id,
+        roadmap_revision_id=human,
     )
-    invalidate_downstream(repos, loop.id, "roadmap_ai", clock=clock)
     log_loop_activity(
         repos,
         actor,
@@ -179,6 +218,48 @@ def store_roadmap_candidate(
         clock=clock,
         new_id=new_id,
     )
+
+
+def _roadmap_view(
+    repos: BoardRepositories,
+    loop: LoopsRow,
+    *,
+    canonical_id: str,
+    plan_id: str,
+    rendered: str,
+    brief: RoadmapBrief | None,
+    actor: ActorContext,
+    provenance: Mapping[str, object],
+    clock: Callable[[], str],
+    new_id: Callable[[], str],
+    run_id: str | None = None,
+) -> str:
+    """The RoadMap's human view: the brief, checked against the plan, or the view rendered from
+    the plan until somebody writes one. Answers the revision's id."""
+    if brief is not None:
+        return store_brief(
+            repos,
+            loop,
+            brief,
+            actor,
+            provenance={"plan_id": plan_id, **provenance},
+            clock=clock,
+            new_id=new_id,
+            run_id=run_id,
+        ).id
+    return write_revision(
+        repos,
+        clock=clock,
+        new_id=new_id,
+        loop_id=loop.id,
+        kind="roadmap",
+        content=rendered,
+        payload=None,
+        actor=actor,
+        sources={"roadmap_ai": canonical_id},
+        generation_run_id=run_id,
+        provenance={"plan_id": plan_id, **provenance, "rendered": True},
+    ).id
 
 
 def store_run_analysis(
@@ -266,35 +347,64 @@ def store_run_roadmap(
         generation_run_id=run_id,
         provenance={"plan_id": draft["plan_id"], **provenance},
     )
-    human = write_revision(
+    human = _roadmap_view(
         repos,
+        loop,
+        canonical_id=technical.id,
+        plan_id=draft["plan_id"],
+        rendered=render_roadmap(canonical),
+        brief=None,
+        actor=actor,
+        provenance=provenance,
         clock=clock,
         new_id=new_id,
-        loop_id=loop.id,
-        kind="roadmap",
-        content=render_roadmap(canonical),
-        payload=None,
-        actor=actor,
-        sources={"roadmap_ai": technical.id},
-        generation_run_id=run_id,
-        provenance={"plan_id": draft["plan_id"], **provenance},
+        run_id=run_id,
     )
     plans.attach_revisions(
         repos,
         draft["plan_id"],
         roadmap_ai_revision_id=technical.id,
-        roadmap_revision_id=human.id,
+        roadmap_revision_id=human,
     )
     invalidate_downstream(repos, loop.id, "roadmap_ai", clock=clock)
     refresh_stage(repos, loop.id, now=clock())
-    return {"plan_id": draft["plan_id"], "roadmap_ai": technical.id, "roadmap": human.id}
+    return {"plan_id": draft["plan_id"], "roadmap_ai": technical.id, "roadmap": human}
+
+
+def store_run_brief(
+    repos: BoardRepositories,
+    loop: LoopsRow,
+    brief: HumanBrief | RoadmapBrief,
+    actor: ActorContext,
+    *,
+    run_id: str,
+    provenance: Mapping[str, object],
+    clock: Callable[[], str],
+    new_id: Callable[[], str],
+) -> dict[str, str]:
+    """A board agent's brief (an ``analysis_human`` or ``roadmap_human`` run) as the scope's human
+    view, from the technical revision the run read: promotion only runs while it is current."""
+    human = store_brief(
+        repos,
+        loop,
+        brief,
+        actor,
+        provenance=provenance,
+        clock=clock,
+        new_id=new_id,
+        run_id=run_id,
+    )
+    refresh_stage(repos, loop.id, now=clock())
+    return {human.kind: human.id}
 
 
 __all__ = [
     "MATERIAL_FINDING_CATEGORIES",
+    "check_expected_sources",
     "store_analysis_candidate",
     "store_roadmap_candidate",
     "store_run_analysis",
+    "store_run_brief",
     "store_run_roadmap",
     "validate_analysis",
 ]

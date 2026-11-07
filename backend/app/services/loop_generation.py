@@ -73,6 +73,7 @@ from .loops import (
     ensure_writable,
     latest_approvals,
     require_loop,
+    roadmap_approved,
     stale_reasons,
 )
 
@@ -100,9 +101,9 @@ __all__ = [
 
 logger = logging.getLogger("tralala.loop_generation")
 
-# A purpose that runs on the agent the Loop prefers for another: the analysis written for people
-# comes from the agent that analyses.
-AGENT_PURPOSE = {"analysis_human": "analysis"}
+# A purpose that runs on the agent the Loop prefers for another: the brief for people comes from the
+# agent that analyses or plans.
+AGENT_PURPOSE = {"analysis_human": "analysis", "roadmap_human": "roadmap"}
 
 
 class BoardRows(Protocol):
@@ -246,6 +247,21 @@ class LoopGenerationService:
                     details={"scope": "analysis"},
                 )
             return
+        if purpose == "roadmap_human":
+            technical = documents["roadmap_ai"].current
+            if technical is None or not technical.payload_json:
+                raise Conflict(
+                    "There is no technical RoadMap to write for people",
+                    code="document_empty",
+                    details={"kind": "roadmap_ai"},
+                )
+            if roadmap_approved(documents, approvals, stale):
+                raise Conflict(
+                    "The RoadMap is approved; request changes or reset it before it is rewritten",
+                    code="approval_exists",
+                    details={"scope": "roadmap"},
+                )
+            return
         if purpose == "roadmap":
             if not analysis_approved(documents, approvals, stale):
                 raise Conflict(
@@ -274,20 +290,28 @@ class LoopGenerationService:
         return self._start(actor, board_id, loop_id, request, idempotency_key=idempotency_key)
 
     def start_human_view(
-        self, actor: ActorContext, board_id: str, loop_id: str
+        self, actor: ActorContext, board_id: str, loop_id: str, kind: str = "analysis"
     ) -> HumanViewStart:
-        """After a new technical analysis, have the Loop's analysis agent write it for people.
+        """After a new technical analysis or RoadMap (``kind``), have the Loop's analysis or
+        RoadMap agent write its brief for people.
 
-        It follows from an action the actor was allowed (a candidate, an analysis run), so it is
+        It follows from an action the actor was allowed (a candidate, a generation run), so it is
         not checked again, and it never fails that action: without an agent, or with a run already
         active, the view rendered from the structure stays and the reason is logged."""
-        request = GenerationRequest(purpose="analysis_human")
+        request = GenerationRequest(
+            purpose="roadmap_human" if kind == "roadmap" else "analysis_human"
+        )
         try:
             run, _ = self._start(actor, board_id, loop_id, request)
         except ApiError as exc:
             logger.info(
                 "human_view_skipped",
-                extra={"board_id": board_id, "loop_id": loop_id, "reason": exc.code},
+                extra={
+                    "board_id": board_id,
+                    "loop_id": loop_id,
+                    "kind": kind,
+                    "reason": exc.code,
+                },
             )
             return {"status": "skipped", "run_id": None, "reason": exc.code}
         # Inline (a unit test) the run has already ended; read where it stands now.

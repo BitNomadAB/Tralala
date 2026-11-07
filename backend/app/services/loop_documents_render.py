@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 
+from ..schemas.briefs import HumanBrief, RoadmapBrief
 from ..schemas.loops import AnalysisPayload
 from .loop_plans import CanonicalPlan
 
@@ -125,6 +127,62 @@ def render_roadmap(payload: CanonicalPlan) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+VERDICT_TEXT = {
+    "yes": "Yes",
+    "yes_with_conditions": "Yes, with conditions",
+    "no": "No",
+    "unclear": "Unclear",
+}
+LEVEL_TEXT = {
+    "business": "Business",
+    "technical": "Technical",
+    "security": "Security",
+    "legal": "Legal",
+    "people_time": "People and time",
+}
+
+
+def render_analysis_brief(brief: HumanBrief) -> str:
+    """The analysis brief for people: the verdict first, then what stands in the way, the
+    highlights for and against, the decisions and the recommendation. No id, path or traceability
+    block: the brief's ids carry that, and the technical analysis holds the detail."""
+    verdict = VERDICT_TEXT.get(brief.verdict, brief.verdict)
+    lines = ["# Analysis", "", f"**Can it be done?** {verdict}. {brief.verdict_reason}", ""]
+    lines += [brief.summary, "", "## What stands in the way", ""]
+    if brief.obstacles:
+        lines += [
+            f"- **{LEVEL_TEXT.get(item.level, item.level)}:** {item.text}"
+            for item in brief.obstacles
+        ]
+    else:
+        lines.append("Nothing was found that stands in the way.")
+    for heading, points in (("For", brief.pros), ("Against", brief.cons)):
+        if points:
+            lines += ["", f"## {heading}", ""] + [f"- {point.text}" for point in points]
+    if brief.decisions:
+        lines += ["", "## What you need to decide", ""]
+        lines += [f"- {decision.question}" for decision in brief.decisions]
+    lines += ["", "## Recommendation", "", brief.recommendation]
+    return "\n".join(lines).strip() + "\n"
+
+
+def render_roadmap_brief(brief: RoadmapBrief, phases: Mapping[str, tuple[int, str]]) -> str:
+    """The RoadMap brief for people: the order of work by Phase (numbered and named from the
+    plan, in its order), what the person must do and what could block it."""
+    lines = ["# RoadMap", "", brief.summary, "", "## The order of work", ""]
+    steps = sorted(brief.order, key=lambda step: phases.get(step.phase_id, (0, ""))[0])
+    for step in steps:
+        number, name = phases.get(step.phase_id, (0, ""))
+        lines += [f"### Phase {number} — {name}", "", step.what_happens, ""]
+        lines += [f"**Done when:** {step.done_when}", ""]
+    if brief.your_part:
+        lines += ["## Your part", ""] + [f"- {part.text}" for part in brief.your_part] + [""]
+    if brief.could_block:
+        lines += ["## What could block it", ""]
+        lines += [f"- {risk.text}" for risk in brief.could_block]
+    return "\n".join(lines).strip() + "\n"
+
+
 def render_analysis_technical(payload: AnalysisPayload) -> str:
     return "```json\n" + json.dumps(payload.model_dump(), indent=2, ensure_ascii=False) + "\n```\n"
 
@@ -134,9 +192,14 @@ def render_roadmap_technical(payload: CanonicalPlan) -> str:
 
 
 __all__ = [
+    "LEVEL_TEXT",
+    "VERDICT_TEXT",
     "content_hash",
     "render_analysis",
+    "render_analysis_brief",
     "render_analysis_technical",
     "render_roadmap",
+    "render_roadmap_brief",
     "render_roadmap_technical",
+    "render_traceability",
 ]

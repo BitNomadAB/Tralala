@@ -29,6 +29,7 @@ from ..core.dates import iso_utc
 from ..core.errors import Forbidden, ValidationFailure, VersionConflict
 from ..db.generated.board import LoopDocumentsRow, LoopsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..schemas.briefs import BriefWrite, HumanBrief, RoadmapBrief
 from ..schemas.loops import (
     AnalysisPayload,
     ApprovalRequest,
@@ -40,12 +41,14 @@ from ..schemas.loops import (
 )
 from .lists import BoardChecks
 from .loop_documents_generated import (
+    check_expected_sources,
     store_analysis_candidate,
     store_roadmap_candidate,
     store_run_analysis,
+    store_run_brief,
     store_run_roadmap,
 )
-from .loop_documents_human import store_human_analysis
+from .loop_documents_human import store_brief
 from .loop_documents_render import (
     content_hash,
     render_analysis,
@@ -92,8 +95,9 @@ from .loops import (
 # approvals, so the edit belongs to a signed-in person.
 WORKER_INFO_STAGES = frozenset({"draft", "analysis_review"})
 
-# Starts the run in which a board agent writes the analysis for people (actor, board, Loop).
-type HumanViewStarter = Callable[[ActorContext, str, str], HumanViewStart]
+# Starts the run in which a board agent writes the brief for people (actor, board, Loop, and the
+# scope: analysis or roadmap).
+type HumanViewStarter = Callable[[ActorContext, str, str, str], HumanViewStart]
 
 
 def _now() -> datetime:
@@ -176,6 +180,8 @@ class LoopDocumentService:
             "analysis": AnalysisPayload.model_json_schema(),
             "roadmap": PlanPayload.model_json_schema(),
             "qa": QaInstructions.model_json_schema(),
+            "analysis_brief": HumanBrief.model_json_schema(),
+            "roadmap_brief": RoadmapBrief.model_json_schema(),
         }
         return context
 
@@ -318,31 +324,99 @@ class LoopDocumentService:
             ensure_writable(loop)
             if not actor.is_user:
                 self._refuse_over_approval(repos, loop, payload.kind)
-            self._check_expected(repos, loop_id, payload)
+            check_expected_sources(repos, loop_id, payload)
             if payload.kind == "analysis":
-                if payload.analysis is None:
-                    raise ValidationFailure("An analysis candidate needs an analysis payload")
-                self._store_analysis(repos, loop, payload.analysis, actor, payload)
+                if payload.analysis is None or payload.roadmap_brief is not None:
+                    raise ValidationFailure(
+                        "An analysis candidate needs an analysis payload and takes an "
+                        "analysis_brief, never a roadmap_brief"
+                    )
+                store_analysis_candidate(
+                    repos,
+                    loop,
+                    payload.analysis,
+                    actor,
+                    payload,
+                    clock=self._now,
+                    new_id=self._new_id,
+                )
             else:
-                if payload.plan is None:
-                    raise ValidationFailure("A RoadMap candidate needs a plan payload")
-                self._store_roadmap(repos, loop, payload.plan, actor, payload)
+                if payload.plan is None or payload.analysis_brief is not None:
+                    raise ValidationFailure(
+                        "A RoadMap candidate needs a plan payload and takes a roadmap_brief, "
+                        "never an analysis_brief"
+                    )
+                store_roadmap_candidate(
+                    repos,
+                    loop,
+                    payload.plan,
+                    actor,
+                    payload,
+                    plans=self.plans,
+                    clock=self._now,
+                    new_id=self._new_id,
+                )
             refresh_stage(repos, loop_id, now=self._now())
-        # After the commit: the run reads the analysis just stored.
+        brief = payload.analysis_brief or payload.roadmap_brief
+        # After the commit: the run reads the technical revision just stored. A candidate that
+        # brought its brief needs no board agent to write one.
         started = (
-            self.after_analysis(actor, board_id, loop_id) if payload.kind == "analysis" else None
+            None
+            if brief is not None
+            else self.after_technical(actor, board_id, loop_id, payload.kind)
         )
         view = self.documents(board_id, loop_id)
         if started is not None:
             view["human_view"] = started
         return view
 
-    def after_analysis(self, actor: ActorContext, board_id: str, loop_id: str) -> HumanViewStart:
-        """Have a board agent write the analysis for people from the technical analysis that was
-        just stored; without one, the view rendered from the structure stays."""
+    def after_technical(
+        self, actor: ActorContext, board_id: str, loop_id: str, kind: str
+    ) -> HumanViewStart:
+        """Have a board agent write the brief for people from the technical revision of ``kind``
+        (``analysis`` or ``roadmap``) that was just stored; without one, the view rendered from the
+        structure stays."""
         if self.human_view is None:
             return {"status": "skipped", "run_id": None, "reason": "not configured"}
-        return self.human_view(actor, board_id, loop_id)
+        return self.human_view(actor, board_id, loop_id, kind)
+
+    def write_brief(
+        self, actor: ActorContext, board_id: str, loop_id: str, write: BriefWrite, *, through: str
+    ) -> DocumentsView:
+        """A brief for the current technical revision of a scope, as its human view.
+
+        A worker writes one over ``/mcp`` (``through="mcp"``) or REST, a person through REST. Over
+        a current approval of the scope a token is refused, as for a candidate; a person is not,
+        and their brief supersedes the approval like any new revision (writing a brief is not
+        approving it)."""
+        actor.require("loops:generate")
+        self.boards.ensure_active(board_id)
+        if isinstance(write.brief, HumanBrief) != (write.kind == "analysis"):
+            raise ValidationFailure(
+                f"A {write.kind} brief has the fields of the {write.kind} brief schema",
+                details={"kind": write.kind},
+            )
+        with self.store.writer(board_id) as repos:
+            loop = require_loop(repos, loop_id)
+            ensure_writable(loop)
+            if not actor.is_user:
+                self._refuse_over_approval(repos, loop, write.kind)
+            store_brief(
+                repos,
+                loop,
+                write.brief,
+                actor,
+                provenance={
+                    "author": actor.actor_name,
+                    "actor_id": actor.actor_id,
+                    "through": through,
+                },
+                clock=self._now,
+                new_id=self._new_id,
+                expected_revision_id=write.expected_revision_id,
+            )
+            refresh_stage(repos, loop_id, now=self._now())
+        return self.documents(board_id, loop_id)
 
     @staticmethod
     def _refuse_over_approval(repos: BoardRepositories, loop: LoopsRow, kind: str) -> None:
@@ -363,61 +437,6 @@ class LoopDocumentService:
                 code="human_action_required",
                 details={"stage": loop.stage, "action": f"Replacing an approved {what}"},
             )
-
-    @staticmethod
-    def _check_expected(
-        repos: BoardRepositories, loop_id: str, payload: CandidateSubmission
-    ) -> None:
-        """A candidate written from an Info or an analysis that has changed since is refused."""
-        expected = (
-            ("info", payload.expected_info_revision_id),
-            ("analysis_ai", payload.expected_analysis_revision_id),
-        )
-        for kind, revision_id in expected:
-            if revision_id is None:
-                continue
-            current = repos.documents.current(loop_id, kind)
-            if current is None or current.id != revision_id:
-                raise VersionConflict(
-                    "The candidate was written from a revision that is no longer current",
-                    code="document_stale",
-                    details={
-                        "kind": kind,
-                        "expected_revision_id": revision_id,
-                        "current_revision_id": current.id if current else None,
-                    },
-                )
-
-    def _store_analysis(
-        self,
-        repos: BoardRepositories,
-        loop: LoopsRow,
-        payload: AnalysisPayload,
-        actor: ActorContext,
-        submission: CandidateSubmission,
-    ) -> None:
-        store_analysis_candidate(
-            repos, loop, payload, actor, submission, clock=self._now, new_id=self._new_id
-        )
-
-    def _store_roadmap(
-        self,
-        repos: BoardRepositories,
-        loop: LoopsRow,
-        payload: PlanPayload,
-        actor: ActorContext,
-        submission: CandidateSubmission,
-    ) -> None:
-        store_roadmap_candidate(
-            repos,
-            loop,
-            payload,
-            actor,
-            submission,
-            plans=self.plans,
-            clock=self._now,
-            new_id=self._new_id,
-        )
 
     # --- approvals -------------------------------------------------------------------------------
 
@@ -503,20 +522,20 @@ class LoopDocumentService:
             new_id=self._new_id,
         )
 
-    def store_human_analysis(
+    def store_written_brief(
         self,
         repos: BoardRepositories,
         loop: LoopsRow,
-        content: str,
+        brief: HumanBrief | RoadmapBrief,
         actor: ActorContext,
         *,
         run_id: str,
         provenance: Mapping[str, object],
     ) -> dict[str, str]:
-        return store_human_analysis(
+        return store_run_brief(
             repos,
             loop,
-            content,
+            brief,
             actor,
             run_id=run_id,
             provenance=provenance,

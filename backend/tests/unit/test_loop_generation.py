@@ -208,7 +208,21 @@ SCHEMA_ORDER = {
         "sources",
         "repository_revision",
     ],
+    # The brief: what stands in the way and the highlights before the verdict, the summary and the
+    # recommendation last.
+    "analysis_human": [
+        "schema_version",
+        "obstacles",
+        "pros",
+        "cons",
+        "decisions",
+        "verdict",
+        "verdict_reason",
+        "summary",
+        "recommendation",
+    ],
     "roadmap": ["schema_version", "summary", "phases"],
+    "roadmap_human": ["schema_version", "order", "your_part", "could_block", "summary"],
     "qa": ["schema_version", "summary", "known_risks", "scenarios"],
 }
 

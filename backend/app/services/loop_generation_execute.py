@@ -62,10 +62,13 @@ CLOSED_LOOP_CODES = {"loop_read_only", "loop_not_found"}
 NO_TOOLS = "the agent's provider does not take tools; its connection test says so"
 A2A = "an A2A agent cannot be offered tools"
 REFUSED = "the provider refused tool calls this time"
+# The purposes whose run writes the brief for people (loop_generation_human).
+FOR_PEOPLE = frozenset({"analysis_human", "roadmap_human"})
 _DOCUMENTS = {
     "analysis": "analysis",
     "analysis_human": "analysis for people",
     "roadmap": "RoadMap",
+    "roadmap_human": "RoadMap for people",
     "qa": "QA instructions",
 }
 
@@ -152,7 +155,7 @@ class _Run:
         if purpose in {"analysis", "roadmap"}:
             self.phase("analysing_repository")
             captured, workspace = self.read_repositories(captured, agent)
-        self.phase("writing_for_people" if purpose == "analysis_human" else "generating")
+        self.phase("writing_for_people" if purpose in FOR_PEOPLE else "generating")
         captured, result = self.ask(purpose, captured, agent, workspace)
         if result.cancelled:
             self.trace.add("saving", "step", "Not saved: the run was cancelled")
@@ -176,16 +179,16 @@ class _Run:
         )
         kind, text = _saved(purpose, ended)
         self.trace.add("saving", kind, text)
-        if purpose == "analysis" and ended is not None and ended.status == "completed":
-            self.after_analysis(row.created_by_actor_id, row.created_by_actor_type)
+        if purpose in {"analysis", "roadmap"} and ended is not None and ended.status == "completed":
+            self.after_technical(purpose, row.created_by_actor_id, row.created_by_actor_type)
 
-    def after_analysis(self, actor_id: str, actor_type: str) -> None:
-        """A promoted analysis is written for people next, by a run of its own; the person who
-        asked for the analysis asked for that too."""
+    def after_technical(self, kind: str, actor_id: str, actor_type: str) -> None:
+        """A promoted analysis or RoadMap gets its brief for people next, from a run of its own;
+        the person who asked for the analysis or RoadMap asked for that too."""
         actor = ActorContext(actor_id=actor_id, actor_type=actor_type, actor_name="")
-        started = self.context.documents.after_analysis(actor, self.board_id, self.loop_id)
+        started = self.context.documents.after_technical(actor, self.board_id, self.loop_id, kind)
         if started["run_id"] is not None:
-            self.trace.add("saving", "note", "A board agent writes it for people next")
+            self.trace.add("saving", "note", "A board agent writes the brief for people next")
 
     def read_repositories(
         self, captured: JsonObject, agent: AgentsRow
@@ -250,7 +253,7 @@ class _Run:
         workspace: RepositoryWorkspace | None,
     ) -> tuple[JsonObject, Outcome]:
         prompt = self.context.system_prompt(purpose, agent)
-        if purpose == "analysis_human":
+        if purpose in FOR_PEOPLE:
             result = write_for_people(
                 captured,
                 agent,

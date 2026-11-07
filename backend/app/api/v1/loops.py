@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from ...schemas.briefs import BriefWrite
 from ...schemas.envelope import Envelope, OpenObject
 from ...schemas.loops import (
     ApprovalOut,
@@ -199,6 +200,27 @@ def submit_candidate(
     return ok(
         request,
         ctx.services.loop_document.submit_candidate(ctx.actor, board_id, loop_id, payload),
+    )
+
+
+@router.post(
+    "/boards/{board_id}/loops/{loop_id}/briefs",
+    response_model=Envelope[DocumentListOut],
+    status_code=201,
+)
+def write_brief(
+    board_id: str,
+    loop_id: str,
+    payload: BriefWrite,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    """The brief for people of the current analysis or RoadMap; it approves nothing."""
+    return ok(
+        request,
+        ctx.services.loop_document.write_brief(
+            ctx.actor, board_id, loop_id, payload, through="api"
+        ),
     )
 
 

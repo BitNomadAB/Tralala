@@ -254,8 +254,9 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops/{loop_id}/documents` | Current and approved revisions per kind |
 | GET | `/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions` | Revision history |
 | PUT | `/boards/{board_id}/loops/{loop_id}/documents/info` | Human-only; new immutable revision |
-| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval. `expected_info_revision_id` / `expected_analysis_revision_id` answer `409 document_stale` when that document changed; a token gets `403 human_action_required` while the scope's approval is current. An analysis answer adds `human_view`: the run that writes it for people, or `skipped` with the reason |
-| POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids; `409 generation_in_progress` while the analysis is being written for people |
+| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval. `expected_info_revision_id` / `expected_analysis_revision_id` answer `409 document_stale` when that document changed; a token gets `403 human_action_required` while the scope's approval is current. An optional `analysis_brief` or `roadmap_brief` is stored as the human view (`422 brief_rejected` when it breaks a rule); without one the answer adds `human_view`: the run that writes the brief for people, or `skipped` with the reason |
+| POST | `/boards/{board_id}/loops/{loop_id}/briefs` | `{kind, brief, expected_revision_id?}`: the brief for people of the current `analysis_ai` or `roadmap_ai`, stored as the `analysis` or `roadmap` revision. It approves nothing; a token gets `403 human_action_required` while the scope's approval is current, a person never; `409 document_stale` when `expected_revision_id` is no longer current; `422 brief_rejected` names every problem |
+| POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids; `409 generation_in_progress` while the analysis's brief is being written for people (the RoadMap's review likewise) |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/roadmap` | Human-only; publishes the plan atomically |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/{scope}/reset` | Human-only; clears the scope's documents and supersedes any approval behind them |
 | GET | `/boards/{board_id}/loops/{loop_id}/plan` | Active plan with phases and readiness |
@@ -264,7 +265,7 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops/{loop_id}/readiness` | Machine-readable blockers and human gates |
 | GET/POST | `/boards/{board_id}/loops/{loop_id}/notes` | The Loop's notes, oldest first (`limit` 1..200, `before` a note id); add one (`loops:write`, at most 20 000 characters, the same note from the same actor within five minutes answers the first) |
 | GET | `/boards/{board_id}/loops/{loop_id}/context` | Bounded, versioned context plus output schemas |
-| POST | `/boards/{board_id}/loops/{loop_id}/generation-runs` | Starts an analysis, RoadMap or QA run (`202`), or `analysis_human`: the analysis written for people from the current `analysis_ai` (`409 approval_exists` while the analysis is approved); `Idempotency-Key` supported |
+| POST | `/boards/{board_id}/loops/{loop_id}/generation-runs` | Starts an analysis, RoadMap or QA run (`202`), or `analysis_human` / `roadmap_human`: the brief for people from the current `analysis_ai` or `roadmap_ai` (`409 approval_exists` while that scope is approved); `Idempotency-Key` supported |
 | GET | `/boards/{board_id}/loops/{loop_id}/generation-runs[/{run_id}]` | Durable run state and failures |
 | POST | `/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/cancel` | Cancels a queued or running run |
 | POST | `/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/retry` | Starts a new run with the same inputs |
@@ -819,7 +820,8 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
 | `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
 | `write_analysis` | `loops:generate` | Hand in the worker's own analysis through the candidate route; schema errors answer one `loc: message` line each |
-| `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map` |
+| `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Both take an optional `brief`, stored as the human view instead of asking a board agent |
+| `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket; only a read-only Loop or board refuses it |

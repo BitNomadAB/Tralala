@@ -11,6 +11,7 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import Field, field_validator
 
+from .briefs import HumanBrief, RoadmapBrief
 from .common import Id, LongText, Name, OutModel, Priority, StrictModel, Summary
 
 DocumentKind = Literal["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"]
@@ -186,6 +187,10 @@ class CandidateSubmission(StrictModel):
     kind: Literal["analysis", "roadmap"]
     analysis: AnalysisPayload | None = None
     plan: PlanPayload | None = None
+    # The human view the candidate brings: stored with it (no board agent writes one), held to the
+    # same coverage and text rules as any brief.
+    analysis_brief: HumanBrief | None = None
+    roadmap_brief: RoadmapBrief | None = None
     source_info_revision_id: Id | None = None
     source_analysis_ai_revision_id: Id | None = None
     source_analysis_revision_id: Id | None = None
@@ -356,9 +361,10 @@ class HumanConfirmation(StrictModel):
 # --- Generation -------------------------------------------------------------------
 
 class GenerationRequest(StrictModel):
-    # analysis_human: a board agent writes the analysis a person reads, from the current technical
-    # analysis; its answer is text, checked for every material finding before it is stored.
-    purpose: Literal["analysis", "analysis_human", "roadmap", "qa"]
+    # analysis_human and roadmap_human: a board agent writes the brief a person reads
+    # (schemas/briefs.py) from the current technical analysis or RoadMap; the brief is checked for
+    # coverage and plain text before it is stored.
+    purpose: Literal["analysis", "analysis_human", "roadmap", "roadmap_human", "qa"]
     agent_id: Id | None = None
     instructions: LongText = ""
 
