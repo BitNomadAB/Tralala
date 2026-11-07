@@ -6,6 +6,9 @@ user input. The service reaches the metadata only through the board unit of work
 only through ``AttachmentFiles`` and the board's registry row through ``BoardChecks``; a Ticket's
 attachments follow its Loop (``ensure_ticket_writable``). The clock and the id source are passed in,
 so every rule here runs in a unit test without a database.
+
+A text file (``.txt``, ``.md``, ``.json``) is also read as text (``read_text``), which is how a
+worker over ``/mcp`` reads one; every other file is only ever downloaded as bytes.
 """
 
 from __future__ import annotations
@@ -47,6 +50,8 @@ ALLOWED_TYPES: dict[str, str] = {
 }
 
 TEXT_TYPES = {".txt", ".md", ".json"}
+TEXT_CONTENT_TYPES = frozenset(ALLOWED_TYPES[extension] for extension in TEXT_TYPES)
+"""The content types the service stores for a text file, the only ones read as text."""
 ZIP_TYPES = {".docx", ".pptx", ".xlsx"}
 _FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._ ()\[\]-]+")
 
@@ -114,6 +119,34 @@ def attachment_entry(row: AttachmentsRow) -> AttachmentEntry:
     }
 
 
+class AttachmentSummary(TypedDict):
+    """An attachment as a worker sees it beside a Ticket: what it is, never where it is stored.
+    ``text`` says whether its content can be read as text (``read_text``)."""
+
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    uploaded_at: str
+    text: bool
+
+
+def is_text(entry: AttachmentEntry) -> bool:
+    """Whether a stored file is one of the text types (the content type the upload gave it)."""
+    return entry["content_type"] in TEXT_CONTENT_TYPES
+
+
+def attachment_summary(entry: AttachmentEntry) -> AttachmentSummary:
+    return {
+        "id": entry["id"],
+        "filename": entry["original_filename"],
+        "content_type": entry["content_type"],
+        "size_bytes": entry["size_bytes"],
+        "uploaded_at": entry["created_at"],
+        "text": is_text(entry),
+    }
+
+
 def attachment_path(files: AttachmentFiles, board_id: str, stored_filename: str) -> Path:
     """Where a stored file's bytes are: the board's attachments directory (created when it is
     missing) and the stored name, sanitized again so a row can never point outside it."""
@@ -176,12 +209,47 @@ class AttachmentService:
         with self.store.reader(board_id) as repos:
             return attachment_entry(self._live(repos, attachment_id))
 
-    def read_bytes(self, board_id: str, attachment_id: str) -> tuple[AttachmentEntry, bytes]:
-        entry = self.get(board_id, attachment_id)
+    def for_ticket(self, board_id: str, card_id: str) -> list[AttachmentEntry]:
+        """A Ticket's live attachments, newest first; ``404`` for a Ticket the board lacks."""
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            if repos.cards.get(card_id) is None:
+                raise NotFound("Ticket not found")
+            rows = repos.attachments.live(card_id=card_id)
+        return [attachment_entry(row) for row in reversed(rows)]
+
+    def _stored_bytes(self, board_id: str, entry: AttachmentEntry) -> bytes:
         path = self.file_path(board_id, entry["stored_filename"])
         if not path.exists():
             raise NotFound("Attachment file is missing")
-        return entry, path.read_bytes()
+        return path.read_bytes()
+
+    def read_bytes(self, board_id: str, attachment_id: str) -> tuple[AttachmentEntry, bytes]:
+        entry = self.get(board_id, attachment_id)
+        return entry, self._stored_bytes(board_id, entry)
+
+    def read_text(self, board_id: str, attachment_id: str) -> tuple[AttachmentEntry, str]:
+        """A text file's content, decoded as the upload checked it (UTF-8, a leading byte-order
+        mark dropped). Any other file, or bytes that are not UTF-8, answer
+        ``422 attachment_not_text`` naming the file; nothing is ever re-encoded."""
+        entry = self.get(board_id, attachment_id)
+        name = entry["original_filename"]
+        details: dict[str, object] = {"attachment_id": entry["id"], "filename": name}
+        if not is_text(entry):
+            raise ValidationFailure(
+                f"{name} is not a text file; download it instead",
+                code="attachment_not_text",
+                details=details | {"content_type": entry["content_type"]},
+            )
+        data = self._stored_bytes(board_id, entry)
+        try:
+            return entry, data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValidationFailure(
+                f"{name} is not valid UTF-8 text",
+                code="attachment_not_text",
+                details=details | {"byte_offset": exc.start},
+            ) from exc
 
     # --- commands ------------------------------------------------------------
 

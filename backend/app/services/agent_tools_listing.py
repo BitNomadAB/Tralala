@@ -213,19 +213,57 @@ def list_tickets(services: TicketListing, actor: ActorContext, args: ToolArgumen
         )
     page = matched[start : start + limit]
     after = start + len(page)
+    echo = filters.echo()
     return {
         "board_id": board_id,
-        "filters": filters.echo(),
+        "filters": echo,
         "loops": {loop["key"]: loop["id"] for loop in loops},
         "tickets": page,
         "count": len(page),
         "total": len(matched),
         "continue_from": after + 1 if after < len(matched) else None,
         "next_step": (
-            "Choose a Ticket and read it with read_ticket. Narrow the list with a filter (column, "
-            "assignee me, state, workplace, needs_person, phase) rather than reading more rows."
+            empty_advice(echo, loop_named=_text(args.get("loop_id")) is not None)
+            if not matched
+            else (
+                "Choose a Ticket and read it with read_ticket. Narrow the list with a filter "
+                "(column, assignee me, state, workplace, needs_person, phase) rather than reading "
+                "more rows."
+            )
         ),
     }
+
+
+def _is_names(value: object) -> TypeIs[list[str]]:
+    """A list in the filters' echo: the names of ``column`` or ``state``."""
+    return isinstance(value, list)
+
+
+def _shown(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if _is_names(value):
+        return ", ".join(value)
+    return str(value)
+
+
+def empty_advice(filters: ToolResult, *, loop_named: bool) -> str:
+    """What an empty ``list_tickets`` answer advises: which filters it applied, and that widening
+    or dropping one (or ``loop_id``, or adding ``include_completed``) shows more."""
+    applied = [
+        f"{key} {_shown(value)}" for key, value in filters.items() if key != "include_completed"
+    ]
+    sentences = [
+        f"No Ticket matches the filters applied ({'; '.join(applied)}): widen or drop one of "
+        "them to see more."
+        if applied
+        else "No Ticket is listed, and no filter was applied."
+    ]
+    if loop_named:
+        sentences.append("Drop loop_id to list every open Loop of the board.")
+    if "include_completed" not in filters:
+        sentences.append("include_completed true also lists completed Tickets and Loops.")
+    return " ".join(sentences)
 
 
 # --- write_ticket_summaries ----------------------------------------------------------------------
@@ -442,6 +480,7 @@ __all__ = [
     "assignee_filter",
     "board_order",
     "chosen_columns",
+    "empty_advice",
     "find_loop",
     "list_tickets",
     "listing_tools",

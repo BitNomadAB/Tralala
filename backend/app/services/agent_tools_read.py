@@ -21,10 +21,12 @@ from pydantic import JsonValue
 
 from ..core.context import ActorContext
 from ..core.errors import ValidationFailure
+from .attachments import attachment_summary
 from .search import search_engine
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
+    from .attachments import AttachmentEntry
     from .boards import BoardService
     from .cards import CardEntry
     from .lists import ListEntry, ListService
@@ -41,6 +43,8 @@ type ToolResult = dict[str, object]
 BOARD_LIST_LIMIT = 100
 SEARCH_LIMIT = 100
 SEARCH_DEFAULT = 25
+# read_ticket names a Ticket's newest files; list_attachments names them all.
+TICKET_ATTACHMENTS = 50
 
 
 class BoardListing(Protocol):
@@ -342,6 +346,7 @@ def _read_ticket(
             "human_instructions": card["human_instructions"],
             "checklists": services.checklist.list(board_id, card_id),
             "comments": services.comment.list(board_id, card_id),
+            **ticket_attachments(services.attachment.for_ticket(board_id, card_id)),
         },
         "loop": {
             "id": loop_id,
@@ -350,6 +355,16 @@ def _read_ticket(
             "blocked_reason": readiness["blocked_reason"],
         },
         "allowed_actions": allowed,
+    }
+
+
+def ticket_attachments(entries: list[AttachmentEntry]) -> ToolResult:
+    """A Ticket's files as ``read_ticket`` shows them: the newest ``TICKET_ATTACHMENTS`` of
+    ``entries`` (newest first already) and how many there are; the rest is
+    ``list_attachments``'."""
+    return {
+        "attachments": [attachment_summary(entry) for entry in entries[:TICKET_ATTACHMENTS]],
+        "attachment_count": len(entries),
     }
 
 
@@ -370,6 +385,7 @@ __all__ = [
     "BOARD_LIST_LIMIT",
     "SEARCH_DEFAULT",
     "SEARCH_LIMIT",
+    "TICKET_ATTACHMENTS",
     "BoardListing",
     "TicketSearching",
     "ToolArguments",
@@ -384,5 +400,6 @@ __all__ = [
     "allowed_actions",
     "list_boards",
     "search_tickets",
+    "ticket_attachments",
     "ticket_plan",
 ]
