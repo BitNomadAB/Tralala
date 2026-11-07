@@ -4,12 +4,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import type { Discussion } from "@/lib/types";
-import { formatDateTime } from "@/lib/utils";
+import { MessageItem } from "./AnswerCard";
+import { DiscussionSynthesisPanel } from "./DiscussionSynthesis";
+import { positionLabel } from "./positions";
 import { RunPanel } from "./RunPanel";
 
 export type ReviewDecision = "approve" | "veto" | "rework";
 
-/** The selected thread: its context, the human decisions, the run panel, messages and reply. */
+/**
+ * The selected thread: its context, Tralala's decision support for the newest round, the person's
+ * decision under it, the run panel, each participant's position, the answers as cards and the reply.
+ */
 export function DiscussionThread({
   boardId,
   discussion,
@@ -71,7 +76,11 @@ export function DiscussionThread({
             )
             .join(" · ") || "No AI participants yet"}
         </p>
+        {discussion.synthesis ? (
+          <DiscussionSynthesisPanel synthesis={discussion.synthesis} />
+        ) : null}
         <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium">Your decision:</span>
           <Button
             size="sm"
             variant="outline"
@@ -87,31 +96,28 @@ export function DiscussionThread({
             Veto
           </Button>
           <span className="text-[11px] text-[var(--muted-foreground)]">
-            Each agent answers with its snapshotted role and an explicit verdict.
+            The agents advise from their snapshotted roles; you decide.
           </span>
         </div>
         <RunPanel boardId={boardId} discussion={discussion} onChanged={onChanged} />
-        {(discussion.votes ?? []).length > 0 ? (
-          <ul className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-            {(discussion.votes ?? []).map((vote) => (
+        {(discussion.positions ?? []).length > 0 ? (
+          <ul aria-label="Positions" className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+            {(discussion.positions ?? []).map((stance) => (
               <li
-                key={`${vote.participant_id}-${vote.created_at}`}
+                key={stance.participant_id}
                 className="rounded-md border border-[var(--border)] px-1.5 py-0.5"
               >
-                {vote.display_name ?? "agent"}: <span className="font-medium">{vote.position}</span>
+                {stance.participant}:{" "}
+                <span className="font-medium">{positionLabel(stance.position)}</span>
               </li>
             ))}
           </ul>
         ) : null}
       </div>
-      <ul className="scrollbar-thin flex-1 overflow-y-auto py-2">
+      <ul aria-label="Messages" className="scrollbar-thin flex-1 overflow-y-auto py-2">
         {discussion.messages.map((message) => (
           <li key={message.id} className="mb-3">
-            <p className="text-[11px] text-[var(--muted-foreground)]">
-              <span className="font-medium text-[var(--foreground)]">{message.author_name}</span> ·{" "}
-              {message.author_type} · {formatDateTime(message.created_at)}
-            </p>
-            <p className="mt-0.5 whitespace-pre-wrap text-sm">{message.content}</p>
+            <MessageItem message={message} />
           </li>
         ))}
       </ul>
