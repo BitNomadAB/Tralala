@@ -66,13 +66,15 @@ _ADD = text(
     " assignee_type, assignee_name, assigned_at, assigned_by_actor_id, loop_id, phase_id,"
     " plan_item_id, ticket_key, kind, required_actor, execution_mode, human_action_reason,"
     " human_instructions, human_confirmed_at, human_confirmed_by_actor_id, plan_revision_id,"
-    " summary, summary_source, summary_basis_sha256)"
+    " summary, summary_source, summary_basis_sha256, workplace, waiting_for, waiting_reason,"
+    " waiting_set_at, waiting_set_by)"
     " VALUES (:id, :list_id, :title, :description, :position, :priority, :due_at,"
     " :completed_at, :created_at, :updated_at, :archived_at, :version, :assignee_actor_id,"
     " :assignee_type, :assignee_name, :assigned_at, :assigned_by_actor_id, :loop_id, :phase_id,"
     " :plan_item_id, :ticket_key, :kind, :required_actor, :execution_mode, :human_action_reason,"
     " :human_instructions, :human_confirmed_at, :human_confirmed_by_actor_id, :plan_revision_id,"
-    " :summary, :summary_source, :summary_basis_sha256)"
+    " :summary, :summary_source, :summary_basis_sha256, :workplace, :waiting_for,"
+    " :waiting_reason, :waiting_set_at, :waiting_set_by)"
 )
 _SYNC_PLAN_ITEM = text(
     "UPDATE cards SET title = :title, description = :instructions,"
@@ -300,6 +302,11 @@ class SqlCardRepository:
                 "summary": row.summary,
                 "summary_source": row.summary_source,
                 "summary_basis_sha256": row.summary_basis_sha256,
+                "workplace": row.workplace,
+                "waiting_for": row.waiting_for,
+                "waiting_reason": row.waiting_reason,
+                "waiting_set_at": row.waiting_set_at,
+                "waiting_set_by": row.waiting_set_by,
             },
         )
 

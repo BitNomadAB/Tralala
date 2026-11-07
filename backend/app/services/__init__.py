@@ -50,6 +50,7 @@ from .runs import RunService
 from .search import SearchService
 from .subresources import ChecklistService, CommentService, LabelService
 from .templates import TemplateService
+from .ticket_work import TicketWorkService
 
 logger = logging.getLogger("tralala")
 
@@ -124,6 +125,7 @@ class Services:
         self.loop_links = LoopWorkflowLinks()
         self.loop_agents = LoopAgentService(self.board_store, self.agent)
         self.loop_notes = LoopNoteService(self.board, self.board_store)
+        self.ticket_work = TicketWorkService(self.board, self.board_store, self.card)
         self.loop_history = LoopHistoryService(
             self.board, self.board_store, self.boards, self.boards
         )

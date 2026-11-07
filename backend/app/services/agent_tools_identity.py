@@ -27,6 +27,7 @@ HUMAN_DECISIONS: tuple[str, ...] = (
     "resetting a scope",
     "editing Info",
     "confirming a human-only Ticket",
+    "clearing a Ticket's wait",
     "accepting implementation or QA",
     "finalizing a Loop",
 )
@@ -86,8 +87,9 @@ def whoami(services: IdentityReading, actor: ActorContext, args: ToolArguments) 
         "human_only": {"decisions": list(HUMAN_DECISIONS), "note": _HUMAN_NOTE},
         "next_step": (
             "Call list_boards to find a board, then loop_summaries for where its Loops stand "
-            "and list_tickets (with assignee me, a column or ready) for the Tickets to choose "
-            "from. A scope you lack is granted by the person who issued this key, with a new key."
+            "and list_tickets (with assignee me, a column, state or needs_person) for the Tickets "
+            "to choose from. A scope you lack is granted by the person who issued this key, with "
+            "a new key."
         ),
     }
 

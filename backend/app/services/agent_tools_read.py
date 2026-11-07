@@ -303,21 +303,22 @@ def _read_board(
 
 def allowed_actions(card: CardEntry, *, execution_allowed: bool) -> list[str]:
     """The tools a worker may call on a Ticket now. ``comment_ticket`` always, done or not, as the
-    service allows (only a read-only Loop or board refuses it); ``complete_ticket`` only while the
-    Ticket is ready, open and not a person's, and for a planned one only while the Loop executes."""
+    service allows (only a read-only Loop or board refuses it); ``set_ticket_wait`` while it is
+    open and waits for nothing (clearing a wait is a person's act); ``complete_ticket`` only while
+    the Ticket is ready (no blocker, no wait), open and not a person's, and for a planned one only
+    while the Loop executes."""
     if card["archived_at"]:
         return ["comment_ticket"]
+    may_wait = not card["completed_at"] and card["waiting_for"] == "nothing"
     if card["human_action_required"] and not card["completed_at"]:
-        return ["comment_ticket", "ask_agents"]
+        return ["comment_ticket", "ask_agents", *(["set_ticket_wait"] if may_wait else [])]
     allowed = ["comment_ticket", "assign_ticket", "move_ticket", "ask_agents"]
     if card["plan_item_id"] and not card["ready"]:
         # A planned Ticket waits for its phase entry conditions; a manual one does not.
         allowed.remove("move_ticket")
-    if (
-        card["ready"]
-        and not card["completed_at"]
-        and (execution_allowed or not card["plan_item_id"])
-    ):
+    if may_wait:
+        allowed.append("set_ticket_wait")
+    if card["state"] == "ready" and (execution_allowed or not card["plan_item_id"]):
         allowed.append("complete_ticket")
     return allowed
 
@@ -365,9 +366,21 @@ def _read_ticket(
             "completed_at": card["completed_at"],
             "acceptance_criteria": card["acceptance_criteria"],
             "expected_evidence": card["expected_evidence"],
-            "ready": card["ready"],
+            "state": card["state"],
+            "workplace": card["workplace"],
+            "wait": (
+                None
+                if card["waiting_for"] == "nothing"
+                else {
+                    "waiting_for": card["waiting_for"],
+                    "reason": card["waiting_reason"],
+                    "set_by": card["waiting_set_by"],
+                    "set_at": card["waiting_set_at"],
+                }
+            ),
             "blockers": card["blockers"],
             "human_action_required": card["human_action_required"],
+            "needs_person": card["needs_person"],
             "human_instructions": card["human_instructions"],
             "checklists": services.checklist.list(board_id, card_id),
             "comments": services.comment.list(board_id, card_id),

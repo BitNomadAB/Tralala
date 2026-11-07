@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from ..core.context import ActorContext
-from ..core.errors import Conflict, NotFound, ValidationFailure
+from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
 from ..db.generated.board import CardsRow, LabelsRow, LoopsRow
 from ..repositories.board import BoardRepositories
 from ..repositories.cards import CardChanges
@@ -49,6 +49,29 @@ def ticket_in_loop(repos: BoardRepositories, loop_id: str, card_id: str) -> Card
             details={"loop_id": loop_id, "ticket_loop_id": row.loop_id},
         )
     return row
+
+
+def require_writable(loop: LoopsRow) -> None:
+    """A completed, archived or cancelled Loop is read-only: ``409 loop_read_only``."""
+    if loop.completed_at is not None or loop.stage == "completed":
+        raise Conflict(
+            "This Loop is completed and read-only",
+            code="loop_read_only",
+            details={"loop_id": loop.id},
+        )
+    if loop.archived_at is not None or loop.cancelled_at is not None:
+        raise Conflict(
+            "This Loop is not editable", code="loop_read_only", details={"loop_id": loop.id}
+        )
+
+
+def check_version(card: CardsRow, expected: int) -> None:
+    """Every card mutation is version-checked: ``409 version_conflict`` on a mismatch."""
+    if card.version != expected:
+        raise VersionConflict(
+            "Card was modified by another actor",
+            details={"expected_version": expected, "current_version": card.version},
+        )
 
 
 def card_position(
@@ -107,6 +130,34 @@ def label_ids(
     return resolved
 
 
+def known_label_ids(
+    repos: BoardRepositories, names: Sequence[str], *, drop_unknown: bool = False
+) -> list[str]:
+    """The ids of the board's labels ``names`` name (by name in any case, or by id). An unknown
+    one is refused with the names the board has, or left out with ``drop_unknown``; a describer
+    (a RoadMap, a worker's follow-up) never invents an area."""
+    board = repos.labels.all()
+    by_name = {label.name.casefold(): label.id for label in board}
+    ids = {label.id for label in board}
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for raw in names:
+        name = raw.strip()
+        if not name:
+            continue
+        label_id = name if name in ids else by_name.get(name.casefold())
+        if label_id is None:
+            unknown.append(name)
+        elif label_id not in resolved:
+            resolved.append(label_id)
+    if unknown and not drop_unknown:
+        raise ValidationFailure(
+            "Unknown label: " + ", ".join(unknown),
+            details={"unknown": unknown, "labels": [label.name for label in board]},
+        )
+    return resolved
+
+
 # --- creating ----------------------------------------------------------------------------------
 
 
@@ -139,8 +190,12 @@ def insert_card(
     *,
     new_id: Callable[[], str],
     now: Callable[[], str],
+    known_labels_only: bool = False,
 ) -> CardsRow:
+    """Insert the Ticket ``payload`` describes; its labels are created when the board lacks them,
+    or, with ``known_labels_only``, refused with the names the board has."""
     list_id = payload.list_id
+    labels = known_label_ids(repos, payload.labels) if known_labels_only else None
     active = {row.id for row in repos.lists.for_loop(loop.id, include_archived=False)}
     if list_id not in active:
         other = repos.lists.get(list_id)
@@ -198,17 +253,30 @@ def insert_card(
             summary_basis_sha256=(
                 summary_basis(payload.title, payload.description) if payload.summary else ""
             ),
+            workplace=payload.workplace,
+            waiting_for=payload.waiting_for,
+            waiting_reason=payload.waiting_reason,
+            waiting_set_at=None if payload.waiting_for == "nothing" else timestamp,
+            waiting_set_by=None if payload.waiting_for == "nothing" else actor.actor_id,
         )
     )
-    if payload.labels:
-        repos.cards.set_labels(card_id, label_ids(repos, payload.labels, new_id=new_id))
+    if labels is None and payload.labels:
+        labels = label_ids(repos, payload.labels, new_id=new_id)
+    if labels:
+        repos.cards.set_labels(card_id, labels)
     row = ticket_in_loop(repos, loop.id, card_id)
     log_card(
         repos,
         actor,
         "card.created",
         card_id,
-        {"title": payload.title, "list_id": list_id, "loop_id": loop.id},
+        {
+            "title": payload.title,
+            "list_id": list_id,
+            "loop_id": loop.id,
+            **({} if payload.workplace == "unknown" else {"workplace": payload.workplace}),
+            **({} if payload.waiting_for == "nothing" else {"waiting_for": payload.waiting_for}),
+        },
         new_id=new_id,
         now=now,
     )

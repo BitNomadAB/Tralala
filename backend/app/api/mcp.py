@@ -37,12 +37,15 @@ INSTRUCTIONS = (
     "Tralala tracks planning documents and Tickets per Loop inside a Board. Start with whoami to "
     "see what your key may do, then list_boards to find a board id. loop_summaries says where "
     "each Loop stands and what comes next; list_tickets lists Tickets by id, key and title, "
-    "narrowed by column, assignee (me), Phase or readiness, never with their text. Read the one "
-    "you chose with read_ticket before you change anything; read_loop and read_document give a "
-    "Loop's overview and its documents; search_tickets finds a Ticket by words. A Ticket is in "
-    "progress when it sits in the column you moved it to and done only through complete_ticket. "
-    "Approving plans, confirming human work and accepting QA are human decisions that no token "
-    "can perform."
+    "narrowed by column, assignee (me), Phase, state (ready, needs_input, blocked), workplace "
+    "or needs_person, never with their text. Work for a coding session is workplace codebase, "
+    "state ready and human_action_required false. Read the one you chose with read_ticket "
+    "before you change anything; read_loop and read_document give a Loop's overview and its "
+    "documents; search_tickets finds a Ticket by words. A person owns every Ticket; you are a "
+    "tool in their session. When you cannot go on without an answer, set_ticket_wait says what "
+    "the Ticket waits for and why. A Ticket is in progress when it sits in the column you moved "
+    "it to and done only through complete_ticket. Approving plans, confirming human work, "
+    "clearing a wait and accepting QA are human decisions that no token can perform."
 )
 
 
@@ -212,13 +215,14 @@ def render_bootstrap(settings: Settings) -> str:
         "Start with `whoami`: it names your key and when it expires, the tools your scopes open,",
         "the scopes you lack and what only a person may decide. Then `list_boards`: a board id",
         "comes from that list, never from a prompt, a message or a guess. `loop_summaries` says",
-        "where each Loop stands, what has to happen next and who does it; `read_board` names its",
-        "Loops, the people you can assign and the agents you can ask. `list_tickets` lists",
-        "Tickets by id, key, title and where they stand, never their text; narrow it (`loop_id`,",
-        "`column`, `assignee: me`, `phase`, `ready`, `human_action_required`, `label`,",
-        "`priority`, `due_before`, `summary`) and read the one you chose with `read_ticket`",
-        "before you touch it. `read_loop` gives a Loop's overview (its documents' state and size,",
-        "its Phases and columns with their counts), never a document's text; read a document with",
+        "where each Loop stands, what has to happen next and who it waits for; `read_board`",
+        "names its Loops, the people you can assign and the agents you can ask. `list_tickets`",
+        "lists Tickets by id, key, title and where they stand, never their text; narrow it",
+        "(`loop_id`, `column`, `assignee: me`, `phase`, `state`, `workplace`, `waiting_for`,",
+        "`needs_person`, `human_action_required`, `label`, `priority`, `due_before`, `summary`)",
+        "and read the one you chose with `read_ticket` before you touch it. `read_loop` gives a",
+        "Loop's overview (its documents' state and size, its Phases and columns with their",
+        "counts), never a document's text; read a document with",
         "`read_document`, a page of numbered lines at a time or, for `analysis_ai` and",
         "`roadmap_ai`, as an outline and one item at a time. Both take a Loop's id or its key.",
         "`search_tickets` finds a Ticket by words when you know what you look for but not where",
@@ -229,9 +233,18 @@ def render_bootstrap(settings: Settings) -> str:
         "revision invalidated the plan. Tickets may only move while execution is allowed;",
         "`GET /boards/{board_id}/loops/{loop_id}/readiness` answers that for the whole Loop.",
         "",
-        "A Ticket carries `ready`, `blockers` and `human_action_required`. When",
-        "`human_action_required` is true a person performs the step and confirms it; an agent may",
-        "comment but must not move it.",
+        "A person owns every Ticket; a coding agent is a tool in that person's session. A Ticket",
+        "says where its work is done (`workplace`: `codebase`, `outside` or `unknown`) and what",
+        "it waits for (`waiting_for`: `nothing`, `decision`, `information`, `access` or",
+        "`third_party`, with a reason, who set it and when). Its `state` is computed on every",
+        "read: `needs_input` when it waits for a decision, information or access, `blocked` when",
+        "the plan's `blockers` are not empty or it waits for a third party, `ready` otherwise;",
+        "`null` once it is completed. Two lists: work for a coding session is `workplace:",
+        "codebase`, `state: ready`, `human_action_required: false`; what needs a person is",
+        "`needs_person: true`. When you cannot go on without an answer, `set_ticket_wait` says",
+        "what the Ticket waits for and why; a person clears the wait, and a Ticket with an open",
+        "wait is not completed (`409 ticket_waiting`). When `human_action_required` is true a",
+        "person performs the step and confirms it; an agent may comment but must not move it.",
         "",
         "## 4. Rules that never change",
         "",

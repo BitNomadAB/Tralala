@@ -65,10 +65,11 @@ class ListingWorld:
 
 
 def listing_world(settings: Settings) -> ListingWorld:
-    """Loop L-1 (open): in Todo ``a`` (Phase 2, Grace's, summarised), ``b`` (Phase 1, a person's,
-    no summary), ``c`` (completed) and ``d`` (Phase 1, not ready, high priority, a summary its
-    description has outgrown); in Doing ``e`` (the reader's, no summary). Loop L-2 (completed):
-    ``f`` in Done."""
+    """Loop L-1 (open): in Todo ``a`` (Phase 2, Grace's, summarised, codebase work, ready), ``b``
+    (Phase 1, a person's task, done outside, no summary), ``c`` (completed) and ``d`` (Phase 1,
+    blocked by the plan and waiting for a decision, so it needs input; high priority, a summary its
+    description has outgrown); in Doing ``e`` (the reader's, no summary, outside the plan, waiting
+    for a third party, so blocked). Loop L-2 (completed): ``f`` in Done."""
     state = BoardState()
     state.loops = {
         "open": loop_row("open").__replace__(key="L-1", current_plan_id="plan-1"),
@@ -94,17 +95,25 @@ def listing_world(settings: Settings) -> ListingWorld:
             summary_basis_sha256=summary_basis("Login", "Build the page."),
             assignee_actor_id="user-7",
             assignee_name="Grace",
+            workplace="codebase",
         ),
-        "b": card("b", "todo", "open", 2, "Search", "## Goal\n\nMake **search** fast."),
+        "b": card("b", "todo", "open", 2, "Search", "## Goal\n\nMake **search** fast.").__replace__(
+            workplace="outside"
+        ),
         "c": card("c", "todo", "open", 3, "Old", "Done before.").__replace__(completed_at=CREATED),
         "d": card("d", "todo", "open", 4, "Docs", "Rewritten.").__replace__(
             summary="Writes the guide.",
             summary_source="agent",
             summary_basis_sha256="old",
             priority="high",
+            waiting_for="decision",
+            waiting_reason="Which login provider?",
         ),
         "e": card("e", "doing", "open", 1, "Empty", "").__replace__(
-            assignee_actor_id="agent-1", assignee_name="Reader"
+            assignee_actor_id="agent-1",
+            assignee_name="Reader",
+            waiting_for="third_party",
+            waiting_reason="The supplier sends the key.",
         ),
         "f": card("f", "finished", "done", 1, "Archive", "Kept for history."),
     }
@@ -174,7 +183,8 @@ def test_list_tickets_names_the_tickets_and_where_they_stand_never_what_they_say
         "loop": "L-1",
         "column": "Todo",
         "phase": 2,
-        "ready": True,
+        "state": "ready",
+        "workplace": "codebase",
         "human_action_required": False,
         "assignee": "Grace",
         "completed": False,
@@ -198,14 +208,25 @@ def test_list_tickets_names_the_tickets_and_where_they_stand_never_what_they_say
         ({"assignee": "none"}, ["b", "d"]),
         ({"assignee": "user-7"}, ["a"]),
         ({"phase": 1}, ["b", "d"]),
-        ({"ready": False}, ["d"]),
+        ({"state": "ready"}, ["b", "a"]),
+        ({"state": "needs_input"}, ["d"]),
+        ({"state": ["needs_input", "blocked"]}, ["d", "e"]),
+        ({"workplace": "codebase"}, ["a"]),
+        ({"workplace": "unknown"}, ["d", "e"]),
+        ({"waiting_for": "decision"}, ["d"]),
+        ({"waiting_for": "nothing"}, ["b", "a"]),
+        # What needs a person: an answer (d), or a person's task that may start (b).
+        ({"needs_person": True}, ["b", "d"]),
+        ({"needs_person": False}, ["a", "e"]),
+        # Work for a coding session: codebase, ready, not a person's task.
+        ({"workplace": "codebase", "state": "ready", "human_action_required": False}, ["a"]),
         ({"human_action_required": True}, ["b"]),
         ({"human_action_required": False}, ["d", "a", "e"]),
         ({"summary": "missing"}, ["b", "e"]),
         ({"summary": "stale"}, ["d"]),
         ({"priority": "high"}, ["d"]),
         ({"query": "search"}, ["b"]),
-        ({"column": ["Todo"], "phase": 1, "ready": True}, ["b"]),
+        ({"column": ["Todo"], "phase": 1, "state": "ready"}, ["b"]),
         ({"include_completed": True}, ["b", "d", "a", "c", "e", "f"]),
         # A Loop named by its key (in any case) or its id is listed even when it is completed.
         ({"loop_id": "l-2"}, ["f"]),
@@ -240,7 +261,12 @@ def test_list_tickets_refuses_a_filter_it_cannot_apply_by_name(settings: Setting
         list_tickets(world, READER, ask(loop_id="L-9"))
     assert missing.value.details == {"loop_id": "L-9", "loop_keys": ["L-1", "L-2"]}
     malformed: list[dict[str, JsonValue]] = [
-        {"ready": "yes"},
+        {"ready": True},
+        {"state": "done"},
+        {"state": [1]},
+        {"workplace": "home"},
+        {"waiting_for": "lunch"},
+        {"needs_person": "yes"},
         {"priority": "huge"},
         {"summary": "old"},
         {"fields": "all"},

@@ -1,12 +1,13 @@
 """The Ticket list a worker chooses from, and the summaries a person reads.
 
 ``list_tickets`` answers which Tickets there are and where each stands, never what one says: a row
-is its id, key, title, Loop, column, Phase, owner and whether it is ready. Filters narrow it (a
-Loop, a column, an owner, a Phase, readiness, who must do it, a label, a priority, a due date, a
-missing or stale summary, words), and a worker reads the one it chose with ``read_ticket``, so a
-list costs the same whatever the Tickets say. ``write_ticket_summaries`` writes the short summary
-``read_ticket`` and the Ticket dialog show; every write is an ordinary versioned Ticket edit
-through ``CardService.update``.
+is its id, key, title, Loop, column, Phase, owner, state (ready, needs input, blocked) and
+workplace. Filters narrow it (a Loop, a column, an owner, a Phase, the state, the workplace, the
+wait, what needs a person, whether the task is a person's, a label, a priority, a due date, a
+missing or stale summary, words; ``agent_tools_filters``), and a worker reads the one it chose
+with ``read_ticket``, so a list costs the same whatever the Tickets say.
+``write_ticket_summaries`` writes the short summary ``read_ticket`` and the Ticket dialog show;
+every write is an ordinary versioned Ticket edit through ``CardService.update``.
 
 Both handlers are public and typed on the attributes of the composition root they use, so a unit
 test runs them with the real services on the typed fakes. Their catalogue entries are built here
@@ -15,15 +16,21 @@ too (``listing_tools``) and placed by ``agent_tools.tool_catalog``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, Protocol, TypeIs, get_args
+from typing import TYPE_CHECKING, Final, Protocol, TypeIs
 
 from pydantic import JsonValue, ValidationError
 
 from ..core.context import ActorContext
 from ..core.errors import ApiError, NotFound, ValidationFailure, VersionConflict
-from ..schemas.cards import CardUpdate
-from ..schemas.common import Priority
+from ..schemas.cards import WAITING_FOR, WORKPLACES, CardUpdate
+from .agent_tools_filters import (
+    PRIORITIES,
+    TicketFilters,
+    assignee_filter,
+    choice,
+    chosen_columns,
+    ticket_filters,
+)
 from .agent_tools_read import ToolArguments, ToolResult, _require, _text, _whole_number
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
 
@@ -38,8 +45,6 @@ SUMMARY_WRITE_LIMIT: Final = 100
 # The Tickets of one Loop read to filter and order them before a page is taken.
 LOOP_CARD_LIMIT: Final = 1000
 FIELDS: Final = ("standard", "brief")
-SUMMARY_STATES: Final = ("missing", "stale")
-PRIORITIES: Final[tuple[str, ...]] = get_args(Priority)
 
 # Refusals one Ticket's summary may meet without stopping the others: an unknown id, a read-only
 # Loop or board, a summary the schema refuses.
@@ -97,134 +102,6 @@ def loop_id_of(services: LoopFinding, args: ToolArguments) -> str:
     return find_loop(services, _require(args, "board_id"), _require(args, "loop_id"))["id"]
 
 
-# --- the filters ---------------------------------------------------------------------------------
-
-
-def _flag(args: ToolArguments, key: str) -> bool | None:
-    value = args.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, bool):
-        raise ValidationFailure(f"{key} must be true or false", details={"argument": key})
-    return value
-
-
-def _choice(args: ToolArguments, key: str, choices: tuple[str, ...]) -> str | None:
-    value = _text(args.get(key))
-    if value is not None and value not in choices:
-        raise ValidationFailure(
-            f"{key} must be one of {', '.join(choices)}",
-            details={"argument": key, "choices": list(choices)},
-        )
-    return value
-
-
-def _names(args: ToolArguments, key: str) -> tuple[str, ...]:
-    """A list of texts, or one text; blank entries are dropped."""
-    value = args.get(key)
-    if value is None:
-        return ()
-    entries: list[JsonValue] = (
-        [value] if isinstance(value, str) else value if isinstance(value, list) else [None]
-    )
-    names: list[str] = []
-    for entry in entries:
-        if not isinstance(entry, str):
-            raise ValidationFailure(f"{key} must be a list of texts", details={"argument": key})
-        if entry.strip():
-            names.append(entry.strip())
-    return tuple(names)
-
-
-@dataclass(frozen=True, slots=True)
-class TicketFilters:
-    """What ``list_tickets`` was asked to keep. The card list filters words, owner, label,
-    priority, due date and completion itself (``CardService.list``); the column, the Phase,
-    readiness, who must do it and the summary are applied here, to the Loop's Tickets as read."""
-
-    query: str | None = None
-    columns: tuple[str, ...] = ()
-    assignee: str | None = None
-    phase: int | None = None
-    ready: bool | None = None
-    human: bool | None = None
-    label: str | None = None
-    priority: str | None = None
-    due_before: str | None = None
-    overdue: bool = False
-    summary: str | None = None
-    include_completed: bool = False
-
-    def keeps(self, card: CardEntry) -> bool:
-        return all(
-            (
-                self.phase is None or card["phase_number"] == self.phase,
-                self.ready is None or card["ready"] is self.ready,
-                self.human is None or card["human_action_required"] is self.human,
-                self.summary != "missing" or not card["summary"],
-                self.summary != "stale" or card["summary_stale"],
-            )
-        )
-
-    def echo(self) -> ToolResult:
-        """The filters as given, so an answer says what it was narrowed by."""
-        given: ToolResult = {
-            "query": self.query,
-            "column": list(self.columns) or None,
-            "assignee": self.assignee,
-            "phase": self.phase,
-            "ready": self.ready,
-            "human_action_required": self.human,
-            "label": self.label,
-            "priority": self.priority,
-            "due_before": self.due_before,
-            "overdue": self.overdue or None,
-            "summary": self.summary,
-            "include_completed": self.include_completed or None,
-        }
-        return {key: value for key, value in given.items() if value is not None}
-
-
-def ticket_filters(args: ToolArguments) -> TicketFilters:
-    """The filters of a ``list_tickets`` call, each refused by name when it is malformed."""
-    return TicketFilters(
-        query=_text(args.get("query")),
-        columns=_names(args, "column"),
-        assignee=_text(args.get("assignee")),
-        phase=None
-        if args.get("phase") is None
-        else _whole_number(args, "phase", default=1, maximum=999),
-        ready=_flag(args, "ready"),
-        human=_flag(args, "human_action_required"),
-        label=_text(args.get("label")),
-        priority=_choice(args, "priority", PRIORITIES),
-        due_before=_text(args.get("due_before")),
-        overdue=_flag(args, "overdue") or False,
-        summary=_choice(args, "summary", SUMMARY_STATES),
-        include_completed=_flag(args, "include_completed") or False,
-    )
-
-
-def assignee_filter(assignee: str | None, actor: ActorContext) -> str | None:
-    """``me`` is the key's own actor and ``none`` a Ticket nobody has; anything else is an id."""
-    if assignee is None:
-        return None
-    word = assignee.casefold()
-    if word == "me":
-        return actor.actor_id
-    return "unassigned" if word == "none" else assignee
-
-
-def chosen_columns(columns: list[ListEntry], names: tuple[str, ...]) -> set[str]:
-    """The ids of a Loop's columns named by their name (in any case) or by their id."""
-    wanted = {name.casefold() for name in names}
-    return {
-        entry["id"]
-        for entry in columns
-        if entry["name"].casefold() in wanted or entry["id"] in names
-    }
-
-
 # --- list_tickets --------------------------------------------------------------------------------
 
 
@@ -239,7 +116,8 @@ def ticket_row(card: CardEntry, *, loop_key: str, column: str, brief: bool = Fal
         "loop": loop_key,
         "column": column,
         "phase": card["phase_number"],
-        "ready": card["ready"],
+        "state": card["state"],
+        "workplace": card["workplace"],
         "human_action_required": card["human_action_required"],
         "assignee": card["assignee_name"],
         "completed": card["completed_at"] is not None,
@@ -315,7 +193,7 @@ def list_tickets(services: TicketListing, actor: ActorContext, args: ToolArgumen
     actor.require("loops:read")
     board_id = _require(args, "board_id")
     filters = ticket_filters(args)
-    brief = _choice(args, "fields", FIELDS) == "brief"
+    brief = choice(args, "fields", FIELDS) == "brief"
     limit = _whole_number(args, "limit", default=LIST_DEFAULT, maximum=LIST_LIMIT)
     start = _whole_number(args, "continue_from", default=1, maximum=10**9) - 1
     loops = _loops(services, board_id, args)
@@ -345,7 +223,7 @@ def list_tickets(services: TicketListing, actor: ActorContext, args: ToolArgumen
         "continue_from": after + 1 if after < len(matched) else None,
         "next_step": (
             "Choose a Ticket and read it with read_ticket. Narrow the list with a filter (column, "
-            "assignee me, ready, phase) rather than reading more rows."
+            "assignee me, state, workplace, needs_person, phase) rather than reading more rows."
         ),
     }
 
@@ -457,9 +335,12 @@ def listing_tools(board_id: ArgumentSchema) -> list[AgentTool]:
             name="list_tickets",
             description=(
                 "List which Tickets there are and where each stands, never what they say: id, "
-                "key, title, Loop, column, Phase, whether it is ready, whether a person must do "
-                "it, and who has it. Narrow it with the filters, choose one, then read it with "
-                "read_ticket. The open Loops' open Tickets unless include_completed is true."
+                "key, title, Loop, column, Phase, state (ready, needs_input or blocked), "
+                "workplace (codebase, outside or unknown), whether the task is a person's, and "
+                "who has it. Work for a coding session: workplace codebase, state ready, "
+                "human_action_required false. What needs a person: needs_person true. Choose "
+                "one, then read it with read_ticket. The open Loops' open Tickets unless "
+                "include_completed is true."
             ),
             scopes=("cards:read", "loops:read"),
             input_schema=object_schema(
@@ -475,7 +356,21 @@ def listing_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                         "Optional: me (this key), none (nobody), or a person id from read_board"
                     ),
                     "phase": {"type": "number", "minimum": 1, "description": "Optional Phase"},
-                    "ready": _boolean("Optional: only Tickets that may start now, or only not"),
+                    "state": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional states: ready (may start now), needs_input (waits for a "
+                            "decision, information or access) or blocked (earlier work, or a "
+                            "third party)"
+                        ),
+                    },
+                    "workplace": string_argument("Optional: " + ", ".join(WORKPLACES)),
+                    "waiting_for": string_argument("Optional: " + ", ".join(WAITING_FOR)),
+                    "needs_person": _boolean(
+                        "Optional: what needs a person now (needs_input, or ready and a "
+                        "person's task)"
+                    ),
                     "human_action_required": _boolean(
                         "Optional: only Tickets a person must do (true) or only the others (false)"
                     ),

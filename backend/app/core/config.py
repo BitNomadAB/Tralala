@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # the cache and measures on every list.
     board_counts_cache_seconds: int = 60
     default_lists: str = "Backlog,Todo,In Progress,Review,Done"
+    # The area labels a board created without a template starts with (a template brings its own);
+    # a board created before this setting keeps the labels it has. Empty for none.
+    default_labels: str = (
+        "Development,Architecture,UX,QA,Security,Operations,Documentation,Data,Product,"
+        "Business,Economy,Legal,Support,Communication,Research"
+    )
     bootstrap_username: str = "admin"
     bootstrap_password: str = "admin"  # noqa: S105 - a placeholder bootstrap_admin replaces
     max_page_size: int = 200
@@ -144,6 +150,10 @@ class Settings(BaseSettings):
     @property
     def list_names(self) -> list[str]:
         return [name.strip() for name in self.default_lists.split(",") if name.strip()]
+
+    @property
+    def label_names(self) -> list[str]:
+        return [name.strip() for name in self.default_labels.split(",") if name.strip()]
 
     @property
     def allowed_origins(self) -> list[str]:

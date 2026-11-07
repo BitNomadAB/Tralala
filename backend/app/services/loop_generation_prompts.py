@@ -95,6 +95,51 @@ REPOSITORY_TOOLS = (
 )
 
 
+# What a planned Ticket says about its work besides its text. A person owns every Ticket and a
+# coding agent is a tool in that person's session, so these fields describe the work and never
+# name who does it.
+TICKET_WORK_RULES = (
+    "For every Ticket say where its work is done in workplace: codebase when it is done in a "
+    "repository, outside when it is done in another system or the world outside (a setting, an "
+    "account, a supplier, a document), unknown when the analysis does not tell. Say what it waits "
+    "for before work can go on in waiting_for: nothing, decision, information, access (a system, "
+    "key, account, setting or machine) or third_party, and when it is not nothing write what is "
+    "needed in waiting_reason. Give its area in labels, chosen only from the names in "
+    "context.labels; leave labels empty when none fits. These fields describe the work and "
+    "assign nothing: a person owns every Ticket, so never write that an agent does one."
+)
+
+
+def context_labels(captured: Mapping[str, JsonValue]) -> tuple[str, ...] | None:
+    """The board's label names a run was given (``context.labels``); ``None`` for a run captured
+    before the context carried them, whose labels are then not checked here."""
+    source = captured.get("context")
+    labels = source.get("labels") if isinstance(source, dict) else None
+    if not isinstance(labels, list):
+        return None
+    return tuple(label for label in labels if isinstance(label, str))
+
+
+def _check_labels(plan: PlanPayload, labels: tuple[str, ...]) -> None:
+    """Every label a planned Ticket names is one of the board's, in any case."""
+    known = {label.casefold() for label in labels}
+    unknown = sorted(
+        {
+            label
+            for phase in plan.phases
+            for ticket in phase.tickets
+            for label in ticket.labels
+            if label.strip().casefold() not in known
+        }
+    )
+    if unknown:
+        raise ValidationFailure(
+            "Unknown label: " + ", ".join(unknown) + ". Use only the names in context.labels: "
+            + (", ".join(labels) or "(the board has none, so leave labels empty)"),
+            details={"unknown": unknown, "labels": list(labels)},
+        )
+
+
 def _snapshot_caps() -> str:
     return SNAPSHOT_CAPS
 
@@ -120,6 +165,7 @@ PURPOSE_PROMPTS = {
         "human_action_reason and human_instructions. Model a human check that gates a later "
         f"Phase as execution_mode='pre_phase_gate'. Give every Ticket a summary: what it is "
         "about in one or two plain sentences for a list of Tickets, without file paths or code. "
+        f"{TICKET_WORK_RULES} "
         f"{REPOSITORY_RULES} "
         # The plan rules validate_plan holds every answer to, one sentence each; an answer that
         # breaks one is sent back for repair with the rule's message.
@@ -302,10 +348,13 @@ def user_message(
     return "\n".join(lines)
 
 
-def parse_output(purpose: str, text: str) -> JsonObject:
+def parse_output(
+    purpose: str, text: str, *, labels: tuple[str, ...] | None = None
+) -> JsonObject:
     """The answer as its purpose's schema reads it. A RoadMap must also keep the plan rules
-    (``validate_plan``), so a broken reference is repaired by the model instead of failing the
-    run at promotion; promotion validates again all the same."""
+    (``validate_plan``) and name only the board's ``labels`` (when the run was given them), so a
+    broken reference or an unknown label is repaired by the model instead of failing the run at
+    promotion; promotion validates again all the same."""
     if len(text) > MAX_OUTPUT_CHARS:
         raise ValidationFailure("Generation output exceeds the size limit")
     payload = json.loads(strip_fences(text))
@@ -313,6 +362,8 @@ def parse_output(purpose: str, text: str) -> JsonObject:
     validated = model.model_validate(payload)
     if isinstance(validated, PlanPayload):
         validate_plan(validated)
+        if labels is not None:
+            _check_labels(validated, labels)
     return validated.model_dump()
 
 

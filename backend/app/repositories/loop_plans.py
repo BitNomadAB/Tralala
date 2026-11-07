@@ -30,11 +30,14 @@ class PlanTotals:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PlannedItem:
-    """A plan item and the card published from it; both card fields are None before then."""
+    """A plan item and the card published from it; the card fields are None (and the card's wait
+    and workplace their defaults) before then."""
 
     item: LoopPlanItemsRow
     card_id: str | None
     completed_at: str | None
+    waiting_for: str = "nothing"
+    workplace: str = "unknown"
 
 
 class LoopPlanRepository(Protocol):

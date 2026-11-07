@@ -228,6 +228,7 @@ class LoopDocumentService:
                     for phase in plan["phases"]
                 ],
             },
+            "labels": [label.name for label in repos.labels.all()],
         }
 
     # --- writing revisions -----------------------------------------------------------------------

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from app.db.generated.board import LoopsRow
 from app.repositories.board import BoardRepositories
 from app.services.plan_views import Blocker, PlanView, PlanViews, Readiness, ReadinessItem
+from app.services.ticket_state import ticket_state
 
 
 def readiness_item(
@@ -16,8 +17,10 @@ def readiness_item(
     blockers: tuple[Blocker, ...] = (),
     human: bool = False,
     phase_number: int = 1,
+    waiting_for: str = "nothing",
 ) -> ReadinessItem:
-    """A planned Ticket's readiness; ``card_id`` is the card that carries it."""
+    """A planned Ticket's readiness; ``card_id`` is the card that carries it, and its state
+    follows from ``ready`` and ``waiting_for`` as ``ticket_state`` computes it."""
     return {
         "id": f"item-{card_id}",
         "key": f"K-{card_id}",
@@ -40,6 +43,9 @@ def readiness_item(
         "blockers": list(blockers),
         "human_action_required": human,
         "downstream_phase_numbers": [2],
+        "workplace": "unknown",
+        "waiting_for": waiting_for,
+        "state": ticket_state(completed=False, waiting_for=waiting_for, blocked=not ready),
     }
 
 

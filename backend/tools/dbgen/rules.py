@@ -189,6 +189,7 @@ CROSS_DATABASE: Final = _board(
         ("cards", "assigned_by_actor_id"): REGISTRY,
         ("cards", "assignee_actor_id"): REGISTRY,
         ("cards", "human_confirmed_by_actor_id"): REGISTRY,
+        ("cards", "waiting_set_by"): REGISTRY,
         ("comment_mention_jobs", "agent_id"): REGISTRY,
         ("comment_mention_jobs", "requested_by_actor_id"): REGISTRY,
         ("comments", "actor_id"): REGISTRY,

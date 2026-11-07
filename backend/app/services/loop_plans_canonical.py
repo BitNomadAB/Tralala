@@ -34,6 +34,10 @@ class CanonicalTicket(TypedDict):
     human_instructions: str
     note: str
     priority: str
+    workplace: str
+    waiting_for: str
+    waiting_reason: str
+    labels: list[str]
     key: str
     sequence: int
     phase_number: int
@@ -101,6 +105,10 @@ def canonical_ticket(
         "human_instructions": ticket.human_instructions,
         "note": ticket.note,
         "priority": ticket.priority,
+        "workplace": ticket.workplace,
+        "waiting_for": ticket.waiting_for,
+        "waiting_reason": ticket.waiting_reason,
+        "labels": list(ticket.labels),
         "key": key,
         "sequence": sequence,
         "phase_number": phase_number,

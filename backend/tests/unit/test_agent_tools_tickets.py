@@ -323,6 +323,9 @@ def test_create_ticket_adds_work_outside_the_plan_in_the_first_column(
             "title": "Rename the export",
             "column": "Todo",
             "version": 1,
+            "state": "ready",
+            "workplace": "unknown",
+            "labels": [],
         },
         "unplanned": True,
     }

@@ -214,6 +214,9 @@ def test_unplanned_work_never_blocks_acceptance_and_the_answer_names_what_is_ope
             "title": "Rename the export",
             "completed_at": None,
             "archived_at": None,
+            "workplace": "unknown",
+            "waiting_for": "nothing",
+            "state": "ready",
         }
     ]
     assert len(state.qa_cycles) == 1

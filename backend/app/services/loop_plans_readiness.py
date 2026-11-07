@@ -13,6 +13,7 @@ from pydantic import JsonValue
 from ..db.generated.board import LoopDependenciesRow, LoopPhasesRow
 from ..repositories.loop_plans import PlannedItem
 from .plan_views import Blocker, PhaseView, ReadinessItem
+from .ticket_state import ticket_state
 
 # --- readiness -----------------------------------------------------------------------------------
 
@@ -196,6 +197,13 @@ def phase_views(
                     ),
                     "downstream_phase_numbers": sorted(
                         downstream.get(f"ticket:{item.id}", set[int]())
+                    ),
+                    "workplace": entry.workplace if entry.card_id else item.workplace,
+                    "waiting_for": entry.waiting_for if entry.card_id else item.waiting_for,
+                    "state": ticket_state(
+                        completed=entry.completed_at is not None,
+                        waiting_for=entry.waiting_for if entry.card_id else item.waiting_for,
+                        blocked=bool(blockers),
                     ),
                 }
             )

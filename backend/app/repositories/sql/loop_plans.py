@@ -103,10 +103,11 @@ _ADD_ITEM = text(
     "INSERT INTO loop_plan_items (id, loop_id, plan_id, phase_id, phase_number, key,"
     " ticket_sequence, title, objective, instructions, required_actor, execution_mode, priority,"
     " acceptance_criteria_json, expected_evidence_json, human_action_reason, human_instructions,"
-    " created_at, summary) VALUES (:id, :loop_id, :plan_id, :phase_id, :phase_number, :key,"
-    " :ticket_sequence, :title, :objective, :instructions, :required_actor, :execution_mode,"
-    " :priority, :acceptance_criteria_json, :expected_evidence_json, :human_action_reason,"
-    " :human_instructions, :created_at, :summary)"
+    " created_at, summary, workplace, waiting_for, waiting_reason) VALUES (:id, :loop_id,"
+    " :plan_id, :phase_id, :phase_number, :key, :ticket_sequence, :title, :objective,"
+    " :instructions, :required_actor, :execution_mode, :priority, :acceptance_criteria_json,"
+    " :expected_evidence_json, :human_action_reason, :human_instructions, :created_at, :summary,"
+    " :workplace, :waiting_for, :waiting_reason)"
 )
 _UPDATE_ITEM = text(
     "UPDATE loop_plan_items SET plan_id = :plan_id, phase_id = :phase_id,"
@@ -116,11 +117,13 @@ _UPDATE_ITEM = text(
     " acceptance_criteria_json = :acceptance_criteria_json,"
     " expected_evidence_json = :expected_evidence_json,"
     " human_action_reason = :human_action_reason, human_instructions = :human_instructions,"
-    " summary = :summary WHERE id = :id"
+    " summary = :summary, workplace = :workplace, waiting_for = :waiting_for,"
+    " waiting_reason = :waiting_reason WHERE id = :id"
 )
 _ITEMS_WITH_CARDS = text(
     f"SELECT {sql.column_list(LOOP_PLAN_ITEMS_COLUMNS, 'i')},"  # noqa: S608 - from LOOP_PLAN_ITEMS_COLUMNS
-    " c.id AS card_id, c.completed_at AS card_completed_at FROM loop_plan_items i"
+    " c.id AS card_id, c.completed_at AS card_completed_at,"
+    " c.waiting_for AS card_waiting_for, c.workplace AS card_workplace FROM loop_plan_items i"
     " LEFT JOIN cards c ON c.plan_item_id = i.id"
     " WHERE i.loop_id = :id ORDER BY i.phase_number, i.ticket_sequence, i.key"
 )
@@ -273,6 +276,9 @@ def _item_values(row: LoopPlanItemsRow) -> dict[str, str | int]:
         "human_instructions": row.human_instructions,
         "created_at": row.created_at,
         "summary": row.summary,
+        "workplace": row.workplace,
+        "waiting_for": row.waiting_for,
+        "waiting_reason": row.waiting_reason,
     }
 
 
@@ -303,6 +309,8 @@ class SqlLoopPlanItemRepository:
                 item=LoopPlanItemsRow.from_mapping(row),
                 card_id=values.text_or_none(row, "card_id"),
                 completed_at=values.text_or_none(row, "card_completed_at"),
+                waiting_for=values.text_or_none(row, "card_waiting_for") or "nothing",
+                workplace=values.text_or_none(row, "card_workplace") or "unknown",
             )
             for row in result.mappings()
         ]

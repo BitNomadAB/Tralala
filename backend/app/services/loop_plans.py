@@ -38,6 +38,7 @@ from ..db.generated.board import (
 from ..repositories.board import BoardRepositories
 from ..schemas.loops import PlanPayload
 from .activity import activity_entry
+from .cards_writes import known_label_ids
 from .loop_identifiers import format_ticket_key, phase_prefix
 from .loop_plans_canonical import (
     CanonicalPhase,
@@ -76,6 +77,11 @@ class _StoredTicket(TypedDict):
     execution_mode: str
     human_action_reason: str
     human_instructions: str
+    # absent from a plan stored before Tickets said where their work is done and what they wait for
+    workplace: NotRequired[str]
+    waiting_for: NotRequired[str]
+    waiting_reason: NotRequired[str]
+    labels: NotRequired[list[str]]
 
 
 class _StoredPhase(TypedDict):
@@ -125,12 +131,21 @@ class LoopPlanService(PlanViews):
         loop: LoopsRow,
         payload: PlanPayload,
         actor: ActorContext,
+        *,
+        drop_unknown_labels: bool = False,
     ) -> PlanDraft:
         """Validate a candidate, reserve identities and store it as an unapproved plan revision.
+
+        A planned Ticket's labels are names the board has: an unknown one is refused with the
+        names there are, or, for a generated RoadMap (``drop_unknown_labels``) whose model was
+        given the names and checked against them, left out at publication.
 
         Its two RoadMap revisions are written afterwards in the same transaction, so they are
         empty until ``attach_revisions`` links them."""
         validate_plan(payload)
+        for phase in payload.phases:
+            for ticket in phase.tickets:
+                known_label_ids(repos, ticket.labels, drop_unknown=drop_unknown_labels)
         revision = repos.plans.next_revision(loop.id)
         plan_id = self._new_id()
         now = self._now()
@@ -286,8 +301,13 @@ class LoopPlanService(PlanViews):
                         phase_id=phase["id"],
                         plan_id=plan_id,
                         now=now,
+                        publisher=actor.actor_id,
                     )
                 )
+                # A label removed from the board since the plan was written is left out.
+                labels = known_label_ids(repos, ticket.get("labels", []), drop_unknown=True)
+                if labels:
+                    repos.cards.set_labels(ticket["id"], labels)
                 created.append({"id": ticket["id"], "key": ticket["key"]})
         repos.plans.activate(loop.id, plan_id, approval_id=approval_id, now=now)
         repos.loops.set_current_plan(loop.id, plan_id, now=now)
@@ -443,6 +463,9 @@ def _project_item(
         human_action_reason=ticket["human_action_reason"],
         human_instructions=ticket["human_instructions"],
         created_at=now,
+        workplace=ticket["workplace"],
+        waiting_for=ticket["waiting_for"],
+        waiting_reason=ticket["waiting_reason"],
     )
     if repos.plan_items.get(phase.loop_id, ticket["id"]) is None:
         repos.plan_items.add(row)
@@ -462,10 +485,14 @@ def _planned_card(
     phase_id: str,
     plan_id: str,
     now: str,
+    publisher: str,
 ) -> CardsRow:
-    """The Ticket card a planned Ticket becomes; it carries the plan item's identity and the
-    RoadMap's summary of it."""
+    """The Ticket card a planned Ticket becomes; it carries the plan item's identity, the
+    RoadMap's summary of it and its starting workplace and wait (set by whoever published the
+    plan, when the plan gave one)."""
     summary = ticket.get("summary", "")
+    waiting_for = ticket.get("waiting_for", "nothing")
+    waiting = waiting_for != "nothing"
     return CardsRow(
         id=ticket["id"],
         list_id=list_id,
@@ -501,6 +528,11 @@ def _planned_card(
         summary_basis_sha256=(
             summary_basis(ticket["title"], ticket["instructions"]) if summary else ""
         ),
+        workplace=ticket.get("workplace", "unknown"),
+        waiting_for=waiting_for,
+        waiting_reason=ticket.get("waiting_reason", "") if waiting else "",
+        waiting_set_at=now if waiting else None,
+        waiting_set_by=publisher if waiting else None,
     )
 
 

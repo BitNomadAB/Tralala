@@ -45,7 +45,7 @@ from .boards_archive import (
 from .boards_registry import BoardEntry, BoardSchema, Counts, JsonObject
 from .idempotency import request_fingerprint
 from .repository_links import paths_by_repository
-from .templates import TemplateEntry
+from .templates import TemplateEntry, default_labels
 
 logger = logging.getLogger("tralala")
 
@@ -298,7 +298,7 @@ class BoardService:
             or (template["lists"] if template and template["lists"] else None)
             or self.settings.list_names
         )
-        labels = list(template["labels"]) if template else []
+        labels = list(template["labels"]) if template else default_labels(self.settings)
         self._add_row(board_id, payload.name, description)
         try:
             self.files.create_database(board_id, description)

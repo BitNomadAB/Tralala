@@ -2,10 +2,13 @@
 
 A row is computed from what the Loop already records (its stage, its documents' states, its
 Tickets' readiness and the columns' counts), never written by anyone, so it is never older than
-the Loop. ``next`` says in one sentence what has to happen now and ``waiting_on`` who does it: a
-``person`` (a decision only a signed-in person may make, or a Ticket a person must do), an
-``agent`` (work a worker key or a board agent can do), ``anyone`` or ``nobody`` (a Loop that is
-finished). The documents, the Tickets and the notes themselves are read with ``read_loop``,
+the Loop. ``next`` says in one sentence what has to happen now and ``waiting_on`` who it waits
+for: a ``person`` (a decision only a signed-in person may make, an answer a Ticket waits for, or a
+Ticket that is a person's task), an ``agent`` (a document a worker key or a board agent can write:
+asking Tralala's agent for an analysis is decision support), ``anyone`` or ``nobody`` (a Loop that
+is finished). Delivery never waits on an agent: a person owns every Ticket, and a ready one is
+``anyone``'s to take. The Tickets count by state: ready, needs input, blocked, completed, and
+``needs_person``. The documents, the Tickets and the notes themselves are read with ``read_loop``,
 ``list_tickets`` and ``read_document``.
 
 The handler is public and typed on the attributes of the composition root it uses, so a unit test
@@ -48,30 +51,35 @@ class LoopSummarising(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class TicketCounts:
-    """A Loop's open Tickets by what they wait for."""
+    """A Loop's Tickets by state (``ticket_state``): open ones are ready, need input or are
+    blocked; ``needs_person`` counts what waits for a person now (needs input, or ready and a
+    person's task)."""
 
     total: int = 0
     completed: int = 0
-    for_agent: int = 0  # ready, and not a person's
-    for_person: int = 0  # ready, and a person must do it
-    waiting: int = 0  # not ready: an earlier Ticket or Phase is not done
+    ready: int = 0
+    needs_input: int = 0
+    blocked: int = 0
+    needs_person: int = 0
 
 
 def ticket_counts(readiness: LoopReadiness) -> TicketCounts:
-    """The planned Tickets by readiness, plus the ones added outside the plan (archived ones left
-    out), which never wait for anything."""
+    """The planned Tickets by state, plus the ones added outside the plan (archived ones left
+    out), which only their own wait can hold up."""
     items = readiness["items"]
     unplanned = [ticket for ticket in readiness["unplanned"] if ticket["archived_at"] is None]
-    planned = [item for item in items if item["completed_at"] is None]
+    states = [item["state"] for item in items] + [ticket["state"] for ticket in unplanned]
+    person_tasks = sum(
+        1 for item in items if item["state"] == "ready" and item["human_action_required"]
+    )
+    needs_input = states.count("needs_input")
     return TicketCounts(
-        total=len(items) + len(unplanned),
-        completed=len(items)
-        - len(planned)
-        + sum(1 for ticket in unplanned if ticket["completed_at"] is not None),
-        for_agent=sum(1 for ticket in unplanned if ticket["completed_at"] is None)
-        + sum(1 for item in planned if item["ready"] and not item["human_action_required"]),
-        for_person=sum(1 for item in planned if item["ready"] and item["human_action_required"]),
-        waiting=sum(1 for item in planned if not item["ready"]),
+        total=len(states),
+        completed=states.count(None),
+        ready=states.count("ready"),
+        needs_input=needs_input,
+        blocked=states.count("blocked"),
+        needs_person=needs_input + person_tasks,
     )
 
 
@@ -116,13 +124,20 @@ def next_step(
     blocked = readiness["blocked_reason"]
     if blocked is not None:
         return blocked["message"], "person"
-    if counts.for_agent:
-        return _tickets(counts.for_agent, "can", "can") + " be worked on now.", "agent"
-    if counts.for_person:
-        ready = _tickets(counts.for_person, "is ready and needs", "are ready and need")
+    # Delivery: a person owns every Ticket, so no sentence here names an agent as the one who
+    # does it; a ready Ticket is anyone's to take, in a coding session or not.
+    if counts.needs_input:
+        waiting = _tickets(counts.needs_input, "waits", "wait")
+        return f"{waiting} for a person's decision, information or access.", "person"
+    person_tasks = counts.needs_person - counts.needs_input
+    if counts.ready > person_tasks:
+        return _tickets(counts.ready - person_tasks, "is", "are") + " ready to start.", "anyone"
+    if person_tasks:
+        ready = _tickets(person_tasks, "is ready and needs", "are ready and need")
         return f"{ready} a person.", "person"
-    if counts.waiting:
-        return _tickets(counts.waiting, "waits", "wait") + " for earlier work to be done.", "anyone"
+    if counts.blocked:
+        blocked = _tickets(counts.blocked, "waits", "wait")
+        return f"{blocked} for earlier work or a third party.", "anyone"
     return "Every Ticket is done: a person accepts the implementation.", "person"
 
 
@@ -156,11 +171,12 @@ def loop_row(entry: LoopEntry, readiness: LoopReadiness, columns: list[ListEntry
         "waiting_on": waiting_on,
         "execution_allowed": readiness["execution_allowed"],
         "tickets": {
-            "total": counts.total,
+            "ready": counts.ready,
+            "needs_input": counts.needs_input,
+            "blocked": counts.blocked,
             "completed": counts.completed,
-            "ready_for_agent": counts.for_agent,
-            "ready_for_person": counts.for_person,
-            "waiting": counts.waiting,
+            "total": counts.total,
+            "needs_person": counts.needs_person,
             "by_column": {column["name"]: column["card_count"] for column in columns},
         },
         "documents": {kind: _document(entry, kind) for kind in DOCUMENT_KINDS},
@@ -194,7 +210,8 @@ def loop_summaries(
         "count": len(rows),
         "next_step": (
             "list_tickets with a loop_id (or key) lists its Tickets, narrowed by column, "
-            "assignee me or ready; read_loop gives one Loop's documents, Phases and notes."
+            "assignee me, state or needs_person; read_loop gives one Loop's documents, Phases "
+            "and notes."
         ),
     }
 
@@ -206,9 +223,10 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
             name="loop_summaries",
             description=(
                 "Say where each Loop of a board stands, one row a Loop: its goal and stage, what "
-                "has to happen next and who does it (a person, an agent, anyone or nobody), its "
-                "Tickets by what they wait for and by column, and each document's state. Open "
-                "Loops unless include_completed is true."
+                "has to happen next and who it waits for (a person, an agent for a document, "
+                "anyone or nobody), its Tickets by state (ready, needs_input, blocked, completed, "
+                "total, needs_person) and by column, and each document's state. Open Loops unless "
+                "include_completed is true."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(

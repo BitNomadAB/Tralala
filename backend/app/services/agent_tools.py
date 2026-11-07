@@ -14,7 +14,7 @@ agent for them), tracks and completes the Tickets and adds the follow-ups it fin
 a person still approves the analysis and the RoadMap, confirms human work and accepts QA.
 
 The handlers live beside this module, in ``agent_tools_read``, ``agent_tools_write``,
-``agent_tools_tickets`` and ``agent_tools_plan``, and the argument schemas in
+``agent_tools_tickets``, ``agent_tools_work`` and ``agent_tools_plan``, and the argument schemas in
 ``agent_tools_schema``; this module holds the catalogue and the dispatch and re-exports them.
 """
 
@@ -52,6 +52,7 @@ from .agent_tools_schema import model_argument as _model
 from .agent_tools_schema import object_schema as _object
 from .agent_tools_schema import string_argument as _string
 from .agent_tools_tickets import comment_ticket, complete_ticket, create_ticket
+from .agent_tools_work import set_ticket_wait, work_tools
 from .agent_tools_write import (
     _ask_agents,
     _assign_ticket,
@@ -190,6 +191,7 @@ def tool_catalog() -> dict[str, AgentTool]:
             handler=search_tickets,
         ),
         *listing_tools(_BOARD_ID),
+        *work_tools(_BOARD_ID, _CARD_ID),
         AgentTool(
             name="assign_ticket",
             description=(
@@ -249,6 +251,17 @@ def tool_catalog() -> dict[str, AgentTool]:
                     "summary": _string("Optional: what it is about in a sentence or two"),
                     "follow_up_of": _string("Optional id of the Ticket this work came out of"),
                     "priority": _string("Optional: none, low, medium, high or urgent"),
+                    "workplace": _string("Optional: codebase, outside or unknown (the default)"),
+                    "waiting_for": _string(
+                        "Optional: nothing (the default), decision, information, access or "
+                        "third_party; a wait needs waiting_reason"
+                    ),
+                    "waiting_reason": _string("What the wait needs, at most 500 characters"),
+                    "labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional area labels by the names the board has",
+                    },
                 },
                 required=["board_id", "loop_id", "title"],
             ),
@@ -566,6 +579,7 @@ __all__ = [
     "read_notes",
     "run_tool",
     "search_tickets",
+    "set_ticket_wait",
     "tool_catalog",
     "whoami",
     "write_analysis",

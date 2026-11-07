@@ -39,7 +39,7 @@ from .loop_generation_ask import (
     repair_request,
     repair_step,
 )
-from .loop_generation_prompts import JsonObject, parse_output, user_message
+from .loop_generation_prompts import JsonObject, context_labels, parse_output, user_message
 from .loop_generation_runs import MIRROR_FIELDS, Outcome, write_input
 from .loop_generation_trace import (
     RunTrace,
@@ -245,6 +245,7 @@ def read_and_answer(
         limits=limits,
         trace=trace,
         messages=[{"role": "user", "content": request}],
+        labels=context_labels(captured),
     )
     return reading.run()
 
@@ -262,6 +263,8 @@ class _Reading:
     limits: ReadingLimits
     trace: RunTrace
     messages: list[ChatMessage]
+    labels: tuple[str, ...] | None = None
+    """The board's label names the run was given; a RoadMap names no other."""
     usage: dict[str, int] = field(default_factory=dict[str, int])
     model: str | None = None
     calls_made: int = 0
@@ -372,7 +375,7 @@ class _Reading:
             f"The model wrote {written} after {calls} ({len(text)} characters){aside}",
         )
         try:
-            payload = parse_output(self.purpose, text)
+            payload = parse_output(self.purpose, text, labels=self.labels)
         except (ValueError, ValidationError, ValidationFailure) as exc:
             if self.repairs >= MAX_REPAIRS:
                 note(self.trace, "checking", gave_up(exc), "error")

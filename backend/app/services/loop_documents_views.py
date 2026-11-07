@@ -176,6 +176,8 @@ class LoopContext(TypedDict):
     stage: str
     documents: dict[str, ContextDocument | None]
     plan: ContextPlan
+    labels: list[str]
+    """The board's label names: the areas a planned Ticket may name."""
     schemas: NotRequired[dict[str, JsonValue]]
 
 

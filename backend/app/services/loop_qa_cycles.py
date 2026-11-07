@@ -153,6 +153,11 @@ def ensure_qa_cycle(
             summary="",
             summary_source="",
             summary_basis_sha256="",
+            workplace="unknown",
+            waiting_for="nothing",
+            waiting_reason="",
+            waiting_set_at=None,
+            waiting_set_by=None,
         )
     )
     cycle = LoopQaCyclesRow(

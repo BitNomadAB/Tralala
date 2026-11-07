@@ -15,6 +15,9 @@ from ...schemas.cards import (
     CardMove,
     CardOut,
     CardUpdate,
+    TicketWaitClear,
+    TicketWaitSet,
+    TicketWorkplaceUpdate,
 )
 from ...schemas.envelope import Envelope
 from ...schemas.subresources import (
@@ -195,6 +198,48 @@ def restore_card(
     request: Request,
 ) -> dict[str, object]:
     return ok(request, ctx.services.card.restore(ctx.actor, board_id, loop_id, card_id))
+
+
+@router.patch(f"{PREFIX}/{{card_id}}/workplace", response_model=Envelope[CardOut])
+def set_ticket_workplace(
+    board_id: str,
+    loop_id: str,
+    card_id: str,
+    payload: TicketWorkplaceUpdate,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    """Where the work is done (codebase, outside, unknown); it describes the work."""
+    work = ctx.services.ticket_work
+    return ok(request, work.set_workplace(ctx.actor, board_id, loop_id, card_id, payload))
+
+
+@router.patch(f"{PREFIX}/{{card_id}}/wait", response_model=Envelope[CardOut])
+def set_ticket_wait(
+    board_id: str,
+    loop_id: str,
+    card_id: str,
+    payload: TicketWaitSet,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    """Set what the Ticket waits for, with a reason; replacing another wait is a person's act."""
+    work = ctx.services.ticket_work
+    return ok(request, work.set_wait(ctx.actor, board_id, loop_id, card_id, payload))
+
+
+@router.post(f"{PREFIX}/{{card_id}}/wait/clear", response_model=Envelope[CardOut])
+def clear_ticket_wait(
+    board_id: str,
+    loop_id: str,
+    card_id: str,
+    payload: TicketWaitClear,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    """Clear the wait: a person's act (403 human_action_required for a token)."""
+    work = ctx.services.ticket_work
+    return ok(request, work.clear_wait(ctx.actor, board_id, loop_id, card_id, payload))
 
 
 @router.get(f"{PREFIX}/{{card_id}}/comments", response_model=Envelope[list[CommentOut]])

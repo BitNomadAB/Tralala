@@ -24,7 +24,7 @@ from uuid import uuid4
 from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.dates import iso_utc, parse_due_filter
-from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
+from ..core.errors import Conflict, NotFound, ValidationFailure
 from ..db.generated.board import CardsRow, LoopsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.cards import CardQuery
@@ -45,14 +45,17 @@ from .cards_writes import (
     NEW_LABEL_COLOR,
     apply_update,
     card_position,
+    check_version,
     insert_card,
     log_card,
+    require_writable,
     ticket_in_loop,
 )
 from .lists import BoardChecks
 from .loops import EXECUTION_STAGES, ensure_execution_allowed, readiness_item, require_loop
 from .plan_views import PlanViews, ReadinessItem
 from .subresources import label_entries
+from .ticket_state import ensure_not_waiting
 
 __all__ = [
     "NEW_LABEL_COLOR",
@@ -112,26 +115,11 @@ class CardService:
 
     @staticmethod
     def _require_writable(loop: LoopsRow) -> None:
-        if loop.completed_at is not None or loop.stage == "completed":
-            raise Conflict(
-                "This Loop is completed and read-only",
-                code="loop_read_only",
-                details={"loop_id": loop.id},
-            )
-        if loop.archived_at is not None or loop.cancelled_at is not None:
-            raise Conflict(
-                "This Loop is not editable",
-                code="loop_read_only",
-                details={"loop_id": loop.id},
-            )
+        require_writable(loop)
 
     @staticmethod
     def _check_version(card: CardsRow, expected: int) -> None:
-        if card.version != expected:
-            raise VersionConflict(
-                "Card was modified by another actor",
-                details={"expected_version": expected, "current_version": card.version},
-            )
+        check_version(card, expected)
 
     def _readiness_for(
         self, repos: BoardRepositories, loop: LoopsRow, card_id: str
@@ -287,8 +275,18 @@ class CardService:
         actor: ActorContext,
         loop: LoopsRow,
         payload: CardCreate,
+        *,
+        known_labels_only: bool = False,
     ) -> CardsRow:
-        return insert_card(repos, actor, loop, payload, new_id=self._new_id, now=self._now)
+        return insert_card(
+            repos,
+            actor,
+            loop,
+            payload,
+            new_id=self._new_id,
+            now=self._now,
+            known_labels_only=known_labels_only,
+        )
 
     def _loop_taking_new_work(self, repos: BoardRepositories, loop_id: str) -> LoopsRow:
         loop = require_loop(repos, loop_id)
@@ -311,8 +309,10 @@ class CardService:
         payload: CardCreate,
         *,
         idempotency_key: str | None = None,
+        known_labels_only: bool = False,
     ) -> tuple[CardEntry | idempotency.JsonObject, bool]:
-        """The new Ticket and False, or the answer stored for a replayed key and True."""
+        """The new Ticket and False, or the answer stored for a replayed key and True. With
+        ``known_labels_only`` a label the board does not have is refused, not created."""
         actor.require("cards:write")
         self.boards.ensure_active(board_id)
         fingerprint = idempotency.request_fingerprint(
@@ -329,7 +329,9 @@ class CardService:
                 stored = self._stored(repos, actor, idempotency_key, fingerprint)
                 if stored is not None:
                     return stored, True
-            row = self._insert_card(repos, actor, loop, payload)
+            row = self._insert_card(
+                repos, actor, loop, payload, known_labels_only=known_labels_only
+            )
             entry = self._decorate(repos, board_id, loop, [row])[0]
             if idempotency_key:
                 self._remember(repos, actor, idempotency_key, fingerprint, entry)
@@ -492,6 +494,7 @@ class CardService:
             ensure_execution_allowed(loop)
         if existing.required_actor == "human":
             actor.require_human(f"Confirming {existing.ticket_key or 'this Ticket'}")
+        ensure_not_waiting(existing)
         item = self._readiness_for(repos, loop, existing.id)
         if item is not None and not item["ready"]:
             raise Conflict(

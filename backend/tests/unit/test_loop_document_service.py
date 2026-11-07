@@ -274,8 +274,11 @@ def test_the_context_carries_documents_the_plan_and_the_schemas() -> None:
         "stage",
         "documents",
         "plan",
+        "labels",
         "schemas",
     ]
+    # The board's label names: the areas a planned Ticket may name.
+    assert context["labels"] == [label.name for label in w.state.labels.values()]
     document = context["documents"]["info"]
     assert document is not None
     assert (document["revision_number"], document["content"], document["payload"]) == (

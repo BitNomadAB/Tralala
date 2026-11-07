@@ -38,11 +38,12 @@ Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_
 `validation_failed`, `payload_too_large`, `rate_limited`, and the Loop workflow codes
 `loop_not_found`,
 `loop_required`, `loop_mismatch`, `loop_read_only`, `document_stale`, `approval_required`,
-`human_action_required`, `invalid_dependency_graph`, `ticket_blocked`, `plan_change_required`,
+`human_action_required`, `invalid_dependency_graph`, `ticket_blocked`, `ticket_waiting`,
+`ticket_completed`, `plan_change_required`,
 `generation_input_changed`, `generation_unavailable`, `generation_in_progress`, `qa_incomplete`.
 
 Human-only decisions (analysis approval, RoadMap approval, confirming a human-only Ticket,
-accepting QA and finalizing a Loop) reject agent tokens with `403 human_action_required` even when
+clearing a Ticket's wait, accepting QA and finalizing a Loop) reject agent tokens with `403 human_action_required` even when
 the token holds the scope. Info is the exception on purpose: a worker may write it while the Loop is
 still `draft` or `analysis_review`, because that is the intent it agreed with its person; once
 planning has started the edit is refused the same way.
@@ -717,6 +718,40 @@ empty without one) and `summary_stale`, which is `true` once the title or descri
 the summary was written. A summary is part of a Ticket's content: `read_ticket` shows it, and
 `list_tickets` never does.
 
+### Where a Ticket's work is done and what it waits for
+
+A person owns every Ticket; nothing here names who does it. A Ticket answers:
+
+- `workplace`: `codebase` (the work is done in a repository, so it can be taken in a coding
+  session), `outside` (another system or the world outside) or `unknown` (every Ticket created
+  before the field existed). It describes the work and assigns nothing.
+- `waiting_for`: `nothing`, `decision`, `information`, `access` (a system, key, account, setting or
+  machine) or `third_party` (a supplier, a customer, a lawyer, ...), with `waiting_reason` (at most
+  500 characters), `waiting_set_by` and `waiting_set_at`.
+- `state`, computed on every read and never stored: `needs_input` when it waits for a decision,
+  information or access; `blocked` when the plan's `blockers` are not empty or it waits for a third
+  party; `ready` otherwise; `null` once it is completed. `needs_input` wins over `blocked`. `ready`
+  (no blocker in the plan) and `blockers` stay as they were.
+- `needs_person`: `state` `needs_input`, or `ready` with `human_action_required`.
+
+| Method | Path | Scope |
+| --- | --- | --- |
+| PATCH | `.../cards/{card_id}/workplace` (`version`, `workplace`) | `cards:write` |
+| PATCH | `.../cards/{card_id}/wait` (`version`, `waiting_for` other than `nothing`, `reason`) | `cards:write`; replacing another wait is a person's act (`403 human_action_required` for a token) |
+| POST | `.../cards/{card_id}/wait/clear` (`version`) | `cards:write`, as a signed-in person, never a token (`403 human_action_required`) |
+
+Each is version-checked (`409 version_conflict`), refused on a read-only Loop (`409 loop_read_only`)
+and on a completed Ticket (`409 ticket_completed`); writing what the Ticket already says keeps the
+version. `POST .../cards` takes `workplace`, `waiting_for` and `waiting_reason` (required with a
+wait). Completing a Ticket, or confirming a human-only one, while it waits answers
+`409 ticket_waiting` naming the wait: a person clears it first. A RoadMap's planned Ticket may give
+`workplace`, `waiting_for`, `waiting_reason` and `labels` (names the board has); the card it
+publishes starts with them, and an unknown label in a handed-in RoadMap is refused with the names
+there are. A board created without a template starts with the area labels of
+`TRALALA_DEFAULT_LABELS` (Development, Architecture, UX, QA, Security, Operations, Documentation,
+Data, Product, Business, Economy, Legal, Support, Communication, Research); existing boards keep
+theirs.
+
 ### Ticket assignment
 
 `PATCH /boards/{board_id}/cards/{card_id}` accepts `assignee_actor_id` (a human actor id or an
@@ -806,13 +841,14 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | --- | --- | --- |
 | `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, and the rule-11a decisions only a person makes; never the token or its hash |
 | `list_boards` | `boards:read` | The boards the token may read, by name, with status and Loop count; a board id comes from here |
-| `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent`, `anyone` or `nobody`), `execution_allowed`, its Tickets by what they wait for (`ready_for_agent`, `ready_for_person`, `waiting`) and by column, and each document's state and revision. Computed from what the Loop records, never written by anyone |
+| `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent` for a document, `anyone` or `nobody`; a Ticket never waits on an agent), `execution_allowed`, its Tickets by state (`ready`, `needs_input`, `blocked`, `completed`, `total`, `needs_person`) and by column, and each document's state and revision. Computed from what the Loop records, never written by anyone |
 | `read_board` | `boards:read`, `loops:read` | The board's Loops by id, key, name and stage, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | The Loop's overview, by its id or its key: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases and the columns with their Ticket counts, the work outside the plan and the newest five notes cut to 500 characters; the Tickets themselves are `list_tickets`' answer |
 | `read_document` | `loops:read` | One document of a Loop named by its id or its key, by `kind` (`info`, `analysis`, `analysis_ai`, `roadmap`, `roadmap_ai`): as numbered lines, at most 60 000 characters, with `continue_from` for the rest; `analysis_ai` and `roadmap_ai` also as `view: structured`, an outline of the findings or the Phases and Tickets, and one of them in full with `item` |
-| `read_ticket` | `cards:read` | The Ticket's summary (with `summary_source` and `summary_stale`), description, acceptance criteria, evidence, checklist, comments, column, version and `allowed_actions` |
+| `read_ticket` | `cards:read` | The Ticket's summary (with `summary_source` and `summary_stale`), description, acceptance criteria, evidence, checklist, comments, column, version, `state`, `workplace`, `wait` (what it waits for, the reason, who set it and when; `null` without one), the plan's `blockers`, `needs_person` and `allowed_actions` |
 | `search_tickets` | `cards:read` | Tickets by words in one Loop, a board's open Loops or every active board, each with board, Loop key, key and column |
-| `list_tickets` | `cards:read`, `loops:read` | Which Tickets there are and where each stands, never what one says: id, key, title, Loop key, column, Phase, `ready`, `human_action_required`, assignee and `completed` (`fields: brief` keeps id, key and title). Column by column, then by Phase and key. Filters: `loop_id` (an id or a key), `column` (names), `assignee` (`me`, `none` or an id), `phase`, `ready`, `human_action_required`, `label`, `priority`, `due_before`, `overdue`, `summary` (`missing` or `stale`), `query`; completed Tickets and Loops only with `include_completed`. The answer repeats the filters, maps each Loop key to its id and pages with `limit` (at most 200) and `continue_from`; an unknown column is refused with the column names there are |
+| `list_tickets` | `cards:read`, `loops:read` | Which Tickets there are and where each stands, never what one says: id, key, title, Loop key, column, Phase, `state`, `workplace`, `human_action_required`, assignee and `completed` (`fields: brief` keeps id, key and title). Column by column, then by Phase and key. Filters: `loop_id` (an id or a key), `column` (names), `assignee` (`me`, `none` or an id), `phase`, `state` (one or more of `ready`, `needs_input`, `blocked`), `workplace`, `waiting_for`, `needs_person`, `human_action_required`, `label`, `priority`, `due_before`, `overdue`, `summary` (`missing` or `stale`), `query`; completed Tickets and Loops only with `include_completed`. The answer repeats the filters, maps each Loop key to its id and pages with `limit` (at most 200) and `continue_from`; an unknown column is refused with the column names there are. Work for a coding session: `workplace: codebase`, `state: ready`, `human_action_required: false`; what needs a person: `needs_person: true` |
+| `set_ticket_wait` | `cards:write` | Say what an open Ticket that waits for nothing now waits for (`decision`, `information`, `access` or `third_party`) and why (`reason`); the version is read for the caller. Clearing or replacing a wait is a person's act and never a tool |
 | `write_ticket_summaries` | `cards:write` | Write up to 100 Ticket summaries; each is a versioned edit that reads the version itself and retries once on a race, and each Ticket answers `written` or its refusal |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
 | `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
@@ -825,7 +861,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket; only a read-only Loop or board refuses it |
 | `write_note` | `loops:write` | Add a note to the Loop's log: what belongs to the Loop and to no single Ticket; refused on a completed Loop |
 | `read_notes` | `loops:read` | The Loop's notes, oldest first, a page at a time (`older` is the next `before`) |
-| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`; `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
+| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id` |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the messages and positions |
 | `read_discussion` | `discussions:read` | Read a thread with its messages and each agent's position |
