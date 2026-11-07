@@ -9,6 +9,62 @@ export interface DiscussionParticipant {
   snapshot_at: string;
 }
 
+/** A participant's position on the thread's goal: the analysis brief's verdict set. */
+export type DiscussionPosition = "yes" | "yes_with_conditions" | "no" | "unclear";
+
+/**
+ * A participant's answer in the standard (version 1), stored beside its prose. `format` says how it
+ * was read: at once, after one repair, or never (then it is prose with the position `unclear`).
+ */
+export interface DiscussionAnswer {
+  version: number;
+  format: "structured" | "repaired" | "prose";
+  position: DiscussionPosition;
+  recommendation: string;
+  pros: string[];
+  cons: string[];
+  conditions: string[];
+  open_questions: string[];
+  confidence: "high" | "medium" | "low" | null;
+  problem: string | null;
+}
+
+/** One participant's latest answer: where it stands and what it recommends. */
+export interface DiscussionStance {
+  participant_id: string;
+  participant: string;
+  position: DiscussionPosition;
+  recommendation: string;
+  confidence: string | null;
+  format: string;
+  message_id: string;
+  round_number: number;
+}
+
+/** A condition or an open question, with the participants who named it. */
+export interface DiscussionPoint {
+  text: string;
+  participants: string[];
+}
+
+/** Decision support Tralala computes after a round; its verdict is a suggestion, never a decision. */
+export interface DiscussionSynthesis {
+  version: number;
+  kind: "decision_support";
+  written_by: string;
+  round_id?: string | null;
+  round_number: number;
+  thread_round: number;
+  suggestion: { verdict: DiscussionPosition; reason: string };
+  counts: Record<string, number>;
+  go: DiscussionStance[];
+  stop: DiscussionStance[];
+  unclear: DiscussionStance[];
+  conditions: DiscussionPoint[];
+  open_questions: DiscussionPoint[];
+  missing: string[];
+}
+
 export interface DiscussionMessage {
   id: string;
   parent_message_id: string | null;
@@ -21,6 +77,8 @@ export interface DiscussionMessage {
   model: string | null;
   round_number: number;
   created_at: string;
+  /** A participant's structured answer; null for a person's message and an older answer. */
+  answer?: DiscussionAnswer | null;
 }
 
 export interface DiscussionRound {
@@ -35,6 +93,7 @@ export interface DiscussionRound {
   elapsed_ms: number;
   created_at: string;
   finished_at: string;
+  synthesis?: DiscussionSynthesis | null;
 }
 
 export interface DiscussionRun {
@@ -118,6 +177,10 @@ export interface Discussion {
   runs?: DiscussionRun[];
   /** Set on a message response: started, already_running, thread_closed or no_participants. */
   auto_run?: string | null;
+  /** The newest round's decision support; null before the first round. */
+  synthesis?: DiscussionSynthesis | null;
+  /** Each participant's current position, derived from its latest structured answer. */
+  positions?: DiscussionStance[];
   votes?: {
     participant_id: string;
     display_name: string | null;

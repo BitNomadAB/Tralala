@@ -103,11 +103,20 @@ certificate. `/llms.txt` is plain text at the same origin.
 | `write_analysis` | `loops:generate` | hand in your own analysis, in the same schema and review as a generated one |
 | `write_roadmap` | `loops:generate` | hand in your own RoadMap; short Phase and Ticket ids become stable UUIDs |
 | `ask_agents` | `discussions:write` | open a discussion on a Ticket and run one round |
-| `read_discussion` | `discussions:read` | read a thread and each agent's position |
+| `read_discussion` | `discussions:read` | read a thread: its synthesis and each agent's position |
 | `reply_discussion` | `discussions:write` | add to a thread |
 
 Tools are filtered by the key's scopes, so a key without `loops:generate` does not see
 `run_analysis` at all. Calling a tool the key may not use is refused rather than downgraded.
+
+The three discussion tools answer a thread as data. Each agent answers in one shape: a `position`
+(`yes`, `yes_with_conditions`, `no` or `unclear`), a one-sentence `recommendation`, `pros`, `cons`,
+`conditions`, `open_questions` and a `confidence`. `positions` lists each agent's current one, and
+`synthesis` is Tralala's decision support for the newest round: who is for going ahead, who is
+against and who cannot tell, the conditions, the open questions and a suggested verdict. The
+suggestion is never a decision: a person approves, asks for rework or vetoes in Tralala. A message
+carries its structured `answer` without the prose; pass `include_prose: true` to read the prose too.
+An answer that never followed the shape keeps its prose and the position `unclear`.
 
 ## 4. A session that works
 

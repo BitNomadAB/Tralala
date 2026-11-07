@@ -252,9 +252,16 @@ the "one backend process per data directory" rule intact.
 - Participants answer one after another inside a round, and each prompt carries the answers already
   given in that round. A `roundtable` thread only reaches consensus once an earlier round produced
   answers, because whoever opens a thread has read nobody.
-- A position is read only from an explicit verdict: a JSON `verdict`/`position` field, a `Verdict:`
-  line, or a line that holds nothing else. "I do not AGREE" therefore counts as no vote, and an
-  unreadable answer abstains.
+- Every answer follows one standard (`services/discussion_answers.py`): a position (`yes`,
+  `yes_with_conditions`, `no`, `unclear`), a one-sentence recommendation, reasons for and against,
+  conditions, open questions and a confidence, stored in `discussion_messages.answer_json` beside the
+  prose in `content`. `services/discussion_ask.py` asks with the schema where the provider takes one
+  and repairs a malformed answer once; an answer that never follows the standard keeps its prose and
+  the position `unclear`.
+- After every round `services/discussion_synthesis.py` computes the decision support from each
+  participant's latest answer and stores it in `discussion_rounds.synthesis_json`: who is for going
+  ahead, who is against and who cannot tell, the conditions, the open questions and a suggested
+  verdict by fixed rules. No model writes it, and it is never a decision.
 - Budgets are enforced before a round starts (accumulated time) and after every answer (tokens), so
   a runaway loop stops instead of spending the whole budget in one round. A run always has both: when
   the caller sends none, it takes `TRALALA_DISCUSSION_TOKEN_BUDGET` (default 200 000) and

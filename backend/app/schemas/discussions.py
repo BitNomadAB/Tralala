@@ -49,6 +49,77 @@ class DiscussionParticipantOut(OutModel):
     snapshot_at: str
 
 
+class DiscussionAnswerOut(OutModel):
+    """A participant's answer in the standard (version 1), stored beside its prose.
+
+    ``format``: ``structured`` (valid at once), ``repaired`` (valid after one repair) or ``prose``
+    (never valid: ``position`` is ``unclear`` and ``problem`` says what was wrong).
+    """
+
+    version: int = 1
+    format: str
+    position: str
+    recommendation: str = ""
+    pros: list[str] = Field(default_factory=list[str])
+    cons: list[str] = Field(default_factory=list[str])
+    conditions: list[str] = Field(default_factory=list[str])
+    open_questions: list[str] = Field(default_factory=list[str])
+    confidence: str | None = None
+    problem: str | None = None
+
+
+class DiscussionStanceOut(OutModel):
+    """One participant's latest answer: where it stands and what it recommends."""
+
+    participant_id: str
+    participant: str
+    position: str
+    recommendation: str = ""
+    confidence: str | None = None
+    format: str
+    message_id: str
+    round_number: int = 0
+
+
+class DiscussionPointOut(OutModel):
+    text: str
+    participants: list[str] = Field(default_factory=list[str])
+
+
+class DiscussionSuggestionOut(OutModel):
+    verdict: str
+    reason: str
+
+
+class DiscussionSynthesisOut(OutModel):
+    """Decision support Tralala computes after a round from the latest answers; a suggestion,
+    never a decision."""
+
+    version: int = 1
+    kind: str = "decision_support"
+    written_by: str = "tralala"
+    round_id: str | None = None
+    round_number: int
+    thread_round: int
+    suggestion: DiscussionSuggestionOut
+    counts: dict[str, int] = Field(default_factory=dict[str, int])
+    go: list[DiscussionStanceOut] = Field(default_factory=list[DiscussionStanceOut])
+    stop: list[DiscussionStanceOut] = Field(default_factory=list[DiscussionStanceOut])
+    unclear: list[DiscussionStanceOut] = Field(default_factory=list[DiscussionStanceOut])
+    conditions: list[DiscussionPointOut] = Field(default_factory=list[DiscussionPointOut])
+    open_questions: list[DiscussionPointOut] = Field(default_factory=list[DiscussionPointOut])
+    missing: list[str] = Field(default_factory=list[str])
+
+
+class DiscussionVoteOut(OutModel):
+    participant_id: str
+    display_name: str | None = None
+    position: str
+    justification: str = ""
+    round_number: int = 0
+    created_at: str
+
+
 class DiscussionMessageOut(OutModel):
     id: str
     parent_message_id: str | None = None
@@ -61,6 +132,8 @@ class DiscussionMessageOut(OutModel):
     model: str | None = None
     round_number: int = 0
     created_at: str
+    # A participant's structured answer; null for a person's message and an answer before it.
+    answer: DiscussionAnswerOut | None = None
 
 
 class DiscussionRoundOut(OutModel):
@@ -75,6 +148,7 @@ class DiscussionRoundOut(OutModel):
     elapsed_ms: int = 0
     created_at: str
     finished_at: str
+    synthesis: DiscussionSynthesisOut | None = None
 
 
 class DiscussionRunOut(OutModel):
@@ -149,6 +223,11 @@ class DiscussionOut(OutModel):
         default_factory=list[DiscussionParticipantOut]
     )
     messages: list[DiscussionMessageOut] = Field(default_factory=list[DiscussionMessageOut])
+    # The newest round's decision support, each participant's current position, and the history
+    # of position changes.
+    synthesis: DiscussionSynthesisOut | None = None
+    positions: list[DiscussionStanceOut] = Field(default_factory=list[DiscussionStanceOut])
+    votes: list[DiscussionVoteOut] = Field(default_factory=list[DiscussionVoteOut])
     active_run: DiscussionRunOut | None = None
     runs: list[DiscussionRunOut] = Field(default_factory=list[DiscussionRunOut])
 

@@ -1,7 +1,7 @@
 {
   "version": 2,
   "description": "Factory role templates seeded into every registry. {{discussion}} expands to discussion_preamble. scope=board roles answer inside a board; scope=organisation roles work across the whole installation.",
-  "discussion_preamble": "You participate in a structured discussion about one existing ticket. Stay inside your role, cite concrete evidence from the ticket or thread, and keep replies focused. When the discussion asks for a position, answer with an explicit agree, disagree or abstain verdict and one short justification. Never claim to have executed changes: discussion outcomes are proposals that a human reviewer decides on. The message you receive names the ticket, its Loop and the installation you are working in; use those names and ids, and never guess an identity that you were not given.",
+  "discussion_preamble": "You participate in a structured discussion about one existing ticket. Stay inside your role, cite concrete evidence from the ticket or thread, and keep replies focused. When the discussion asks for a position, answer in the structured form the message describes: a position (yes, yes_with_conditions, no or unclear), a one-sentence recommendation, your reasons for and against, the conditions of a yes and the questions you cannot settle. Never claim to have executed changes: discussion outcomes are proposals that a human reviewer decides on. The message you receive names the ticket, its Loop and the installation you are working in; use those names and ids, and never guess an identity that you were not given.",
   "roles": [
     {
       "key": "lead_developer",

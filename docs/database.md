@@ -57,11 +57,11 @@ Indexes: `boards(status)`, `api_credentials(actor_id)`.
 | `activity_log` | id, actor_id, actor_type, action, entity_type, entity_id, request_id, timestamp, changes_json |
 | `discussion_threads` | id, card_id → cards, title, goal, mode, status, run_state, round_count, tokens_used, elapsed_ms, created_by_*, max_rounds, origin_comment_id, escalation_depth, created_at, updated_at, last_activity_at |
 | `discussion_participants` | id, discussion_id → discussion_threads, participant_id, participant_type, display_name, role_template_*, role_source, system_prompt, system_prompt_sha256, snapshot_at, joined_at |
-| `discussion_messages` | id, discussion_id → discussion_threads, parent_message_id, author_*, content, status, model, round_number, content_sha256, created_at, deleted_at |
+| `discussion_messages` | id, discussion_id → discussion_threads, parent_message_id, author_*, content, status, model, round_number, content_sha256, answer_json (the structured answer, `{}` for none), created_at, deleted_at |
 | `discussion_votes` | id, discussion_id → discussion_threads, participant_id, position, justification, round_number, created_at |
 | `discussion_outcomes` | id, discussion_id → discussion_threads, summary, payload_json, created_at |
 | `discussion_runs` | id, discussion_id → discussion_threads, status, autonomy, rounds_requested, rounds_completed, token_budget, tokens_used, time_budget_seconds, elapsed_ms, stop_reason, error, started_by_*, created_at, started_at, finished_at |
-| `discussion_rounds` | id, discussion_id, run_id → discussion_runs, round_number, status, answers, failures, repeats, tokens_used, elapsed_ms, created_at, finished_at |
+| `discussion_rounds` | id, discussion_id, run_id → discussion_runs, round_number, status, answers, failures, repeats, tokens_used, elapsed_ms, synthesis_json (the decision support, `{}` for none), created_at, finished_at |
 | `discussion_events` | seq (autoincrement), id, discussion_id → discussion_threads, type, payload_json, actor_*, created_at |
 | `idempotency_records` | actor_id, idempotency_key, request_hash, response_json, created_at, expires_at |
 | `cards_fts` | FTS5 external-content index over `cards.title`/`cards.description` (when supported) |

@@ -303,6 +303,15 @@ class FakeDiscussionRoundRepository:
         rows = self.for_run(run_id)
         return rows[-1] if rows else None
 
+    def newest_for_thread(self, discussion_id: str) -> DiscussionRoundsRow | None:
+        # Ties on created_at go to the later insert, as rowid breaks them in SQLite.
+        rows = [
+            (row.created_at, position, row)
+            for position, row in enumerate(self._state.rounds)
+            if row.discussion_id == discussion_id
+        ]
+        return max(rows, key=lambda entry: (entry[0], entry[1]))[2] if rows else None
+
     def add(self, row: DiscussionRoundsRow) -> None:
         self._state.rounds.append(row)
 

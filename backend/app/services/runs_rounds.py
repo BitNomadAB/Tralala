@@ -7,12 +7,14 @@ the order the service always did, and return the events to publish once the writ
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 
 from ..core.context import ActorContext
 from ..db.generated.board import DiscussionOutcomesRow, DiscussionRoundsRow, DiscussionRunsRow
 from ..repositories.board import BoardRepositories
 from .activity import activity_entry
+from .discussion_synthesis import RoundSynthesis, latest_answers, synthesize
 from .events import (
     CONSENSUS_PROPOSED,
     ROUND_COMPLETED,
@@ -98,6 +100,20 @@ def log_run_activity(
     )
 
 
+def round_synthesis(
+    repos: BoardRepositories, discussion_id: str, round_number: int
+) -> RoundSynthesis:
+    """The decision support for the thread as the round leaves it, from each participant's latest
+    answer; the thread's round count names the round across runs."""
+    participants = repos.participants.for_thread(discussion_id)
+    latest = latest_answers(repos.messages.for_thread(discussion_id), participants)
+    thread = repos.threads.get(discussion_id)
+    thread_round = (thread.round_count if thread is not None else 0) + 1
+    return synthesize(
+        participants, latest, round_number=round_number, thread_round=thread_round
+    )
+
+
 def record_round(
     repos: BoardRepositories,
     discussion_id: str,
@@ -109,9 +125,11 @@ def record_round(
     new_id: Callable[[], str],
     events: EventService | None,
 ) -> tuple[Event | None, Event | None, Event | None]:
-    """Store a finished round on its run and thread; the round, status and consensus events."""
+    """Store a finished round on its run and thread with its decision support; the round, status
+    and consensus events."""
     thread_status = "consensus_proposed" if outcome["unanimous"] else "discussing"
     failures = len(outcome["failures"])
+    synthesis = round_synthesis(repos, discussion_id, outcome["round_number"])
     repos.rounds.add(
         DiscussionRoundsRow(
             id=new_id(),
@@ -126,6 +144,7 @@ def record_round(
             elapsed_ms=outcome["elapsed_ms"],
             created_at=now,
             finished_at=now,
+            synthesis_json=json.dumps(synthesis),
         )
     )
     repos.runs.record_round(
@@ -143,8 +162,8 @@ def record_round(
             DiscussionOutcomesRow(
                 id=new_id(),
                 discussion_id=discussion_id,
-                summary="All participating agents agreed.",
-                payload_json="{}",
+                summary="Every participant supports going ahead.",
+                payload_json=json.dumps({"synthesis": synthesis}),
                 created_at=now,
             )
         )
@@ -162,6 +181,7 @@ def record_round(
             "failures": failures,
             "tokens_used": outcome["tokens"],
             "elapsed_ms": outcome["elapsed_ms"],
+            "synthesis": synthesis,
         },
     )
     status_event = record_event(

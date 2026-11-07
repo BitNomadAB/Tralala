@@ -1,5 +1,7 @@
-"""Discussion round engine: one bounded round of agent answers with structured positions.
+"""Discussion round engine: one bounded round of agent answers in the standard shape.
 
+Each participant answers with a ``DiscussionAnswer`` (``discussion_answers``), asked and repaired by
+``discussion_ask``; the prose is the message's ``content`` and the structure its ``answer_json``.
 The engine never decides whether another round should follow; ``RunService`` owns the loop, the
 budgets and the run record.
 """
@@ -7,10 +9,11 @@ budgets and the run record.
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
-from typing import Protocol, TypedDict, TypeGuard
+from typing import Protocol, TypedDict
 from uuid import uuid4
 
 from ..core.dates import utcnow
@@ -24,6 +27,9 @@ from ..db.generated.board import (
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.registry import RegistryUnitOfWork
 from . import runtime
+from .discussion_answers import GO, answer_instructions, answer_line, read_answer
+from .discussion_ask import AnswerCall, ask_participant
+from .discussion_ask import usage_tokens as usage_tokens  # mentions and the tests read it here
 from .events import (
     AGENT_COMPLETED,
     AGENT_FAILED,
@@ -36,7 +42,8 @@ from .events import (
 
 
 class AgentCall(Protocol):
-    """``runtime.call_agent``: one discussion answer from an agent, with a structured position."""
+    """``runtime.call_agent``: one answer from an agent with a verdict read from its text, as a
+    ticket comment's mention asks for it."""
 
     def __call__(
         self,
@@ -77,28 +84,6 @@ def content_hash(value: str) -> str:
     return hashlib.sha256(value.strip().encode("utf-8")).hexdigest()
 
 
-def _is_counts(value: object) -> TypeGuard[Mapping[str, object]]:
-    return isinstance(value, Mapping)
-
-
-def usage_tokens(result: Mapping[str, object]) -> int:
-    counts: object = result.get("usage")
-    if not _is_counts(counts):
-        return 0
-    total = counts.get("total_tokens")
-    if isinstance(total, (int, float)):
-        return int(total)
-    prompt = counts.get("prompt_tokens") or counts.get("input_tokens") or 0
-    completion = counts.get("completion_tokens") or counts.get("output_tokens") or 0
-    if isinstance(prompt, (int, float)) and isinstance(completion, (int, float)):
-        return int(prompt) + int(completion)
-    return 0
-
-
-def _text(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
 def ticket_briefing(repos: BoardRepositories, card_id: str | None) -> str:
     """Which ticket the thread is about, as the prompt names it.
 
@@ -120,11 +105,23 @@ def ticket_briefing(repos: BoardRepositories, card_id: str | None) -> str:
     )
 
 
+def quoted(author: str, author_type: str, line: str, content: str) -> str:
+    """One message as a prompt quotes it: the answer's one line first, then the prose."""
+    lead = f"[{author} · {author_type}]"
+    return f"{lead} {line}\n{content[:1500]}" if line else f"{lead} {content[:1500]}"
+
+
 def transcript(repos: BoardRepositories, discussion_id: str, limit: int = 20) -> str:
     """The thread's latest messages, oldest first, as the prompt quotes them."""
     history = list(reversed(repos.messages.newest(discussion_id, limit=limit)))
     return "\n\n".join(
-        f"[{entry.author_name} · {entry.author_type}] {entry.content[:1500]}" for entry in history
+        quoted(
+            entry.author_name,
+            entry.author_type,
+            answer_line(read_answer(entry.answer_json)),
+            entry.content,
+        )
+        for entry in history
     )
 
 
@@ -137,11 +134,7 @@ def prompt(
         # Agents answer one after another, so each one can respond to what was just said instead of
         # everyone replying to the previous round in parallel.
         sections.append("Answers earlier in this round, before yours:\n" + "\n\n".join(in_round))
-    sections.append(
-        "Respond with your analysis from your role and name the agent you are answering. "
-        "End with one line exactly like `Verdict: AGREE`, `Verdict: DISAGREE` or "
-        "`Verdict: ABSTAIN`, followed by a one-sentence reason."
-    )
+    sections.append(answer_instructions())
     return {"role": "user", "content": "\n\n".join(sections)}
 
 
@@ -154,7 +147,7 @@ def is_unanimous(
     answers: int,
     repeats: int,
 ) -> bool:
-    """Whether the latest positions are a fresh agreement of every participant."""
+    """Whether the latest positions are a fresh agreement of every participant to go ahead."""
     # In a roundtable the agents are meant to review each other, so agreement in the opening round
     # cannot be consensus: whoever answered first had read nobody.
     needs_review_round = mode == "roundtable" and len(participants) > 1
@@ -163,7 +156,7 @@ def is_unanimous(
     only_repeats = repeats > 0 and answers == 0
     return (
         bool(latest)
-        and set(latest.values()) == {"agree"}
+        and set(latest.values()) <= GO
         and set(latest) == {p.participant_id for p in participants}
         and (not needs_review_round or prior_answers > 0)
         and not only_repeats
@@ -184,7 +177,7 @@ class Orchestrator:
         registry: RegistryUnitOfWork,
         events: EventService | None = None,
         *,
-        call_agent: AgentCall = runtime.call_agent,
+        call_completion: AnswerCall = runtime.call_completion,
         clock: Callable[[], str] = utcnow,
         new_id: Callable[[], str] = _new_id,
         monotonic: Callable[[], float] = time.monotonic,
@@ -193,7 +186,7 @@ class Orchestrator:
         self.store = store
         self.registry = registry
         self.events = events
-        self._call_agent = call_agent
+        self._call_completion = call_completion
         self._clock = clock
         self._new_id = new_id
         self._monotonic = monotonic
@@ -267,15 +260,16 @@ class Orchestrator:
                 started_event = self._record(repos, discussion_id, AGENT_STARTED, identity)
             self._emit(board_id, started_event)
             call_started = self._monotonic()
-            result = self._call_agent(
+            asked = ask_participant(
+                self._call_completion,
                 self.settings,
                 asdict(agent),
                 system_prompt=participant.system_prompt,
                 messages=messages,
             )
             duration_ms = int((self._monotonic() - call_started) * 1000)
-            if not result.get("ok"):
-                error = str(result.get("error"))
+            if not asked["ok"]:
+                error = str(asked["error"])
                 failures.append({"agent": participant.display_name, "error": error})
                 with self.store.writer(board_id) as repos:
                     failed_event = self._record(
@@ -286,12 +280,15 @@ class Orchestrator:
                     )
                 self._emit(board_id, failed_event)
                 continue
-            answer = str(result.get("text") or "")
-            verdict = str(result.get("verdict"))
-            model = _text(result.get("model"))
-            in_round.append(f"[{participant.display_name} · agent] {answer[:1500]}")
+            answer = asked["content"]
+            structured = asked["answer"]
+            verdict = structured["position"]
+            model = asked["model"]
+            in_round.append(
+                quoted(participant.display_name, "agent", answer_line(structured), answer)
+            )
             digest = content_hash(answer)
-            round_tokens = usage_tokens(result)
+            round_tokens = asked["tokens"]
             tokens += round_tokens
             now = self._clock()
             message_event: Event | None = None
@@ -318,6 +315,7 @@ class Orchestrator:
                             deleted_at=None,
                             round_number=round_number,
                             content_sha256=digest,
+                            answer_json=json.dumps(structured),
                         )
                     )
                     message_event = self._record(
@@ -331,8 +329,9 @@ class Orchestrator:
                             "author_name": participant.display_name,
                             "author_role": participant.role_template_name,
                             "round_number": round_number,
-                            "model": result.get("model"),
-                            "position": result.get("verdict"),
+                            "model": model,
+                            "position": verdict,
+                            "answer": structured,
                             "content": answer,
                         },
                     )
@@ -346,7 +345,8 @@ class Orchestrator:
                                 discussion_id=discussion_id,
                                 participant_id=participant.participant_id,
                                 position=verdict,
-                                justification=str(result.get("justification") or ""),
+                                justification=structured["recommendation"]
+                                or "Answered in prose only.",
                                 created_at=now,
                                 round_number=round_number,
                             )
@@ -358,7 +358,7 @@ class Orchestrator:
                             {
                                 "participant_id": participant.participant_id,
                                 "agent": participant.display_name,
-                                "position": result.get("verdict"),
+                                "position": verdict,
                                 "round_number": round_number,
                             },
                         )
@@ -370,7 +370,9 @@ class Orchestrator:
                     AGENT_COMPLETED,
                     {
                         **identity,
-                        "position": result.get("verdict"),
+                        "position": verdict,
+                        "format": structured["format"],
+                        "repairs": asked["repairs"],
                         "tokens": round_tokens,
                         "duplicate": message_event is None,
                         "duration_ms": duration_ms,

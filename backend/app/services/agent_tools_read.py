@@ -2,7 +2,8 @@
 
 The catalogue in ``agent_tools`` declares each tool's name, description, scopes and input schema;
 the handlers here run the read-only entries (``list_boards``, ``read_board``,
-``read_ticket``, ``search_tickets`` and ``read_discussion``). Each takes
+``read_ticket`` and ``search_tickets``; ``read_discussion`` lives in ``agent_tools_discussions``).
+Each takes
 ``(services, actor, args)``, opens with the ``actor.require`` checks of the scopes its entry
 declares and calls the same services as the REST routes.
 
@@ -14,7 +15,7 @@ typed fakes; the others still take the whole ``Services``.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Protocol, TypeIs
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import JsonValue
 
@@ -26,7 +27,6 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from . import Services
     from .boards import BoardService
     from .cards import CardEntry
-    from .discussions import DiscussionEntry
     from .lists import ListEntry, ListService
     from .loops import LoopService
     from .search import SearchHit, SearchService
@@ -101,50 +101,6 @@ def _ticket_location(
 ) -> tuple[str, CardEntry]:
     loop_id, _ = services.card.locate(board_id, card_id)
     return loop_id, services.card.get(board_id, loop_id, card_id)
-
-
-def _is_list(value: object) -> TypeIs[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_rows(value: object) -> TypeIs[list[Mapping[str, object]]]:
-    return _is_list(value) and all(isinstance(row, Mapping) for row in value)
-
-
-def _rows(value: object) -> list[Mapping[str, object]]:
-    """A thread's ``messages`` or ``votes``: the rows the discussion service lists, by name."""
-    if not _is_rows(value):
-        raise TypeError(f"a thread lists rows, not {type(value).__name__}")
-    return value
-
-
-def _thread_view(thread: DiscussionEntry) -> ToolResult:
-    return {
-        "discussion_id": thread["id"],
-        "title": thread["title"],
-        "status": thread["status"],
-        "goal": thread["goal"],
-        "card_id": thread.get("card_id"),
-        "run_state": thread.get("run_state"),
-        "messages": [
-            {
-                "id": message["id"],
-                "author": message["author_name"],
-                "author_type": message["author_type"],
-                "content": message["content"],
-                "created_at": message["created_at"],
-            }
-            for message in _rows(thread.get("messages", []))
-        ],
-        "positions": [
-            {
-                "agent": vote["display_name"],
-                "position": vote["position"],
-                "justification": vote["justification"],
-            }
-            for vote in _rows(thread.get("votes", []))
-        ],
-    }
 
 
 # --- handlers ---------------------------------------------------------------
@@ -395,15 +351,6 @@ def _read_ticket(
     }
 
 
-def _read_discussion(
-    services: Services, actor: ActorContext, args: ToolArguments
-) -> ToolResult:
-    actor.require("discussions:read")
-    board_id = _require(args, "board_id")
-    discussion_id = _require(args, "discussion_id")
-    return _thread_view(services.discussion.get(board_id, discussion_id))
-
-
 __all__ = [
     "BOARD_LIST_LIMIT",
     "SEARCH_DEFAULT",
@@ -414,12 +361,9 @@ __all__ = [
     "ToolResult",
     "_loop_lists",
     "_read_board",
-    "_read_discussion",
     "_read_ticket",
     "_require",
-    "_rows",
     "_text",
-    "_thread_view",
     "_ticket_location",
     "_whole_number",
     "allowed_actions",
