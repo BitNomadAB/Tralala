@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Self, get_args
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from ..core.dates import normalize_timestamp
-from .common import Id, LongText, Name, OutModel, Priority, StrictModel, Summary
+from .common import FaceList, FaceText, Id, LongText, Name, OutModel, Priority, StrictModel, Summary
 from .subresources import LabelOut
 
 # Where a Ticket's work is done: it describes the work and assigns nothing. ``unknown`` is what
@@ -25,6 +25,27 @@ WaitingReason = Annotated[
 ]
 
 
+# The face for people on a create or an edit: each field is optional, and when any is given the
+# whole face (the summary included) is held to its template (``services/ticket_face.py``).
+
+
+class FaceFields(StrictModel):
+    """The face's fields besides the summary, each optional (``None`` leaves it as it is)."""
+
+    why: FaceText | None = None
+    if_skipped: FaceText | None = None
+    pros: FaceList | None = None
+    cons: FaceList | None = None
+    steps: FaceList | None = None
+
+    def face_given(self) -> bool:
+        """True when the request gives any face field."""
+        return any(
+            value is not None
+            for value in (self.why, self.if_skipped, self.pros, self.cons, self.steps)
+        )
+
+
 def wait_needs_reason(waiting_for: str, reason: str) -> None:
     """A wait says why; waiting for nothing has no reason."""
     if waiting_for != "nothing" and not reason:
@@ -33,12 +54,12 @@ def wait_needs_reason(waiting_for: str, reason: str) -> None:
         raise ValueError("waiting_reason is only given with a wait")
 
 
-class CardCreate(StrictModel):
+class CardCreate(FaceFields):
     list_id: Id
     title: Name
     description: LongText = ""
     summary: Summary = Field(
-        default="", description="What the Ticket is about in a sentence or two (plain text)"
+        default="", description="What the Ticket means in at most 20 plain words (plain text)"
     )
     priority: Priority = "none"
     due_at: str | None = None
@@ -86,7 +107,7 @@ class TicketWaitClear(StrictModel):
     version: int = Field(ge=1, description="Expected current version for optimistic concurrency")
 
 
-class CardUpdate(StrictModel):
+class CardUpdate(FaceFields):
     version: int = Field(ge=1, description="Expected current version for optimistic concurrency")
     title: Name | None = None
     description: LongText | None = None
@@ -132,6 +153,17 @@ class BulkCardCreate(StrictModel):
     cards: list[CardCreate] = Field(min_length=1, max_length=100)
 
 
+class TicketFaceOut(OutModel):
+    """The face for people: the summary, why, if skipped, for and against, the steps."""
+
+    summary: str
+    why: str
+    if_skipped: str
+    pros: list[str]
+    cons: list[str]
+    steps: list[str]
+
+
 class CardOut(OutModel):
     id: str
     board_id: str
@@ -143,6 +175,9 @@ class CardOut(OutModel):
     summary_source: str = Field(default="", description="plan, person, agent; empty without one")
     summary_stale: bool = Field(
         default=False, description="The title or description changed after the summary was written"
+    )
+    face: TicketFaceOut | None = Field(
+        default=None, description="The face for people; null for a Ticket written without one"
     )
     position: int
     priority: Priority

@@ -11,16 +11,25 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from ..core.context import ActorContext
-from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
+from ..core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
 from ..db.generated.board import CardsRow, LabelsRow, LoopsRow
 from ..repositories.board import BoardRepositories
 from ..repositories.cards import CardChanges
 from ..repositories.registry import RegistryUnitOfWork
-from ..schemas.cards import CardCreate, CardUpdate
+from ..schemas.cards import CardCreate, CardUpdate, FaceFields
 from .activity import activity_entry
 from .loop_identifiers import format_unplanned_key, next_unplanned_sequence
 from .loops import refresh_stage
 from .ordering import place
+from .ticket_face import (
+    TicketFace,
+    face_findings,
+    face_from_text,
+    face_missing,
+    face_to_text,
+    make_face,
+    refuse_face,
+)
 from .ticket_summaries import summary_basis, summary_source
 
 NEW_LABEL_COLOR = "#64748b"
@@ -158,6 +167,70 @@ def known_label_ids(
     return resolved
 
 
+# --- the face for people ------------------------------------------------------------------------
+
+FACE_EDIT_REFUSAL = (
+    "A Ticket's face for people is changed by a person; a token changes it through a new RoadMap "
+    "revision"
+)
+
+
+def _given_face(fields: FaceFields, current: TicketFace) -> TicketFace:
+    """``current`` with every face field the request gives in place of its own."""
+    return make_face(
+        current["why"] if fields.why is None else fields.why,
+        current["if_skipped"] if fields.if_skipped is None else fields.if_skipped,
+        current["pros"] if fields.pros is None else fields.pros,
+        current["cons"] if fields.cons is None else fields.cons,
+        current["steps"] if fields.steps is None else fields.steps,
+    )
+
+
+def checked_face(label: str, summary: str, face: TicketFace) -> str:
+    """The face as its column stores it, held whole to its template (``422 face_invalid``); a face
+    with every field empty is no face and passes."""
+    texts = (face["why"], face["if_skipped"], face["pros"], face["cons"], face["steps"])
+    if not face_missing("", *texts):
+        refuse_face(
+            face_findings(
+                label,
+                summary,
+                face["why"],
+                face["if_skipped"],
+                face["pros"],
+                face["cons"],
+                face["steps"],
+            )
+        )
+    return face_to_text(face)
+
+
+def _face_changes(
+    actor: ActorContext,
+    existing: CardsRow,
+    payload: CardUpdate,
+    changes: CardChanges,
+    logged: dict[str, object],
+) -> None:
+    """A person's edit of the face, checked whole with the summary the edit leaves; a token's is
+    ``403 human_action_required`` (it changes a face through a new RoadMap revision)."""
+    if not payload.face_given():
+        return
+    if not actor.is_user:
+        raise Forbidden(
+            FACE_EDIT_REFUSAL,
+            code="human_action_required",
+            details={"action": "edit_face", "actor_type": actor.actor_type},
+        )
+    current = face_from_text(existing.face) or make_face()
+    summary = existing.summary if payload.summary is None else payload.summary
+    label = existing.ticket_key or f'"{existing.title}"'
+    face = checked_face(label, summary, _given_face(payload, current))
+    if face != existing.face:
+        changes["face"] = face
+        logged["face"] = {"changed": True, "removed": face == ""}
+
+
 # --- creating ----------------------------------------------------------------------------------
 
 
@@ -217,6 +290,10 @@ def insert_card(
             loop.key, [row.ticket_key for row in repos.cards.manual(loop.id)]
         )
         key = format_unplanned_key(loop.key, sequence)
+    face = ""
+    if payload.face_given():
+        label = key or f'"{payload.title}"'
+        face = checked_face(label, payload.summary, _given_face(payload, make_face()))
     repos.cards.add(
         CardsRow(
             id=card_id,
@@ -258,6 +335,7 @@ def insert_card(
             waiting_reason=payload.waiting_reason,
             waiting_set_at=None if payload.waiting_for == "nothing" else timestamp,
             waiting_set_by=None if payload.waiting_for == "nothing" else actor.actor_id,
+            face=face,
         )
     )
     if labels is None and payload.labels:
@@ -276,6 +354,7 @@ def insert_card(
             "loop_id": loop.id,
             **({} if payload.workplace == "unknown" else {"workplace": payload.workplace}),
             **({} if payload.waiting_for == "nothing" else {"waiting_for": payload.waiting_for}),
+            **({"face": True} if face else {}),
         },
         new_id=new_id,
         now=now,
@@ -348,6 +427,8 @@ def apply_update(
     card_id = existing.id
     logged: dict[str, object] = {}
     changes: CardChanges = {}
+    # First, so a refused face writes nothing.
+    _face_changes(actor, existing, payload, changes, logged)
     if payload.title is not None and payload.title != existing.title:
         changes["title"] = payload.title
         logged["title"] = {"before": existing.title, "after": payload.title}

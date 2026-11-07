@@ -31,6 +31,7 @@ from .loop_generation_runs import Outcome
 from .loop_generation_trace import RunTrace, clip, note
 from .runtime import Completion, ResponseSchema
 from .runtime_tools import Message, ToolChoice, ToolDefinition
+from .ticket_face import FACE_INVALID, FaceRefusal
 
 MAX_REPAIRS = 2
 
@@ -64,7 +65,11 @@ def call_failed(outcome: Completion) -> Outcome:
 
 def problem_of(exc: Exception) -> str:
     """What a repair message and a failed run say about an answer that did not validate: a rule's
-    message with its details (the Phase and the reference that is missing), or the parser's text."""
+    message with its details (the Phase and the reference that is missing), or the parser's text.
+    A face that breaks its template is told by its messages, one per line, each naming the Ticket,
+    the field and the rule."""
+    if isinstance(exc, FaceRefusal):
+        return exc.lines()
     if isinstance(exc, ValidationFailure):
         details = f" {json.dumps(dict(exc.details), default=str)}" if exc.details else ""
         return f"{exc.message}{details}"
@@ -72,6 +77,15 @@ def problem_of(exc: Exception) -> str:
 
 
 def invalid_outcome(exc: Exception) -> Outcome:
+    """The failed run's outcome: ``face_invalid`` with the face's first messages for a face that
+    still breaks its template, ``invalid_output`` for anything else."""
+    if isinstance(exc, FaceRefusal):
+        return Outcome(
+            error_code=FACE_INVALID,
+            error_message=exc.message,
+            error_details=error_details({"rule": exc.code, **(exc.details or {})}),
+            retryable=False,
+        )
     if isinstance(exc, ValidationFailure):
         return Outcome(
             error_code="invalid_output",

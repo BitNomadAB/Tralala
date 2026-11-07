@@ -103,11 +103,11 @@ _ADD_ITEM = text(
     "INSERT INTO loop_plan_items (id, loop_id, plan_id, phase_id, phase_number, key,"
     " ticket_sequence, title, objective, instructions, required_actor, execution_mode, priority,"
     " acceptance_criteria_json, expected_evidence_json, human_action_reason, human_instructions,"
-    " created_at, summary, workplace, waiting_for, waiting_reason) VALUES (:id, :loop_id,"
+    " created_at, summary, workplace, waiting_for, waiting_reason, face) VALUES (:id, :loop_id,"
     " :plan_id, :phase_id, :phase_number, :key, :ticket_sequence, :title, :objective,"
     " :instructions, :required_actor, :execution_mode, :priority, :acceptance_criteria_json,"
     " :expected_evidence_json, :human_action_reason, :human_instructions, :created_at, :summary,"
-    " :workplace, :waiting_for, :waiting_reason)"
+    " :workplace, :waiting_for, :waiting_reason, :face)"
 )
 _UPDATE_ITEM = text(
     "UPDATE loop_plan_items SET plan_id = :plan_id, phase_id = :phase_id,"
@@ -118,7 +118,7 @@ _UPDATE_ITEM = text(
     " expected_evidence_json = :expected_evidence_json,"
     " human_action_reason = :human_action_reason, human_instructions = :human_instructions,"
     " summary = :summary, workplace = :workplace, waiting_for = :waiting_for,"
-    " waiting_reason = :waiting_reason WHERE id = :id"
+    " waiting_reason = :waiting_reason, face = :face WHERE id = :id"
 )
 _ITEMS_WITH_CARDS = text(
     f"SELECT {sql.column_list(LOOP_PLAN_ITEMS_COLUMNS, 'i')},"  # noqa: S608 - from LOOP_PLAN_ITEMS_COLUMNS
@@ -279,6 +279,7 @@ def _item_values(row: LoopPlanItemsRow) -> dict[str, str | int]:
         "workplace": row.workplace,
         "waiting_for": row.waiting_for,
         "waiting_reason": row.waiting_reason,
+        "face": row.face,
     }
 
 

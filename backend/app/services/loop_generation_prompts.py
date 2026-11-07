@@ -19,6 +19,7 @@ from ..schemas.briefs import HumanBrief, RoadmapBrief
 from ..schemas.loops import AnalysisPayload, PlanPayload, QaInstructions
 from .loop_plans_validation import validate_plan
 from .runtime import ResponseSchema
+from .ticket_face import plan_face_findings, refuse_face
 
 MAX_OUTPUT_CHARS = 200_000
 """The longest answer a run parses and stores; it no longer bounds what the model is sent."""
@@ -388,8 +389,9 @@ def parse_output(
     purpose: str, text: str, *, labels: tuple[str, ...] | None = None
 ) -> JsonObject:
     """The answer as its purpose's schema reads it. A RoadMap must also keep the plan rules
-    (``validate_plan``) and name only the board's ``labels`` (when the run was given them), so a
-    broken reference or an unknown label is repaired by the model instead of failing the run at
+    (``validate_plan``), carry a face for people on every Ticket (``ticket_face``) and name only
+    the board's ``labels`` (when the run was given them), so a broken reference, a face that breaks
+    its template or an unknown label is repaired by the model instead of failing the run at
     promotion; promotion validates again all the same."""
     if len(text) > MAX_OUTPUT_CHARS:
         raise ValidationFailure("Generation output exceeds the size limit")
@@ -398,6 +400,7 @@ def parse_output(
     validated = model.model_validate(payload)
     if isinstance(validated, PlanPayload):
         validate_plan(validated)
+        refuse_face(plan_face_findings(validated))
         if labels is not None:
             _check_labels(validated, labels)
     return validated.model_dump()

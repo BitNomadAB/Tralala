@@ -62,6 +62,7 @@ from .loop_plans_readiness import (
 from .loop_plans_validation import validate_plan
 from .loops import EXECUTION_STAGES
 from .plan_views import BlockedReason, PhaseView, PlanView, PlanViews, Readiness
+from .ticket_face import face_to_text, make_face
 from .ticket_summaries import summary_basis
 
 
@@ -82,6 +83,12 @@ class _StoredTicket(TypedDict):
     waiting_for: NotRequired[str]
     waiting_reason: NotRequired[str]
     labels: NotRequired[list[str]]
+    # absent from a plan stored before Tickets had a face for people
+    why: NotRequired[str]
+    if_skipped: NotRequired[str]
+    pros: NotRequired[list[str]]
+    cons: NotRequired[list[str]]
+    steps: NotRequired[list[str]]
 
 
 class _StoredPhase(TypedDict):
@@ -466,6 +473,11 @@ def _project_item(
         workplace=ticket["workplace"],
         waiting_for=ticket["waiting_for"],
         waiting_reason=ticket["waiting_reason"],
+        face=face_to_text(
+            make_face(
+                ticket["why"], ticket["if_skipped"], ticket["pros"], ticket["cons"], ticket["steps"]
+            )
+        ),
     )
     if repos.plan_items.get(phase.loop_id, ticket["id"]) is None:
         repos.plan_items.add(row)
@@ -488,8 +500,8 @@ def _planned_card(
     publisher: str,
 ) -> CardsRow:
     """The Ticket card a planned Ticket becomes; it carries the plan item's identity, the
-    RoadMap's summary of it and its starting workplace and wait (set by whoever published the
-    plan, when the plan gave one)."""
+    RoadMap's summary and face of it and its starting workplace and wait (set by whoever published
+    the plan, when the plan gave one). A plan stored before the face existed publishes none."""
     summary = ticket.get("summary", "")
     waiting_for = ticket.get("waiting_for", "nothing")
     waiting = waiting_for != "nothing"
@@ -533,6 +545,15 @@ def _planned_card(
         waiting_reason=ticket.get("waiting_reason", "") if waiting else "",
         waiting_set_at=now if waiting else None,
         waiting_set_by=publisher if waiting else None,
+        face=face_to_text(
+            make_face(
+                ticket.get("why", ""),
+                ticket.get("if_skipped", ""),
+                ticket.get("pros", []),
+                ticket.get("cons", []),
+                ticket.get("steps", []),
+            )
+        ),
     )
 
 

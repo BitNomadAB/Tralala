@@ -13,7 +13,7 @@ from pydantic import Field, field_validator, model_validator
 
 from .briefs import HumanBrief, RoadmapBrief
 from .cards import WaitingFor, WaitingReason, Workplace, wait_needs_reason
-from .common import Id, LongText, Name, OutModel, Priority, StrictModel, Summary
+from .common import FaceList, FaceText, Id, LongText, Name, OutModel, Priority, StrictModel, Summary
 
 DocumentKind = Literal["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"]
 DOCUMENT_KINDS: tuple[str, ...] = get_args(DocumentKind)
@@ -144,8 +144,8 @@ class PlanTicket(StrictModel):
     summary: Summary = Field(
         default="",
         description=(
-            "What the Ticket is about in one or two plain sentences, for a list of Tickets; "
-            "no file paths or code"
+            "What the Ticket means in at most 20 plain words, for a list of Tickets and the "
+            "first line of its face for people; no file paths or code"
         ),
     )
     objective: LongText = ""
@@ -170,6 +170,16 @@ class PlanTicket(StrictModel):
         default_factory=list,
         max_length=10,
         description="Area labels, by the names the board has (context.labels)",
+    )
+    # The face for people, last so it is written with the whole Ticket before it (the summary is
+    # its first line); its counts and rules are the face check's (``services/ticket_face.py``).
+    why: FaceText = Field(default="", description="Face: why it is needed, at most 3 sentences")
+    if_skipped: FaceText = Field(default="", description="Face: if we skip it, at most 3 sentences")
+    pros: FaceList = Field(default_factory=list, description="Face: at most 3 points for")
+    cons: FaceList = Field(default_factory=list, description="Face: at most 3 points against")
+    steps: FaceList = Field(
+        default_factory=list,
+        description="Face: 1 to 5 steps saying what changes for the person; split a longer Ticket",
     )
 
     @field_validator("human_action_reason", "human_instructions")

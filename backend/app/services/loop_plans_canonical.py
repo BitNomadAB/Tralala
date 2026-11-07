@@ -38,6 +38,11 @@ class CanonicalTicket(TypedDict):
     waiting_for: str
     waiting_reason: str
     labels: list[str]
+    why: str
+    if_skipped: str
+    pros: list[str]
+    cons: list[str]
+    steps: list[str]
     key: str
     sequence: int
     phase_number: int
@@ -109,6 +114,11 @@ def canonical_ticket(
         "waiting_for": ticket.waiting_for,
         "waiting_reason": ticket.waiting_reason,
         "labels": list(ticket.labels),
+        "why": ticket.why,
+        "if_skipped": ticket.if_skipped,
+        "pros": list(ticket.pros),
+        "cons": list(ticket.cons),
+        "steps": list(ticket.steps),
         "key": key,
         "sequence": sequence,
         "phase_number": phase_number,

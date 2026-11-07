@@ -5,7 +5,9 @@
 ``<LoopKey>-UNP-<nnn>``, never blocking readiness or completion (``CardService.create`` holds the
 rule). A follow-up names the Ticket it came from, which gets a comment pointing at it. It may say
 where the work is done, what it waits for (with a reason) and its area labels, by the names the
-board has: an unknown label is refused with the names there are, never created.
+board has: an unknown label is refused with the names there are, never created. It may carry a face
+for people (``why``, ``if_skipped``, ``pros``, ``cons``, ``steps`` with the summary): when any of
+them is given the whole face is held to its template, and a problem is ``422 face_invalid``.
 
 A comment goes on a Ticket whether it is done or not and whatever its Loop's state, completed,
 archived or cancelled included, so a later Loop can point back at the work it replaced; only an
@@ -41,6 +43,7 @@ from ..schemas.common import Priority
 from ..schemas.subresources import CommentCreate
 from .agent_tools_read import ToolArguments, ToolResult, _require, _text
 from .agent_tools_write import DEDUPE_WINDOW_SECONDS, _seconds_since
+from .ticket_face import FACE_FIELDS
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from .cards import CardEntry, CardService
@@ -212,6 +215,11 @@ def _labels(args: ToolArguments) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
+def _face_arguments(args: ToolArguments) -> dict[str, object]:
+    """The face fields the call gives, as they were given; the schema checks their types."""
+    return {name: args[name] for name in FACE_FIELDS if args.get(name) is not None}
+
+
 def create_ticket(
     services: TicketCreating, actor: ActorContext, args: ToolArguments
 ) -> ToolResult:
@@ -238,6 +246,7 @@ def create_ticket(
         "waiting_reason": _text(args.get("waiting_reason")) or "",
     }
     labels = _labels(args)
+    face = _face_arguments(args)
     try:
         payload = CardCreate.model_validate(
             {
@@ -248,6 +257,7 @@ def create_ticket(
                 "priority": priority,
                 "labels": labels,
                 **work,
+                **face,
             }
         )
     except ValidationError as error:
@@ -260,7 +270,7 @@ def create_ticket(
         loop_id,
         payload,
         idempotency_key=_retry_key(
-            loop_id, title, description, priority, origin_id or "", work, labels
+            loop_id, title, description, priority, origin_id or "", work, labels, face
         ),
         known_labels_only=True,
     )

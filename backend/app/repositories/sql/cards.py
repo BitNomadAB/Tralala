@@ -67,14 +67,14 @@ _ADD = text(
     " plan_item_id, ticket_key, kind, required_actor, execution_mode, human_action_reason,"
     " human_instructions, human_confirmed_at, human_confirmed_by_actor_id, plan_revision_id,"
     " summary, summary_source, summary_basis_sha256, workplace, waiting_for, waiting_reason,"
-    " waiting_set_at, waiting_set_by)"
+    " waiting_set_at, waiting_set_by, face)"
     " VALUES (:id, :list_id, :title, :description, :position, :priority, :due_at,"
     " :completed_at, :created_at, :updated_at, :archived_at, :version, :assignee_actor_id,"
     " :assignee_type, :assignee_name, :assigned_at, :assigned_by_actor_id, :loop_id, :phase_id,"
     " :plan_item_id, :ticket_key, :kind, :required_actor, :execution_mode, :human_action_reason,"
     " :human_instructions, :human_confirmed_at, :human_confirmed_by_actor_id, :plan_revision_id,"
     " :summary, :summary_source, :summary_basis_sha256, :workplace, :waiting_for,"
-    " :waiting_reason, :waiting_set_at, :waiting_set_by)"
+    " :waiting_reason, :waiting_set_at, :waiting_set_by, :face)"
 )
 _SYNC_PLAN_ITEM = text(
     "UPDATE cards SET title = :title, description = :instructions,"
@@ -83,7 +83,8 @@ _SYNC_PLAN_ITEM = text(
     " phase_id = :phase_id, updated_at = :now,"
     " summary = CASE WHEN :summary = '' THEN summary ELSE :summary END,"
     " summary_source = CASE WHEN :summary = '' THEN summary_source ELSE 'plan' END,"
-    " summary_basis_sha256 = CASE WHEN :summary = '' THEN summary_basis_sha256 ELSE :basis END"
+    " summary_basis_sha256 = CASE WHEN :summary = '' THEN summary_basis_sha256 ELSE :basis END,"
+    " face = CASE WHEN :face = '' THEN face ELSE :face END"
     " WHERE id = :id AND plan_item_id = :id"
 )
 _MOVE = text(
@@ -307,6 +308,7 @@ class SqlCardRepository:
                 "waiting_reason": row.waiting_reason,
                 "waiting_set_at": row.waiting_set_at,
                 "waiting_set_by": row.waiting_set_by,
+                "face": row.face,
             },
         )
 
@@ -328,6 +330,7 @@ class SqlCardRepository:
                 "phase_id": item.phase_id,
                 "summary": item.summary,
                 "basis": summary_basis,
+                "face": item.face,
                 "now": now,
                 "id": item.id,
             },

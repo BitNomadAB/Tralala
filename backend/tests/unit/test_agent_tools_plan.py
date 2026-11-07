@@ -30,6 +30,7 @@ from app.services.agent_tools import (
 )
 from app.services.loop_documents import LoopDocumentService
 from app.services.loop_plans import LoopPlanService
+from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -49,6 +50,7 @@ NAMESPACE = uuid.UUID(LOOP)
 P1, P2 = (str(uuid.uuid5(NAMESPACE, f"phase:{name}")) for name in ("p1", "p2"))
 T1, T2 = (str(uuid.uuid5(NAMESPACE, f"ticket:{name}")) for name in ("t1", "t2"))
 KEPT = "00000000-0000-4000-8000-000000000011"
+KEPT_TICKET: dict[str, JsonValue] = {**FACE, "id": KEPT, "title": "A Ticket with a UUID"}
 
 
 def finding(finding_id: str, category: str, plain_language: str) -> dict[str, JsonValue]:
@@ -91,6 +93,7 @@ def ticket(
     ticket_id: str, *, after_ticket: str = "", after_phase: str = ""
 ) -> dict[str, JsonValue]:
     return {
+        **FACE,
         "id": ticket_id,
         "title": f"Ticket {ticket_id}",
         "acceptance_criteria": ["it works"],
@@ -323,6 +326,46 @@ def test_a_reference_to_an_unknown_id_is_answered_with_the_id_the_model_wrote() 
     )
 
 
+def test_a_face_that_breaks_its_template_is_refused_by_ticket_field_and_rule() -> None:
+    w = world(approved_analysis=True)
+    seven: dict[str, JsonValue] = {**ticket("t1"), "steps": [f"Show part {n}" for n in range(7)]}
+    no_reason: dict[str, JsonValue] = {**ticket("t2"), "why": ""}
+    no_reason["cons"] = ["It touches loop_questions"]
+    broken = plan_payload(phase("p1", 1, seven), phase("p2", 2, no_reason, KEPT_TICKET))
+    with pytest.raises(ValidationFailure) as refused:
+        write(w, "plan", broken)
+    error = refused.value
+    # Each message names the Ticket by the id the model wrote, the field and the rule.
+    messages = [
+        "Ticket t1, steps: 7 items, at most 5. Split the Ticket into two.",
+        "Ticket t2, why: missing. Say in at most 3 sentences why it is needed.",
+        "Ticket t2, cons[0]: looks like a code symbol (loop_questions).",
+    ]
+    assert (error.status_code, error.code) == (422, "face_invalid")
+    assert error.details == {
+        "errors": messages,
+        "error_count": 3,
+        "faces": [
+            {"ticket_id": "t1", "field": "steps", "rule": "too_many"},
+            {"ticket_id": "t2", "field": "why", "rule": "missing"},
+            {"ticket_id": "t2", "field": "cons[0]", "rule": "code_symbol"},
+        ],
+    }
+    assert error.message.endswith(" ".join(messages))
+    assert w.state.plans == {}
+    assert w.repos.documents.current(LOOP, "roadmap_ai") is None
+
+
+def test_a_roadmap_ticket_without_a_face_is_refused() -> None:
+    w = world(approved_analysis=True)
+    bare: dict[str, JsonValue] = {"id": "t1", "title": "Ticket t1", "acceptance_criteria": ["ok"]}
+    with pytest.raises(ValidationFailure) as refused:
+        write(w, "plan", plan_payload(phase("p1", 1, bare)))
+    assert refused.value.code == "face_invalid"
+    assert field(refused.value.details, "error_count") == 4
+    assert w.state.plans == {}
+
+
 def test_write_roadmap_from_an_analysis_that_changed_is_stale() -> None:
     w = world(approved_analysis=True)
     with pytest.raises(VersionConflict) as stale:
@@ -506,6 +549,17 @@ def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None
         "summary",
         "phases",
     ]
+    assert keys(field(plan, "$defs", "PlanTicket", "properties"))[-5:] == [
+        "why",
+        "if_skipped",
+        "pros",
+        "cons",
+        "steps",
+    ]
+    description = tool_catalog()["write_roadmap"].description
+    assert "face for people" in description
+    assert "1 to 5 steps" in description
+    assert "face_invalid" in description
     assert tool_catalog()["write_roadmap"].handler is write_roadmap
 
 
