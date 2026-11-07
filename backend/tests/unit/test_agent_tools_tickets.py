@@ -76,6 +76,7 @@ class TicketWorld:
     list: ListService
     state: BoardState
     views: FakePlanViews
+    checks: FakeBoardChecks
 
 
 def ticket_world(settings: Settings) -> TicketWorld:
@@ -118,6 +119,7 @@ def ticket_world(settings: Settings) -> TicketWorld:
         list=ListService(checks, store),
         state=state,
         views=views,
+        checks=checks,
     )
 
 
@@ -254,6 +256,13 @@ def test_complete_ticket_writes_nothing_in_a_loop_that_is_read_only(settings: Se
         complete_ticket(world, WORKER, done("m"))
     assert closed.value.code == "loop_read_only"
     assert comments(world, "m") == []
+    # A Ticket that is done already gets no summary either: the Loop takes comments, not a
+    # completion, so the call is refused whole.
+    world.state.cards["t"] = world.state.cards["t"].__replace__(completed_at=CREATED)
+    with pytest.raises(Conflict) as again:
+        complete_ticket(world, WORKER, done("t"))
+    assert again.value.code == "loop_read_only"
+    assert comments(world, "t") == []
 
 
 def note(card_id: str, content: str) -> dict[str, JsonValue]:
@@ -274,16 +283,46 @@ def test_comment_ticket_comments_a_ticket_done_or_not_and_answers_a_retry_with_t
     assert comments(world, "t") == ["Started."]
 
 
-def test_comment_ticket_is_refused_only_where_nothing_may_be_written(settings: Settings) -> None:
+@pytest.mark.parametrize(
+    "ended",
+    [
+        {"stage": "completed", "completed_at": CREATED},
+        {"archived_at": CREATED},
+        {"stage": "cancelled", "cancelled_at": CREATED},
+    ],
+)
+def test_comment_ticket_comments_a_ticket_of_a_completed_archived_or_cancelled_loop(
+    settings: Settings, ended: dict[str, str]
+) -> None:
+    world = ticket_world(settings)
+    loop = world.state.loops[LOOP]
+    world.state.loops[LOOP] = loop.__replace__(
+        stage=ended.get("stage", loop.stage),
+        completed_at=ended.get("completed_at"),
+        archived_at=ended.get("archived_at"),
+        cancelled_at=ended.get("cancelled_at"),
+    )
+    later = "Superseded by L-7, which replaced this work."
+    answer = comment_ticket(world, WORKER, note("m", later))
+    assert answer["content"] == later
+    assert comments(world, "m") == [later]
+    (entry,) = world.comment.list(BOARD_ID, "m")
+    assert entry["after_loop_completed"] is ("completed_at" in ended)
+
+
+def test_comment_ticket_is_refused_only_by_its_scope_and_an_archived_board(
+    settings: Settings,
+) -> None:
     world = ticket_world(settings)
     with pytest.raises(Forbidden):
         comment_ticket(world, MOVER, note("m", "Hello"))
     world.state.loops[LOOP] = world.state.loops[LOOP].__replace__(
         stage="completed", completed_at=CREATED
     )
+    world.checks.archived = frozenset({BOARD_ID})
     with pytest.raises(Conflict) as closed:
         comment_ticket(world, WORKER, note("m", "Hello"))
-    assert closed.value.code == "loop_read_only"
+    assert closed.value.code == "board_archived"
     assert comments(world, "m") == []
 
 
@@ -403,6 +442,28 @@ def test_allowed_actions_offer_complete_ticket_only_for_a_ready_open_ticket_of_a
     assert allowed_actions(archived, execution_allowed=True) == ["comment_ticket"]
 
 
+def test_read_ticket_offers_only_comment_ticket_in_a_loop_that_is_read_only(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    assert not world.loop.read_only(BOARD_ID, LOOP)
+    open_ticket = world.card.get(BOARD_ID, LOOP, "t")
+    assert "complete_ticket" in allowed_actions(open_ticket, execution_allowed=True)
+    world.state.cards["t"] = world.state.cards["t"].__replace__(completed_at=CREATED)
+    done_ticket = world.card.get(BOARD_ID, LOOP, "t")
+    loop = world.state.loops[LOOP]
+    for ended in (
+        loop.__replace__(stage="completed", completed_at=CREATED),
+        loop.__replace__(archived_at=CREATED),
+        loop.__replace__(stage="cancelled", cancelled_at=CREATED),
+    ):
+        world.state.loops[LOOP] = ended
+        assert world.loop.read_only(BOARD_ID, LOOP)
+        for card in (open_ticket, done_ticket):
+            offered = allowed_actions(card, execution_allowed=False, loop_read_only=True)
+            assert offered == ["comment_ticket"]
+
+
 def test_a_comment_holds_a_completion_summary_not_only_a_title() -> None:
     long = "x" * 5000
     assert CommentCreate(content=long).content == long
@@ -422,4 +483,7 @@ def test_complete_ticket_is_described_in_tools_list_and_llms_txt(settings: Setti
     text = render_bootstrap(settings)
     assert "A Ticket is done through `complete_ticket`" in text
     assert "a column named Done completes nothing" in text
+    assert "Its Tickets still take comments (`comment_ticket`)" in text
+    assert "only an archived board refuses" in text
+    assert "in a completed Loop too" in tool_catalog()["comment_ticket"].description
     assert "complete_ticket" in INSTRUCTIONS

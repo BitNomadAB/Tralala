@@ -68,7 +68,11 @@ message broker.
     documents with an empty draft, so nothing downstream executes against text nobody stands behind.
     A token may set a wait on a Ticket that waits for nothing; the person who answers it clears it.
 11b. **Completed Loops are read-only.** Finalization writes an immutable, hashed snapshot to
-    `loop_history` in the same transaction and blocks every mutation path afterwards.
+    `loop_history` in the same transaction and blocks every mutation path afterwards, with one
+    exception: comments on its Tickets (written, edited, deleted) while the board is not archived,
+    so a later Loop can point back at the work it replaced. The same holds for a cancelled or
+    archived Loop. A later comment never changes the snapshot or its hash; the live Ticket marks it
+    as written after the Loop was completed (`after_loop_completed`).
 11. **Role templates and agents are separate resources.** `role_templates` holds the shared,
     editable role prompt; `agents` holds identity, connection and credentials plus a *reference* to
     a template (or an override). Never join live templates into historical output: any discussion or

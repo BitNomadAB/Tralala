@@ -258,13 +258,16 @@ def _read_board(
     }
 
 
-def allowed_actions(card: CardEntry, *, execution_allowed: bool) -> list[str]:
-    """The tools a worker may call on a Ticket now. ``comment_ticket`` always, done or not, as the
-    service allows (only a read-only Loop or board refuses it); ``set_ticket_wait`` while it is
-    open and waits for nothing (clearing a wait is a person's act); ``complete_ticket`` only while
-    the Ticket is ready (no blocker, no wait), open and not a person's, and for a planned one only
-    while the Loop executes."""
-    if card["archived_at"]:
+def allowed_actions(
+    card: CardEntry, *, execution_allowed: bool, loop_read_only: bool = False
+) -> list[str]:
+    """The tools a worker may call on a Ticket now. ``comment_ticket`` always, done or not, in a
+    completed, archived or cancelled Loop too, as the service allows (only an archived board
+    refuses it); nothing else in such a Loop; ``set_ticket_wait`` while it is open and waits for
+    nothing (clearing a wait is a person's act); ``complete_ticket`` only while the Ticket is ready
+    (no blocker, no wait), open and not a person's, and for a planned one only while the Loop
+    executes."""
+    if card["archived_at"] or loop_read_only:
         return ["comment_ticket"]
     may_wait = not card["completed_at"] and card["waiting_for"] == "nothing"
     if card["human_action_required"] and not card["completed_at"]:
@@ -296,7 +299,11 @@ def _read_ticket(
         ),
         None,
     )
-    allowed = allowed_actions(card, execution_allowed=readiness["execution_allowed"])
+    allowed = allowed_actions(
+        card,
+        execution_allowed=readiness["execution_allowed"],
+        loop_read_only=services.loop.read_only(board_id, loop_id),
+    )
     return {
         "ticket": {
             "id": card["id"],

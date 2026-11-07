@@ -7,17 +7,20 @@ rule). A follow-up names the Ticket it came from, which gets a comment pointing 
 where the work is done, what it waits for (with a reason) and its area labels, by the names the
 board has: an unknown label is refused with the names there are, never created.
 
-A comment goes on a Ticket whether it is done or not; only a Loop or board that takes no writes
-refuses it (the service's rule).
+A comment goes on a Ticket whether it is done or not and whatever its Loop's state, completed,
+archived or cancelled included, so a later Loop can point back at the work it replaced; only an
+archived board refuses it (the service's rule, AGENTS.md rule 11b).
 
 A Ticket is done when ``completed_at`` is set, never because it sits in a column named Done. The
 tool completes it through ``CardService.update`` (the version read for the worker, one retry on a
 version conflict) and comments the summary and the evidence. The comment is written whether or not
 the Ticket can be completed: on a Ticket that is already done, and beside a refusal, so what the
-worker did is on the Ticket either way; only a Loop or board that takes no writes refuses it. The
-refusals are the service's: a human-only Ticket (the answer names who confirms it), an unfinished
-prerequisite (``ticket_blocked`` with the blockers), an open wait (``ticket_waiting``, which a
-person clears) and a Loop that is not executing.
+worker did is on the Ticket either way. A completed, archived or cancelled Loop refuses the call
+whole (``loop_read_only``, nothing written): it takes comments through ``comment_ticket``, never a
+completion. An archived board refuses it too. The other refusals are the service's: a human-only
+Ticket (the answer names who confirms it), an unfinished prerequisite (``ticket_blocked`` with the
+blockers), an open wait (``ticket_waiting``, which a person clears) and a Loop that is not
+executing.
 
 ``complete_ticket`` is typed on ``TicketCompleting``, the attributes of the composition root it
 uses, so a unit test runs it with the real services on the typed fakes.
@@ -32,7 +35,7 @@ from typing import TYPE_CHECKING, Protocol, TypeIs, get_args
 from pydantic import ValidationError
 
 from ..core.context import ActorContext
-from ..core.errors import ApiError, NotFound, ValidationFailure, VersionConflict
+from ..core.errors import ApiError, Conflict, NotFound, ValidationFailure, VersionConflict
 from ..schemas.cards import CardCreate, CardUpdate
 from ..schemas.common import Priority
 from ..schemas.subresources import CommentCreate
@@ -301,6 +304,11 @@ def complete_ticket(
     card_id = _require(args, "card_id")
     content = completion_comment(_require(args, "summary"), _evidence(args))
     loop_id, _ = services.card.locate(board_id, card_id)
+    if services.loop.read_only(board_id, loop_id):
+        # Such a Loop takes a comment but no completion, so the summary is not kept either.
+        raise Conflict(
+            "This Loop is read-only", code="loop_read_only", details={"card_id": card_id}
+        )
     earlier = _recent(services, actor, board_id, card_id, content)
 
     def comment() -> CommentEntry:
