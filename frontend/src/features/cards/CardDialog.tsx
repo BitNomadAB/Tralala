@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/useToast";
 import { useCardEvents } from "@/features/cards/useCardEvents";
 import { ApiError, api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
+import type { MarkdownOptions } from "@/lib/markdown";
 import { keys, useActivity, useLabels } from "@/lib/queries";
 import type { BoardList } from "@/lib/types";
 import { formatDateTime, fromDateInputValue, toDateInputValue } from "@/lib/utils";
@@ -28,6 +29,7 @@ export function CardDialog({
   lists,
   onClose,
   onConfirmHuman,
+  ticketHref,
 }: {
   boardId: string;
   loopId: string;
@@ -35,6 +37,8 @@ export function CardDialog({
   lists: BoardList[];
   onClose: () => void;
   onConfirmHuman?: (version: number, note: string) => Promise<void>;
+  /** Links a Ticket key in the description to that Ticket; the page knows which exist. */
+  ticketHref?: MarkdownOptions["ticketHref"];
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -179,6 +183,7 @@ export function CardDialog({
               listId={card.list_id}
               onMove={(listId) => moveMutation.mutate(listId)}
               labelOptions={labelOptions}
+              ticketHref={ticketHref}
             />
 
             <div className="flex flex-wrap items-center gap-2 border-y border-[var(--border)] py-3">

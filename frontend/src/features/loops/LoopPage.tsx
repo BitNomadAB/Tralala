@@ -16,6 +16,7 @@ import { LoopKanban } from "./LoopKanban";
 import { LoopToolbar, type TicketFilters } from "./LoopToolbar";
 import { LIST_LIMIT } from "./loopUi";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
+import { ticketHrefResolver } from "./ticketLinks";
 
 export function LoopPage() {
   const { boardId = "", loopId = "" } = useParams();
@@ -67,6 +68,12 @@ export function LoopPage() {
     });
     return map;
   }, [lists, cardQueries]);
+
+  // A Ticket key in a description links to that Ticket when this Loop has it; others stay text.
+  const ticketHref = useMemo(
+    () => ticketHrefResolver(boardId, loopId, Object.values(cardsByList).flat()),
+    [boardId, loopId, cardsByList],
+  );
 
   const filtersActive = Boolean(filters.q.trim() || filters.priority || filters.overdue);
   const searchQuery = useQuery({
@@ -257,6 +264,7 @@ export function LoopPage() {
           cardId={selectedCardId}
           lists={lists}
           onClose={closeCard}
+          ticketHref={ticketHref}
           onConfirmHuman={async (version, note) => {
             await api.confirmHumanTicket(boardId, loopId, selectedCardId, { version, note });
             invalidateCards();

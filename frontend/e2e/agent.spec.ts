@@ -118,7 +118,7 @@ test.describe("browser safety", () => {
       .getByLabel("Card description (Markdown)")
       .fill('<script>window.__pwned = true</script> <img src=x onerror="window.__pwned = true">');
     await dialog.getByRole("button", { name: "Save changes" }).click();
-    await dialog.getByRole("button", { name: "Preview" }).click();
+    await dialog.getByRole("tab", { name: "Preview" }).click();
 
     await expect(dialog).toContainText("<script>");
     const pwned = await page.evaluate(() => (window as unknown as { __pwned?: boolean }).__pwned);

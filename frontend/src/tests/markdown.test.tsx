@@ -74,4 +74,122 @@ describe("renderMarkdown", () => {
       unmount();
     }
   });
+
+  it("keeps javascript: and mailto: addresses as text, written or bare", () => {
+    const { container } = render(
+      <div>
+        {renderMarkdown(
+          "[run](javascript:run) [mail](mailto:a@example.com) javascript:alert(2) mailto:b@example.com",
+        )}
+      </div>,
+    );
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toBe("run mail javascript:alert(2) mailto:b@example.com");
+  });
+});
+
+describe("renderMarkdown bare URLs", () => {
+  it("links a bare address in a new tab and leaves trailing punctuation out", () => {
+    const { container } = render(
+      <div>
+        {renderMarkdown(
+          "See https://example.com/a?b=1. Or (http://example.org/x), and https://en.example.com/T_(1)!",
+        )}
+      </div>,
+    );
+    const anchors = [...container.querySelectorAll("a")];
+    expect(anchors.map((anchor) => anchor.getAttribute("href"))).toEqual([
+      "https://example.com/a?b=1",
+      "http://example.org/x",
+      "https://en.example.com/T_(1)",
+    ]);
+    expect(anchors.every((anchor) => anchor.getAttribute("target") === "_blank")).toBe(true);
+    expect(anchors.every((anchor) => anchor.getAttribute("rel") === "noreferrer noopener")).toBe(
+      true,
+    );
+    expect(container.textContent).toBe(
+      "See https://example.com/a?b=1. Or (http://example.org/x), and https://en.example.com/T_(1)!",
+    );
+  });
+
+  it("keeps an address in a code span or a code block as text", () => {
+    const { container } = render(
+      <div>
+        {renderMarkdown("Run `curl https://example.com` now\n\n```\nhttps://example.org\n```")}
+      </div>,
+    );
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.querySelector("p code")?.textContent).toBe("curl https://example.com");
+    expect(container.querySelector("pre code")?.textContent).toBe("https://example.org");
+  });
+
+  it("does not link an address with no host or one glued to a word", () => {
+    const { container } = render(<div>{renderMarkdown("https://. and xhttps://example.com")}</div>);
+    expect(container.querySelector("a")).toBeNull();
+  });
+});
+
+describe("renderMarkdown Ticket keys", () => {
+  const known: Record<string, string> = {
+    "AN001-RA02-001": "/boards/b-1/loops/l-1?card=c-1",
+    "AN001-UNP-012": "/boards/b-1/loops/l-1?card=c-2",
+    "AN001-QA01-1000": "/boards/b-1/loops/l-1?card=c-3",
+  };
+  const ticketHref = (key: string) => known[key] ?? null;
+
+  it("links a key the page knows to that Ticket, in the same tab", () => {
+    const { container } = render(
+      <div>
+        {renderMarkdown("Needs AN001-RA02-001, AN001-UNP-012 and AN001-QA01-1000.", {
+          ticketHref,
+        })}
+      </div>,
+    );
+    const anchors = [...container.querySelectorAll("a")];
+    expect(anchors.map((anchor) => [anchor.textContent, anchor.getAttribute("href")])).toEqual([
+      ["AN001-RA02-001", "/boards/b-1/loops/l-1?card=c-1"],
+      ["AN001-UNP-012", "/boards/b-1/loops/l-1?card=c-2"],
+      ["AN001-QA01-1000", "/boards/b-1/loops/l-1?card=c-3"],
+    ]);
+    expect(anchors.every((anchor) => !anchor.hasAttribute("target"))).toBe(true);
+  });
+
+  it("keeps unknown keys, near-keys and keys without a resolver as text", () => {
+    const asked: string[] = [];
+    const { container, unmount } = render(
+      <div>
+        {renderMarkdown(
+          "BE09-RA02-001 an001-ra02-001 AN01-RA02-001 AN001-RA2-001 AN001-RA02-01 XAN001-RA02-001 AN001-RA02-001-2 AN001-BE01-003 `AN001-RA02-001`",
+          {
+            ticketHref: (key) => {
+              asked.push(key);
+              return ticketHref(key);
+            },
+          },
+        )}
+      </div>,
+    );
+    expect(container.querySelector("a")).toBeNull();
+    expect(asked).toEqual(["AN001-BE01-003"]);
+    unmount();
+
+    const { container: plain } = render(<div>{renderMarkdown("Needs AN001-RA02-001.")}</div>);
+    expect(plain.querySelector("a")).toBeNull();
+  });
+
+  it("refuses a resolver's answer that leaves the site", () => {
+    for (const href of [
+      "https://example.com",
+      "//example.com/x",
+      "/\\example.com",
+      "javascript:x",
+    ]) {
+      const { container, unmount } = render(
+        <div>{renderMarkdown("AN001-RA02-001", { ticketHref: () => href })}</div>,
+      );
+      expect(container.querySelector("a")).toBeNull();
+      expect(container.textContent).toBe("AN001-RA02-001");
+      unmount();
+    }
+  });
 });

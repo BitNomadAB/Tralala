@@ -1,7 +1,7 @@
 import { LabelChip } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { renderMarkdown } from "@/lib/markdown";
+import { Field, Input, Select } from "@/components/ui/input";
+import { MarkdownField } from "@/components/ui/markdown-field";
+import type { MarkdownOptions } from "@/lib/markdown";
 import { PRIORITIES, type BoardList, type Label, type Priority } from "@/lib/types";
 
 /** The card's editable fields, kept apart from the card until "Save changes". */
@@ -23,15 +23,19 @@ export function CardDialogForm({
   listId,
   onMove,
   labelOptions,
+  ticketHref,
 }: {
   draft: CardDraft;
   onDraftChange: (draft: CardDraft) => void;
+  /** Whether the description shows its Preview tab rather than Write. */
   preview: boolean;
   onPreviewChange: (preview: boolean) => void;
   lists: BoardList[];
   listId: string;
   onMove: (listId: string) => void;
   labelOptions: Label[];
+  /** Links a Ticket key in the description to that Ticket; absent, keys stay text. */
+  ticketHref?: MarkdownOptions["ticketHref"];
 }) {
   return (
     <div className="grid gap-3 md:grid-cols-[1fr_200px]">
@@ -43,41 +47,17 @@ export function CardDialogForm({
             onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
           />
         </Field>
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-            Description
-          </span>
-          <div className="flex gap-1">
-            <Button
-              size="sm"
-              variant={preview ? "ghost" : "secondary"}
-              onClick={() => onPreviewChange(false)}
-            >
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant={preview ? "secondary" : "ghost"}
-              onClick={() => onPreviewChange(true)}
-            >
-              Preview
-            </Button>
-          </div>
-        </div>
-        {preview ? (
-          <div className="prose-card min-h-24 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3">
-            {renderMarkdown(draft.description) ?? (
-              <span className="text-xs text-[var(--muted-foreground)]">No description</span>
-            )}
-          </div>
-        ) : (
-          <Textarea
-            aria-label="Card description (Markdown)"
-            value={draft.description}
-            onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
-            placeholder="Markdown supported"
-          />
-        )}
+        <MarkdownField
+          id="card-description"
+          title="Description"
+          label="Card description (Markdown)"
+          value={draft.description}
+          onChange={(description) => onDraftChange({ ...draft, description })}
+          preview={preview}
+          onPreviewChange={onPreviewChange}
+          placeholder="Markdown supported"
+          ticketHref={ticketHref}
+        />
       </div>
 
       <div className="flex flex-col gap-2">

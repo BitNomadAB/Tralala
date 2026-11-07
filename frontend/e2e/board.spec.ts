@@ -26,13 +26,24 @@ test.describe("boards and cards", () => {
     await dialog.getByLabel("Title", { exact: true }).fill(`${cardTitle} (final)`);
     await dialog
       .getByLabel("Card description (Markdown)")
-      .fill("## Launch plan\n\n- **Publish** release notes\n- `pnpm publish`");
+      .fill(
+        "## Launch plan\n\n- **Publish** release notes\n- `pnpm publish`\n\nSee https://example.com.",
+      );
     await dialog.getByLabel("Priority", { exact: true }).selectOption("high");
     await dialog.getByRole("button", { name: "Save changes" }).click();
 
     await expect(dialog.getByText(/version 2/)).toBeVisible();
-    await dialog.getByRole("button", { name: "Preview" }).click();
-    await expect(dialog.getByRole("heading", { name: "Launch plan" })).toBeVisible();
+    await dialog.getByRole("tab", { name: "Preview" }).click();
+    const preview = dialog.getByRole("tabpanel", { name: "Preview" });
+    await expect(preview.getByRole("heading", { name: "Launch plan" })).toBeVisible();
+    await expect(preview.getByRole("link", { name: "https://example.com" })).toHaveAttribute(
+      "target",
+      "_blank",
+    );
+    await dialog.getByText("How to format").click();
+    await expect(
+      dialog.getByText("Links to other sites open in a new tab; only http(s) links become links."),
+    ).toBeVisible();
 
     await closeDialog(page);
     await expect(cardTile(page, "Todo", `${cardTitle} (final)`)).toContainText("high");
