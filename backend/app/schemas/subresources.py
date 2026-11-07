@@ -69,6 +69,9 @@ class CommentOut(OutModel):
     content: str
     created_at: str
     updated_at: str
+    # Written (or last edited) after the Ticket's Loop was completed, so the Loop's history
+    # snapshot does not hold it as it reads now.
+    after_loop_completed: bool = False
 
 
 class CommentMentionOut(OutModel):

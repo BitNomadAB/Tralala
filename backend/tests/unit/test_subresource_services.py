@@ -1,6 +1,7 @@
 """LabelService, ChecklistService and CommentService on an in-memory board: scopes, the board's
-state, a Ticket's read-only Loop, ordering, who wrote a comment, the mention hook and the activity
-each write leaves.
+state, a Ticket's read-only Loop (which refuses checklists but takes comments, marked when written
+after its completion), ordering, who wrote a comment, the mention hook and the activity each write
+leaves.
 
 The services run their real code; the repositories, both units of work, the registry checks, the
 clock and the id source are the typed fakes in ``tests/unit/fakes``.
@@ -36,7 +37,11 @@ from app.schemas.subresources import (
 )
 from app.services.boards import BoardService
 from app.services.lists import BoardChecks
-from app.services.loops import ensure_ticket_writable
+from app.services.loops import (
+    after_completion,
+    ensure_ticket_commentable,
+    ensure_ticket_writable,
+)
 from app.services.mentions import MentionService
 from app.services.subresources import (
     ChecklistService,
@@ -234,6 +239,28 @@ def test_a_finished_or_stopped_loop_refuses_writes_to_its_tickets(card_id: str) 
 @pytest.mark.parametrize("card_id", ["c1", "no-such-card", "orphan"])
 def test_an_open_loop_or_a_missing_ticket_or_loop_passes(card_id: str) -> None:
     ensure_ticket_writable(FakeBoardRepositories(world().state), card_id)
+
+
+@pytest.mark.parametrize("card_id", ["c1", *READ_ONLY_CARDS])
+def test_a_ticket_takes_a_comment_whatever_its_loops_state(card_id: str) -> None:
+    state = world().state
+    loop = ensure_ticket_commentable(FakeBoardRepositories(state), card_id)
+    assert loop == state.loops[state.cards[card_id].loop_id]
+
+
+@pytest.mark.parametrize("card_id", ["no-such-card", "orphan"])
+def test_a_comment_needs_a_ticket_whose_loop_exists(card_id: str) -> None:
+    with pytest.raises(NotFound, match="Card not found"):
+        ensure_ticket_commentable(FakeBoardRepositories(world().state), card_id)
+
+
+def test_only_what_is_written_after_a_loops_completion_counts_as_after_it() -> None:
+    done = loop_row("done", completed_at="2026-11-03T10:00:00Z")
+    assert after_completion("2026-11-03T10:00:01Z", done)
+    assert not after_completion("2026-11-03T10:00:00Z", done)
+    assert not after_completion("2026-11-03T09:59:59Z", done)
+    assert not after_completion("2026-11-03T10:00:01Z", loop_row(OPEN))
+    assert not after_completion("2026-11-03T10:00:01Z", None)
 
 
 # --- labels -------------------------------------------------------------------------------------
@@ -725,6 +752,7 @@ def test_comments_are_listed_oldest_first_with_their_authors() -> None:
         "updated_at": "2026-11-03T09:00:00Z",
         "actor_name": "Grace",
         "actor_type": "user",
+        "after_loop_completed": False,
     }
     assert w.checks.calls == [("require_row", BOARD_ID)]
 
@@ -753,6 +781,7 @@ def test_a_new_comment_is_stored_logged_and_answered_with_its_author() -> None:
         "updated_at": STAMP,
         "actor_name": "worker",
         "actor_type": "agent",
+        "after_loop_completed": False,
     }
     assert w.state.comments["new-1"] == CommentsRow(
         id="new-1",
@@ -794,25 +823,57 @@ def test_without_a_mention_queue_a_mention_is_only_a_comment() -> None:
     assert entry["content"] == "@Helper"
 
 
-def test_a_comment_needs_its_scope_a_ticket_and_a_loop_that_takes_writes() -> None:
+def test_a_comment_needs_its_scope_a_ticket_and_a_board_that_is_not_archived() -> None:
     w = world()
     no_comments = ActorContext(
         actor_id="person", actor_type="user", actor_name="Grace", scopes=frozenset({"cards:write"})
     )
     with pytest.raises(Forbidden):
         w.comments.create(no_comments, BOARD_ID, "c1", CommentCreate(content="x"))
-    with pytest.raises(NotFound, match="Card not found"):
-        w.comments.create(PERSON, BOARD_ID, "nope", CommentCreate(content="x"))
-    for card_id in READ_ONLY_CARDS:
+    for card_id in ("nope", "orphan"):
+        with pytest.raises(NotFound, match="Card not found"):
+            w.comments.create(PERSON, BOARD_ID, card_id, CommentCreate(content="x"))
+    w.checks.archived = frozenset({BOARD_ID})
+    for card_id in ("c1", *READ_ONLY_CARDS):
         with pytest.raises(Conflict) as raised:
             w.comments.create(PERSON, BOARD_ID, card_id, CommentCreate(content="@Helper"))
-        refused_as_read_only(raised, card_id)
-    w.checks.archived = frozenset({BOARD_ID})
-    with pytest.raises(Conflict, match="archived"):
-        w.comments.create(PERSON, BOARD_ID, "c1", CommentCreate(content="x"))
+        assert raised.value.code == "board_archived"
     assert w.state.comments == {}
     assert w.state.activity == []
     assert w.queue.calls == []
+
+
+@pytest.mark.parametrize("card_id", READ_ONLY_CARDS)
+def test_a_ticket_of_a_completed_archived_or_cancelled_loop_takes_a_comment(card_id: str) -> None:
+    w = world()
+    later = "Superseded by L-7, which replaced this work."
+    entry = w.comments.create(PERSON, BOARD_ID, card_id, CommentCreate(content=later))
+    assert (entry["id"], entry["card_id"], entry["content"]) == ("new-1", card_id, later)
+    assert w.state.comments["new-1"].content == later
+    assert w.actions() == [("comment.created", "comment", "new-1", {"card_id": card_id})]
+
+
+def test_a_comment_written_after_the_loop_was_completed_is_marked() -> None:
+    w = world()
+    w.state.loops["done"] = w.state.loops["done"].__replace__(completed_at="2026-11-03T09:00:00Z")
+    w.state.comments = {
+        "before": comment("before", "done-card", "person", "2026-11-02T09:00:00Z"),
+        "after": comment("after", "done-card", "person", "2026-11-03T09:30:00Z"),
+        "open": comment("open", "c1", "person", "2026-11-03T09:30:00Z"),
+        "cancelled": comment("cancelled", "cancelled-card", "person", "2026-11-03T09:30:00Z"),
+    }
+    marks = [(e["id"], e["after_loop_completed"]) for e in w.comments.list(BOARD_ID, "done-card")]
+    assert marks == [("before", False), ("after", True)]
+    (open_entry,) = w.comments.list(BOARD_ID, "c1")
+    (cancelled_entry,) = w.comments.list(BOARD_ID, "cancelled-card")
+    assert not open_entry["after_loop_completed"]
+    assert not cancelled_entry["after_loop_completed"]
+    created = w.comments.create(PERSON, BOARD_ID, "done-card", CommentCreate(content="See L-7"))
+    assert created["after_loop_completed"]
+    # An earlier comment edited now no longer reads as the Loop's history holds it.
+    edited = w.comments.update(PERSON, BOARD_ID, "before", CommentCreate(content="Still true"))
+    assert (edited["content"], edited["after_loop_completed"]) == ("Still true", True)
+    assert w.comments.list(BOARD_ID, "nope") == []
 
 
 def test_a_person_edits_any_comment_and_an_agent_only_its_own() -> None:
@@ -849,20 +910,31 @@ def test_a_person_edits_any_comment_and_an_agent_only_its_own() -> None:
     ]
 
 
-def test_a_comment_on_a_read_only_loop_is_not_changed_after_the_owner_check() -> None:
+@pytest.mark.parametrize("card_id", READ_ONLY_CARDS)
+def test_a_comment_on_a_read_only_loop_is_edited_and_deleted_by_the_same_rule(
+    card_id: str,
+) -> None:
     w = world()
-    w.state.comments = {"old": comment("old", "done-card", "person", CREATED)}
-    for write in (
-        lambda: w.comments.update(PERSON, BOARD_ID, "old", CommentCreate(content="x")),
-        lambda: w.comments.delete(PERSON, BOARD_ID, "old"),
-    ):
-        with pytest.raises(Conflict) as raised:
-            write()
-        refused_as_read_only(raised, "done-card")
+    w.state.comments = {
+        "old": comment("old", card_id, "person", CREATED),
+        "mine": comment("mine", card_id, "token-actor", CREATED),
+    }
     with pytest.raises(Forbidden):
         w.comments.update(WORKER, BOARD_ID, "old", CommentCreate(content="x"))
-    assert w.state.comments["old"].content == "text of old"
-    assert w.state.activity == []
+    with pytest.raises(Forbidden):
+        w.comments.delete(WORKER, BOARD_ID, "old")
+    assert w.comments.update(PERSON, BOARD_ID, "old", CommentCreate(content="x"))["content"] == "x"
+    w.comments.delete(WORKER, BOARD_ID, "mine")
+    assert {key: row.content for key, row in w.state.comments.items()} == {"old": "x"}
+    w.checks.archived = frozenset({BOARD_ID})
+    with pytest.raises(Conflict, match="archived"):
+        w.comments.update(PERSON, BOARD_ID, "old", CommentCreate(content="y"))
+    with pytest.raises(Conflict, match="archived"):
+        w.comments.delete(PERSON, BOARD_ID, "old")
+    assert w.actions() == [
+        ("comment.updated", "comment", "old", {"card_id": card_id}),
+        ("comment.deleted", "comment", "mine", {"card_id": card_id}),
+    ]
 
 
 def test_an_unknown_comment_is_not_found_and_writes_need_the_scope() -> None:

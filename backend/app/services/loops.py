@@ -45,12 +45,16 @@ from .activity import activity_entry
 from .lists import BoardChecks
 from .loop_identifiers import format_loop_key, loop_prefix
 from .loops_rules import (
+    after_completion,
     ensure_execution_allowed,
+    ensure_ticket_commentable,
     ensure_ticket_writable,
     ensure_writable,
+    is_read_only,
     readiness_item,
     refresh_stage,
     require_loop,
+    ticket_loop,
 )
 from .loops_stage import (
     ANALYSIS_KINDS,
@@ -191,6 +195,13 @@ class LoopService:
         self.boards.require_row(board_id)
         with self.store.reader(board_id) as repos:
             return self.plans.plan_view(repos, require_loop(repos, loop_id))
+
+    def read_only(self, board_id: str, loop_id: str) -> bool:
+        """Whether the Loop is completed, archived or cancelled: it takes no writes then but
+        comments on its Tickets (AGENTS.md rule 11b)."""
+        self.boards.require_row(board_id)
+        with self.store.reader(board_id) as repos:
+            return is_read_only(require_loop(repos, loop_id))
 
     def readiness(self, board_id: str, loop_id: str) -> LoopReadiness:
         self.boards.require_row(board_id)
@@ -466,6 +477,7 @@ __all__ = [
     "QaSummary",
     "StaleReasons",
     "TicketReader",
+    "after_completion",
     "analysis_approved",
     "board_loop_facts",
     "compute_stage",
@@ -473,8 +485,10 @@ __all__ = [
     "document_slots",
     "document_state",
     "ensure_execution_allowed",
+    "ensure_ticket_commentable",
     "ensure_ticket_writable",
     "ensure_writable",
+    "is_read_only",
     "latest_approvals",
     "loop_entry",
     "loop_facts",
@@ -487,4 +501,5 @@ __all__ = [
     "require_loop",
     "roadmap_approved",
     "stale_reasons",
+    "ticket_loop",
 ]

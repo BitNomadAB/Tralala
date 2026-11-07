@@ -1,26 +1,30 @@
 """LoopHistoryService on the in-memory fakes: finalization writes one hashed, self-contained
-snapshot and completes the Loop, a second finalization returns the same record, and the legacy
-import stores a reference that is never a Loop."""
+snapshot and completes the Loop, a second finalization returns the same record, a comment
+written on its Ticket afterwards never changes the snapshot or its hash, and the legacy import
+stores a reference that is never a Loop."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound
-from app.db.generated.board import AttachmentsRow, LoopNotesRow
+from app.db.generated.board import AttachmentsRow, CommentsRow, LoopNotesRow
 from app.schemas.loops import LegacyImportRequest
+from app.schemas.subresources import CommentCreate
 from app.services.loop_history import (
     LEGACY_LABEL,
     LoopHistoryService,
     canonical,
     fts_query,
 )
+from app.services.subresources import CommentService
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -30,6 +34,7 @@ from tests.unit.fakes.board import (
     list_row,
     loop_row,
 )
+from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState
 
 NOW = "2026-11-03T10:00:00Z"
 LOOP = "loop-a"
@@ -157,6 +162,48 @@ def test_a_second_finalization_returns_the_same_record(tmp_path: Path) -> None:
     second = finalize(service, store)
     assert first["id"] == second["id"]
     assert len(state.history) == 1
+
+
+def test_a_comment_written_after_completion_leaves_the_snapshot_and_its_hash_alone(
+    tmp_path: Path,
+) -> None:
+    service, state, store = make(tmp_path)
+    for comment_id, content in (("early", "Built as planned."), ("older", "Needs a review.")):
+        state.comments[comment_id] = CommentsRow(
+            id=comment_id,
+            card_id="card-1",
+            actor_id="actor-1",
+            content=content,
+            created_at="2026-11-03T09:00:00Z",
+            updated_at="2026-11-03T09:00:00Z",
+        )
+    record = finalize(service, store)
+    (stored,) = state.history.values()
+    sealed = (stored.envelope_json, stored.content_hash, stored.search_text)
+    ids = iter(["later", "log-1", "log-2"])
+    comments = CommentService(
+        FakeBoardChecks(),
+        store,
+        FakeRegistryUnitOfWork(RegistryState()),
+        clock=lambda: datetime(2026, 11, 3, 11, 0, tzinfo=UTC),
+        new_id=lambda: next(ids),
+    )
+    later = "Superseded by L-7, which replaced this work."
+    writer = ADA.__replace__(scopes=frozenset({"comments:write"}))
+    comments.create(writer, BOARD_ID, "card-1", CommentCreate(content=later))
+    comments.update(writer, BOARD_ID, "older", CommentCreate(content="Reviewed; see L-7."))
+    assert (stored.envelope_json, stored.content_hash, stored.search_text) == sealed
+    assert state.history[stored.id] == stored
+    assert stored.content_hash == hashlib.sha256(stored.envelope_json.encode()).hexdigest()
+    # The history view is the record: it holds the comments as they were at completion and not
+    # the later one. The live Ticket holds them all and marks what was written after completion.
+    envelope = service.existing(BOARD_ID, LOOP)["envelope"]
+    assert envelope == record["envelope"]
+    assert envelope == service.detail(BOARD_ID, stored.id)["envelope"]
+    kept = json.loads(stored.envelope_json)["delivery"]["comments"]
+    assert [c["content"] for c in kept] == ["Built as planned.", "Needs a review."]
+    marks = [(c["id"], c["after_loop_completed"]) for c in comments.list(BOARD_ID, "card-1")]
+    assert marks == [("early", False), ("older", True), ("later", True)]
 
 
 def attachment(

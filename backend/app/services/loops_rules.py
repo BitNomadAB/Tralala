@@ -1,9 +1,10 @@
 """The rules every Loop service shares.
 
-A Loop that exists, one that may still change, a Ticket whose Loop may still change, a stage that
-lets delivery work start, the stage kept in step with the Loop's documents, approvals, plan and
-Tickets, and the planned Ticket behind a card. ``loops`` re-exports every name here, so
-``CardService`` and the Loop workflow services keep importing them from there.
+A Loop that exists, one that may still change, a Ticket whose Loop may still change (and one that
+takes a comment whatever its Loop's state), a stage that lets delivery work start, the stage kept
+in step with the Loop's documents, approvals, plan and Tickets, and the planned Ticket behind a
+card. ``loops`` re-exports every name here, so ``CardService`` and the Loop workflow services keep
+importing them from there.
 """
 
 from __future__ import annotations
@@ -53,23 +54,53 @@ def ensure_writable(loop: LoopsRow) -> None:
         )
 
 
-def ensure_ticket_writable(repos: BoardRepositories, card_id: str) -> None:
-    """A Ticket's comments, checklists and attachments follow its Loop: a completed, archived or
-    cancelled Loop refuses them (``409 loop_read_only``). A Ticket or Loop that does not exist
-    passes; the caller answers its own 404."""
-    card = repos.cards.get(card_id)
-    loop = None if card is None else repos.loops.get(card.loop_id)
-    if loop is None:
-        return
-    if (
+def is_read_only(loop: LoopsRow) -> bool:
+    """A completed, archived or cancelled Loop takes no writes but comments on its Tickets."""
+    return (
         loop.completed_at is not None
-        or loop.stage == "completed"
+        or loop.stage in {"completed", "cancelled"}
         or loop.archived_at is not None
         or loop.cancelled_at is not None
-    ):
+    )
+
+
+def ticket_loop(repos: BoardRepositories, card_id: str) -> LoopsRow | None:
+    """The Loop that owns a Ticket; None when the Ticket or the Loop does not exist."""
+    card = repos.cards.get(card_id)
+    return None if card is None else repos.loops.get(card.loop_id)
+
+
+def after_completion(written_at: str, loop: LoopsRow | None) -> bool:
+    """Whether text on a Loop's Ticket (a comment as it reads now: written, or edited, at
+    ``written_at``) was written after the Loop was completed, so its history snapshot does not hold
+    it as it reads. Both are ``utcnow`` text (UTC, whole seconds), which compares as the moment
+    does; the very second of completion counts as before it."""
+    return loop is not None and loop.completed_at is not None and written_at > loop.completed_at
+
+
+def ensure_ticket_writable(repos: BoardRepositories, card_id: str) -> None:
+    """A Ticket's checklists, attachments and discussions follow its Loop: a completed, archived
+    or cancelled Loop refuses them (``409 loop_read_only``). A Ticket or Loop that does not exist
+    passes; the caller answers its own 404. Comments do not follow it
+    (``ensure_ticket_commentable``)."""
+    loop = ticket_loop(repos, card_id)
+    if loop is None:
+        return
+    if is_read_only(loop):
         raise Conflict(
             "This Loop is read-only", code="loop_read_only", details={"card_id": card_id}
         )
+
+
+def ensure_ticket_commentable(repos: BoardRepositories, card_id: str) -> LoopsRow:
+    """The Loop of a Ticket that takes a comment: any Ticket whose Loop exists, done or not, in a
+    Loop that is open, completed, archived or cancelled, so a later Loop can point back at the work
+    it replaced (AGENTS.md rule 11b). Only the board decides beyond that: the caller checks first
+    that it is not archived. A Ticket or Loop that does not exist is ``404``."""
+    loop = ticket_loop(repos, card_id)
+    if loop is None:
+        raise NotFound("Card not found")
+    return loop
 
 
 def ensure_execution_allowed(loop: LoopsRow) -> None:

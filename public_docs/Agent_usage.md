@@ -93,7 +93,7 @@ certificate. `/llms.txt` is plain text at the same origin.
 | `write_ticket_summaries` | `cards:write` | write the short summaries `read_ticket` shows, up to 100 at a time |
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |
-| `comment_ticket` | `comments:write` | add a comment, done or not: progress, findings, a blocker |
+| `comment_ticket` | `comments:write` | add a comment, done or not, in a completed Loop too: progress, findings, a blocker, the Loop that replaced it |
 | `write_note` | `loops:write` | add a note to the Loop's log: baseline, checks, merge, deploy, what is open |
 | `read_notes` | `loops:read` | read the Loop's notes, a page at a time |
 | `create_ticket` | `cards:write`, `comments:write` | add a follow-up outside the plan while the Loop executes, keyed `<LoopKey>-UNP-<nnn>` |
@@ -237,6 +237,12 @@ comment `Follow-up: <NEW KEY> - <title>`. Outside an execution stage the answer 
   it; an unfinished prerequisite answers `409 ticket_blocked` with the blockers, and an open wait
   `409 ticket_waiting` naming it. Either way your
   summary is kept as a comment, and the refusal names its `comment_id`.
+- Change a completed, archived or cancelled Loop: its documents, plan, Tickets, checklists,
+  attachments and QA answer `409 loop_read_only`, and so does `complete_ticket` there, which then
+  writes nothing. Its Tickets still take a comment (`comment_ticket`, the only action
+  `read_ticket` offers there), so you can note on old work that a later Loop replaced it; such a
+  comment is marked `after_loop_completed` and never changes the Loop's history snapshot. Only an
+  archived board refuses a comment (`409 board_archived`).
 - See or change users, credentials or agent configuration.
 
 ## 6. Retries and repeats

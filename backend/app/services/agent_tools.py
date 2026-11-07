@@ -266,8 +266,8 @@ def tool_catalog() -> dict[str, AgentTool]:
         AgentTool(
             name="comment_ticket",
             description=(
-                "Add a comment to a Ticket, done or not: progress, findings, a blocker, or a "
-                "note on later work."
+                "Add a comment to a Ticket, done or not, in a completed Loop too: progress, "
+                "findings, a blocker, or a note on later work such as the Loop that replaced it."
             ),
             scopes=("comments:write",),
             input_schema=_object(

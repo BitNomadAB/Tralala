@@ -848,6 +848,13 @@ lists render without a cross-database join; every change is written to the activ
 | GET | `/boards/{board_id}/cards/{card_id}/events` (`text/event-stream`) | `cards:read` |
 | GET | `/boards/{board_id}/cards/{card_id}/events/history?after=&limit=` | `cards:read` |
 
+Checklists follow the Ticket's Loop: a completed, archived or cancelled Loop refuses them
+(`409 loop_read_only`). Comments do not: a Ticket of such a Loop still takes a comment, and its
+comments may be edited and deleted, so a later Loop can point back at the work it replaced; only an
+archived board refuses them (`409 board_archived`). A comment carries `after_loop_completed`, true
+when it was written or last edited after its Loop was completed; the Loop's history snapshot, which
+a later comment never changes, holds the comments as they were at completion.
+
 A label name is unique on its board, compared exactly (`Bug` and `bug` are two labels). Creating a
 label, or renaming one, to a name another label has answers `409 label_name_taken` with
 `details.name`.
@@ -891,7 +898,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `read_board` | `boards:read`, `loops:read` | The board's Loops by id, key, name and stage, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | The Loop's overview, by its id or its key: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases and the columns with their Ticket counts, the work outside the plan and the newest five notes cut to 500 characters; the Tickets themselves are `list_tickets`' answer |
 | `read_document` | `loops:read` | One document of a Loop named by its id or its key, by `kind` (`info`, `analysis`, `analysis_ai`, `roadmap`, `roadmap_ai`): as numbered lines, at most 60 000 characters, with `continue_from` for the rest; `analysis_ai` and `roadmap_ai` also as `view: structured`, an outline of the findings or the Phases and Tickets, and one of them in full with `item` |
-| `read_ticket` | `cards:read` | The Ticket's summary (with `summary_source` and `summary_stale`), description, acceptance criteria, evidence, checklist, comments, column, version, `state`, `workplace`, `wait` (what it waits for, the reason, who set it and when; `null` without one), the plan's `blockers`, `needs_person`, `attachments` (the newest 50 files, one row each: `id`, `filename`, `content_type`, `size_bytes`, `uploaded_at` and `text`) with `attachment_count`, and `allowed_actions` |
+| `read_ticket` | `cards:read` | The Ticket's summary (with `summary_source` and `summary_stale`), description, acceptance criteria, evidence, checklist, comments, column, version, `state`, `workplace`, `wait` (what it waits for, the reason, who set it and when; `null` without one), the plan's `blockers`, `needs_person`, `attachments` (the newest 50 files, one row each: `id`, `filename`, `content_type`, `size_bytes`, `uploaded_at` and `text`) with `attachment_count`, and `allowed_actions` (only `comment_ticket` in a completed, archived or cancelled Loop) |
 | `list_attachments` | `cards:read` | Every live file of one Ticket, newest first, in the rows `read_ticket` shows; `text` is true for `.txt`, `.md` and `.json`. `next_step` names `read_attachment` for a text file and the download route for the rest |
 | `read_attachment` | `cards:read` | One file by `attachment_id`. A text file answers as numbered lines by `read_document`'s rule: at most 60 000 characters a page, `lines`, `text` and `continue_from` (the next `start_line`); a file whose bytes are not UTF-8 is refused with `422 attachment_not_text` naming it. Any other file answers its metadata, `text: false` and `download`, the route that answers its bytes with the same key; no tool answer carries a binary file |
 | `search_tickets` | `cards:read` | Tickets by words in one Loop, a board's open Loops or every active board, each with board, Loop key, key and column |
@@ -907,11 +914,11 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
-| `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket; only a read-only Loop or board refuses it |
+| `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket, in a completed, archived or cancelled Loop too (a later Loop can point back at the work it replaced); only an archived board refuses it (`409 board_archived`) |
 | `write_note` | `loops:write` | Add a note to the Loop's log: what belongs to the Loop and to no single Ticket; refused on a completed Loop |
 | `read_notes` | `loops:read` | The Loop's notes, oldest first, a page at a time (`older` is the next `before`) |
 | `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
-| `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id` |
+| `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id`. A completed, archived or cancelled Loop refuses the call whole (`409 loop_read_only`, nothing written) |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the synthesis, the positions and the structured answers |
 | `read_discussion` | `discussions:read` | Read a thread: the newest round's synthesis, each agent's position and the messages (prose with `include_prose`) |
 | `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |
@@ -919,7 +926,8 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 The flow a person and their worker use to start work is `create_loop` → `write_info` →
 `run_analysis` → the person approves the analysis → `list_tickets`/`read_ticket` to work the Tickets it
 produces. Every step stays inside the same gates: the analysis and the RoadMap are candidates until a
-signed-in person approves them, and a cancelled or completed Loop is read-only.
+signed-in person approves them, and a cancelled or completed Loop is read-only but for comments
+on its Tickets.
 
 Deliberately absent: board and list structure changes, planned Ticket creation or archiving, RoadMap and QA
 writes, provider configuration and the approval decisions themselves.

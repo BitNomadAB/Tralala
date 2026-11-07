@@ -1,12 +1,12 @@
 """A board's labels and a Ticket's checklists and comments.
 
-Labels belong to the board. Checklists and comments belong to a Ticket and follow its Loop: a
-completed, archived or cancelled Loop refuses them with ``409 loop_read_only``
-(``loops.ensure_ticket_writable``). The services reach the board database only through the board
-unit of work, the registry (who wrote a comment) only through the registry unit of work and the
-board's registry row through ``BoardChecks``; the clock and the id source are passed in, so every
-rule here runs in a unit test without a database. A comment that mentions someone is handed to
-``MentionQueue``, best effort.
+Labels belong to the board. A Ticket's checklists follow its Loop: a completed, archived or
+cancelled Loop refuses them (``409 loop_read_only``). Its comments do not, so a later Loop can point
+back at the work it replaced (rule 11b); one written after the Loop was completed is marked. The
+services reach the board database only through the board unit of work, the registry (who wrote a
+comment) only through the registry unit of work and the board's registry row through
+``BoardChecks``; the clock and the id source are passed in, so every rule here runs in a unit test
+without a database. A comment that mentions someone is handed to ``MentionQueue``, best effort.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from ..db.generated.board import (
     ChecklistsRow,
     CommentsRow,
     LabelsRow,
+    LoopsRow,
 )
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.checklists import ChecklistItemChanges
@@ -42,7 +43,7 @@ from ..schemas.subresources import (
 )
 from .activity import activity_entry
 from .lists import BoardChecks
-from .loops import ensure_ticket_writable
+from .loops import after_completion, ensure_ticket_commentable, ensure_ticket_writable, ticket_loop
 from .ordering import place
 
 logger = logging.getLogger("tralala.subresources")
@@ -73,7 +74,7 @@ class ChecklistEntry(TypedDict):
 
 
 class CommentEntry(TypedDict):
-    """A comment as the API returns it: its row and who wrote it (None when nobody is known)."""
+    """A comment as the API returns it: its row, who wrote it, and if after its Loop completed."""
 
     id: str
     card_id: str
@@ -83,6 +84,7 @@ class CommentEntry(TypedDict):
     updated_at: str
     actor_name: str | None
     actor_type: str | None
+    after_loop_completed: bool
 
 
 class MentionQueue(Protocol):
@@ -476,7 +478,9 @@ class CommentService(_BoardParts):
         # Set by the composition root once the mention service exists.
         self.mentions: MentionQueue | None = None
 
-    def _decorate(self, comments: Sequence[CommentsRow]) -> list[CommentEntry]:
+    def _decorate(
+        self, comments: Sequence[CommentsRow], loop: LoopsRow | None
+    ) -> list[CommentEntry]:
         """Each comment with its author's name and type: a person or token actor by its actor
         row, otherwise an agent profile of that id; unknown when neither exists."""
         authors = self._authors({comment.actor_id for comment in comments})
@@ -490,6 +494,7 @@ class CommentService(_BoardParts):
                 "updated_at": comment.updated_at,
                 "actor_name": authors.get(comment.actor_id, (None, None))[0],
                 "actor_type": authors.get(comment.actor_id, (None, None))[1],
+                "after_loop_completed": after_completion(comment.updated_at, loop),
             }
             for comment in comments
         ]
@@ -506,22 +511,24 @@ class CommentService(_BoardParts):
         return found
 
     @staticmethod
-    def _comment(repos: BoardRepositories, actor: ActorContext, comment_id: str) -> CommentsRow:
-        """The comment the actor may change: a person any, an agent only its own, and only while
-        the Ticket's Loop is writable."""
+    def _comment(
+        repos: BoardRepositories, actor: ActorContext, comment_id: str
+    ) -> tuple[CommentsRow, LoopsRow]:
+        """The comment the actor may change and its Ticket's Loop: a person any comment, an agent
+        only its own, whatever the Loop's state."""
         comment = repos.comments.get(comment_id)
         if comment is None:
             raise NotFound("Comment not found")
         if not actor.is_user and comment.actor_id != actor.actor_id:
             raise Forbidden("Agents may only modify their own comments")
-        ensure_ticket_writable(repos, comment.card_id)
-        return comment
+        return comment, ensure_ticket_commentable(repos, comment.card_id)
 
     def list(self, board_id: str, card_id: str) -> list[CommentEntry]:
         self.boards.require_row(board_id)
         with self.store.reader(board_id) as repos:
             comments = repos.comments.for_card(card_id)
-        return self._decorate(comments)
+            loop = ticket_loop(repos, card_id)
+        return self._decorate(comments, loop)
 
     def create(
         self, actor: ActorContext, board_id: str, card_id: str, payload: CommentCreate
@@ -539,9 +546,7 @@ class CommentService(_BoardParts):
             updated_at=now,
         )
         with self.store.writer(board_id) as repos:
-            if repos.cards.get(card_id) is None:
-                raise NotFound("Card not found")
-            ensure_ticket_writable(repos, card_id)
+            loop = ensure_ticket_commentable(repos, card_id)
             repos.comments.add(row)
             self._log(
                 repos,
@@ -556,7 +561,7 @@ class CommentService(_BoardParts):
                 self.mentions.queue(actor, board_id, card_id, comment_id, payload.content)
             except Exception:  # the comment is saved; mentions are best effort
                 logger.exception("Could not queue mentions for comment %s", comment_id)
-        return self._decorate([row])[0]
+        return self._decorate([row], loop)[0]
 
     def update(
         self, actor: ActorContext, board_id: str, comment_id: str, payload: CommentCreate
@@ -564,7 +569,7 @@ class CommentService(_BoardParts):
         actor.require("comments:write")
         self.boards.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
-            comment = self._comment(repos, actor, comment_id)
+            comment, loop = self._comment(repos, actor, comment_id)
             now = self._now()
             repos.comments.edit(comment_id, payload.content, now=now)
             self._log(
@@ -575,13 +580,14 @@ class CommentService(_BoardParts):
                 entity_id=comment_id,
                 changes={"card_id": comment.card_id},
             )
-        return self._decorate([comment.__replace__(content=payload.content, updated_at=now)])[0]
+        edited = comment.__replace__(content=payload.content, updated_at=now)
+        return self._decorate([edited], loop)[0]
 
     def delete(self, actor: ActorContext, board_id: str, comment_id: str) -> None:
         actor.require("comments:write")
         self.boards.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
-            comment = self._comment(repos, actor, comment_id)
+            comment, _ = self._comment(repos, actor, comment_id)
             repos.comments.delete(comment_id)
             self._log(
                 repos,

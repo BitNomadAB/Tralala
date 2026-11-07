@@ -268,6 +268,19 @@ delivery dispositions, human decisions, QA evidence, generation provenance (agen
 plus a content hash. `GET /boards/{board_id}/history` searches a derived text projection with FTS5
 (or `LIKE` when FTS5 is unavailable).
 
+A completed Loop is read-only: its documents, plan, Tickets' fields, checklists, attachments and QA
+take no writes (`409 loop_read_only`), and a Ticket in it is not completed again. The one exception
+is comments on its Tickets. As long as the board exists and is not archived, a person or a worker
+may still comment on any of its Tickets, done or not, and edit or delete a comment by the usual
+rules, so a later Loop can point back at the work it replaced ("superseded by L-7"). The same holds
+for a cancelled or archived Loop; an archived board refuses the comment (`409 board_archived`).
+
+The history snapshot is the record of the Loop as it was completed: a later comment never changes
+it or its content hash, and `GET /boards/{board_id}/history/{history_id}` answers the comments as
+they were at completion. The live Ticket shows every comment, and one written (or last edited) after the Loop was completed carries
+`after_loop_completed: true`, which the Ticket dialog shows as "written after the Loop was
+completed".
+
 Legacy material is stored with `source_kind = imported_legacy`, `conformance = legacy_unvalidated`
 and its original bytes. It is never converted into an active Loop, never creates Tickets and never
 counts as a verified QA result; every view labels it
