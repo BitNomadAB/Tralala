@@ -4,6 +4,7 @@
  */
 import { accountApi } from "./account";
 import { agentsApi } from "./agents";
+import { attachmentsApi } from "./attachments";
 import { boardsApi } from "./boards";
 import { cardsApi } from "./cards";
 import { discussionsApi } from "./discussions";
@@ -25,5 +26,6 @@ export const api = {
   ...loopWorkflowApi,
   ...cardsApi,
   ...ticketWorkApi,
+  ...attachmentsApi,
   ...discussionsApi,
 };

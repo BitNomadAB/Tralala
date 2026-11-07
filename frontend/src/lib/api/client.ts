@@ -60,6 +60,9 @@ function readCookie(name: string): string | null {
  */
 export type QueryValue = string | number | boolean | undefined;
 
+/** Where every route below is served; a link to a route (a download) starts with it too. */
+export const API_BASE = "/api/v1";
+
 export async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
@@ -78,7 +81,7 @@ export async function request<T>(
     body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
     body,

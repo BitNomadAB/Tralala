@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/useToast";
+import { useAuth } from "@/features/auth/useAuth";
 import { useCardEvents } from "@/features/cards/useCardEvents";
 import { ApiError, api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
@@ -13,6 +14,7 @@ import { keys, useActivity, useLabels } from "@/lib/queries";
 import type { BoardList } from "@/lib/types";
 import { formatDateTime, fromDateInputValue, toDateInputValue } from "@/lib/utils";
 import { useCardTools } from "@/webmcp/useWebMcp";
+import { CardAttachments } from "./CardAttachments";
 import { CardChecklists } from "./CardChecklists";
 import { CardComments } from "./CardComments";
 import { CardDialogForm, type CardDraft } from "./CardDialogForm";
@@ -31,6 +33,7 @@ export function CardDialog({
   onClose,
   onConfirmHuman,
   ticketHref,
+  readOnly = false,
 }: {
   boardId: string;
   loopId: string;
@@ -40,9 +43,12 @@ export function CardDialog({
   onConfirmHuman?: (version: number, note: string) => Promise<void>;
   /** Links a Ticket key in the description to that Ticket; the page knows which exist. */
   ticketHref?: MarkdownOptions["ticketHref"];
+  /** The Loop refuses writes (completed, cancelled, archived) or the board is not active. */
+  readOnly?: boolean | undefined;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { actor } = useAuth();
   const {
     data: card,
     isLoading,
@@ -245,6 +251,14 @@ export function CardDialog({
               onItemTextChange={checklists.changeItemText}
               onAddItem={checklists.addItem}
               onToggleItem={checklists.toggleItem}
+            />
+
+            <CardAttachments
+              boardId={boardId}
+              cardId={cardId}
+              readOnly={readOnly}
+              currentActorId={actor?.id}
+              onChanged={refresh}
             />
 
             <CardComments

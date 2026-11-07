@@ -265,6 +265,7 @@ export function LoopPage() {
           lists={lists}
           onClose={closeCard}
           ticketHref={ticketHref}
+          readOnly={readOnly}
           onConfirmHuman={async (version, note) => {
             await api.confirmHumanTicket(boardId, loopId, selectedCardId, { version, note });
             invalidateCards();

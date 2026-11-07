@@ -30,6 +30,7 @@ export const keys = {
     ["mentions", boardId, loopId, cardId] as const,
   search: (boardId: string, loopId: string, params: Record<string, unknown>) =>
     ["search", boardId, loopId, params] as const,
+  attachments: (boardId: string, cardId: string) => ["attachments", boardId, cardId] as const,
   labels: (boardId: string) => ["labels", boardId] as const,
   activity: (boardId: string, entityId?: string) =>
     ["activity", boardId, entityId ?? "board"] as const,
