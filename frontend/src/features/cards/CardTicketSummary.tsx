@@ -17,7 +17,6 @@ export function CardTicketSummary({ card }: { card: Card }) {
             <User size={11} /> Human action required
           </Badge>
         ) : null}
-        {card.ready ? null : <Badge tone="neutral">Blocked</Badge>}
       </div>
       {card.human_action_required && card.human_action_reason ? (
         <p className="text-[var(--muted-foreground)]">

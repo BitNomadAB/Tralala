@@ -1,5 +1,6 @@
 import type { Label, Priority } from "./board";
 import type { LoopBlocker } from "./loop";
+import type { TicketState, WaitingFor, Workplace } from "./work";
 
 export interface Card {
   id: string;
@@ -40,6 +41,17 @@ export interface Card {
   blockers: LoopBlocker[];
   downstream_phase_numbers: number[];
   plan_item_id: string | null;
+  workplace: Workplace;
+  waiting_for: WaitingFor;
+  /** Why it waits; empty when it waits for nothing. */
+  waiting_reason: string;
+  waiting_set_at: string | null;
+  /** The actor id of whoever set the wait. */
+  waiting_set_by: string | null;
+  /** Null on a completed Ticket. */
+  state: TicketState | null;
+  /** It needs input, or it is ready and the task itself is a person's. */
+  needs_person: boolean;
 }
 
 export interface ChecklistItem {

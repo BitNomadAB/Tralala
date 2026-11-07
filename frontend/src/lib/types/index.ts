@@ -9,3 +9,4 @@ export type * from "./brief";
 export type * from "./loop";
 export type * from "./card";
 export type * from "./discussion";
+export type * from "./work";

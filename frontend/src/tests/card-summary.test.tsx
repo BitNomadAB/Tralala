@@ -43,6 +43,13 @@ function card(extra: Partial<Card>): Card {
     blockers: [],
     downstream_phase_numbers: [],
     plan_item_id: "card-1",
+    workplace: "unknown",
+    waiting_for: "nothing",
+    waiting_reason: "",
+    waiting_set_at: null,
+    waiting_set_by: null,
+    state: "ready",
+    needs_person: false,
     ...extra,
   };
 }

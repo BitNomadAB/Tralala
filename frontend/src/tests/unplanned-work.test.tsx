@@ -12,8 +12,22 @@ import { apiPath, ok } from "./msw/envelope";
 import { BOARD_ID, LOOP, LOOP_ID, LOOP_PATH, NOW } from "./msw/loops";
 import { server } from "./msw/server";
 
-function unplanned(key: string, title: string, extra: Partial<UnplannedTicket> = {}) {
-  return { id: key, key, title, completed_at: null, archived_at: null, ...extra };
+function unplanned(
+  key: string,
+  title: string,
+  extra: Partial<UnplannedTicket> = {},
+): UnplannedTicket {
+  return {
+    id: key,
+    key,
+    title,
+    completed_at: null,
+    archived_at: null,
+    workplace: "unknown",
+    waiting_for: "nothing",
+    state: "ready",
+    ...extra,
+  };
 }
 
 const OUTSIDE: UnplannedTicket[] = [
@@ -78,6 +92,13 @@ function card(extra: Partial<Card>): Card {
     blockers: [],
     downstream_phase_numbers: [],
     plan_item_id: null,
+    workplace: "unknown",
+    waiting_for: "nothing",
+    waiting_reason: "",
+    waiting_set_at: null,
+    waiting_set_by: null,
+    state: "ready",
+    needs_person: false,
     ...extra,
   };
 }

@@ -19,6 +19,7 @@ import { CardDialogForm, type CardDraft } from "./CardDialogForm";
 import { CardHistory } from "./CardHistory";
 import { CardSummaryNote } from "./CardSummaryNote";
 import { CardTicketSummary } from "./CardTicketSummary";
+import { CardWorkSection } from "./CardWorkSection";
 import { useCardChecklists } from "./useCardChecklists";
 import { useCardComments } from "./useCardComments";
 
@@ -174,6 +175,7 @@ export function CardDialog({
           <div className="flex flex-col gap-4">
             <CardSummaryNote card={card} />
             <CardTicketSummary card={card} />
+            <CardWorkSection boardId={boardId} loopId={loopId} card={card} onChanged={refresh} />
             <CardDialogForm
               draft={draft}
               onDraftChange={setDraft}
@@ -198,17 +200,22 @@ export function CardDialog({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!card.completed_at && card.kind !== "manual" && !card.ready}
+                disabled={
+                  !card.completed_at &&
+                  ((card.kind !== "manual" && !card.ready) || card.waiting_for !== "nothing")
+                }
                 title={
-                  !card.completed_at && card.blockers.length > 0
-                    ? `Blocked by ${card.blockers
-                        .map((blocker) => blocker.key ?? blocker.title ?? blocker.reason)
-                        .join(", ")}`
-                    : undefined
+                  !card.completed_at && card.waiting_for !== "nothing"
+                    ? "Clear the wait first"
+                    : !card.completed_at && card.blockers.length > 0
+                      ? `Blocked by ${card.blockers
+                          .map((blocker) => blocker.key ?? blocker.title ?? blocker.reason)
+                          .join(", ")}`
+                      : undefined
                 }
                 onClick={() => {
                   if (!card.completed_at && card.human_action_required && onConfirmHuman) {
-                    void onConfirmHuman(card.version, "").then(onClose);
+                    void onConfirmHuman(card.version, "").then(onClose, onError);
                     return;
                   }
                   updateMutation.mutate({ version: card.version, completed: !card.completed_at });

@@ -1,3 +1,5 @@
+import type { TicketState, WaitingFor, Workplace } from "./work";
+
 export interface LoopAgentPreferences {
   loop_id: string;
   analysis_agent_id: string | null;
@@ -102,6 +104,10 @@ export interface PlanTicketView {
   blockers: LoopBlocker[];
   human_action_required: boolean;
   downstream_phase_numbers: number[];
+  workplace: Workplace;
+  waiting_for: WaitingFor;
+  /** Null once the Ticket is completed. */
+  state: TicketState | null;
 }
 
 export interface PlanPhaseView {
@@ -136,6 +142,10 @@ export interface UnplannedTicket {
   title: string;
   completed_at: string | null;
   archived_at: string | null;
+  workplace: Workplace;
+  waiting_for: WaitingFor;
+  /** Null once the Ticket is completed. */
+  state: TicketState | null;
 }
 
 /** A note in a Loop's log: what belongs to the Loop and to no single Ticket. */

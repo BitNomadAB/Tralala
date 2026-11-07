@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CalendarClock, CheckSquare, Lock, MessageSquare, User } from "lucide-react";
+import { CalendarClock, CheckSquare, CircleHelp, Lock, MessageSquare, User } from "lucide-react";
 import { LabelChip } from "@/components/ui/badge";
 import type { Card } from "@/lib/types";
 import { cn, isOverdue } from "@/lib/utils";
@@ -38,6 +38,8 @@ export function CardTile({
   const overdue = isOverdue(card.due_at, card.completed_at);
   // A manual Ticket with a key was added while the Loop's plan executes: outside the plan.
   const unplanned = card.kind === "manual" && card.ticket_key !== null;
+  // The server's state: a marker for what holds the Ticket up, none when it is ready or done.
+  const held = card.state === "needs_input" || card.state === "blocked";
 
   return (
     <li
@@ -79,17 +81,29 @@ export function CardTile({
         ) : null}
       </div>
 
-      {card.human_action_required || !card.ready || card.kind === "qa" || unplanned ? (
+      {card.human_action_required || held || card.kind === "qa" || unplanned ? (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {card.human_action_required ? (
             <span className="inline-flex items-center gap-1 rounded border border-[var(--warning)] px-1.5 py-0.5 text-[10px] text-[var(--warning)]">
               <User size={10} /> Human action required
             </span>
           ) : null}
-          {!card.ready ? (
+          {card.state === "needs_input" ? (
+            <span
+              className="inline-flex items-center gap-1 rounded border border-[var(--warning)] px-1.5 py-0.5 text-[10px] text-[var(--warning)]"
+              title={card.waiting_reason || undefined}
+            >
+              <CircleHelp size={10} /> Needs input
+            </span>
+          ) : null}
+          {card.state === "blocked" ? (
             <span
               className="inline-flex items-center gap-1 rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]"
-              title={card.blockers.map((blocker) => blocker.key ?? blocker.reason).join(", ")}
+              title={
+                card.blockers.map((blocker) => blocker.key ?? blocker.reason).join(", ") ||
+                card.waiting_reason ||
+                undefined
+              }
             >
               <Lock size={10} /> Blocked
             </span>

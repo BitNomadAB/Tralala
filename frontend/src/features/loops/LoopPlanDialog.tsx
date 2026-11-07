@@ -127,7 +127,8 @@ function TicketRow({
             <Check size={11} /> done
           </Badge>
         ) : null}
-        {!ticket.ready && !ticket.completed_at ? <Badge tone="neutral">blocked</Badge> : null}
+        {ticket.state === "needs_input" ? <Badge tone="warning">needs input</Badge> : null}
+        {ticket.state === "blocked" ? <Badge tone="neutral">blocked</Badge> : null}
       </div>
       {ticket.human_action_required && ticket.human_action_reason ? (
         <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
@@ -163,7 +164,7 @@ function TicketRow({
             boardId={boardId}
             loopId={loopId}
             cardId={ticket.card_id}
-            disabled={disabled || !ticket.ready}
+            disabled={disabled || !ticket.ready || ticket.waiting_for !== "nothing"}
             onChanged={onChanged}
           />
         </div>

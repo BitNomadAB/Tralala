@@ -10,6 +10,7 @@ import { discussionsApi } from "./discussions";
 import { loopsApi } from "./loops";
 import { loopWorkflowApi } from "./loopWorkflow";
 import { templatesApi } from "./templates";
+import { ticketWorkApi } from "./ticketWork";
 
 export { ApiError, type ApiResult } from "./client";
 export type { AgentPayload } from "./agents";
@@ -23,5 +24,6 @@ export const api = {
   ...loopsApi,
   ...loopWorkflowApi,
   ...cardsApi,
+  ...ticketWorkApi,
   ...discussionsApi,
 };
