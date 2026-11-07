@@ -23,7 +23,10 @@ from starlette.concurrency import run_in_threadpool
 from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.errors import ApiError
+from ..schemas.loops import CRITERION_MAX_CHARS
 from ..services.agent_tools import missing_scopes, tool_catalog
+from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
+from ..services.loop_notes import NOTE_MAX_CHARACTERS
 from .body import read_limited_json
 from .deps import get_context
 
@@ -338,6 +341,9 @@ def render_bootstrap(settings: Settings) -> str:
         f"- Requests are rate limited per actor (default {settings.rate_limit_per_minute}/minute).",
         f"- Request bodies are capped at {settings.max_request_bytes} bytes; list pages at",
         f"  {settings.max_page_size} items.",
+        f"- An analysis or a RoadMap is stored as JSON of at most {MAX_DOCUMENT_PAYLOAD}",
+        f"  characters; a planned Ticket's acceptance criterion holds {CRITERION_MAX_CHARS}, a",
+        f"  note {NOTE_MAX_CHARACTERS}.",
         "- One installation is one backend process; there is no shared coordination store.",
         "",
     ]

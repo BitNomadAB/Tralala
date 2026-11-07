@@ -9,7 +9,10 @@ import pytest
 from app.api.mcp import render_bootstrap
 from app.core.config import Settings
 from app.core.context import MEMBER_TOKEN_SCOPES, SCOPES, ActorContext
+from app.schemas.loops import CRITERION_MAX_CHARS
 from app.services.agent_tools import AgentTool, describe_scope, missing_scopes, tool_catalog
+from app.services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
+from app.services.loop_notes import NOTE_MAX_CHARACTERS
 
 CATALOGUE = tool_catalog()
 
@@ -109,4 +112,9 @@ def test_the_bootstrap_is_a_contract_not_a_data_dump(settings: Settings, bootstr
 def test_the_bootstrap_states_the_limits_it_was_given(settings: Settings, bootstrap: str) -> None:
     assert f"default {settings.rate_limit_per_minute}/minute" in bootstrap
     assert f"capped at {settings.max_request_bytes} bytes" in bootstrap
+    # A worker bringing a whole plan learns the document bounds before it hits one.
+    limits = " ".join(bootstrap.split("## 8. Limits", 1)[1].split())
+    assert f"stored as JSON of at most {MAX_DOCUMENT_PAYLOAD} characters" in limits
+    assert f"acceptance criterion holds {CRITERION_MAX_CHARS}" in limits
+    assert f"a note {NOTE_MAX_CHARACTERS}" in limits
     assert render_bootstrap(settings) == bootstrap
