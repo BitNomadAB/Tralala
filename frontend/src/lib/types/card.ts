@@ -79,6 +79,8 @@ export interface Comment {
   content: string;
   created_at: string;
   updated_at: string;
+  /** Written (or last edited) after the Ticket's Loop was completed: not in the Loop's history. */
+  after_loop_completed: boolean;
 }
 
 export type MentionStatus = "queued" | "running" | "completed" | "failed";

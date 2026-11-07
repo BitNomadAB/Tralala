@@ -13,7 +13,12 @@ const MENTION_TONES: Record<MentionJob["status"], "neutral" | "brand" | "success
   failed: "danger",
 };
 
-/** The agent mention jobs, the comment thread and the composer with @-mention suggestions. */
+/**
+ * The agent mention jobs, the comment thread and the composer with @-mention suggestions. The
+ * composer stays open on a Ticket of a completed, archived or cancelled Loop: such a Loop takes
+ * comments on its Tickets (only an archived board refuses one), and a comment written after the
+ * Loop was completed says so.
+ */
 export function CardComments({
   live,
   mentions,
@@ -99,6 +104,11 @@ export function CardComments({
                 {entry.actor_type ?? "user"}
               </Badge>
               <span>{formatDateTime(entry.created_at)}</span>
+              {entry.after_loop_completed ? (
+                <Badge title="The Loop's history holds the comments as they were at completion">
+                  written after the Loop was completed
+                </Badge>
+              ) : null}
             </div>
             <p className="mt-1 whitespace-pre-wrap text-sm">{entry.content}</p>
           </li>
