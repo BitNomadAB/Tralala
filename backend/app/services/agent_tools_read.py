@@ -317,6 +317,7 @@ def _read_ticket(
             "summary": card["summary"],
             "summary_source": card["summary_source"],
             "summary_stale": card["summary_stale"],
+            "face": card["face"],
             "description": card["description"],
             "plan": ticket_plan(readiness, card["id"]),
             "column": column,

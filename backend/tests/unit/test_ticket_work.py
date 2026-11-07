@@ -46,6 +46,7 @@ from app.services.loops import LoopService
 from app.services.subresources import CommentService
 from app.services.ticket_state import needs_person, ticket_state
 from app.services.ticket_work import TicketWorkService
+from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -344,7 +345,7 @@ def roadmap(**ticket: JsonValue) -> PlanPayload:
                     "id": uid(1),
                     "number": 1,
                     "name": "Build",
-                    "tickets": [{"id": uid(11), "title": "Add the login", **ticket}],
+                    "tickets": [{**FACE, "id": uid(11), "title": "Add the login", **ticket}],
                 }
             ]
         }

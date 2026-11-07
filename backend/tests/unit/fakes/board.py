@@ -359,6 +359,7 @@ def card_row(
         waiting_reason="",
         waiting_set_at=None,
         waiting_set_by=None,
+        face="",
     )
 
 
@@ -516,6 +517,7 @@ def plan_item_row(item_id: str, loop_id: str, plan_id: str, phase_id: str) -> Lo
         workplace="unknown",
         waiting_for="nothing",
         waiting_reason="",
+        face="",
     )
 
 
@@ -1372,6 +1374,8 @@ class FakeCardRepository:
             card = card.__replace__(
                 summary=item.summary, summary_source="plan", summary_basis_sha256=summary_basis
             )
+        if item.face:  # and so does an empty plan face
+            card = card.__replace__(face=item.face)
         self._state.cards[item.id] = card.__replace__(
             title=item.title,
             description=item.instructions,

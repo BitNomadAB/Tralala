@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from app.core.context import ActorContext
 from app.core.errors import Conflict, NotFound, ValidationFailure
@@ -35,7 +35,9 @@ from app.services.loop_plans import (
     validate_plan,
 )
 from app.services.plan_views import PlanViews, Readiness
+from app.services.ticket_face import face_view
 from app.services.ticket_summaries import summary_basis
+from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
@@ -522,6 +524,7 @@ def test_a_draft_projects_its_phases_and_items_and_keeps_known_rows_creation() -
         workplace="unknown",
         waiting_for="nothing",
         waiting_reason="",
+        face="",
     )
     state.phases[P1] = state.phases[P1].__replace__(created_at=CREATED, is_qa_phase=1)
     state.plan_items[T1] = state.plan_items[T1].__replace__(created_at=CREATED)
@@ -1323,3 +1326,50 @@ def test_a_gate_does_not_carry_its_phases_dependents_downstream() -> None:
     # T1 opens Phase 2, whose ordinary T3 opens Phase 3; Phase 4 waits only for the gate T2.
     assert downstream[T1] == [2, 3]
     assert downstream[T2] == [4]
+
+
+# --- the face for people -------------------------------------------------------------------------
+
+FACE_FIELDS_OF = ("why", "if_skipped", "pros", "cons", "steps")
+
+
+def stored(face: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """The face fields of ``face`` as the column's JSON object holds them."""
+    return {name: face[name] for name in FACE_FIELDS_OF}
+
+
+def test_publishing_copies_each_items_face_to_its_card_and_a_replan_updates_or_keeps_it() -> None:
+    w = board()
+    state = w.state
+    first = ticket(T1, "First", **FACE)
+    plan_id = register(w, payload(phase(P1, 1, first, ticket(T2, "Second"))))
+    assert json.loads(state.plan_items[T1].face) == stored(FACE)
+    assert state.plan_items[T2].face == ""
+    publish(w, plan_id)
+    assert state.cards[T1].face == state.plan_items[T1].face
+    assert state.cards[T2].face == ""
+    assert face_view(state.cards[T1].summary, state.cards[T1].face) == {
+        "summary": FACE["summary"],
+        **stored(FACE),
+    }
+    # A new RoadMap revision with another face replaces it; one without a face keeps the card's.
+    changed: dict[str, JsonValue] = {**FACE, "steps": ["Show one sign-in form"]}
+    register(w, payload(phase(P1, 1, ticket(T1, "First", **changed), ticket(T2, "Second"))))
+    assert json.loads(state.cards[T1].face) == stored(changed)
+    register(w, payload(phase(P1, 1, ticket(T1, "First"), ticket(T2, "Second"))))
+    assert json.loads(state.cards[T1].face) == stored(changed)
+
+
+def test_a_plan_stored_before_the_face_still_publishes_its_tickets_without_one() -> None:
+    w = board()
+    state = w.state
+    plan_id = register(w, payload(phase(P1, 1, ticket(T1, "First", **FACE))))
+    stored = json.loads(state.plans[plan_id].payload_json)
+    for entry in stored["phases"][0]["tickets"]:
+        for name in FACE_FIELDS_OF:
+            del entry[name]
+    state.plans[plan_id] = state.plans[plan_id].__replace__(payload_json=json.dumps(stored))
+    publish(w, plan_id)
+    card = state.cards[T1]
+    assert (card.ticket_key, card.face, card.summary) == ("L-1-PH01-001", "", FACE["summary"])
+    assert face_view(card.summary, card.face) is None

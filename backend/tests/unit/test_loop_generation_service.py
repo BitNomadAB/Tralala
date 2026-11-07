@@ -45,6 +45,7 @@ from app.services.repo_snapshot import FetchedRepository
 from app.services.repository_problems import problem_text
 from app.services.runtime import Completion, ResponseSchema
 from app.services.runtime_tools import Message, ToolChoice, ToolDefinition
+from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -145,6 +146,7 @@ def roadmap(prerequisites: Sequence[str] = ()) -> dict[str, JsonValue]:
                 "prerequisite_phase_ids": list(prerequisites),
                 "tickets": [
                     {
+                        **FACE,
                         "id": "22222222-2222-4222-8222-222222222222",
                         "title": "Add columns",
                         "acceptance_criteria": ["ok"],
@@ -838,6 +840,80 @@ def test_a_roadmap_that_breaks_a_plan_rule_every_time_fails_with_the_last_rule()
     assert entry["output"] == {
         "error_details": {"rule": "invalid_dependency_graph", "phase_id": PHASE}
     }
+    assert w.kinds() == ["info", "analysis_ai", "analysis"]
+
+
+TICKET = "22222222-2222-4222-8222-222222222222"
+TOO_MANY_STEPS = f"Ticket {TICKET}, steps: 7 items, at most 5. Split the Ticket into two."
+
+
+def long_steps_roadmap() -> dict[str, JsonValue]:
+    """The RoadMap of ``roadmap()`` whose one Ticket has seven steps."""
+    steps: list[JsonValue] = [f"Step {n}" for n in range(7)]
+    ticket: dict[str, JsonValue] = {**FACE, "id": TICKET, "title": "Add columns", "steps": steps}
+    return {
+        "summary": "One phase",
+        "phases": [{"id": PHASE, "number": 1, "name": "Database", "tickets": [ticket]}],
+    }
+
+
+def test_a_roadmap_whose_face_breaks_the_template_is_repaired_with_ticket_field_and_rule() -> None:
+    broken = json.dumps(long_steps_roadmap())
+    w = make(answers=[answer(broken), answer(json.dumps(roadmap()))])
+    approve_analysis(w)
+    start(w, "roadmap")
+    first, repair = w.provider.calls
+    assert repair.messages[:2] == [first.messages[0], {"role": "assistant", "content": broken}]
+    content = repair.messages[2]["content"]
+    assert content == (
+        "That response did not validate. Fix it and return the corrected JSON object only. "
+        f"Error: {TOO_MANY_STEPS}"
+    )
+    run = w.run()
+    assert (run.status, run.error_code) == ("completed", None)
+    assert w.kinds() == ["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"]
+
+
+def test_a_roadmap_whose_face_breaks_the_template_every_time_fails_with_face_invalid() -> None:
+    answers = [answer(json.dumps(long_steps_roadmap()))] * (MAX_REPAIRS + 1)
+    w = make(answers=[*answers, answer(json.dumps(roadmap()))])
+    approve_analysis(w)
+    start(w, "roadmap")
+    run = w.run()
+    assert len(w.provider.calls) == MAX_REPAIRS + 1
+    assert (run.status, run.error_code, run.error_message) == (
+        "failed",
+        "face_invalid",
+        f"The face for people does not keep its template: {TOO_MANY_STEPS} (not retryable)",
+    )
+    entry = w.service.get(BOARD_ID, LOOP, "id-1")
+    assert entry["output"] == {
+        "error_details": {
+            "rule": "face_invalid",
+            "errors": [TOO_MANY_STEPS],
+            "error_count": 1,
+            "faces": [{"ticket_id": TICKET, "field": "steps", "rule": "too_many"}],
+        }
+    }
+    assert w.kinds() == ["info", "analysis_ai", "analysis"]
+
+
+def test_promotion_still_refuses_a_roadmap_whose_face_breaks_the_template() -> None:
+    w = make()
+    approve_analysis(w)
+    broken = PlanPayload.model_validate(long_steps_roadmap())
+    with pytest.raises(ValidationFailure) as refused, w.store.writer(BOARD_ID) as repos:
+        w.service.documents.store_generated_roadmap(
+            repos, w.state.loops[LOOP], broken, ADA, run_id="id-1", provenance={}
+        )
+    assert (refused.value.code, refused.value.details) == (
+        "face_invalid",
+        {
+            "errors": [TOO_MANY_STEPS],
+            "error_count": 1,
+            "faces": [{"ticket_id": TICKET, "field": "steps", "rule": "too_many"}],
+        },
+    )
     assert w.kinds() == ["info", "analysis_ai", "analysis"]
 
 

@@ -167,10 +167,18 @@ def test_the_update_allowlists_cover_every_field_a_request_can_change() -> None:
     assert _fields(CardNoteUpdate) <= set(card_note_repositories.CARD_NOTE_EDITABLE)
     assert _fields(ChecklistItemUpdate) <= set(checklist_repositories.CHECKLIST_ITEM_EDITABLE)
     assert _fields(LoopUpdate) | {"updated_at"} <= set(loop_repositories.LOOP_EDITABLE)
+    # The face's fields are written together as one column, ``face``.
+    face_fields = ("why", "if_skipped", "pros", "cons", "steps")
     card_fields = _fields(
-        CardUpdate, "clear_due_at", "completed", "labels", "assignee_actor_id", "clear_assignee"
+        CardUpdate,
+        "clear_due_at",
+        "completed",
+        "labels",
+        "assignee_actor_id",
+        "clear_assignee",
+        *face_fields,
     )
-    assert card_fields | {"completed_at", "assignee_actor_id", "updated_at"} <= set(
+    assert card_fields | {"completed_at", "assignee_actor_id", "updated_at", "face"} <= set(
         card_repositories.CARD_EDITABLE
     )
     tokens = {"token_ciphertext", "token_hint"}

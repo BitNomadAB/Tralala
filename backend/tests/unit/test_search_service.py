@@ -240,7 +240,7 @@ def test_hits_are_newest_first_then_by_id_one_page_at_a_time() -> None:
 def test_a_hit_carries_its_card_its_loop_its_labels_and_its_counts() -> None:
     w = world()
     (hit,) = w.service.board(BOARD_ID, LOOP, q="write")["items"]
-    assert list(hit)[:7] == [
+    assert list(hit)[:8] == [
         "id",
         "list_id",
         "title",
@@ -248,8 +248,9 @@ def test_a_hit_carries_its_card_its_loop_its_labels_and_its_counts() -> None:
         "summary",
         "summary_source",
         "summary_stale",
+        "face",
     ]
-    assert list(hit)[32:] == [
+    assert list(hit)[33:] == [
         "workplace",
         "waiting_for",
         "waiting_reason",

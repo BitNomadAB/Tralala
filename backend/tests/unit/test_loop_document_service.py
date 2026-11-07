@@ -37,6 +37,7 @@ from app.services.loop_documents import (
 )
 from app.services.loop_documents_views import HumanViewStart
 from app.services.loop_plans import LoopPlanService
+from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -122,7 +123,9 @@ PLAN = PlanPayload.model_validate(
                 "id": P1,
                 "number": 1,
                 "name": "Database",
-                "tickets": [{"id": T1, "title": "Add columns", "acceptance_criteria": ["ok"]}],
+                "tickets": [
+                    {**FACE, "id": T1, "title": "Add columns", "acceptance_criteria": ["ok"]}
+                ],
             },
             {
                 "id": P2,
@@ -131,6 +134,7 @@ PLAN = PlanPayload.model_validate(
                 "prerequisite_phase_ids": [P1],
                 "tickets": [
                     {
+                        **FACE,
                         "id": T2,
                         "title": "Confirm",
                         "required_actor": "human",
@@ -762,6 +766,9 @@ def test_approving_a_roadmap_publishes_its_plan() -> None:
     assert (plan.status, plan.approval_id) == ("active", w.loop.roadmap_approval_id)
     assert sorted(card.id for card in w.state.cards.values()) == [T1, T2]
     assert (w.loop.current_plan_id, w.loop.stage) == (plan.id, "ready")
+    # Each card carries its Ticket's face for people, copied with the summary.
+    card = w.state.cards[T1]
+    assert (card.summary, json.loads(card.face)["steps"]) == (FACE["summary"], FACE["steps"])
 
 
 def test_a_roadmap_without_a_registered_plan_cannot_be_approved() -> None:

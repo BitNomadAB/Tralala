@@ -14,6 +14,7 @@ from ..db.generated.board import CardsRow, LabelsRow
 from ..repositories.cards import CardCounts, CardSort
 from .plan_views import Blocker, ReadinessItem
 from .subresources import ChecklistEntry, CommentEntry, LabelEntry, label_entries
+from .ticket_face import FaceView, face_view
 from .ticket_state import TicketState, needs_person, ticket_state
 from .ticket_summaries import summary_stale
 
@@ -28,6 +29,7 @@ class CardRecord(TypedDict):
     summary: str
     summary_source: str
     summary_stale: bool
+    face: FaceView | None
     position: int
     priority: str
     due_at: str | None
@@ -116,6 +118,7 @@ def card_record(row: CardsRow) -> CardRecord:
         "summary": row.summary,
         "summary_source": row.summary_source,
         "summary_stale": summary_stale(row),
+        "face": face_view(row.summary, row.face),
         "position": row.position,
         "priority": row.priority,
         "due_at": row.due_at,

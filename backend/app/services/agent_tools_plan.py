@@ -16,7 +16,8 @@ by a person. The tools only make that route usable for a model:
 - the payload is parsed here, so a schema error answers one ``loc: message`` line per error;
 - a Phase or Ticket id that is not a UUID (``p1``, ``t3``) becomes ``uuid5`` of the Loop and the id,
   so a model can write readable ids and a second submission with the same ids keeps the same
-  Phases and Tickets; an error about an id names the id the model wrote;
+  Phases and Tickets; an error about an id names the id the model wrote, and so does a refused
+  face (``422 face_invalid``, one message per problem naming the Ticket, the field and the rule);
 - the revision records who handed it in and that it came through MCP.
 
 A token never replaces an approved analysis or RoadMap: ``submit_candidate`` refuses it, so REST
@@ -26,6 +27,7 @@ the composition root they use, so a unit test runs them with the real service on
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol
@@ -45,6 +47,7 @@ from .agent_tools_schema import (
     string_argument,
 )
 from .loops import DOCUMENT_KINDS
+from .ticket_face import FACE_INVALID
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from .loop_documents import LoopDocumentService
@@ -171,6 +174,24 @@ def _original_ids(details: Mapping[str, object], id_map: IdMap) -> dict[str, obj
         key: written.get(value, value) if isinstance(value, str) else value
         for key, value in details.items()
     }
+
+
+def _written_ids(text: str, id_map: IdMap, *, in_json: bool = False) -> str:
+    """``text`` with each generated UUID replaced by the id the model wrote (escaped as a JSON
+    string's content, ``in_json``)."""
+    for ids in id_map.values():
+        for old, new in ids.items():
+            text = text.replace(new, json.dumps(old)[1:-1] if in_json else old)
+    return text
+
+
+def _original_face_error(error: ValidationFailure, id_map: IdMap) -> ValidationFailure:
+    """A refused face with every generated UUID in its messages named by the id the model wrote."""
+    written: JsonValue = json.loads(
+        _written_ids(json.dumps(dict(error.details or {}), default=str), id_map, in_json=True)
+    )
+    details = dict(written) if isinstance(written, dict) else {}
+    return ValidationFailure(_written_ids(error.message, id_map), code=error.code, details=details)
 
 
 def _provenance(actor: ActorContext) -> dict[str, object]:
@@ -311,6 +332,8 @@ def write_roadmap(services: PlanWriting, actor: ActorContext, args: ToolArgument
     try:
         view = services.loop_document.submit_candidate(actor, board_id, loop_id, submission)
     except ValidationFailure as error:
+        if error.code == FACE_INVALID:
+            raise _original_face_error(error, id_map) from None
         if error.code != "invalid_dependency_graph" or error.details is None:
             raise
         raise ValidationFailure(
@@ -427,8 +450,13 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
             "order with their Tickets, in the same schema, validation and review as a "
             "generated RoadMap. Ids may be short (p1, t1): they become stable UUIDs, listed "
             "in id_map, so the same ids keep the same Tickets when you hand it in again; a "
-            "brief may use the same short ids. A person approves it, and the approval "
-            "publishes the Tickets with their keys."
+            "brief may use the same short ids. Every Ticket ends with its face for people: "
+            "summary of at most 20 words, why and if_skipped in at most 3 sentences each, at "
+            "most 3 pros and 3 cons, and 1 to 5 steps saying what changes for the person (a "
+            "Ticket that needs more is split), all plain text without file paths, code symbols "
+            "or ids; a face that breaks this is refused with face_invalid, one message per "
+            "Ticket, field and rule. A person approves it, and the approval publishes the "
+            "Tickets with their keys."
         ),
         scopes=("loops:generate",),
         input_schema=object_schema(

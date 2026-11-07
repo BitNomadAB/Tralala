@@ -77,6 +77,10 @@ _INCLUDE_PROSE: ArgumentSchema = {
 }
 
 
+def _face_list(description: str) -> ArgumentSchema:
+    return {"type": "array", "items": {"type": "string"}, "description": description}
+
+
 def _run_arguments() -> InputSchema:
     """What run_analysis and run_roadmap take: a Loop, and optionally an agent and a wait."""
     return _object(
@@ -236,7 +240,11 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "Add a follow-up you found while executing a Loop: a Ticket outside the plan, "
                 "keyed <LoopKey>-UNP-<nnn>, in the first column. It never blocks the plan or the "
                 "Loop's completion. With follow_up_of, the origin Ticket gets a comment pointing "
-                "at it. Asking for the same Ticket again answers the first one."
+                "at it. Asking for the same Ticket again answers the first one. Optionally give "
+                "it a face for people (summary of at most 20 words, why and if_skipped in at most "
+                "3 sentences each, at most 3 pros and 3 cons, 1 to 5 steps saying what changes "
+                "for the person, plain text without file paths, code or ids): when any face field "
+                "is given the whole face is checked and a problem is face_invalid."
             ),
             scopes=("cards:write", "comments:write"),
             input_schema=_object(
@@ -245,7 +253,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                     "loop_id": _string("Loop identifier from read_board"),
                     "title": _string("Short title of the work"),
                     "description": _string("Markdown: what was found and what is to be done"),
-                    "summary": _string("Optional: what it is about in a sentence or two"),
+                    "summary": _string("Optional: what it means in at most 20 plain words"),
                     "follow_up_of": _string("Optional id of the Ticket this work came out of"),
                     "priority": _string("Optional: none, low, medium, high or urgent"),
                     "workplace": _string("Optional: codebase, outside or unknown (the default)"),
@@ -259,6 +267,16 @@ def tool_catalog() -> dict[str, AgentTool]:
                         "items": {"type": "string"},
                         "description": "Optional area labels by the names the board has",
                     },
+                    "why": _string("Optional face: why it is needed, at most 3 sentences"),
+                    "if_skipped": _string(
+                        "Optional face: what happens if we skip it, at most 3 sentences"
+                    ),
+                    "pros": _face_list("Optional face: at most 3 points for"),
+                    "cons": _face_list("Optional face: at most 3 points against"),
+                    "steps": _face_list(
+                        "Optional face: 1 to 5 concrete steps, each saying what changes for the "
+                        "person; no file paths or code symbols"
+                    ),
                 },
                 required=["board_id", "loop_id", "title"],
             ),

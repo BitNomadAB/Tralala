@@ -29,6 +29,7 @@ CARD_EDITABLE: Final = (
     "waiting_reason",
     "waiting_set_at",
     "waiting_set_by",
+    "face",
     "version",
     "updated_at",
 )
@@ -63,6 +64,7 @@ class CardChanges(TypedDict, total=False):
     waiting_reason: str
     waiting_set_at: str | None
     waiting_set_by: str | None
+    face: str
     version: int
     updated_at: str
 
@@ -149,7 +151,8 @@ class CardRepository(Protocol):
         """The card published from ``item`` (its id, and the item as its plan item) takes the
         item's title, instructions as description, actor, mode, human texts and Phase; its version
         stays. A non-empty plan summary replaces the card's (source ``plan``, written from
-        ``summary_basis``); an empty one keeps it. Any other card is left alone."""
+        ``summary_basis``); an empty one keeps it, and so does an empty face. Any other card is
+        left alone."""
         ...
 
     def move(self, card_id: str, list_id: str, position: int, *, now: str) -> None:

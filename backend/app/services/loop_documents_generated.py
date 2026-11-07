@@ -3,9 +3,10 @@
 Each is stored as a pair of revisions, the technical one holding the validated structure and the
 human one: the brief the candidate brought (``loop_documents_human.store_brief``), or else a view
 rendered from the structure until somebody writes the brief. A new pair invalidates what was
-approved downstream of it. A RoadMap needs a current approved analysis and registers its plan as a
-draft. The functions run inside the unit of work of ``LoopDocumentService``, with its clock and id
-source.
+approved downstream of it. A RoadMap needs a current approved analysis, carries a face for people
+on every Ticket (``ticket_face``: a worker is refused with ``422 face_invalid``, a generation was
+repaired against the same check before it got here) and registers its plan as a draft. The
+functions run inside the unit of work of ``LoopDocumentService``, with its clock and id source.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from .loop_documents_revisions import (
     write_revision,
 )
 from .loop_documents_views import GeneratedAnalysis, GeneratedRoadmap
-from .loop_plans import LoopPlanService
+from .loop_plans import LoopPlanService, validate_plan
 from .loops import (
     analysis_approved,
     document_slots,
@@ -40,6 +41,7 @@ from .loops import (
     refresh_stage,
     stale_reasons,
 )
+from .ticket_face import plan_face_findings, refuse_face
 
 
 def validate_analysis(payload: AnalysisPayload) -> None:
@@ -54,6 +56,14 @@ def validate_analysis(payload: AnalysisPayload) -> None:
             code="validation_failed",
             details={"finding_ids": missing},
         )
+
+
+def check_roadmap_faces(payload: PlanPayload) -> None:
+    """The plan rules first (a broken reference is named as such), then every Ticket's face for
+    people: ``422 face_invalid`` naming each Ticket, field and rule. ``register_draft`` checks the
+    plan rules again; they are pure and cheap."""
+    validate_plan(payload)
+    refuse_face(plan_face_findings(payload))
 
 
 def check_expected_sources(
@@ -172,6 +182,7 @@ def store_roadmap_candidate(
             code="approval_required",
             details={"scope": "analysis"},
         )
+    check_roadmap_faces(payload)
     draft = plans.register_draft(repos, loop, payload, actor)
     canonical = draft["payload"]
     technical = write_revision(
@@ -328,6 +339,7 @@ def store_run_roadmap(
             "RoadMap generation requires a current approved analysis",
             code="approval_required",
         )
+    check_roadmap_faces(payload)
     draft = plans.register_draft(repos, loop, payload, actor, drop_unknown_labels=True)
     canonical = draft["payload"]
     technical = write_revision(
