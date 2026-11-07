@@ -145,3 +145,16 @@ export async function csrfToken(page: Page): Promise<string> {
   if (!cookie) throw new Error("CSRF cookie missing");
   return cookie.value;
 }
+
+/**
+ * Issues an access key in the signed-in person's name, as Settings -> New access key does, and
+ * returns the token (shown once). The key expires after a day.
+ */
+export async function issueToken(page: Page, scopes: string[]): Promise<string> {
+  const response = await page.request.post("/api/v1/credentials", {
+    headers: { "X-CSRF-Token": await csrfToken(page) },
+    data: { name: uniqueName("worker-key"), scopes, expires_in_days: 1 },
+  });
+  expect(response.status(), await response.text()).toBe(201);
+  return ((await response.json()).data as { token: string }).token;
+}

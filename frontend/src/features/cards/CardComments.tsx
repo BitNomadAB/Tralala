@@ -132,8 +132,9 @@ export function CardComments({
             placeholder="Add a comment — type @ to mention an agent"
             aria-label="New comment"
             aria-autocomplete="list"
-            aria-controls="mention-suggestions"
-            aria-expanded={suggestions.length > 0}
+            // A textarea is a textbox, which takes no aria-expanded (axe: aria-allowed-attr); it
+            // points at the suggestions only while they are shown, so the reference always resolves.
+            aria-controls={suggestions.length > 0 ? "mention-suggestions" : undefined}
             value={comment}
             onChange={(event) => onCommentChange(event.target.value, event.target.selectionStart)}
             onKeyDown={(event) => {
