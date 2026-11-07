@@ -186,6 +186,7 @@ CROSS_DATABASE: Final = _board(
         ("activity_log", "actor_id"): REGISTRY,
         ("attachments", "uploaded_by_actor_id"): REGISTRY,
         ("card_events", "actor_id"): REGISTRY,
+        ("card_notes", "author_actor_id"): REGISTRY,
         ("cards", "assigned_by_actor_id"): REGISTRY,
         ("cards", "assignee_actor_id"): REGISTRY,
         ("cards", "human_confirmed_by_actor_id"): REGISTRY,

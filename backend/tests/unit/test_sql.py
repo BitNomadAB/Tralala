@@ -22,11 +22,13 @@ from app.core import sql
 from app.db.generated.registry import AGENTS_COLUMNS, REPOSITORIES_COLUMNS
 from app.repositories import agents as agent_repositories
 from app.repositories import board_rows, code_repositories
+from app.repositories import card_notes as card_note_repositories
 from app.repositories import cards as card_repositories
 from app.repositories import checklists as checklist_repositories
 from app.repositories import labels as label_repositories
 from app.repositories import loops as loop_repositories
 from app.schemas.agents import AgentCreate, AgentUpdate, RoleTemplateUpdate
+from app.schemas.card_notes import CardNoteUpdate
 from app.schemas.cards import CardUpdate
 from app.schemas.loops import LoopUpdate
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
@@ -162,6 +164,7 @@ def test_the_update_allowlists_cover_every_field_a_request_can_change() -> None:
     )
     assert _fields(AgentCreate, "api_key") | credentials <= set(AGENTS_COLUMNS)
     assert _fields(LabelUpdate) <= set(label_repositories.LABEL_EDITABLE)
+    assert _fields(CardNoteUpdate) <= set(card_note_repositories.CARD_NOTE_EDITABLE)
     assert _fields(ChecklistItemUpdate) <= set(checklist_repositories.CHECKLIST_ITEM_EDITABLE)
     assert _fields(LoopUpdate) | {"updated_at"} <= set(loop_repositories.LOOP_EDITABLE)
     card_fields = _fields(
@@ -233,6 +236,13 @@ def test_each_change_type_names_exactly_the_columns_its_update_may_format() -> N
                 label_repositories.LabelChanges.__optional_keys__,
             ),
             label_repositories.LABEL_EDITABLE,
+        ),
+        (
+            _keys(
+                card_note_repositories.CardNoteChanges.__required_keys__,
+                card_note_repositories.CardNoteChanges.__optional_keys__,
+            ),
+            card_note_repositories.CARD_NOTE_EDITABLE,
         ),
         (
             _keys(

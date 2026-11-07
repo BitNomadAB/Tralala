@@ -146,7 +146,8 @@ def tool_catalog() -> dict[str, AgentTool]:
         AgentTool(
             name="read_ticket",
             description=(
-                "Read one Ticket with acceptance criteria, evidence, checklist, comments, its "
+                "Read one Ticket with acceptance criteria, evidence, checklist, comments, the "
+                "notes a person wrote on it (person_notes, which no key can write), its "
                 "newest 50 attachments (read_attachment reads a text one), current column, "
                 "version and the actions that are allowed right now."
             ),

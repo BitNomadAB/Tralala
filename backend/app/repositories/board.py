@@ -14,6 +14,7 @@ from typing import Protocol
 from .activity import ActivityRepository
 from .attachments import AttachmentRepository
 from .board_metadata import BoardMetadataRepository, LoopDefaultsRepository
+from .card_notes import CardNoteRepository
 from .cards import CardRepository
 from .checklists import ChecklistItemRepository, ChecklistRepository
 from .comments import CommentRepository
@@ -107,6 +108,9 @@ class BoardRepositories(Protocol):
 
     @property
     def comments(self) -> CommentRepository: ...
+
+    @property
+    def card_notes(self) -> CardNoteRepository: ...
 
     @property
     def notes(self) -> LoopNoteRepository: ...

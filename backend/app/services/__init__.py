@@ -25,6 +25,7 @@ from .backup_scheduler import BackupScheduler
 from .backups import BackupService
 from .board_stats import BoardStatsCache
 from .boards import BoardSchema, BoardService
+from .card_notes import CardNoteService
 from .cards import CardService
 from .discussions import DiscussionService
 from .events import EventService
@@ -195,6 +196,7 @@ class Services:
             self.board, self.agent, self.board_store, self.registry_store
         )
         self.event = EventService(self.board, self.board_store)
+        self.card_note = CardNoteService(self.board, self.board_store, self.event)
         self.orchestrator = Orchestrator(
             settings, self.board_store, self.registry_store, self.event
         )
