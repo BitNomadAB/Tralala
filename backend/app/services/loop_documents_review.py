@@ -100,15 +100,15 @@ def record_review(
     loop = require_loop(repos, loop_id)
     ensure_writable(loop)
     _check_version(loop, payload.version)
-    writing = (
-        repos.generation_runs.active(loop_id, "analysis_human") if scope == "analysis" else None
-    )
+    purpose = f"{scope}_human"
+    writing = repos.generation_runs.active(loop_id, purpose)
     if writing is not None:
-        # The text a person would approve is about to be replaced by the one written for them.
+        # The text a person would approve is about to be replaced by the brief written for them.
+        what = "analysis" if scope == "analysis" else "RoadMap"
         raise Conflict(
-            "A board agent is writing the analysis for people; approve it when the run has ended",
+            f"A board agent is writing the {what} for people; approve it when the run has ended",
             code="generation_in_progress",
-            details={"purpose": "analysis_human", "run_id": writing.id},
+            details={"purpose": purpose, "run_id": writing.id},
         )
     documents = document_slots(repos.documents.current_or_approved(loop_id))
     expected = expected_revisions(documents, scope)

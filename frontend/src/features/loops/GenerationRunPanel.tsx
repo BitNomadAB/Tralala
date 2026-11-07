@@ -4,9 +4,9 @@ import type { GenerationRun } from "@/lib/types";
 import type { PlanScope, RunPurpose } from "./loopUi";
 import { RunPhases } from "./RunPhases";
 
-/** The analysis written for people has stages of its own; any other run is its scope's. */
+/** The brief for people has stages of its own; any other run is its scope's. */
 function runPurpose(scope: PlanScope, run: GenerationRun): RunPurpose {
-  return run.purpose === "analysis_human" ? "analysis_human" : scope;
+  return run.purpose === "analysis_human" || run.purpose === "roadmap_human" ? run.purpose : scope;
 }
 
 interface RunPanelProps {

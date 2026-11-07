@@ -25,14 +25,13 @@ from typing import TYPE_CHECKING
 
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound
-from ..schemas.loops import AnalysisPayload, PlanPayload
 from .agent_tools_discussions import ask_agents, read_discussion, reply_discussion
 from .agent_tools_documents import document_tools, read_document, read_loop
 from .agent_tools_identity import identity_tools, whoami
 from .agent_tools_listing import list_tickets, listing_tools, write_ticket_summaries
 from .agent_tools_loops import loop_summaries, loop_tools
 from .agent_tools_notes import read_notes, write_note
-from .agent_tools_plan import map_plan_ids, write_analysis, write_roadmap
+from .agent_tools_plan import map_plan_ids, plan_tools, write_analysis, write_brief, write_roadmap
 from .agent_tools_read import (
     ToolArguments,
     ToolResult,
@@ -49,7 +48,6 @@ from .agent_tools_schema import (
     describe_scope,
     missing_scopes,
 )
-from .agent_tools_schema import model_argument as _model
 from .agent_tools_schema import object_schema as _object
 from .agent_tools_schema import string_argument as _string
 from .agent_tools_tickets import comment_ticket, complete_ticket, create_ticket
@@ -98,16 +96,7 @@ def _run_arguments() -> InputSchema:
 
 def tool_catalog() -> dict[str, AgentTool]:
     """The worker surface: how to find a task, read it, start one, track it and ask for advice."""
-    analysis, analysis_definitions = _model(
-        AnalysisPayload,
-        "The analysis as one JSON object, written in the order of its fields: outcome, "
-        "scope, findings with technical_detail and plain_language, recommendation and the rest",
-    )
-    plan, plan_definitions = _model(
-        PlanPayload,
-        "The RoadMap as one JSON object: a summary and the Phases in order with their Tickets; "
-        "a Ticket a person must do has required_actor human, a reason and instructions",
-    )
+    write_analysis_tool, write_roadmap_tool, write_brief_tool = plan_tools(_BOARD_ID)
     tools = [
         *identity_tools(),
         AgentTool(
@@ -402,32 +391,7 @@ def tool_catalog() -> dict[str, AgentTool]:
             input_schema=_run_arguments(),
             handler=_run_analysis,
         ),
-        AgentTool(
-            name="write_analysis",
-            description=(
-                "Hand in your own analysis of a Loop that has Info, in Tralala's structure: the "
-                "same schema, validation, rendering and review as an analysis a board agent "
-                "writes. technical_detail is for engineers; plain_language is for a project "
-                "manager and every risk, blocker, legal, security or question finding needs it. "
-                "A person approves it; an approved analysis is replaced only after that person "
-                "requests changes or resets it."
-            ),
-            scopes=("loops:generate",),
-            input_schema=_object(
-                {
-                    "board_id": _BOARD_ID,
-                    "loop_id": _string("Loop identifier from read_board or create_loop"),
-                    "analysis": analysis,
-                    "expected_info_revision_id": _string(
-                        "Optional Info revision id you wrote from (read_loop); a mismatch returns "
-                        "document_stale"
-                    ),
-                },
-                required=["board_id", "loop_id", "analysis"],
-                definitions=analysis_definitions,
-            ),
-            handler=write_analysis,
-        ),
+        write_analysis_tool,
         AgentTool(
             name="run_roadmap",
             description=(
@@ -438,31 +402,8 @@ def tool_catalog() -> dict[str, AgentTool]:
             input_schema=_run_arguments(),
             handler=_run_roadmap,
         ),
-        AgentTool(
-            name="write_roadmap",
-            description=(
-                "Hand in your own RoadMap for a Loop whose analysis is approved: the Phases in "
-                "order with their Tickets, in the same schema, validation and review as a "
-                "generated RoadMap. Ids may be short (p1, t1): they become stable UUIDs, listed "
-                "in id_map, so the same ids keep the same Tickets when you hand it in again. A "
-                "person approves it, and the approval publishes the Tickets with their keys."
-            ),
-            scopes=("loops:generate",),
-            input_schema=_object(
-                {
-                    "board_id": _BOARD_ID,
-                    "loop_id": _string("Loop identifier from read_board or create_loop"),
-                    "plan": plan,
-                    "expected_analysis_revision_id": _string(
-                        "Optional technical analysis (analysis_ai) revision id you planned from; "
-                        "a mismatch returns document_stale"
-                    ),
-                },
-                required=["board_id", "loop_id", "plan"],
-                definitions=plan_definitions,
-            ),
-            handler=write_roadmap,
-        ),
+        write_roadmap_tool,
+        write_brief_tool,
         AgentTool(
             name="ask_agents",
             description=(
@@ -592,6 +533,7 @@ __all__ = [
     "tool_catalog",
     "whoami",
     "write_analysis",
+    "write_brief",
     "write_note",
     "write_roadmap",
     "write_ticket_summaries",

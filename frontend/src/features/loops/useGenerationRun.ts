@@ -79,11 +79,12 @@ export function useGenerationRun({
   });
   const purposeRuns = (runsQuery.data ?? []).filter((entry) => entry.purpose === tab);
   const lastRun = purposeRuns.at(0);
-  // A board agent writes a new analysis for people in a run of its own, started by the server; the
-  // list follows it, and its end brings the written view in.
-  const writingForPeople = (runsQuery.data ?? []).some(
-    (entry) => entry.purpose === "analysis_human" && inFlight(entry),
-  );
+  // A board agent writes the brief for people of a new analysis or RoadMap in a run of its own,
+  // started by the server; the list follows it, and its end brings the written view in.
+  const forPeople = tab === "roadmap" ? "roadmap_human" : "analysis_human";
+  const writingForPeople =
+    tab !== "info" &&
+    (runsQuery.data ?? []).some((entry) => entry.purpose === forPeople && inFlight(entry));
   const [wasWriting, setWasWriting] = useState(false);
   const [writtenAt, setWrittenAt] = useState(0);
   if (writingForPeople !== wasWriting) {
@@ -158,7 +159,7 @@ export function useGenerationRun({
     cancelRun,
     lastRun,
     lastRunLoading: runsQuery.isLoading,
-    /** A board agent is writing the analysis for people; it is not approved meanwhile. */
+    /** A board agent is writing the open scope's brief for people; it is not approved meanwhile. */
     writingForPeople,
     dismissFailure: () => {
       setFailure(null);

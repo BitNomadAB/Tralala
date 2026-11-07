@@ -24,7 +24,7 @@ function document(purpose: Purpose): string {
   return purpose === "roadmap" ? "RoadMap" : purpose === "qa" ? "QA instructions" : "analysis";
 }
 
-/** The analysis written for people reads the technical analysis and writes prose; no repository. */
+/** The brief for people reads the technical revision and writes the brief; no repository. */
 const FOR_PEOPLE: Readonly<Partial<Record<RunStage, string>>> = {
   documents: "Reading the analysis",
   writing: "Writing for people",
@@ -32,7 +32,9 @@ const FOR_PEOPLE: Readonly<Partial<Record<RunStage, string>>> = {
 };
 
 export function stageLabel(stage: RunStage, purpose: Purpose): string {
-  const forPeople = purpose === "analysis_human" ? FOR_PEOPLE[stage] : undefined;
+  if (purpose === "roadmap_human" && stage === "documents") return "Reading the RoadMap";
+  const forPeople =
+    purpose === "analysis_human" || purpose === "roadmap_human" ? FOR_PEOPLE[stage] : undefined;
   if (forPeople) return forPeople;
   switch (stage) {
     case "documents":

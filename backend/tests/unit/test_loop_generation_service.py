@@ -21,6 +21,7 @@ from app.core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, V
 from app.db.generated.board import LoopDocumentsRow, LoopGenerationRunsRow, LoopsRow
 from app.db.generated.registry import BoardsRow
 from app.repositories.board import BoardRepositories
+from app.schemas.briefs import HumanBrief, RoadmapBrief
 from app.schemas.loops import (
     AnalysisPayload,
     CandidateSubmission,
@@ -31,8 +32,7 @@ from app.schemas.loops import (
 from app.services.agents import EffectiveRole
 from app.services.idempotency import request_fingerprint
 from app.services.loop_documents import LoopDocumentService
-from app.services.loop_documents_human import compose_human_view
-from app.services.loop_documents_render import render_traceability
+from app.services.loop_documents_human import render_brief
 from app.services.loop_documents_views import DocumentsView
 from app.services.loop_generation import MAX_REPAIRS, PURPOSE_PROMPTS, LoopGenerationService
 from app.services.loop_generation_prompts import DEFAULT_CONTEXT_CHARS
@@ -1401,7 +1401,7 @@ def test_two_commits_of_the_same_repository_are_different_inputs() -> None:
 
 
 
-# --- the analysis written for people -------------------------------------------------------------
+# --- the brief for people ------------------------------------------------------------------------
 
 MATERIAL = AnalysisPayload.model_validate(
     {
@@ -1431,8 +1431,26 @@ MATERIAL = AnalysisPayload.model_validate(
         ],
     }
 )
-WRITTEN = "People confirm by e-mail. Some never arrive [F-02]; who writes it is open [F-03]."
-HALF = "People confirm by e-mail. Some never arrive [F-02]."
+
+
+def brief(
+    *, summary: str = "People confirm by e-mail.", names: Sequence[str] = ("F-02", "F-03")
+) -> dict[str, JsonValue]:
+    """A brief of MATERIAL whose obstacle names ``names``."""
+    return {
+        "obstacles": [
+            {"level": "technical", "text": "Some e-mails never arrive.", "finding_ids": [*names]}
+        ],
+        "verdict": "yes_with_conditions",
+        "verdict_reason": "It works once bounces are handled.",
+        "summary": summary,
+        "recommendation": "Go ahead and decide who writes the e-mail.",
+    }
+
+
+WRITTEN = json.dumps(brief())
+HALF = json.dumps(brief(names=("F-02",)))
+NOISY = json.dumps(brief(summary="See mailer/send.py for why."))
 SAVED_FOR_PEOPLE = "Saved the analysis for people as a draft for a person to review and approve"
 
 
@@ -1448,8 +1466,8 @@ def with_technical_analysis(w: World) -> None:
     ]
 
 
-def human_view(w: World) -> LoopDocumentsRow:
-    return next(row for row in w.state.documents if row.kind == "analysis" and row.is_current)
+def human_view(w: World, kind: str = "analysis") -> LoopDocumentsRow:
+    return next(row for row in w.state.documents if row.kind == kind and row.is_current)
 
 
 def steps(w: World, run_id: str = "id-1") -> list[tuple[object, object]]:
@@ -1459,7 +1477,7 @@ def steps(w: World, run_id: str = "id-1") -> list[tuple[object, object]]:
 
 
 def wire(w: World) -> None:
-    """As the composition root does: a new technical analysis is written for people."""
+    """As the composition root does: a new technical revision gets its brief for people."""
     w.service.documents.human_view = w.service.start_human_view
 
 
@@ -1470,63 +1488,82 @@ def submit_analysis(w: World) -> DocumentsView:
     return w.service.documents.submit_candidate(ADA, BOARD_ID, LOOP, candidate)
 
 
-def test_the_analysis_is_written_for_people_with_the_servers_traceability_block() -> None:
+def test_the_brief_is_written_for_people_and_stored_as_the_human_view() -> None:
     w = make(answers=[answer(WRITTEN)])
     with_technical_analysis(w)
     start(w, "analysis_human")
     assert (w.run().status, w.run().purpose) == ("completed", "analysis_human")
     human = human_view(w)
-    assert human.content == compose_human_view(WRITTEN, MATERIAL)
-    assert human.content.endswith(render_traceability(MATERIAL))
+    stored = HumanBrief.model_validate(brief())
+    assert json.loads(human.payload_json or "{}") == stored.model_dump()
+    assert human.content == render_brief(stored, MATERIAL.model_dump())
+    assert "F-02" not in human.content
     assert json.loads(human.provenance_json) == {**PROVENANCE, "written": True}
     assert (human.source_analysis_ai_revision_id, human.source_info_revision_id) == (
         "ai-1",
         "info-1",
     )
     assert (human.author_actor_id, human.generation_run_id) == ("alpha", "id-1")
-    # A text answer: no schema, no tools, and only the Info and the analysis it explains.
+    # The brief's schema, no tools, and only the Info and the analysis it explains.
     (call,) = w.provider.calls
-    assert call.response_schema is None
-    assert call.system_prompt == f"You are alpha.\n\n{PURPOSE_PROMPTS['analysis_human']}"
+    assert call.response_schema == {
+        "name": "analysis_human",
+        "schema": HumanBrief.model_json_schema(),
+    }
+    assert call.system_prompt.startswith(f"You are alpha.\n\n{PURPOSE_PROMPTS['analysis_human']}")
+    assert "JSON schema:" in call.system_prompt
     message = call.messages[0]["content"]
     assert "Users must confirm." in message
     assert '"id": "F-03"' in message
     assert "Context (JSON)" not in message
     assert call.running == {"id-1": "writing_for_people"}
-    assert ("step", "The text names every material finding") in steps(w)
+    assert ("step", "The brief covers what it must and its text is for people") in steps(w)
     assert ("step", SAVED_FOR_PEOPLE) in steps(w)
 
 
-def test_a_text_that_leaves_a_finding_out_is_sent_back_once_with_its_id() -> None:
+def test_the_prompt_asks_for_decision_support_and_forbids_ids_and_paths() -> None:
+    prompt = PURPOSE_PROMPTS["analysis_human"]
+    for question in ("can it be done", "stands in the way", "for (pros)", "must decide"):
+        assert question in prompt
+    assert "never holds a file path, a code symbol, a code fence or an id" in prompt
+    assert "a person decides, and people do the work" in PURPOSE_PROMPTS["roadmap_human"]
+
+
+def test_a_brief_that_leaves_a_finding_out_is_sent_back_once_with_its_id() -> None:
     w = make(answers=[answer(HALF), answer(WRITTEN)])
     with_technical_analysis(w)
     start(w, "analysis_human")
     assert w.run().status == "completed"
     repair = w.provider.calls[1].messages
     assert repair[1] == {"role": "assistant", "content": HALF}
-    assert "F-03" in str(repair[2]["content"])
-    assert "F-02" not in str(repair[2]["content"])
-    assert ("repair", "The text leaves out F-03 — asked the model to cover them") in steps(w)
-    assert human_view(w).content.startswith(WRITTEN)
+    assert "no item names F-03" in str(repair[2]["content"])
+    assert w.provider.calls[1].response_schema is not None
+    assert ("repair", "The brief breaks 1 rule(s) — asked the model to correct them") in steps(w)
+    assert json.loads(w.run().output_json)["repaired"] is True
 
 
-def test_a_text_that_still_leaves_one_out_fails_and_the_rendered_view_stays() -> None:
-    w = make(answers=[answer(HALF), answer(HALF)])
+def test_a_brief_whose_text_holds_a_path_fails_after_one_repair_and_the_view_stays() -> None:
+    w = make(answers=[answer(NOISY), answer(NOISY)])
     with_technical_analysis(w)
     start(w, "analysis_human")
     run = w.run()
-    assert (run.status, run.error_code) == ("failed", "coverage_missing")
-    assert json.loads(run.output_json) == {"error_details": {"finding_ids": ["F-03"]}}
+    assert (run.status, run.error_code) == ("failed", "brief_rejected")
+    assert "summary: contains a file path (mailer/send.py)" in str(w.provider.calls[1].messages[2])
+    assert json.loads(run.output_json) == {
+        "error_details": {"problems": ["summary: contains a file path (mailer/send.py)"]}
+    }
     assert "(not retryable)" not in (run.error_message or "")
     assert human_view(w).id == "an-1"
 
 
-def test_an_empty_answer_counts_as_leaving_everything_out() -> None:
-    w = make(answers=[answer("  "), answer("```\n```")])
+def test_an_answer_that_is_no_brief_counts_as_breaking_the_rules() -> None:
+    w = make(answers=[answer("  "), answer('{"verdict": "maybe"}')])
     with_technical_analysis(w)
     start(w, "analysis_human")
-    assert (w.run().status, w.run().error_code) == ("failed", "coverage_missing")
-    assert "F-02, F-03" in str(w.provider.calls[1].messages[2]["content"])
+    assert (w.run().status, w.run().error_code) == ("failed", "brief_rejected")
+    assert "the answer is not a JSON object" in str(w.provider.calls[1].messages[2]["content"])
+    problems = json.loads(w.run().output_json)["error_details"]["problems"]
+    assert any(str(line).startswith("verdict:") for line in problems)
 
 
 def test_writing_for_people_needs_a_technical_analysis_nobody_approved_yet() -> None:
@@ -1543,18 +1580,26 @@ def test_writing_for_people_needs_a_technical_analysis_nobody_approved_yet() -> 
         start(w, "analysis_human")
     assert approved.value.code == "approval_exists"
     assert approved.value.details == {"scope": "analysis"}
+    with pytest.raises(Conflict) as no_plan:
+        start(w, "roadmap_human")
+    assert no_plan.value.details == {"kind": "roadmap_ai"}
     assert w.state.generation_runs == {}
 
 
-def test_the_analysis_is_written_for_people_by_the_loops_analysis_agent() -> None:
+def test_the_brief_is_written_by_the_loops_analysis_agent() -> None:
     w = make(answers=[answer(WRITTEN)], preferences={"analysis": "beta", "roadmap": "alpha"})
     with_technical_analysis(w)
     start(w, "analysis_human")
     assert w.run().agent_id == "beta"
 
 
-def test_a_generated_analysis_is_written_for_people_by_a_run_of_its_own() -> None:
-    w = make(answers=[VALID, answer("People confirm their address by e-mail.")])
+def plain_brief() -> str:
+    """A brief of ANALYSIS, whose only finding is one to reuse: no finding must be named."""
+    return json.dumps(brief(names=()))
+
+
+def test_a_generated_analysis_gets_its_brief_from_a_run_of_its_own() -> None:
+    w = make(answers=[VALID, answer(plain_brief())])
     wire(w)
     start(w)
     analysis_run, written_run = w.state.generation_runs.values()
@@ -1564,15 +1609,18 @@ def test_a_generated_analysis_is_written_for_people_by_a_run_of_its_own() -> Non
         "actor-1",
         "user",
     )
-    assert steps(w, analysis_run.id)[-1] == ("note", "A board agent writes it for people next")
+    assert steps(w, analysis_run.id)[-1] == (
+        "note",
+        "A board agent writes the brief for people next",
+    )
     human = human_view(w)
-    assert human.content.startswith("People confirm their address by e-mail.")
+    assert human.content.startswith("# Analysis\n\n**Can it be done?** Yes, with conditions.")
     assert json.loads(human.provenance_json)["generation_run_id"] == written_run.id
     assert len(w.provider.calls) == 2
 
 
-def test_a_submitted_analysis_is_written_for_people_once() -> None:
-    w = make(answers=[answer("People confirm their address by e-mail.")])
+def test_a_submitted_analysis_gets_its_brief_written_once() -> None:
+    w = make(answers=[answer(plain_brief())])
     wire(w)
     view = submit_analysis(w)
     (run,) = w.state.generation_runs.values()
@@ -1597,6 +1645,7 @@ def test_without_an_agent_the_rendered_view_stays_and_the_skip_is_logged(
         "event": "human_view_skipped",
         "board_id": BOARD_ID,
         "loop_id": LOOP,
+        "kind": "analysis",
         "reason": "generation_unavailable",
     } in events(caplog.records)
     assert view["documents"]["analysis"]["current_provenance"].get("rendered") is True
@@ -1608,3 +1657,50 @@ def test_a_view_already_being_written_is_not_started_twice() -> None:
     started = w.service.start_human_view(ADA, BOARD_ID, LOOP)
     assert started == {"status": "skipped", "run_id": None, "reason": "generation_in_progress"}
     assert list(w.state.generation_runs) == ["busy"]
+
+
+ROADMAP_BRIEF: dict[str, JsonValue] = {
+    "order": [{"phase_id": PHASE, "what_happens": "The data is prepared.", "done_when": "Ready."}],
+    "summary": "One Phase prepares the data.",
+}
+
+
+def test_a_generated_roadmap_gets_its_brief_from_the_loops_roadmap_agent() -> None:
+    w = make(
+        answers=[answer(json.dumps(roadmap())), answer(json.dumps(ROADMAP_BRIEF))],
+        preferences={"analysis": "alpha", "roadmap": "beta"},
+    )
+    wire(w)
+    approve_analysis(w)
+    start(w, "roadmap")
+    roadmap_run, brief_run = w.state.generation_runs.values()
+    assert (roadmap_run.purpose, roadmap_run.status) == ("roadmap", "completed")
+    assert (brief_run.purpose, brief_run.status, brief_run.agent_id) == (
+        "roadmap_human",
+        "completed",
+        "beta",
+    )
+    assert w.provider.calls[1].response_schema == {
+        "name": "roadmap_human",
+        "schema": RoadmapBrief.model_json_schema(),
+    }
+    assert "Technical RoadMap (JSON):" in w.provider.calls[1].messages[0]["content"]
+    human = human_view(w, "roadmap")
+    assert human.content.startswith("# RoadMap\n\nOne Phase prepares the data.")
+    assert "### Phase 1 — Database" in human.content
+    assert json.loads(human.provenance_json)["written"] is True
+    assert human.source_roadmap_ai_revision_id == human_view(w, "roadmap_ai").id
+
+
+def test_a_roadmap_brief_that_leaves_a_phase_out_is_rejected() -> None:
+    stray = {"phase_id": UNKNOWN_PHASE, "what_happens": "x", "done_when": "y"}
+    wrong = answer(json.dumps({**ROADMAP_BRIEF, "order": [stray]}))
+    w = make(answers=[answer(json.dumps(roadmap())), wrong, wrong])
+    wire(w)
+    approve_analysis(w)
+    start(w, "roadmap")
+    brief_run = list(w.state.generation_runs.values())[1]
+    assert (brief_run.status, brief_run.error_code) == ("failed", "brief_rejected")
+    problems = json.loads(brief_run.output_json)["error_details"]["problems"]
+    assert f"order: leaves out the Phase(s) {PHASE}" in problems
+    assert json.loads(human_view(w, "roadmap").provenance_json).get("rendered") is True

@@ -24,6 +24,7 @@ from pydantic import JsonValue
 from ..core.context import ActorContext
 from ..db.generated.board import LoopGenerationRunsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..schemas.briefs import HumanBrief, RoadmapBrief
 from ..schemas.loops import AnalysisPayload, PlanPayload, QaInstructions
 from .idempotency import request_fingerprint
 from .loop_documents import LoopDocumentService
@@ -385,11 +386,12 @@ def _promote_run(
             run_id=run_id,
             provenance=provenance,
         )
-    elif captured["purpose"] == "analysis_human":
-        outputs = documents.store_human_analysis(
+    elif captured["purpose"] in {"analysis_human", "roadmap_human"}:
+        brief_model = HumanBrief if captured["purpose"] == "analysis_human" else RoadmapBrief
+        outputs = documents.store_written_brief(
             repos,
             loop,
-            str(payload.get("content") or ""),
+            brief_model.model_validate(payload.get("brief")),
             _system_actor(row),
             run_id=run_id,
             provenance=provenance,

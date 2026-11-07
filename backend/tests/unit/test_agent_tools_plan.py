@@ -25,6 +25,7 @@ from app.services.agent_tools import (
     map_plan_ids,
     tool_catalog,
     write_analysis,
+    write_brief,
     write_roadmap,
 )
 from app.services.loop_documents import LoopDocumentService
@@ -343,6 +344,105 @@ def test_ids_that_are_uuids_pass_and_short_ones_map_the_same_way_every_time() ->
     assert map_plan_ids(plan, "loop-a") == map_plan_ids(plan, "loop-a")
 
 
+# --- the brief for people ------------------------------------------------------------------------
+
+BRIEF: dict[str, JsonValue] = {
+    "obstacles": [
+        {"level": "people_time", "text": "Some people may miss the e-mail.", "finding_ids": ["F-2"]}
+    ],
+    "pros": [{"text": "The sign-in can send it already.", "finding_ids": ["F-1"]}],
+    "verdict": "yes_with_conditions",
+    "verdict_reason": "It works if missed e-mails are followed up.",
+    "summary": "People confirm their address by e-mail.",
+    "recommendation": "Go ahead and agree who follows up missed e-mails.",
+}
+ROADMAP_BRIEF: dict[str, JsonValue] = {
+    "order": [
+        {"phase_id": "p1", "what_happens": "The first change is made.", "done_when": "It works."},
+        {"phase_id": "p2", "what_happens": "The rest follows.", "done_when": "All is done."},
+    ],
+    "could_block": [{"text": "The second step waits for the first.", "phase_ids": ["p2"]}],
+    "summary": "Two Phases, one after the other.",
+}
+
+
+def brief_args(kind: str, brief: JsonValue, **extra: str) -> dict[str, JsonValue]:
+    return {"board_id": BOARD_ID, "loop_id": LOOP, "kind": kind, "brief": brief, **extra}
+
+
+def test_write_analysis_with_a_brief_stores_it_as_the_human_view() -> None:
+    w = world()
+    answer = write(w, "analysis", ANALYSIS, brief=json.dumps(BRIEF))
+    human = w.repos.documents.current(LOOP, "analysis")
+    assert human is not None
+    assert json.loads(human.payload_json or "{}")["verdict"] == "yes_with_conditions"
+    assert json.loads(human.provenance_json) == {
+        "submitted": True,
+        "through": "mcp",
+        "author": "Coder",
+        "actor_id": "agent-1",
+        "written": True,
+    }
+    assert "F-2" not in human.content
+    # The worker wrote the brief, so no board agent is asked for one.
+    assert (answer["brief"], answer["human_view"]) == ({"written": True, "through": "mcp"}, None)
+
+
+def test_write_analysis_without_a_brief_leaves_the_view_rendered() -> None:
+    w = world()
+    answer = write(w, "analysis", ANALYSIS)
+    assert answer["brief"] == {"written": False, "through": "mcp"}
+    assert field(answer, "human_view", "status") == "skipped"
+
+
+def test_a_brief_that_misses_a_finding_is_refused_with_its_id() -> None:
+    w = world()
+    partial = {**BRIEF, "obstacles": []}
+    with pytest.raises(ValidationFailure) as refused:
+        write(w, "analysis", ANALYSIS, brief=json.dumps(partial))
+    assert refused.value.code == "brief_rejected"
+    assert field(refused.value.details, "missing_ids") == ["F-2"]
+    assert w.repos.documents.current(LOOP, "analysis_ai") is None
+
+
+def test_write_roadmap_with_a_brief_maps_its_short_ids_as_the_plans() -> None:
+    w = world(approved_analysis=True)
+    answer = write(w, "plan", PLAN, brief=json.dumps(ROADMAP_BRIEF))
+    human = w.repos.documents.current(LOOP, "roadmap")
+    assert human is not None
+    order = json.loads(human.payload_json or "{}")["order"]
+    assert [step["phase_id"] for step in order] == [P1, P2]
+    assert answer["brief"] == {"written": True, "through": "mcp"}
+    assert "### Phase 2 — Phase 2" in human.content
+
+
+def test_write_brief_rewrites_the_brief_of_the_current_analysis() -> None:
+    w = world()
+    write(w, "analysis", ANALYSIS)
+    technical = w.current("analysis_ai")
+    answer = write_brief(
+        w, WORKER, brief_args("analysis", BRIEF, expected_revision_id=technical)
+    )
+    assert field(answer, "documents", "analysis", "revision_number") == 2
+    assert answer["brief"] == {"written": True, "through": "mcp"}
+    assert "approves nothing" in str(answer["next_step"])
+    with pytest.raises(VersionConflict):
+        write_brief(w, WORKER, brief_args("analysis", BRIEF, expected_revision_id="old"))
+    with pytest.raises(ValidationFailure) as unknown:
+        write_brief(w, WORKER, brief_args("plan", BRIEF))
+    assert field(unknown.value.details, "argument") == "kind"
+
+
+def test_write_brief_never_replaces_an_approved_view() -> None:
+    w = world(approved_analysis=True)
+    with pytest.raises(Forbidden) as refused:
+        write_brief(w, WORKER, brief_args("analysis", BRIEF))
+    assert refused.value.code == "human_action_required"
+    write(w, "plan", PLAN)
+    answer = write_brief(w, WORKER, brief_args("roadmap", ROADMAP_BRIEF))
+    assert field(answer, "documents", "roadmap", "revision_number") == 2
+
+
 # --- the catalogue, tools/list and /llms.txt -----------------------------------------------------
 
 
@@ -354,7 +454,7 @@ def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None
         scopes=frozenset({"loops:generate"}),
     )
     listed = {str(tool["name"]): tool["inputSchema"] for tool in tool_list(token)}
-    assert {"write_analysis", "write_roadmap"} <= set(listed)
+    assert {"write_analysis", "write_roadmap", "write_brief"} <= set(listed)
     analysis = listed["write_analysis"]
     assert field(analysis, "properties", "analysis", "type") == "object"
     findings = field(analysis, "properties", "analysis", "properties", "findings", "items")
@@ -362,7 +462,21 @@ def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None
     assert "plain_language" in keys(field(analysis, "$defs", "AnalysisFinding", "properties"))
     assert field(analysis, "required") == ["board_id", "loop_id", "analysis"]
     plan = listed["write_roadmap"]
-    assert sorted(keys(field(plan, "$defs"))) == ["PlanPhase", "PlanTicket"]
+    assert sorted(keys(field(plan, "$defs"))) == [
+        "BriefPart",
+        "BriefPhaseStep",
+        "BriefRisk",
+        "PlanPhase",
+        "PlanTicket",
+    ]
+    assert field(analysis, "properties", "brief", "properties", "verdict", "enum") == [
+        "yes",
+        "yes_with_conditions",
+        "no",
+        "unclear",
+    ]
+    assert "BriefObstacle" in keys(field(analysis, "$defs"))
+    assert field(listed["write_brief"], "required") == ["board_id", "loop_id", "kind", "brief"]
     assert keys(field(plan, "properties", "plan", "properties")) == [
         "schema_version",
         "summary",

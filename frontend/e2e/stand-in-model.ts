@@ -36,11 +36,73 @@ export const ANALYSIS = {
   repository_revision: "",
 };
 
-/** One chat request: the model, the tools it was offered, and whether it asked for an analysis. */
+/** The brief for people of ANALYSIS: its only finding is a change, so no finding must be named. */
+export const ANALYSIS_BRIEF = {
+  schema_version: 1,
+  obstacles: [],
+  pros: [{ text: "Idle sessions end by themselves.", finding_ids: ["F-01"] }],
+  cons: [],
+  decisions: [],
+  verdict: "yes",
+  verdict_reason: "Nothing stands in the way.",
+  summary: "Sessions that nobody uses end after a while.",
+  recommendation: "Go ahead.",
+};
+
+interface ChatMessage {
+  content?: unknown;
+}
+
+interface PlannedPhase {
+  id?: string;
+  tickets?: { id?: string; required_actor?: string }[];
+}
+
+/** The brief for people of the RoadMap a request carries: every Phase once, every human Ticket. */
+function roadmapBrief(request: string): unknown {
+  const plan = JSON.parse(request.split("Technical RoadMap (JSON):\n")[1] ?? "{}") as {
+    phases?: PlannedPhase[];
+  };
+  const phases = plan.phases ?? [];
+  const human = phases.flatMap((phase) =>
+    (phase.tickets ?? []).filter((ticket) => ticket.required_actor === "human"),
+  );
+  return {
+    schema_version: 1,
+    order: phases.map((phase) => ({
+      phase_id: phase.id,
+      what_happens: "The work of this Phase is done.",
+      done_when: "Its Tickets are complete.",
+    })),
+    your_part: human.length
+      ? [{ text: "Take the steps only a person can take.", ticket_ids: human.map((t) => t.id) }]
+      : [],
+    could_block: [],
+    summary: "The Phases run in order.",
+  };
+}
+
+/** The brief a request for people asks for, or null for any other request. */
+function briefFor(messages: unknown): unknown {
+  const texts = (Array.isArray(messages) ? (messages as ChatMessage[]) : []).map((message) =>
+    typeof message.content === "string" ? message.content : "",
+  );
+  const roadmap = texts.find((content) => content.includes("Technical RoadMap (JSON):"));
+  if (roadmap) return roadmapBrief(roadmap);
+  return texts.some((content) => content.includes("Technical analysis (JSON):"))
+    ? ANALYSIS_BRIEF
+    : null;
+}
+
+/**
+ * One chat request: the model, the tools it was offered, whether it asked for an analysis, and the
+ * brief for people it asked for (null when it asked for none).
+ */
 export interface Received {
   model: string;
   tools: string[];
   analysis: boolean;
+  brief: unknown;
 }
 
 export const received: Received[] = [];
@@ -56,9 +118,10 @@ function read(body: string): Received {
       model: String(parsed.model ?? ""),
       tools: (parsed.tools ?? []).map((tool) => tool.function?.name ?? ""),
       analysis: JSON.stringify(parsed.messages ?? []).includes("Purpose: analysis"),
+      brief: briefFor(parsed.messages),
     };
   } catch {
-    return { model: "", tools: [], analysis: false };
+    return { model: "", tools: [], analysis: false, brief: null };
   }
 }
 
@@ -89,7 +152,7 @@ function answer(response: http.ServerResponse, request: Received) {
     json(response, 400, { error: { message: "Model Not Exist" } });
     return;
   }
-  const content = "```json\n" + JSON.stringify(ANALYSIS) + "\n```";
+  const content = "```json\n" + JSON.stringify(request.brief ?? ANALYSIS) + "\n```";
   setTimeout(
     () => json(response, 200, { choices: [{ message: { content } }], usage: { total_tokens: 21 } }),
     request.model === PATIENT_MODEL ? 6000 : 2500,

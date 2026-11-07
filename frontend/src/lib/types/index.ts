@@ -5,6 +5,7 @@
 export * from "./account";
 export * from "./board";
 export type * from "./agent";
+export type * from "./brief";
 export type * from "./loop";
 export type * from "./card";
 export type * from "./discussion";

@@ -102,6 +102,7 @@ certificate. `/llms.txt` is plain text at the same origin.
 | `run_roadmap` | `loops:generate` | ask for the RoadMap candidate |
 | `write_analysis` | `loops:generate` | hand in your own analysis, in the same schema and review as a generated one |
 | `write_roadmap` | `loops:generate` | hand in your own RoadMap; short Phase and Ticket ids become stable UUIDs |
+| `write_brief` | `loops:generate` | write the brief for people of the current analysis or RoadMap |
 | `ask_agents` | `discussions:write` | open a discussion on a Ticket and run one round |
 | `read_discussion` | `discussions:read` | read a thread: its synthesis and each agent's position |
 | `reply_discussion` | `discussions:write` | add to a thread |
@@ -188,6 +189,16 @@ keys when you hand the RoadMap in again. Send `expected_info_revision_id` or
 `expected_analysis_revision_id` with what you read, and a document that changed meanwhile answers
 `409 document_stale`. While an analysis or a RoadMap is approved, a token cannot replace it
 (`403 human_action_required`): the person requests changes or resets it first.
+
+The person who decides reads a brief, not the technical analysis. You may write it yourself, for
+example from your organisation's own sources and decisions: `brief` on `write_analysis` (schema
+under `schemas.analysis_brief`) or `write_roadmap` (`schemas.roadmap_brief`, with the same short ids
+as the plan), or `write_brief(kind, brief)` for the current technical revision. Put the ids in
+`finding_ids`, `phase_ids` and `ticket_ids`; together the items of an analysis brief name every risk,
+blocker, legal, security, question and decision finding, a RoadMap brief lists every Phase once and
+every Ticket a person must do. The text is for people: no id, file path or code, and it never says
+that you or an agent will do the work. A brief that breaks a rule answers `422 brief_rejected` with
+each problem and its field. Without a brief, a board agent writes one. A brief approves nothing.
 
 ### Work outside the plan
 
