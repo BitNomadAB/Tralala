@@ -36,6 +36,10 @@ ExecutionMode = Literal["normal", "pre_phase_gate"]
 
 ShortText = Annotated[str, Field(max_length=500)]
 BodyText = Annotated[str, Field(max_length=40_000)]
+# One acceptance criterion of a planned Ticket: a testable sentence, sometimes naming the columns,
+# filters or refusals it covers, so it gets more room than a list item.
+CRITERION_MAX_CHARS = 1_000
+Criterion = Annotated[str, Field(max_length=CRITERION_MAX_CHARS)]
 
 # --- Loop ownership ---------------------------------------------------------------
 
@@ -148,7 +152,7 @@ class PlanTicket(StrictModel):
     execution_mode: ExecutionMode = "normal"
     prerequisite_phase_ids: list[Id] = Field(default_factory=list, max_length=50)
     prerequisite_ticket_ids: list[Id] = Field(default_factory=list, max_length=50)
-    acceptance_criteria: list[ShortText] = Field(default_factory=list, max_length=30)
+    acceptance_criteria: list[Criterion] = Field(default_factory=list, max_length=30)
     expected_evidence: list[ShortText] = Field(default_factory=list, max_length=30)
     human_action_reason: LongText = ""
     human_instructions: LongText = ""

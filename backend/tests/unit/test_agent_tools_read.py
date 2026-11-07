@@ -20,11 +20,13 @@ from app.core.context import ActorContext
 from app.core.errors import Forbidden, ValidationFailure
 from app.repositories.search import FullTextIndex
 from app.services.agent_tools import ToolResult, list_boards, search_tickets, tool_catalog
+from app.services.agent_tools_read import ticket_plan
 from app.services.agents import AgentService
 from app.services.boards import BoardCounters, BoardSchema, BoardService, Counts
 from app.services.cards import CardService
 from app.services.lists import ListService
 from app.services.loops import LoopService
+from app.services.plan_views import PhaseView, Readiness, ReadinessItem
 from app.services.repositories import RepositoryService
 from app.services.search import SearchService
 from tests.unit.fakes.board import (
@@ -41,7 +43,7 @@ from tests.unit.fakes.board_files import (
     as_migrator,
     as_unit_of_work,
 )
-from tests.unit.fakes.plans import FakePlanViews, plan_views
+from tests.unit.fakes.plans import FakePlanViews, plan_views, readiness_item
 from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState, board_row
 
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
@@ -381,3 +383,42 @@ def test_the_bootstrap_starts_the_work_at_list_boards(settings: Settings) -> Non
     assert "never their text" in section
     assert "never from a prompt" in section
     assert "`search_tickets`" in section
+
+
+def _readiness(items: list[ReadinessItem], phases: list[PhaseView]) -> Readiness:
+    return {
+        "loop_id": "loop-1",
+        "stage": "in_progress",
+        "execution_allowed": True,
+        "blocked_reason": None,
+        "items": items,
+        "phases": phases,
+    }
+
+
+def test_read_ticket_says_why_a_planned_ticket_is_there_and_in_which_phase() -> None:
+    item = readiness_item("card-1", phase_number=2)
+    item["objective"] = "Order of work 10 of 21: right after the overview"
+    phase: PhaseView = {
+        "id": item["phase_id"],
+        "number": 2,
+        "name": "Reading a board",
+        "objective": "",
+        "entry_conditions": [],
+        "exit_conditions": [],
+        "prerequisite_phase_ids": [],
+        "prerequisite_ticket_ids": [],
+        "state": "active",
+        "blocked_by": [],
+        "tickets": [item],
+    }
+    assert ticket_plan(_readiness([item], [phase]), "card-1") == {
+        "objective": "Order of work 10 of 21: right after the overview",
+        "phase": {"number": 2, "name": "Reading a board"},
+    }
+    # A Ticket outside the plan has no plan to quote; a Phase the view lacks keeps its number.
+    assert ticket_plan(_readiness([item], [phase]), "card-2") is None
+    assert ticket_plan(_readiness([item], []), "card-1") == {
+        "objective": "Order of work 10 of 21: right after the overview",
+        "phase": {"number": 2, "name": None},
+    }

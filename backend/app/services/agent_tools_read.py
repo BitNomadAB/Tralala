@@ -29,6 +29,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from .discussions import DiscussionEntry
     from .lists import ListEntry, ListService
     from .loops import LoopService
+    from .plan_views import Readiness
     from .search import SearchHit, SearchService
 
 # A tool's arguments: the JSON object an MCP ``tools/call`` carried, untrusted.
@@ -348,6 +349,7 @@ def _read_ticket(
             "summary_source": card["summary_source"],
             "summary_stale": card["summary_stale"],
             "description": card["description"],
+            "plan": ticket_plan(readiness, card["id"]),
             "column": column,
             "list_id": card["list_id"],
             "priority": card["priority"],
@@ -391,6 +393,19 @@ def _read_discussion(
     return _thread_view(services.discussion.get(board_id, discussion_id))
 
 
+def ticket_plan(readiness: Readiness, card_id: str) -> ToolResult | None:
+    """What the approved RoadMap says about a planned Ticket beyond its instructions: why it is
+    there (its objective) and the Phase it belongs to. A Ticket outside the plan has none."""
+    item = next((entry for entry in readiness["items"] if entry["card_id"] == card_id), None)
+    if item is None:
+        return None
+    phase = next((entry for entry in readiness["phases"] if entry["id"] == item["phase_id"]), None)
+    return {
+        "objective": item["objective"],
+        "phase": {"number": item["phase_number"], "name": phase["name"] if phase else None},
+    }
+
+
 __all__ = [
     "BOARD_LIST_LIMIT",
     "SEARCH_DEFAULT",
@@ -412,4 +427,5 @@ __all__ = [
     "allowed_actions",
     "list_boards",
     "search_tickets",
+    "ticket_plan",
 ]

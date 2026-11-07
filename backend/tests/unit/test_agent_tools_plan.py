@@ -19,7 +19,7 @@ from app.api.mcp import render_bootstrap, tool_list
 from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, ValidationFailure, VersionConflict
-from app.schemas.loops import ApprovalRequest, InfoRevisionWrite, PlanPayload
+from app.schemas.loops import CRITERION_MAX_CHARS, ApprovalRequest, InfoRevisionWrite, PlanPayload
 from app.services.agent_tools import (
     ToolResult,
     map_plan_ids,
@@ -344,6 +344,30 @@ def test_ids_that_are_uuids_pass_and_short_ones_map_the_same_way_every_time() ->
 
 
 # --- the catalogue, tools/list and /llms.txt -----------------------------------------------------
+
+
+def test_an_acceptance_criterion_holds_a_thousand_characters_and_no_more() -> None:
+    # A criterion of a real plan names the fields, filters and refusals it covers (PLN-019: two
+    # of the agent-workspace plan's criteria are 516 and 531 characters long).
+    w = world(approved_analysis=True)
+    longest = "c" * CRITERION_MAX_CHARS
+    planned = ticket("t1")
+    planned["acceptance_criteria"] = [longest]
+    write(w, "plan", plan_payload(phase("p1", 1, planned)))
+    (item,) = w.state.plan_items.values()
+    assert json.loads(item.acceptance_criteria_json) == [longest]
+    planned["acceptance_criteria"] = [longest + "c"]
+    with pytest.raises(ValidationFailure) as refused:
+        write(w, "plan", plan_payload(phase("p1", 1, planned)))
+    assert "plan.phases.0.tickets.0.acceptance_criteria.0: String should have at most 1000" in (
+        refused.value.message
+    )
+    # The evidence a Ticket expects stays a list of short items.
+    planned["acceptance_criteria"] = ["it works"]
+    planned["expected_evidence"] = ["e" * 501]
+    with pytest.raises(ValidationFailure) as short:
+        write(w, "plan", plan_payload(phase("p1", 1, planned)))
+    assert "expected_evidence.0: String should have at most 500" in short.value.message
 
 
 def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None:
