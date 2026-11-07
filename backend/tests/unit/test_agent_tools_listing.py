@@ -22,6 +22,7 @@ from app.services.agent_tools import (
     tool_catalog,
     write_ticket_summaries,
 )
+from app.services.agent_tools_listing import empty_advice
 from app.services.cards import CardService
 from app.services.lists import ListService
 from app.services.loops import LoopService
@@ -196,6 +197,32 @@ def test_list_tickets_names_the_tickets_and_where_they_stand_never_what_they_say
     assert "read_ticket" in str(answer["next_step"])
     brief = rows(list_tickets(world, READER, ask(fields="brief")), "tickets")
     assert brief[0] == {"id": "b", "key": "K-b", "title": "Search"}
+
+
+def test_an_empty_list_says_which_filters_it_applied_and_how_to_see_more(
+    settings: Settings,
+) -> None:
+    world = listing_world(settings)
+    answer = list_tickets(
+        world, READER, ask(loop_id="L-1", state="blocked", workplace="codebase")
+    )
+    assert (answer["tickets"], answer["total"]) == ([], 0)
+    assert answer["next_step"] == (
+        "No Ticket matches the filters applied (state blocked; workplace codebase): widen or "
+        "drop one of them to see more. Drop loop_id to list every open Loop of the board. "
+        "include_completed true also lists completed Tickets and Loops."
+    )
+    assert "read_ticket" not in str(answer["next_step"])
+    assert empty_advice({"include_completed": True}, loop_named=False) == (
+        "No Ticket is listed, and no filter was applied."
+    )
+    assert empty_advice(
+        {"column": ["Todo", "Doing"], "needs_person": False}, loop_named=False
+    ) == (
+        "No Ticket matches the filters applied (column Todo, Doing; needs_person false): widen "
+        "or drop one of them to see more. include_completed true also lists completed Tickets "
+        "and Loops."
+    )
 
 
 @pytest.mark.parametrize(

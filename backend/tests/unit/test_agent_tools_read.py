@@ -364,6 +364,8 @@ def test_tools_list_offers_the_listing_tools_to_the_scopes_they_declare() -> Non
     ]
     assert [tool["name"] for tool in tool_list(_token("cards:read"))] == [
         "read_ticket",
+        "list_attachments",
+        "read_attachment",
         "search_tickets",
     ]
     catalogue = tool_catalog()

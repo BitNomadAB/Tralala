@@ -57,6 +57,7 @@ CATALOGUE_FILES = tuple(
     SERVICES_ROOT / name
     for name in (
         "agent_tools.py",
+        "agent_tools_attachments.py",
         "agent_tools_discussions.py",
         "agent_tools_documents.py",
         "agent_tools_identity.py",

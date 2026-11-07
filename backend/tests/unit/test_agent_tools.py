@@ -72,7 +72,12 @@ def test_a_token_sees_only_the_tools_its_scopes_cover() -> None:
         "read_document",
         "read_notes",
     ]
-    assert _visible(_token("cards:read")) == ["read_ticket", "search_tickets"]
+    assert _visible(_token("cards:read")) == [
+        "read_ticket",
+        "list_attachments",
+        "read_attachment",
+        "search_tickets",
+    ]
     assert _visible(_token(*MEMBER_TOKEN_SCOPES)) == list(CATALOGUE)
 
 

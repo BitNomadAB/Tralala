@@ -15,7 +15,8 @@ a person still approves the analysis and the RoadMap, confirms human work and ac
 
 The handlers live beside this module, in ``agent_tools_read``, ``agent_tools_write``,
 ``agent_tools_tickets``, ``agent_tools_work``, ``agent_tools_plan`` and
-``agent_tools_discussions``, among others, and the argument schemas in ``agent_tools_schema``;
+``agent_tools_discussions``, among others (``agent_tools_attachments`` reads a Ticket's files),
+and the argument schemas in ``agent_tools_schema``;
 this module holds the catalogue and the dispatch and re-exports them.
 """
 
@@ -25,6 +26,7 @@ from typing import TYPE_CHECKING
 
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound
+from .agent_tools_attachments import attachment_tools, list_attachments, read_attachment
 from .agent_tools_discussions import ask_agents, read_discussion, reply_discussion
 from .agent_tools_documents import document_tools, read_document, read_loop
 from .agent_tools_identity import identity_tools, whoami
@@ -144,8 +146,9 @@ def tool_catalog() -> dict[str, AgentTool]:
         AgentTool(
             name="read_ticket",
             description=(
-                "Read one Ticket with acceptance criteria, evidence, checklist, comments, "
-                "current column, version and the actions that are allowed right now."
+                "Read one Ticket with acceptance criteria, evidence, checklist, comments, its "
+                "newest 50 attachments (read_attachment reads a text one), current column, "
+                "version and the actions that are allowed right now."
             ),
             scopes=("cards:read",),
             input_schema=_object(
@@ -154,6 +157,7 @@ def tool_catalog() -> dict[str, AgentTool]:
             ),
             handler=_read_ticket,
         ),
+        *attachment_tools(_BOARD_ID, _CARD_ID),
         AgentTool(
             name="search_tickets",
             description=(
@@ -517,11 +521,13 @@ __all__ = [
     "complete_ticket",
     "create_ticket",
     "describe_scope",
+    "list_attachments",
     "list_boards",
     "list_tickets",
     "loop_summaries",
     "map_plan_ids",
     "missing_scopes",
+    "read_attachment",
     "read_discussion",
     "read_document",
     "read_loop",
