@@ -287,8 +287,11 @@ export interface RunTraceStep {
   };
 }
 
-/** What a generation run writes; `analysis_human` is the analysis written for people. */
-export type GenerationPurpose = "analysis" | "analysis_human" | "roadmap" | "qa";
+/**
+ * What a generation run writes; `analysis_human` and `roadmap_human` write the brief for people of
+ * the analysis or the RoadMap.
+ */
+export type GenerationPurpose = "analysis" | "analysis_human" | "roadmap" | "roadmap_human" | "qa";
 
 export interface GenerationRun {
   id: string;

@@ -48,20 +48,65 @@ export function staleReasonText(code: string): string {
 /** The planning documents dialog's tabs; the last two are the scopes an agent generates. */
 export type PlanTab = "info" | "analysis" | "roadmap";
 export type PlanScope = Exclude<PlanTab, "info">;
-/** What a run panel describes: a scope's run, or the analysis written for people. */
-export type RunPurpose = PlanScope | "analysis_human";
+/** What a run panel describes: a scope's run, or the brief for people of a scope. */
+export type RunPurpose = PlanScope | "analysis_human" | "roadmap_human";
+/** The run that writes a scope's brief for people. */
+export const FOR_PEOPLE_PURPOSE = {
+  analysis: "analysis_human",
+  roadmap: "roadmap_human",
+} as const satisfies Record<PlanScope, RunPurpose>;
 
 /**
- * Who wrote the human view of an analysis: the board agent that wrote it for people, or the server
+ * Who wrote the human view: the board agent or the worker that wrote it for people, or the server
  * that rendered it from the structure. Null for a revision that says neither.
  */
 export function viewAuthorship(document: LoopDocument): string | null {
   const provenance = document.current_provenance ?? {};
   if (provenance.written === true) {
     const agent = provenance.agent_name;
-    return typeof agent === "string" && agent ? `Written by ${agent}` : "Written by a board agent";
+    if (typeof agent === "string" && agent) return `Written by ${agent}`;
+    const author = provenance.author;
+    if (typeof author === "string" && author) return `Written by ${author}`;
+    return "Written by a board agent";
   }
   return provenance.rendered === true ? "Rendered from the structure" : null;
+}
+
+/**
+ * Whether the human view is a brief (its revision carries the brief as payload). A view written for
+ * people before briefs existed is Markdown without one: the "Earlier format".
+ */
+export function isBrief(document: LoopDocument): boolean {
+  const payload = document.current_payload;
+  if (payload === null) return false;
+  if (document.kind === "analysis") return typeof payload.verdict === "string";
+  return document.kind === "roadmap" && Array.isArray(payload.order);
+}
+
+export function isEarlierFormat(document: LoopDocument): boolean {
+  return document.current_provenance?.written === true && !isBrief(document);
+}
+
+/**
+ * Why "Rewrite for people" cannot start, or null when it can. A disabled button that only turns grey
+ * leaves a person guessing; the reason is shown beside it.
+ */
+export function rewriteBlockedReason({
+  approved,
+  writing,
+  generating,
+  hasTechnical,
+}: {
+  approved: boolean;
+  writing: boolean;
+  generating: boolean;
+  hasTechnical: boolean;
+}): string | null {
+  if (writing) return "Writing for people...";
+  if (approved) return "Approved: request changes or reset to rewrite";
+  if (generating) return "A run is in progress";
+  if (!hasTechnical) return "Generate the technical version first";
+  return null;
 }
 
 /** How many cards one column loads; the drag and drop writes to the same query keys. */

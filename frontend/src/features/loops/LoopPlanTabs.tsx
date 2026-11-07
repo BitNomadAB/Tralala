@@ -4,7 +4,10 @@ import { Select } from "@/components/ui/input";
 import type { GenerationCandidates } from "@/lib/boardAgents";
 import type { PlanScope, PlanTab } from "./loopUi";
 
-/** The Info / Analysis / RoadMap tabs, with the view toggle and the generation controls. */
+/**
+ * The Info / Analysis / RoadMap tabs, with the switch between the brief for people and the technical
+ * version for AI, and the generation controls.
+ */
 export function LoopPlanTabs({
   tab,
   onTabChange,
@@ -19,7 +22,7 @@ export function LoopPlanTabs({
   generateDisabled,
   onGenerate,
   onRewrite,
-  rewriteDisabled = true,
+  rewriteBlocked = null,
 }: {
   tab: PlanTab;
   onTabChange: (tab: PlanTab) => void;
@@ -33,9 +36,10 @@ export function LoopPlanTabs({
   generating: boolean;
   generateDisabled: boolean;
   onGenerate: (scope: PlanScope) => void;
-  /** Have a board agent write the analysis for people again; absent for a reader. */
+  /** Have a board agent write the brief for people again; absent for a reader. */
   onRewrite?: (() => void) | undefined;
-  rewriteDisabled?: boolean;
+  /** Why the rewrite cannot start, shown beside the button; null when it can. */
+  rewriteBlocked?: string | null;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-2">
@@ -50,14 +54,42 @@ export function LoopPlanTabs({
         </Button>
       ))}
       {tab !== "info" ? (
-        <Button size="sm" variant="ghost" onClick={onToggleTechnical}>
-          {technical ? "Human view" : "Technical view"}
-        </Button>
+        <div role="group" aria-label="Version" className="flex gap-1">
+          {(
+            [
+              ["For people", false],
+              ["For AI", true],
+            ] as const
+          ).map(([label, forAi]) => (
+            <Button
+              key={label}
+              size="sm"
+              variant={technical === forAi ? "outline" : "ghost"}
+              aria-pressed={technical === forAi}
+              onClick={technical === forAi ? undefined : onToggleTechnical}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
       ) : null}
-      {tab === "analysis" && !technical && onRewrite ? (
-        <Button size="sm" variant="ghost" disabled={rewriteDisabled} onClick={onRewrite}>
-          <PenLine size={14} /> Rewrite for people
-        </Button>
+      {tab !== "info" && !technical && onRewrite ? (
+        <span className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={rewriteBlocked !== null}
+            aria-describedby={rewriteBlocked ? "rewrite-blocked" : undefined}
+            onClick={onRewrite}
+          >
+            <PenLine size={14} /> Rewrite for people
+          </Button>
+          {rewriteBlocked ? (
+            <span id="rewrite-blocked" className="text-[11px] text-[var(--muted-foreground)]">
+              {rewriteBlocked}
+            </span>
+          ) : null}
+        </span>
       ) : null}
       {tab !== "info" ? (
         <label className="ml-auto flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">

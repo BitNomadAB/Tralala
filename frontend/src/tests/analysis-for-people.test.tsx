@@ -130,7 +130,7 @@ describe("the analysis written for people", () => {
     openAnalysis({ rendered: true });
     expect(await screen.findByText("Rendered from the structure")).toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Technical view" }));
+    await user.click(screen.getByRole("button", { name: "For AI" }));
     expect(screen.queryByRole("button", { name: /Rewrite for people/ })).not.toBeInTheDocument();
   });
 
@@ -141,7 +141,7 @@ describe("the analysis written for people", () => {
     // The analysis is there and complete, so only the run keeps it from being approved.
     expect(await screen.findByText("Rendered from the structure")).toBeInTheDocument();
     expect(
-      await screen.findByText(/A board agent is writing this analysis for people/),
+      await screen.findByText(/A board agent is writing the brief of this analysis for people/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve analysis" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Rewrite for people/ })).toBeDisabled();
@@ -154,7 +154,7 @@ describe("the analysis written for people", () => {
     expect(await screen.findByText("Written by Alpha")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Approve analysis" })).toBeEnabled();
     expect(
-      screen.queryByText(/A board agent is writing this analysis for people/),
+      screen.queryByText(/A board agent is writing the brief of this analysis for people/),
     ).not.toBeInTheDocument();
   });
 });

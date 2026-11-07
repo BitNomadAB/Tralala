@@ -2,20 +2,44 @@ import { Fragment } from "react";
 import { Badge } from "@/components/ui/badge";
 import { renderMarkdown } from "@/lib/markdown";
 import type { DocumentKind, LoopDocument } from "@/lib/types";
-import { DOCUMENT_LABELS, staleReasonText, viewAuthorship } from "./loopUi";
+import { isHumanBrief, isRoadmapBrief } from "./briefs";
+import { AnalysisBriefView, RoadmapBriefView } from "./BriefView";
+import {
+  DOCUMENT_LABELS,
+  isBrief,
+  isEarlierFormat,
+  staleReasonText,
+  viewAuthorship,
+} from "./loopUi";
+
+/** The current text: the brief's sections for a brief, Markdown for everything else. */
+function CurrentText({ document, technical }: { document: LoopDocument; technical: unknown }) {
+  const payload: unknown = document.current_payload;
+  if (isBrief(document) && document.kind === "analysis" && isHumanBrief(payload)) {
+    return <AnalysisBriefView brief={payload} technical={technical} />;
+  }
+  if (isBrief(document) && document.kind === "roadmap" && isRoadmapBrief(payload)) {
+    return <RoadmapBriefView brief={payload} technical={technical} />;
+  }
+  return renderMarkdown(document.current_content ?? "");
+}
 
 /** One planning document: its state, current text, approved baseline and revision list. */
 export function PlanDocumentPanel({
   kind,
   document,
+  technical,
 }: {
   kind: DocumentKind;
   document: LoopDocument;
+  /** The technical revision's payload, which a brief's "Where does this come from?" reads. */
+  technical?: unknown;
 }) {
   // Both approvals can supersede the same document, and one sentence says it once.
   const reasons = [...new Set(document.stale_reasons)];
-  // A view a board agent wrote for people reads differently from one rendered from the structure.
-  const authorship = kind === "analysis" ? viewAuthorship(document) : null;
+  // A view written for people reads differently from one rendered from the structure.
+  const human = kind === "analysis" || kind === "roadmap";
+  const authorship = human ? viewAuthorship(document) : null;
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -32,6 +56,7 @@ export function PlanDocumentPanel({
           {document.state.replace("_", " ")}
         </Badge>
         {authorship ? <Badge tone="neutral">{authorship}</Badge> : null}
+        {human && isEarlierFormat(document) ? <Badge tone="neutral">Earlier format</Badge> : null}
         {document.current_revision_number ? (
           <span className="text-[var(--muted-foreground)]">
             revision {document.current_revision_number}
@@ -54,7 +79,7 @@ export function PlanDocumentPanel({
       ) : null}
       {document.current_content ? (
         <div className="prose-sm max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
-          {renderMarkdown(document.current_content)}
+          <CurrentText document={document} technical={technical} />
         </div>
       ) : (
         <p className="rounded-lg border border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted-foreground)]">

@@ -9,7 +9,7 @@ import { InfoEditor } from "./InfoEditor";
 import { InfoSaveGuard } from "./InfoSaveGuard";
 import { KeptCandidate } from "./KeptCandidate";
 import { LoopPlanTabs } from "./LoopPlanTabs";
-import type { PlanScope, PlanTab } from "./loopUi";
+import { FOR_PEOPLE_PURPOSE, rewriteBlockedReason, type PlanScope, type PlanTab } from "./loopUi";
 import { PlanDocumentPanel } from "./PlanDocumentPanel";
 import { ScopeReview } from "./ScopeReview";
 import { useGenerationRun } from "./useGenerationRun";
@@ -88,8 +88,8 @@ export function LoopDocumentDialog({
   // Reset is for the draft too, not only for an approval: a bad generation has to be clearable before
   // anyone signs it off.
   const canResetScope = isHuman && !readOnly && (scopeHasText || approvedForScope);
-  // The text a person would approve is about to be replaced by the one written for them.
-  const writingForPeople = tab === "analysis" && generation.writingForPeople;
+  // The text a person would approve is about to be replaced by the brief written for them.
+  const writingForPeople = generation.writingForPeople;
   const canReviewScope =
     isHuman &&
     !writingForPeople &&
@@ -148,17 +148,24 @@ export function LoopDocumentDialog({
           generating={generating}
           generateDisabled={generateDisabled}
           onGenerate={(purpose) => generation.generate.mutate(purpose)}
-          onRewrite={readOnly ? undefined : () => generation.generate.mutate("analysis_human")}
-          rewriteDisabled={
-            generateDisabled ||
-            writingForPeople ||
-            approvedForScope ||
-            !documents?.analysis_ai.current_content?.trim()
+          onRewrite={
+            readOnly || tab === "info"
+              ? undefined
+              : () => generation.generate.mutate(FOR_PEOPLE_PURPOSE[tab])
           }
+          rewriteBlocked={rewriteBlockedReason({
+            approved: approvedForScope,
+            writing: writingForPeople,
+            generating: generateDisabled,
+            hasTechnical: Boolean(
+              documents?.[tab === "roadmap" ? "roadmap_ai" : "analysis_ai"].current_content?.trim(),
+            ),
+          })}
         />
         {writingForPeople ? (
           <p role="status" className="mt-2 text-xs text-[var(--muted-foreground)]">
-            A board agent is writing this analysis for people. It can be approved when that is done.
+            A board agent is writing the brief of this {scopeLabel} for people. It can be approved
+            when that is done.
           </p>
         ) : null}
         {/* Once, under the button that started the run; from 2xl the aside below shows it instead. */}
@@ -185,7 +192,15 @@ export function LoopDocumentDialog({
           {visible.map((kind) => {
             const document = documents?.[kind];
             if (!document) return null;
-            return <PlanDocumentPanel key={kind} kind={kind} document={document} />;
+            const technical =
+              kind === "analysis"
+                ? documents.analysis_ai.current_payload
+                : kind === "roadmap"
+                  ? documents.roadmap_ai.current_payload
+                  : null;
+            return (
+              <PlanDocumentPanel key={kind} kind={kind} document={document} technical={technical} />
+            );
           })}
 
           {tab === "info" ? (
