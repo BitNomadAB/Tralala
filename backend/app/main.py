@@ -21,6 +21,7 @@ from .api.v1 import agents as agent_routes
 from .api.v1 import attachments as attachment_routes
 from .api.v1 import auth as auth_routes
 from .api.v1 import boards as board_routes
+from .api.v1 import card_notes as card_note_routes
 from .api.v1 import cards as card_routes
 from .api.v1 import discussions as discussion_routes
 from .api.v1 import history as history_routes
@@ -259,6 +260,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         history_routes.router,
         list_routes.router,
         card_routes.router,
+        card_note_routes.router,
         label_routes.router,
         label_routes.checklists,
         label_routes.comments,

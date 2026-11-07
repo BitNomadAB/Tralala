@@ -14,6 +14,7 @@ from ..attachments import AttachmentRepository
 from ..board import BoardUnitOfWork
 from ..board_files import BoardFiles, BoardMigrator
 from ..board_metadata import BoardMetadataRepository, LoopDefaultsRepository
+from ..card_notes import CardNoteRepository
 from ..cards import CardRepository
 from ..checklists import ChecklistItemRepository, ChecklistRepository
 from ..comments import CommentRepository
@@ -49,6 +50,7 @@ from ..search import CardSearchRepository, FullTextIndex
 from .activity import SqlActivityRepository
 from .attachments import SqlAttachmentRepository
 from .board_metadata import SqlBoardMetadataRepository, SqlLoopDefaultsRepository
+from .card_notes import SqlCardNoteRepository
 from .cards import SqlCardRepository
 from .checklists import SqlChecklistItemRepository, SqlChecklistRepository
 from .comments import SqlCommentRepository
@@ -109,6 +111,7 @@ class SqlBoardRepositories:
         self.checklists: ChecklistRepository = SqlChecklistRepository(connection)
         self.checklist_items: ChecklistItemRepository = SqlChecklistItemRepository(connection)
         self.comments: CommentRepository = SqlCommentRepository(connection)
+        self.card_notes: CardNoteRepository = SqlCardNoteRepository(connection)
         self.notes: LoopNoteRepository = SqlLoopNoteRepository(connection)
         self.attachments: AttachmentRepository = SqlAttachmentRepository(connection)
         self.search: CardSearchRepository = SqlCardSearchRepository(connection)

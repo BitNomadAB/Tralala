@@ -28,6 +28,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from . import Services
     from .attachments import AttachmentEntry
     from .boards import BoardService
+    from .card_notes import CardNoteEntry
     from .cards import CardEntry
     from .lists import ListEntry, ListService
     from .loops import LoopService
@@ -353,6 +354,9 @@ def _read_ticket(
             "human_instructions": card["human_instructions"],
             "checklists": services.checklist.list(board_id, card_id),
             "comments": services.comment.list(board_id, card_id),
+            "person_notes": person_notes(
+                services.card_note.list(actor, board_id, loop_id, card_id)
+            ),
             **ticket_attachments(services.attachment.for_ticket(board_id, card_id)),
         },
         "loop": {
@@ -373,6 +377,16 @@ def ticket_attachments(entries: list[AttachmentEntry]) -> ToolResult:
         "attachments": [attachment_summary(entry) for entry in entries[:TICKET_ATTACHMENTS]],
         "attachment_count": len(entries),
     }
+
+
+def person_notes(entries: list[CardNoteEntry]) -> list[ToolResult]:
+    """A person's notes on the Ticket as `read_ticket` shows them, oldest first: who wrote each,
+    when, and the text. A person writes them and no token can; they are the person's words beside
+    the plan, not part of it."""
+    return [
+        {"author": entry["author"], "written_at": entry["written_at"], "text": entry["text"]}
+        for entry in entries
+    ]
 
 
 def ticket_plan(readiness: Readiness, card_id: str) -> ToolResult | None:
@@ -406,6 +420,7 @@ __all__ = [
     "_whole_number",
     "allowed_actions",
     "list_boards",
+    "person_notes",
     "search_tickets",
     "ticket_attachments",
     "ticket_plan",
