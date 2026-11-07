@@ -24,7 +24,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0019_generation_roadmap_brief"
-down_revision: str | None = "0016_ticket_summaries"
+down_revision: str | None = "0018_discussion_answers"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
