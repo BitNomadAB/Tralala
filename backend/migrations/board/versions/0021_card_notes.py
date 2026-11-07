@@ -11,7 +11,7 @@ comments table's ``actor_id`` and ``loop_notes.author_actor_id`` follow); ``auth
 name at the time of writing, so a later rename does not rewrite who wrote the note.
 
 Revision ID: 0021_card_notes
-Revises: 0019_generation_roadmap_brief
+Revises: 0020_ticket_face
 Create Date: 2026-11-08
 """
 
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0021_card_notes"
-down_revision: str | None = "0019_generation_roadmap_brief"
+down_revision: str | None = "0020_ticket_face"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
