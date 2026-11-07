@@ -17,14 +17,20 @@ Board
 
 | Slot | Author | Purpose |
 | --- | --- | --- |
-| `info` | A person only | Notes, requirements, links, constraints and the desired outcome. Agents may read it and never write it. |
-| `analysis_ai` | Agent or submitted candidate | Structured technical findings with stable ids, evidence sources, assumptions and options. |
+| `info` | A person, or their worker through `write_info` while the Loop is `draft` or `analysis_review` | Notes, requirements, links, constraints and the desired outcome. Once planning has started only a person edits it, and a new revision makes the approvals built on it stale. |
+| `analysis_ai` | Tralala's analysis agent (`run_analysis`), or your worker through the same candidate route (`write_analysis`, `POST …/candidates`) | Structured technical findings with stable ids, evidence sources, assumptions and options. |
 | `analysis` | A connected worker, the Loop's analysis agent, or rendered by the server | A decision brief for the person who decides: can it be done, what stands in the way, for and against, what to decide, a recommendation. Written from `analysis_ai`; no ids, paths or code. |
-| `roadmap_ai` | Agent or submitted candidate | Validated structured plan: numbered Phases, planned Tickets, dependencies and human gates. |
+| `roadmap_ai` | Tralala's RoadMap agent (`run_roadmap`), or your worker through the same candidate route (`write_roadmap`) | Validated structured plan: numbered Phases, planned Tickets, dependencies and human gates. |
 | `roadmap` | A connected worker, the Loop's RoadMap agent, or rendered by the server | A brief of the plan: what happens in each Phase and when it is done, your own part, what could block it. Written from `roadmap_ai`. |
 
 Every revision is immutable. The current revision and the approved revision are separate pointers,
-and an approval is a recorded human decision bound to exact revision ids and content hashes.
+and an approval is a recorded human decision bound to exact revision ids and content hashes. A
+candidate from a worker is not a second kind of document: it has the same schema, validation,
+human view and review as one Tralala's agent writes, and nobody approves it but a person.
+
+The Loop is the plan. Nothing a worker plans or logs is a file in a repository: the intent is the
+Info, the plan is the RoadMap and its Tickets, progress is a comment on a Ticket, what belongs to
+the Loop as a whole is a note, and work found along the way is a Ticket outside the plan.
 
 A person and a model read differently, so the analysis and the RoadMap each have two views: the
 technical one (`analysis_ai`, `roadmap_ai`), complete and unchanged, and a short **brief** for the
@@ -69,8 +75,9 @@ it.
 Once the plan executes (`ready`, `in_progress`, `awaiting_qa`), a person or a worker may still add
 a Ticket *outside the plan*: it is keyed `<LoopKey>-UNP-<nnn>`, carries an **Unplanned** badge, is
 listed under **Outside the plan** in the RoadMap tab and in readiness (`unplanned`), and never blocks
-a Phase or the Loop's completion; accepting the implementation names the ones still open. Outside
-those stages a new Ticket is refused with `409 plan_change_required`.
+a Phase or the Loop's completion; accepting the implementation names the ones still open. A Loop
+whose plan is not executing refuses a new Ticket with
+`409 plan_change_required`; a Loop without a plan yet takes one without a key.
 
 Changing an input invalidates what depended on it: a new Info revision makes the analysis pair and
 both RoadMap views stale, the Loop moves to `replanning`, and execution transitions are rejected
@@ -114,6 +121,12 @@ person's task), and what needs a person (`needs_person`: needs input, or ready a
 The RoadMap gives each planned Ticket its starting workplace, wait and labels; the plan describes,
 it never assigns.
 
+In the Ticket dialog, **Where and what it waits for** shows the state, sets **Where the work is
+done** and marks a wait (**Mark as waiting**: what it waits for and why). A worker marks one with
+`set_ticket_wait` when it cannot go on without an answer. **Clear the wait** is a person's: a token
+can neither clear nor replace a wait (`403 human_action_required`), and **Mark complete** stays off
+while one is open. The Kanban card shows *Needs input* or *Blocked*.
+
 ## Approval boundaries
 
 | Action | Who | Endpoint |
@@ -132,9 +145,10 @@ but only while the Loop is still speculative (`draft` or `analysis_review`). Onc
 started a new Info revision would invalidate approvals, so the edit returns
 `403 human_action_required` for a token and stays a person's decision.
 
-Agents may generate candidates, move eligible Tickets, record results and comment. An agent token
-is rejected with `403 human_action_required` for every other action in the table, even when it holds
-the scope. WebMCP registers inspection, generation and permitted Ticket tools, never these decisions.
+A worker token may write the Info while the Loop is speculative, hand in or ask for candidates and
+briefs, set a wait on a Ticket that waits for nothing, move and complete eligible Tickets, add
+Tickets outside the plan, write notes, record QA results and comment. It is rejected with
+`403 human_action_required` for every other action in the table, even when it holds the scope. WebMCP registers inspection, generation and permitted Ticket tools, never these decisions.
 
 ## The agent and its repository context
 

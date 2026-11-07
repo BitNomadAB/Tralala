@@ -67,6 +67,10 @@ message broker.
     a changed input invalidates them. A reset supersedes the approval and replaces the scope's
     documents with an empty draft, so nothing downstream executes against text nobody stands behind.
     A token may set a wait on a Ticket that waits for nothing; the person who answers it clears it.
+    Info has one speculative-stage exception: while the Loop is `draft` or `analysis_review`
+    (`WORKER_INFO_STAGES` in `services/loop_documents.py`) a token may write it (`write_info`),
+    because that is the intent it agreed with its person; from planning on, editing Info is a
+    person's and `save_info` refuses a token.
 11b. **Completed Loops are read-only.** Finalization writes an immutable, hashed snapshot to
     `loop_history` in the same transaction and blocks every mutation path afterwards, with one
     exception: comments on its Tickets (written, edited, deleted) while the board is not archived,
@@ -91,7 +95,12 @@ message broker.
 13. **The worker surface is one catalogue.** `services/agent_tools.py` is the only description of
     what an external worker token may call; `/mcp` and `/llms.txt` are generated from it and every
     handler calls a service. Adding a capability is a catalogue entry plus a handler — never a new
-    transport with its own rules — and a tool may be narrower than a scope, never wider.
+    transport with its own rules — and a tool may be narrower than a scope, never wider. Its areas
+    are the key's identity (`whoami`), reading (boards, Loop overviews and summaries, documents,
+    Tickets by filter, attachments, search), work on a Ticket (summaries, a wait, assigning,
+    moving, commenting, completing), work outside the plan (`create_ticket`, an unplanned Ticket),
+    planning (a Loop, its Info, a worker's own analysis and RoadMap as candidates, the briefs for
+    people), the Loop's notes and discussions; the handlers live in `services/agent_tools_*.py`.
     `tests/unit/test_worker_catalogue.py` holds every entry to this: a handler it can read, a
     section in `/llms.txt` and an entry in the MCP tool list, declared scopes that the opening
     `actor.require` checks of the handler (or of what it hands the actor to) cover and do not

@@ -65,8 +65,9 @@ is no shared password. See [the first sign-in](public_docs/Installation.md#first
 - **Loops**: each Board contains Loops, and each Loop owns its columns, Tickets and planning
   documents. A Loop moves through Draft, Analysis review, Planning, RoadMap review, Ready, In
   progress, Replanning, Awaiting QA and Completed, and Readiness explains every blocker.
-- **Revisioned planning documents**: human-authored Info, an AI technical analysis with a
-  plain-language human view, and a structured RoadMap whose numbered Phases and planned Tickets are
+- **Revisioned planning documents**: the Info a person writes (or their coding agent, while the
+  Loop is still a draft), a technical analysis with a brief for the person who decides, and a
+  structured RoadMap whose numbered Phases and planned Tickets are
   published atomically after a human approval. Generated content is validated before it can be
   approved, and approvals bind to exact revisions.
 - **Version-bound human gates**: agents may generate, plan and execute eligible Tickets, but only a
@@ -82,8 +83,10 @@ is no shared password. See [the first sign-in](public_docs/Installation.md#first
   sealed credential; OpenAI-compatible and A2A transports.
 - **People**: `admin`/`member` roles, invitation links instead of email, sessions that revoke on a
   password change, and self-service "interaction agent access" keys.
-- **One worker surface**: thirteen curated tools behind `/mcp`, generated from a single catalogue,
-  with a public `/llms.txt` bootstrap so a URL and a token are enough to start working.
+- **One worker surface**: a curated tool catalogue behind `/mcp` for a coding agent in a person's
+  session (reading, planning a Loop, working its Tickets, notes and discussions), with a public
+  `/llms.txt` bootstrap generated from it so a URL and a token are enough to start working. The
+  Loop is the plan: nothing the agent plans or logs is a file in a repository.
 
 ## Layout
 

@@ -87,9 +87,9 @@ changes code.
 1. **Settings → New access key.** Name it, pick scopes, create. The token is shown once.
    For a coding agent take `boards:read`, `loops:read`, `cards:read`, `cards:write`,
    `comments:write`, `discussions:read`, `discussions:write`; add `loops:write` and
-   `loops:generate` if it should open Loops and run analyses.
+   `loops:generate` if it should open Loops and hand in or ask for analyses and RoadMaps.
 2. Point the agent at `<your URL>/mcp` with `Authorization: Bearer <key>`. `<your URL>/llms.txt`
-   tells it the rest. The full walkthrough, the thirteen tools and their scopes are in
+   tells it the rest. The full walkthrough, every tool and its scope are in
    [Agent_usage.md](Agent_usage.md).
 3. The key belongs to your account: disable the account and it stops. Revoke it under the same list
    when a laptop is retired, and check `last_used_at` if you are unsure which key is which.
@@ -138,17 +138,19 @@ A **Board** is a project; a **Loop** is one feature or coherent change inside it
 
 | Step | Who | What happens |
 | --- | --- | --- |
-| 1. Info | you, maybe with your worker agent | Write the intent: what to build and why. This is the input everything else is derived from. |
-| 2. Analysis | the analysis agent, approved by you | Generate a technical analysis; read the plain-language view; **approve** it. Approval binds to that exact revision. |
-| 3. RoadMap | an agent, approved by you | Generate a structured RoadMap: numbered Phases and planned Tickets; **approve** it to publish every Ticket at once. |
-| 4. Execution | you and your worker agent | Move Tickets through the Loop's columns, assign them, comment progress. Readiness shows what blocks a Phase. |
+| 1. Info | you, maybe with your coding agent | Write the intent: what to build and why. This is the input everything else is derived from. |
+| 2. Analysis | the analysis agent or your coding agent, approved by you | Generate or hand in a technical analysis; read the brief **For people**; **approve** it. Approval binds to that exact revision. |
+| 3. RoadMap | the RoadMap agent or your coding agent, approved by you | A structured RoadMap: numbered Phases and planned Tickets; **approve** it to publish every Ticket at once. |
+| 4. Execution | you, with your coding agent as a tool in your session | Move Tickets through the Loop's columns, assign them, comment progress. Readiness shows what blocks a Phase. |
 | 5. QA | the QA agent, accepted by you | Ask for a QA Task (scenarios, agent view and human view); **accept implementation**, then **accept QA**. |
 | 6. Finalize | you | The Loop is finalized: an immutable, hashed snapshot lands in History and the Loop becomes read-only. |
 
 Three rules that keep this honest:
 
-- **A person decides.** Approving the analysis and the RoadMap, confirming a human-only Ticket,
-  accepting QA and finalizing are human actions. A token cannot perform them, whatever its scopes.
+- **A person decides.** Approving or resetting the analysis and the RoadMap, editing the Info once
+  planning has started, confirming a human-only Ticket, clearing a Ticket's wait, accepting the
+  implementation and QA and finalizing are human actions. A token cannot perform them, whatever
+  its scopes.
 - **Changing Info invalidates approvals.** Edit the intent after planning and the Loop returns to
   `replanning`; the dependent approvals go stale and execution stops until you approve a replacement.
 - **A column named Done completes nothing.** Completion is the acceptance decision, not a move.
@@ -159,6 +161,51 @@ Every Ticket has a **discussion**: ask the agents a question, get rounds of answ
 pause or stop a run, then decide. It is capped at four rounds, with a token and time budget per run,
 so a question cannot quietly spend the afternoon. Use it when you want an opinion *before* writing
 the Info or the plan; use `@Agent` in a comment when you want one answer next to the work.
+
+After each round the thread shows **Decision support** — Tralala's summary of the answers: a
+**Suggestion** with its reason, who is **For going ahead**, **Against** or **Cannot tell yet**, the
+**Conditions to accept if you go ahead** and the **Open questions**. It is a suggestion, not a
+decision: **Your decision** is the row of buttons under it (**Approve**, **Request rework**,
+**Veto**).
+
+### Plan with your coding agent
+
+Your first Loop goes best with the coding agent you already use, connected with the key from
+section 3b. The agent is a tool in your session: it reads, drafts and records, and you decide.
+Tralala's own agents keep the board in order and write decision support; none of them takes a
+Ticket off your hands.
+
+1. **Agree the intent in your session**, then ask the agent to open the Loop and write its Info.
+   It may do that while the Loop is a draft or its analysis is in review; the **Info** button on the
+   Loop page shows the revision it wrote, and **Write or revise Info** lets you change it. Once
+   planning has started only a person edits the Info.
+2. **Analysis.** The agent hands in its own analysis, or asks the Loop's analysis agent for one.
+   Open **Analysis**: **For people** is the brief for you (can it be done, what stands in the way,
+   for and against, what you must decide), **For AI** the technical analysis. Each point of the
+   brief has *Where does this come from?*. **Approve analysis**, or **Request changes**;
+   **Rewrite for people**
+   asks for a new brief when the one you have does not help you decide.
+3. **RoadMap.** The same again: the agent hands in or asks for a RoadMap, you read it **For
+   people**, and approving it publishes every Ticket with its key onto the Loop's Kanban.
+4. **Work the Tickets.** Tell the agent which Ticket to take, or let it list the ready ones that are
+   done in the code base. Open a Ticket to see what the agent sees:
+   - the **Description**, a Markdown field with **Write** and **Preview** tabs and **How to
+     format** under it (Ctrl+B, Ctrl+I, and Ctrl+K for a link; the key of another Ticket of the
+     Loop becomes a link to it);
+   - **Files**: drop files on the section or use **Add file** (a specification, a log, a sample,
+     a screenshot); the agent reads the text ones;
+   - **Where and what it waits for**: **Where the work is done** (*In the code base*, *Outside the
+     code base*, *Not decided*) and the Ticket's state, *Ready*, *Needs input* or *Blocked*. When
+     the agent cannot go on without you it marks the Ticket as waiting, with the reason; so can you,
+     with **Mark as waiting**. Answer in a comment and press **Clear the wait**: only a person
+     clears one, and **Mark complete** stays off until the wait is cleared.
+5. **Keep the plan in the Loop.** The agent comments progress on the Ticket, completes it with a
+   summary and its evidence, adds what it finds outside the plan as a follow-up Ticket (marked
+   **Unplanned**), and writes the baseline, the checks, a merge or a deploy as a Loop note. Nothing
+   it plans or logs is a file in your repository.
+
+A Ticket of a completed Loop still takes comments, so a later Loop can say that it replaced the
+work; such a comment is marked "written after the Loop was completed".
 
 ## 6. Day two: the habits that matter
 

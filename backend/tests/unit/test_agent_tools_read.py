@@ -377,7 +377,8 @@ def test_tools_list_offers_the_listing_tools_to_the_scopes_they_declare() -> Non
 def test_the_bootstrap_starts_the_work_at_list_boards(settings: Settings) -> None:
     bootstrap = render_bootstrap(settings)
     section = bootstrap.split("## 3. ", 1)[1].split("\n## 4. ", 1)[0]
-    assert section.startswith("Understand the work before you touch it\n\nStart with `whoami`")
+    assert section.startswith("The shared workspace\n\n")
+    assert "\n### Reading\n\nStart with `whoami`" in section
     names = ("whoami", "list_boards", "loop_summaries", "list_tickets", "read_ticket")
     order = [section.index(f"`{name}`") for name in names]
     assert order == sorted(order)

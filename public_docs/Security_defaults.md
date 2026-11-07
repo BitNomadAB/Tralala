@@ -32,8 +32,9 @@ decide. Every claim here is behaviour of this repository, not a promise about yo
   (`/enrol?token=…`, valid for `TRALALA_INVITE_TTL_HOURS`, default 72). Tralala sends no e-mail, so
   delivery is yours.
 - Roles are `admin` and `member`. A member holds every scope except `users:admin` and
-  `credentials:admin`, which stay with the administrator; no token of any kind can hold those or the
-  `agents:*` administrative scopes.
+  `credentials:admin`, which stay with the administrator. No token of any kind can hold those,
+  `loops:review` (the approvals), `boards:admin`, the `agents:*` scopes or `discussions:admin`
+  ([the scope table](API.md#authentication)).
 
 ## Sessions
 
@@ -98,13 +99,38 @@ decides for itself whether to believe the `X-Forwarded-For` header it receives:
   Cost is bounded per discussion instead: at most four rounds, with a default token and time budget
   per run, and every key belongs to the account that issued it.
 
+## What a worker key can do
+
+A key a person issues for their coding agent works the boards through the tools of the worker
+catalogue (`/mcp`, described by `/llms.txt`), within the scopes it was given and never beyond them:
+
+- read boards, Loops, documents, Tickets, their attached files and notes, and search them;
+- open a Loop and write its Info while the Loop is still `draft` or `analysis_review`;
+- hand in its own analysis, RoadMap or brief for people, or ask a board agent for one; each waits
+  for a person's approval like any other;
+- assign, move and comment on Tickets, write their summaries, say what a Ticket waits for, complete
+  a Ticket that is ready and not a person's, and add a follow-up outside the plan;
+- write notes on a Loop and ask the board's agents for advice in a discussion.
+
+Every one of these runs through the same services and checks as the REST API, so a key can do
+nothing over `/mcp` that the same key could not do over REST. The text it reads (Tickets, comments,
+attachments, documents) is data and never instructions.
+
 ## What no token can do
 
-Approving an analysis or a RoadMap, confirming a human-only Ticket, accepting QA, finalizing a Loop,
-changing a board's structure, managing users or credentials, and issuing or rotating a key are human
-decisions. They reject
-tokens with `403 human_action_required` regardless of scope, and they are not registered as worker
-tools. Approvals bind to exact document revision ids, so a changed input invalidates them.
+Approving or resetting an analysis or a RoadMap, editing the Info once planning has started,
+confirming a human-only Ticket, clearing or replacing a Ticket's wait, accepting the implementation
+or QA, finalizing or cancelling a Loop, and issuing or rotating a key are human decisions. They
+reject tokens with `403 human_action_required` regardless of scope, and they are not registered as
+worker tools. Approvals bind to exact document revision ids, so a changed input invalidates them. A
+token never replaces a current approval either: over an approved analysis or RoadMap a person
+requests changes or resets it first.
+
+Deciding a discussion is a signed-in person's too, and managing users, credentials or agents needs a
+scope no token can hold. No worker tool changes a board's structure; over REST that needs
+`boards:write`, which only an administrator can put on a key. A key also cannot attach a file
+through the catalogue, publish or edit an approved RoadMap, create a planned Ticket, or change a
+completed Loop beyond a comment on its Tickets.
 
 ## Secrets and provider credentials
 

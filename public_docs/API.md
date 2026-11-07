@@ -71,14 +71,38 @@ Invoke-RestMethod -Method Post http://localhost:8000/api/v1/auth/login `
 Invoke-RestMethod http://localhost:8000/api/v1/boards -Headers @{ Authorization = "Bearer trl_…" }
 ```
 
-Scopes: `boards:read`, `boards:write`, `boards:admin`, `cards:read`, `cards:write`,
-`comments:write`, `agents:read`, `agents:write`, `agents:admin`, `discussions:read`,
-`discussions:write`, `discussions:admin`, `discussions:vote`, `credentials:admin`, `users:admin`.
+Every scope, what it allows, and who may hold it. A session's scopes come from its account role and
+nothing is implicit: `admin` holds every scope, `member` every scope but `users:admin` and
+`credentials:admin`. A token holds only what it was granted: a member may grant the scopes in
+`member_token_scopes`, an administrator also those marked *admin-issued*, and the rest no token can
+hold (`GET /meta` publishes both lists as `member_token_scopes` and `token_scopes`).
 
-A session's scopes come from its account role and nothing is implicit. `admin` holds every scope;
-`member` holds every scope except `users:admin` and `credentials:admin`, so everyone signed in works
-with boards, agents and discussions, while only administrators manage accounts and the global API
-keys. API tokens may hold every scope except `credentials:admin` and `users:admin`.
+| Scope | Allows | A token |
+| --- | --- | --- |
+| `boards:read` | read boards, their columns and activity | member-issued |
+| `boards:write` | create, change, duplicate, archive and restore boards, templates and a Loop's agent choice; take a backup | admin-issued |
+| `boards:admin` | delete boards and templates, manage repositories, restore a backup, retry a migration | never |
+| `cards:read` | read Tickets, labels, checklists, comments, attachments and search | member-issued |
+| `cards:write` | create, change, move, assign and archive Tickets; labels, checklists and attachments; a Ticket's workplace and wait | member-issued |
+| `comments:write` | comment on a Ticket, edit or delete a comment, retry a mention | member-issued |
+| `loops:read` | read Loops: their documents, plan, readiness, notes and context | member-issued |
+| `loops:write` | create, change, cancel and archive a Loop; write its Info and notes; record QA results | member-issued |
+| `loops:generate` | start and cancel generation runs; hand in a candidate, a brief or QA instructions | member-issued |
+| `loops:review` | approve or reset an analysis or a RoadMap, accept the implementation, decide QA (a person only) | never |
+| `history:read` | search and read the history of completed Loops | member-issued |
+| `agents:read` | read agents and role templates | never |
+| `agents:write` | create, change, duplicate and test agents and role templates | never |
+| `agents:admin` | delete agents and role templates, restore the factory roles | never |
+| `discussions:read` | read discussions | member-issued |
+| `discussions:write` | open, continue and run discussions | member-issued |
+| `discussions:admin` | record the decision on a discussion (a person only) | never |
+| `discussions:vote` | reserved; no route requires it today | admin-issued |
+| `credentials:admin` | manage the installation-wide API keys | never |
+| `users:admin` | manage accounts, invitations and passwords | never |
+
+A key never issues a key: `POST /credentials` and a rotation refuse every token with
+`403 human_action_required`, whatever its scopes. The human-only decisions above refuse a token the
+same way even when it could hold the scope.
 
 ## Endpoints
 
@@ -254,7 +278,7 @@ document slots; there is no Board-level Kanban.
 | POST | `/boards/{board_id}/loops/{loop_id}/archive` | Hides the Loop from active views |
 | GET | `/boards/{board_id}/loops/{loop_id}/documents` | Current and approved revisions per kind |
 | GET | `/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions` | Revision history |
-| PUT | `/boards/{board_id}/loops/{loop_id}/documents/info` | Human-only; new immutable revision |
+| PUT | `/boards/{board_id}/loops/{loop_id}/documents/info` | New immutable revision. A person while the Loop is open; a token (`write_info`) only while the Loop is `draft` or `analysis_review`, then `403 human_action_required` |
 | POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval. `expected_info_revision_id` / `expected_analysis_revision_id` answer `409 document_stale` when that document changed; a token gets `403 human_action_required` while the scope's approval is current. An optional `analysis_brief` or `roadmap_brief` is stored as the human view (`422 brief_rejected` when it breaks a rule); without one the answer adds `human_view`: the run that writes the brief for people, or `skipped` with the reason |
 | POST | `/boards/{board_id}/loops/{loop_id}/briefs` | `{kind, brief, expected_revision_id?}`: the brief for people of the current `analysis_ai` or `roadmap_ai`, stored as the `analysis` or `roadmap` revision. It approves nothing; a token gets `403 human_action_required` while the scope's approval is current, a person never; `409 document_stale` when `expected_revision_id` is no longer current; `422 brief_rejected` names every problem |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids; `409 generation_in_progress` while the analysis's brief is being written for people (the RoadMap's review likewise) |
@@ -750,7 +774,7 @@ copies both.
 A worker over `/mcp` reads a Ticket's files with the same `cards:read` scope: `read_ticket` names
 the newest 50, `list_attachments` all of them, and `read_attachment` answers a `.txt`, `.md` or
 `.json` file as text, a page of numbered lines at a time. Any other file is downloaded with the route
-above; a tool never answers a binary file's bytes. A worker cannot attach a file.
+above; a tool never answers a binary file's bytes. No worker tool attaches a file.
 
 ### Ticket summaries
 
@@ -800,36 +824,36 @@ theirs.
 
 ### Ticket assignment
 
-`PATCH /boards/{board_id}/cards/{card_id}` accepts `assignee_actor_id` (a human actor id or an
+`PATCH /boards/{board_id}/loops/{loop_id}/cards/{card_id}` accepts `assignee_actor_id` (a human actor id or an
 enabled registry agent id) or `clear_assignee: true`. The card stores the display name and type so
 lists render without a cross-database join; every change is written to the activity log. Filter with
-`GET /cards?assignee=me|<actor-or-agent-id>|unassigned`.
+`GET .../cards?assignee=me|<actor-or-agent-id>|unassigned`.
 
 ### Lists (Loop-scoped: `/boards/{board_id}/loops/{loop_id}/lists`)
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/boards/{board_id}/lists?include_archived=` | `boards:read` |
-| POST | `/boards/{board_id}/lists` | `cards:write` |
-| GET | `/boards/{board_id}/lists/{list_id}` | `boards:read` |
-| PATCH | `/boards/{board_id}/lists/{list_id}` | `cards:write` |
-| POST | `/boards/{board_id}/lists/{list_id}/move` (`{"position": n}`) | `cards:write` |
-| POST | `/boards/{board_id}/lists/{list_id}/archive` | `cards:write` |
-| POST | `/boards/{board_id}/lists/{list_id}/restore` | `cards:write` |
-| DELETE | `/boards/{board_id}/lists/{list_id}` (archived and empty) | `cards:write` |
+| GET | `/boards/{board_id}/loops/{loop_id}/lists?include_archived=` | `boards:read` |
+| POST | `/boards/{board_id}/loops/{loop_id}/lists` | `cards:write` |
+| GET | `/boards/{board_id}/loops/{loop_id}/lists/{list_id}` | `boards:read` |
+| PATCH | `/boards/{board_id}/loops/{loop_id}/lists/{list_id}` | `cards:write` |
+| POST | `/boards/{board_id}/loops/{loop_id}/lists/{list_id}/move` (`{"position": n}`) | `cards:write` |
+| POST | `/boards/{board_id}/loops/{loop_id}/lists/{list_id}/archive` | `cards:write` |
+| POST | `/boards/{board_id}/loops/{loop_id}/lists/{list_id}/restore` | `cards:write` |
+| DELETE | `/boards/{board_id}/loops/{loop_id}/lists/{list_id}` (archived and empty) | `cards:write` |
 
 ### Cards (Loop-scoped: `/boards/{board_id}/loops/{loop_id}/cards`)
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/boards/{board_id}/cards` with `list_id\|q\|label\|priority\|due_before\|overdue\|completed\|include_archived\|sort\|order\|limit\|offset` | `cards:read` |
-| POST | `/boards/{board_id}/cards` (`Idempotency-Key`) | `cards:write` |
-| POST | `/boards/{board_id}/cards/bulk` (`{"cards": [...]}`, max 100, partial failures, `Idempotency-Key`) | `cards:write` |
-| GET | `/boards/{board_id}/cards/{card_id}?include=checklists,comments` | `cards:read` |
-| PATCH | `/boards/{board_id}/cards/{card_id}` (requires `version`) | `cards:write` |
-| POST | `/boards/{board_id}/cards/{card_id}/move` (`version`, `list_id`, `position`) | `cards:write` |
-| POST | `/boards/{board_id}/cards/{card_id}/archive` | `cards:write` |
-| POST | `/boards/{board_id}/cards/{card_id}/restore` | `cards:write` |
+| GET | `/boards/{board_id}/loops/{loop_id}/cards` with `list_id\|q\|label\|priority\|due_before\|overdue\|completed\|include_archived\|sort\|order\|limit\|offset` | `cards:read` |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards` (`Idempotency-Key`) | `cards:write` |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards/bulk` (`{"cards": [...]}`, max 100, partial failures, `Idempotency-Key`) | `cards:write` |
+| GET | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}?include=checklists,comments` | `cards:read` |
+| PATCH | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}` (requires `version`) | `cards:write` |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/move` (`version`, `list_id`, `position`) | `cards:write` |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/archive` | `cards:write` |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/restore` | `cards:write` |
 
 ### Labels, checklists, comments
 
@@ -837,16 +861,16 @@ lists render without a cross-database join; every change is written to the activ
 | --- | --- | --- |
 | GET/POST | `/boards/{board_id}/labels` | `cards:read` / `cards:write` |
 | PATCH/DELETE | `/boards/{board_id}/labels/{label_id}` | `cards:write` |
-| GET/POST | `/boards/{board_id}/cards/{card_id}/checklists` | `cards:read` / `cards:write` |
+| GET/POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/checklists` | `cards:read` / `cards:write` |
 | PATCH/DELETE | `/boards/{board_id}/checklists/{checklist_id}` | `cards:write` |
 | POST | `/boards/{board_id}/checklists/{checklist_id}/items` | `cards:write` |
 | PATCH/DELETE | `/boards/{board_id}/checklist-items/{item_id}` | `cards:write` |
-| GET/POST | `/boards/{board_id}/cards/{card_id}/comments` | `cards:read` / `comments:write` |
+| GET/POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/comments` | `cards:read` / `comments:write` |
 | PATCH/DELETE | `/boards/{board_id}/comments/{comment_id}` | `comments:write` (agents: own comments only) |
-| GET | `/boards/{board_id}/cards/{card_id}/mentions` | `cards:read` |
-| POST | `/boards/{board_id}/cards/{card_id}/mentions/{job_id}/retry` (`202`) | `comments:write` |
-| GET | `/boards/{board_id}/cards/{card_id}/events` (`text/event-stream`) | `cards:read` |
-| GET | `/boards/{board_id}/cards/{card_id}/events/history?after=&limit=` | `cards:read` |
+| GET | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/mentions` | `cards:read` |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/mentions/{job_id}/retry` (`202`) | `comments:write` |
+| GET | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/events` (`text/event-stream`) | `cards:read` |
+| GET | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/events/history?after=&limit=` | `cards:read` |
 
 Checklists follow the Ticket's Loop: a completed, archived or cancelled Loop refuses them
 (`409 loop_read_only`). Comments do not: a Ticket of such a Loop still takes a comment, and its
@@ -903,34 +927,62 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `read_attachment` | `cards:read` | One file by `attachment_id`. A text file answers as numbered lines by `read_document`'s rule: at most 60 000 characters a page, `lines`, `text` and `continue_from` (the next `start_line`); a file whose bytes are not UTF-8 is refused with `422 attachment_not_text` naming it. Any other file answers its metadata, `text: false` and `download`, the route that answers its bytes with the same key; no tool answer carries a binary file |
 | `search_tickets` | `cards:read` | Tickets by words in one Loop, a board's open Loops or every active board, each with board, Loop key, key and column |
 | `list_tickets` | `cards:read`, `loops:read` | Which Tickets there are and where each stands, never what one says: id, key, title, Loop key, column, Phase, `state`, `workplace`, `human_action_required`, assignee and `completed` (`fields: brief` keeps id, key and title). Column by column, then by Phase and key. Filters: `loop_id` (an id or a key), `column` (names), `assignee` (`me`, `none` or an id), `phase`, `state` (one or more of `ready`, `needs_input`, `blocked`), `workplace`, `waiting_for`, `needs_person`, `human_action_required`, `label`, `priority`, `due_before`, `overdue`, `summary` (`missing` or `stale`), `query`; completed Tickets and Loops only with `include_completed`. The answer repeats the filters, maps each Loop key to its id and pages with `limit` (at most 200) and `continue_from`; an unknown column is refused with the column names there are, and an empty answer's `next_step` names the filters it applied and how to widen it. Work for a coding session: `workplace: codebase`, `state: ready`, `human_action_required: false`; what needs a person: `needs_person: true` |
-| `set_ticket_wait` | `cards:write` | Say what an open Ticket that waits for nothing now waits for (`decision`, `information`, `access` or `third_party`) and why (`reason`); the version is read for the caller. Clearing or replacing a wait is a person's act and never a tool |
 | `write_ticket_summaries` | `cards:write` | Write up to 100 Ticket summaries; each is a versioned edit that reads the version itself and retries once on a race, and each Ticket answers `written` or its refusal |
-| `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
-| `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
-| `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
-| `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
-| `write_analysis` | `loops:generate` | Hand in the worker's own analysis through the candidate route; schema errors answer one `loc: message` line each |
-| `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Both take an optional `brief`, stored as the human view instead of asking a board agent |
-| `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval |
+| `set_ticket_wait` | `cards:write` | Say what an open Ticket that waits for nothing now waits for (`decision`, `information`, `access` or `third_party`) and why (`reason`); the version is read for the caller. Clearing or replacing a wait is a person's act and never a tool |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
+| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket, in a completed, archived or cancelled Loop too (a later Loop can point back at the work it replaced); only an archived board refuses it (`409 board_archived`) |
+| `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id`. A completed, archived or cancelled Loop refuses the call whole (`409 loop_read_only`, nothing written) |
+| `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
+| `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
 | `write_note` | `loops:write` | Add a note to the Loop's log: what belongs to the Loop and to no single Ticket; refused on a completed Loop |
 | `read_notes` | `loops:read` | The Loop's notes, oldest first, a page at a time (`older` is the next `before`) |
-| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
-| `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id`. A completed, archived or cancelled Loop refuses the call whole (`409 loop_read_only`, nothing written) |
+| `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
+| `write_analysis` | `loops:generate` | Hand in the worker's own analysis through the candidate route; schema errors answer one `loc: message` line each |
+| `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
+| `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Both take an optional `brief`, stored as the human view instead of asking a board agent |
+| `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the synthesis, the positions and the structured answers |
 | `read_discussion` | `discussions:read` | Read a thread: the newest round's synthesis, each agent's position and the messages (prose with `include_prose`) |
 | `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |
 
-The flow a person and their worker use to start work is `create_loop` → `write_info` →
-`run_analysis` → the person approves the analysis → `list_tickets`/`read_ticket` to work the Tickets it
-produces. Every step stays inside the same gates: the analysis and the RoadMap are candidates until a
-signed-in person approves them, and a cancelled or completed Loop is read-only but for comments
-on its Tickets.
+The flow a person and their worker use to plan is `create_loop` → `write_info` → `write_analysis`
+(or `run_analysis`) → the person approves the analysis → `write_roadmap` (or `run_roadmap`) → the
+person approves the RoadMap, which publishes its Tickets with their keys. To work them:
+`list_tickets` → `read_ticket` → `move_ticket` and `comment_ticket` → `set_ticket_wait` when an
+answer is needed → `complete_ticket`; `create_ticket` for a follow-up outside the plan and
+`write_note` for what belongs to the Loop. Every step stays inside the same gates: the analysis and
+the RoadMap are candidates until a signed-in person approves them, and a cancelled or completed
+Loop is read-only but for comments on its Tickets. The Loop is the plan: nothing a worker plans or
+logs is a file in a repository.
 
-Deliberately absent: board and list structure changes, planned Ticket creation or archiving, RoadMap and QA
-writes, provider configuration and the approval decisions themselves.
+Deliberately absent: board and list structure changes, planned Ticket creation or archiving,
+publishing or editing an approved RoadMap, QA decisions, attaching a file, provider configuration,
+keys, and every rule-11a decision (approving or resetting a scope, editing Info once planning has
+started, confirming a human-only Ticket, clearing a Ticket's wait, accepting the implementation or
+QA, finalizing a Loop).
+
+### Work outside the plan
+
+`POST .../loops/{loop_id}/cards` in a Loop that executes a plan (`ready`, `in_progress` or
+`awaiting_qa`), and the `create_ticket` tool, add a Ticket outside the plan: it is keyed
+`<LoopKey>-UNP-<nnn>`, starts in the column it names (the tool takes the first one), never blocks a
+Phase, the plan's readiness or the Loop's completion, and is listed under `unplanned` in readiness
+and `unplanned_tickets` in `read_loop`. Accepting the implementation names the ones still open.
+A Loop that has a plan but is not executing it refuses a new Ticket with
+`409 plan_change_required`; a Loop without a plan yet takes one without a key.
+
+### Completion
+
+A Ticket is completed by an explicit completion (`PATCH .../cards/{card_id}` with `completed: true`
+and its `version`, or the `complete_ticket` tool), which passes the same readiness rules as the
+plan: an unfinished prerequisite answers `409 ticket_blocked`, an open wait `409 ticket_waiting`
+naming it, and a human-only Ticket `403 human_action_required` for a token (a person confirms it
+with `POST .../cards/{card_id}/confirm`). Work completes only while the Loop executes an approved
+plan: in another stage the answer is `409 approval_required`, or `409 plan_change_required` while
+the plan is being replaced. Moving a Ticket into a column named `Done` completes nothing. A
+completed, archived or cancelled Loop refuses a completion with `409 loop_read_only`.
 
 A tool lists **every** scope it needs, and `tools/list` hides a tool unless the token holds all of
 them — advertising a call that would fail is worse than not advertising it. Calling a tool the token
@@ -950,7 +1002,7 @@ comment. A comment holds up to 20 000 characters.
 ## Example: create a card
 
 ```http
-POST /api/v1/boards/{board_id}/cards
+POST /api/v1/boards/{board_id}/loops/{loop_id}/cards
 Authorization: Bearer trl_…
 Idempotency-Key: 5f2c1b0a
 Content-Type: application/json
