@@ -205,12 +205,20 @@ export function BoardLoopsPage() {
         </div>
       ) : null}
 
-      <LoopList loops={active} boardId={boardId} empty="This board has no active Loops yet." />
+      <div className="flex flex-col gap-2">
+        <div>
+          <h2 className="text-sm font-medium">Current Loops</h2>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Each Loop is a feature or a change someone asked for in this project.
+          </p>
+        </div>
+        <LoopList loops={active} boardId={boardId} empty="This board has no active Loops yet." />
+      </div>
 
       {finished.length > 0 ? (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium text-[var(--muted-foreground)]">Completed</h2>
+            <h2 className="text-sm font-medium text-[var(--muted-foreground)]">Completed Loops</h2>
             <Button size="sm" variant="ghost" onClick={() => setShowCompleted((value) => !value)}>
               {showCompleted ? "Hide" : "Show"}
             </Button>
