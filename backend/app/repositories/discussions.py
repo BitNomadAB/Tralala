@@ -161,6 +161,10 @@ class DiscussionRoundRepository(Protocol):
 
     def last_for_run(self, run_id: str) -> DiscussionRoundsRow | None: ...
 
+    def newest_for_thread(self, discussion_id: str) -> DiscussionRoundsRow | None:
+        """The thread's latest round over all its runs, the one whose synthesis is current."""
+        ...
+
     def add(self, row: DiscussionRoundsRow) -> None: ...
 
 

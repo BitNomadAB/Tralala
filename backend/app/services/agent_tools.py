@@ -14,8 +14,9 @@ agent for them), tracks and completes the Tickets and adds the follow-ups it fin
 a person still approves the analysis and the RoadMap, confirms human work and accepts QA.
 
 The handlers live beside this module, in ``agent_tools_read``, ``agent_tools_write``,
-``agent_tools_tickets`` and ``agent_tools_plan``, and the argument schemas in
-``agent_tools_schema``; this module holds the catalogue and the dispatch and re-exports them.
+``agent_tools_tickets``, ``agent_tools_plan`` and ``agent_tools_discussions``, among others, and
+the argument schemas in ``agent_tools_schema``; this module holds the catalogue and the dispatch and
+re-exports them.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from typing import TYPE_CHECKING
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound
 from ..schemas.loops import AnalysisPayload, PlanPayload
+from .agent_tools_discussions import ask_agents, read_discussion, reply_discussion
 from .agent_tools_documents import document_tools, read_document, read_loop
 from .agent_tools_identity import identity_tools, whoami
 from .agent_tools_listing import list_tickets, listing_tools, write_ticket_summaries
@@ -35,7 +37,6 @@ from .agent_tools_read import (
     ToolArguments,
     ToolResult,
     _read_board,
-    _read_discussion,
     _read_ticket,
     allowed_actions,
     list_boards,
@@ -53,11 +54,9 @@ from .agent_tools_schema import object_schema as _object
 from .agent_tools_schema import string_argument as _string
 from .agent_tools_tickets import comment_ticket, complete_ticket, create_ticket
 from .agent_tools_write import (
-    _ask_agents,
     _assign_ticket,
     _create_loop,
     _move_ticket,
-    _reply_discussion,
     _run_analysis,
     _run_roadmap,
     _write_info,
@@ -71,6 +70,10 @@ _BOARD_ID = _string("Board identifier from list_boards")
 _CARD_ID = _string("Ticket identifier from list_tickets or search_tickets")
 _LOOP_ID = _string("Loop identifier from read_board")
 _LOOP_REF = _string("Loop id or key (AN001), from loop_summaries or read_board")
+_INCLUDE_PROSE: ArgumentSchema = {
+    "type": "boolean",
+    "description": "Also return the prose of every structured answer; defaults to false",
+}
 
 
 def _run_arguments() -> InputSchema:
@@ -450,8 +453,10 @@ def tool_catalog() -> dict[str, AgentTool]:
         AgentTool(
             name="ask_agents",
             description=(
-                "Ask the local agents a question about one Ticket and read their answers. They "
-                "read and advise; they never change the Ticket."
+                "Ask the local agents a question about one Ticket and read their answers: each "
+                "agent's position (yes, yes_with_conditions, no, unclear) with its recommendation, "
+                "reasons and conditions, and Tralala's synthesis of the round. They read and "
+                "advise; they never change the Ticket, and a person decides."
             ),
             scopes=("discussions:write",),
             input_schema=_object(
@@ -467,26 +472,29 @@ def tool_catalog() -> dict[str, AgentTool]:
                         ),
                     },
                     "rounds": {"type": "number", "minimum": 1, "maximum": 4},
+                    "include_prose": _INCLUDE_PROSE,
                 },
                 required=["board_id", "card_id", "question"],
             ),
-            handler=_ask_agents,
+            handler=ask_agents,
         ),
         AgentTool(
             name="read_discussion",
             description=(
-                "Read one discussion thread with its messages and each agent's position. Use it "
-                "after ask_agents to re-read answers, or before replying."
+                "Read one discussion thread: Tralala's synthesis of the newest round (a "
+                "suggestion, never a decision), each agent's current position and the messages "
+                "with their structured answers. Use it after ask_agents, or before replying."
             ),
             scopes=("discussions:read",),
             input_schema=_object(
                 {
                     "board_id": _BOARD_ID,
                     "discussion_id": _string("Discussion identifier from ask_agents"),
+                    "include_prose": _INCLUDE_PROSE,
                 },
                 required=["board_id", "discussion_id"],
             ),
-            handler=_read_discussion,
+            handler=read_discussion,
         ),
         AgentTool(
             name="reply_discussion",
@@ -505,10 +513,11 @@ def tool_catalog() -> dict[str, AgentTool]:
                         "type": "boolean",
                         "description": "Start one answering round; defaults to true",
                     },
+                    "include_prose": _INCLUDE_PROSE,
                 },
                 required=["board_id", "discussion_id", "content"],
             ),
-            handler=_reply_discussion,
+            handler=reply_discussion,
         ),
     ]
     return {tool.name: tool for tool in tools}
@@ -540,18 +549,16 @@ __all__ = [
     "InputSchema",
     "ToolArguments",
     "ToolResult",
-    "_ask_agents",
     "_assign_ticket",
     "_create_loop",
     "_move_ticket",
     "_read_board",
-    "_read_discussion",
     "_read_ticket",
-    "_reply_discussion",
     "_run_analysis",
     "_run_roadmap",
     "_write_info",
     "allowed_actions",
+    "ask_agents",
     "comment_ticket",
     "complete_ticket",
     "create_ticket",
@@ -561,9 +568,11 @@ __all__ = [
     "loop_summaries",
     "map_plan_ids",
     "missing_scopes",
+    "read_discussion",
     "read_document",
     "read_loop",
     "read_notes",
+    "reply_discussion",
     "run_tool",
     "search_tickets",
     "tool_catalog",

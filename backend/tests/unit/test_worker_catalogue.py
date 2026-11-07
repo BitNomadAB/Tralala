@@ -57,6 +57,7 @@ CATALOGUE_FILES = tuple(
     SERVICES_ROOT / name
     for name in (
         "agent_tools.py",
+        "agent_tools_discussions.py",
         "agent_tools_documents.py",
         "agent_tools_identity.py",
         "agent_tools_listing.py",
@@ -146,9 +147,6 @@ UNTESTED_TOOLS: Mapping[str, str] = MappingProxyType(
             "write_info",
             "run_analysis",
             "run_roadmap",
-            "ask_agents",
-            "read_discussion",
-            "reply_discussion",
         ),
         _ON_SERVICES,
     )

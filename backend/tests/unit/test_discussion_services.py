@@ -3,8 +3,10 @@ call replaced by a scripted answer: no model, no network, no database."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import TypeIs
 
 import pytest
 
@@ -13,13 +15,16 @@ from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure
 from app.db.generated.board import DiscussionParticipantsRow, DiscussionRunsRow
 from app.schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from app.services.agents import AgentService, RoleSnapshot
+from app.services.discussion_ask import AnswerCall
 from app.services.discussions import (
     DiscussionService,
     RoleSnapshots,
     requests_agent_reply,
 )
-from app.services.orchestrator import AgentCall, Orchestrator, RoundOutcome, usage_tokens
+from app.services.orchestrator import Orchestrator, RoundOutcome, usage_tokens
 from app.services.runs import RunService, classify
+from app.services.runtime import Completion, ResponseSchema
+from app.services.runtime_tools import Message
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -51,11 +56,11 @@ def agent_service_fits(service: AgentService) -> RoleSnapshots:
     return service
 
 
-def runtime_fits() -> AgentCall:
-    """Never called: pyright proves that runtime.call_agent fits the engine's agent call."""
+def runtime_fits() -> AnswerCall:
+    """Never called: pyright proves that runtime.call_completion fits the engine's agent call."""
     from app.services import runtime
 
-    return runtime.call_agent
+    return runtime.call_completion
 
 
 class Ids:
@@ -69,12 +74,13 @@ class Ids:
 
 @dataclass
 class ScriptedAgents:
-    """Answers per agent id, in order; a missing script means the call failed."""
+    """Answers per agent id, in order; a missing script means the call failed. Every call's
+    messages and schema are kept, so a test reads what a repair asked."""
 
-    scripts: dict[str, list[Mapping[str, object]]] = field(
-        default_factory=dict[str, list[Mapping[str, object]]]
-    )
+    scripts: dict[str, list[Completion]] = field(default_factory=dict[str, list[Completion]])
     calls: list[str] = field(default_factory=list[str])
+    prompts: list[Sequence[Message]] = field(default_factory=list[Sequence[Message]])
+    schemas: list[ResponseSchema | None] = field(default_factory=list[ResponseSchema | None])
 
     def __call__(
         self,
@@ -82,26 +88,48 @@ class ScriptedAgents:
         agent_row: dict[str, object],
         *,
         system_prompt: str,
-        messages: list[dict[str, str]],
-    ) -> Mapping[str, object]:
-        del settings, system_prompt, messages
+        messages: Sequence[Message],
+        response_schema: ResponseSchema | None,
+    ) -> Completion:
+        del settings, system_prompt
         agent_id = str(agent_row["id"])
         self.calls.append(agent_id)
+        self.prompts.append(messages)
+        self.schemas.append(response_schema)
         script = self.scripts.get(agent_id) or []
         if not script:
-            return {"ok": False, "error": "unreachable"}
+            return {"ok": False, "error": "unreachable", "text": "", "tool_calls": []}
         return script.pop(0)
 
 
-def answer(text: str, verdict: str = "agree", tokens: int = 10) -> Mapping[str, object]:
+def said(text: str, tokens: int = 10) -> Completion:
+    """A provider's answer with this text."""
     return {
         "ok": True,
+        "error": None,
         "text": text,
-        "verdict": verdict,
-        "justification": "because",
+        "tool_calls": [],
         "model": "m",
         "usage": {"total_tokens": tokens},
     }
+
+
+def answer(
+    text: str, position: str = "yes", tokens: int = 10, **fields: object
+) -> Completion:
+    """An answer in the standard: the position, a recommendation and ``text`` as its reasoning."""
+    payload: dict[str, object] = {
+        "position": position,
+        "recommendation": f"Recommend: {text}",
+        "confidence": "high",
+        "reasoning": text,
+    }
+    if position == "yes_with_conditions":
+        payload["conditions"] = ["A rollback exists."]
+    if position == "unclear":
+        payload["open_questions"] = ["Who owns it?"]
+    payload.update(fields)
+    return said(json.dumps(payload), tokens)
 
 
 @dataclass
@@ -201,7 +229,7 @@ def world(*agent_ids: str, mode: str = "manual") -> World:
         object(),
         store,
         registry_store,
-        call_agent=agents,
+        call_completion=agents,
         clock=lambda: NOW,
         new_id=ids,
         monotonic=lambda: 0.0,
@@ -239,7 +267,8 @@ def test_a_round_stores_each_answer_and_vote_and_counts_its_tokens() -> None:
     outcome = round_of(w)
     assert (outcome["answers"], outcome["repeats"], outcome["tokens"]) == (2, 0, 11)
     assert [m.author_actor_id for m in w.state.discussion_messages] == ["alpha", "beta"]
-    assert [v.position for v in w.state.votes] == ["agree", "agree"]
+    assert [v.position for v in w.state.votes] == ["yes", "yes"]
+    assert [m.content for m in w.state.discussion_messages] == ["Yes.", "Agreed."]
     assert w.state.runs["run-1"].tokens_used == 11
     assert outcome["unanimous"] is True
     assert outcome["card_id"] == CARD
@@ -259,11 +288,12 @@ def test_an_answer_repeated_word_for_word_is_not_stored_again() -> None:
 def test_a_vote_is_recorded_only_when_the_position_changes() -> None:
     w = world("alpha")
     w.agents.scripts = {
-        "alpha": [answer("A", "agree"), answer("B", "agree"), answer("C", "disagree")]
+        "alpha": [answer("A", "yes"), answer("B", "yes"), answer("C", "no")]
     }
     for number in (1, 2, 3):
         round_of(w, round_number=number)
-    assert [v.position for v in w.state.votes] == ["agree", "disagree"]
+    assert [v.position for v in w.state.votes] == ["yes", "no"]
+    assert [v.justification for v in w.state.votes] == ["Recommend: A", "Recommend: C"]
 
 
 def test_a_failed_or_missing_agent_is_a_failure_not_an_answer() -> None:
@@ -342,7 +372,7 @@ def test_classify_names_why_a_round_ends_the_run() -> None:
 
 def test_a_single_round_runs_inline_and_finishes_the_run() -> None:
     w = world("alpha")
-    w.agents.scripts = {"alpha": [answer("Fine.", "disagree")]}
+    w.agents.scripts = {"alpha": [answer("Fine.", "no")]}
     summary = w.runs.start(ADA, BOARD_ID, THREAD, rounds=1, background=False)
     assert summary["run_status"] == "completed"
     assert summary["rounds_completed"] == 1
@@ -357,7 +387,11 @@ def test_consensus_ends_the_run_and_proposes_it_on_the_thread() -> None:
     w.agents.scripts = {"alpha": [answer("Yes.")]}
     w.runs.start(ADA, BOARD_ID, THREAD, rounds=1, background=False)
     assert w.state.discussions[THREAD].status == "consensus_proposed"
-    assert [o.summary for o in w.state.outcomes] == ["All participating agents agreed."]
+    assert [o.summary for o in w.state.outcomes] == ["Every participant supports going ahead."]
+    assert json.loads(w.state.outcomes[0].payload_json)["synthesis"]["suggestion"] == {
+        "verdict": "yes",
+        "reason": "Every participant supports going ahead.",
+    }
 
 
 def test_a_run_needs_participants_an_open_thread_and_no_other_active_run() -> None:
@@ -469,3 +503,121 @@ def test_a_participant_name_or_at_agents_asks_for_an_answer() -> None:
     assert requests_agent_reply("@agents go", people)
     assert requests_agent_reply("what do you think @Alpha", people)
     assert not requests_agent_reply("just a note", people)
+
+
+# --- the answer standard in a round ---------------------------------------------------------------
+
+
+def _is_mapping(value: object) -> TypeIs[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def _is_list(value: object) -> TypeIs[list[object]]:
+    return isinstance(value, list)
+
+
+def entries(value: object) -> list[Mapping[str, object]]:
+    """A thread detail's list of rows, narrowed."""
+    assert _is_list(value)
+    rows = [row for row in value if _is_mapping(row)]
+    assert len(rows) == len(value)
+    return rows
+
+
+def answered_position(message: Mapping[str, object]) -> object:
+    answer = message["answer"]
+    return answer["position"] if _is_mapping(answer) else None
+
+
+def test_a_round_asks_for_the_standard_and_stores_the_structure_beside_the_prose() -> None:
+    w = world("alpha")
+    w.agents.scripts = {"alpha": [answer("Small change.", "yes_with_conditions")]}
+    round_of(w)
+    (stored,) = w.state.discussion_messages
+    assert stored.content == "Small change."
+    assert json.loads(stored.answer_json)["conditions"] == ["A rollback exists."]
+    assert [schema and schema["name"] for schema in w.agents.schemas] == ["discussion_answer"]
+    (prompt,) = w.agents.prompts[0]
+    assert '"yes" | "yes_with_conditions" | "no" | "unclear"' in prompt["content"]
+    assert [v.position for v in w.state.votes] == ["yes_with_conditions"]
+
+
+def test_a_round_repairs_an_answer_once_and_keeps_one_that_stays_prose() -> None:
+    w = world("alpha", "beta")
+    w.agents.scripts = {
+        "alpha": [said("Verdict: AGREE", tokens=3), answer("Fixed.", tokens=4)],
+        "beta": [said("I would rather wait.", tokens=5), said("Still prose.", tokens=6)],
+    }
+    outcome = round_of(w)
+    assert w.agents.calls == ["alpha", "alpha", "beta", "beta"]
+    assert outcome["tokens"] == 18
+    alpha, beta = w.state.discussion_messages
+    assert (alpha.content, json.loads(alpha.answer_json)["format"]) == ("Fixed.", "repaired")
+    kept = json.loads(beta.answer_json)
+    assert beta.content == "I would rather wait."
+    assert (kept["format"], kept["position"]) == ("prose", "unclear")
+    assert [v.position for v in w.state.votes] == ["yes", "unclear"]
+    assert w.state.votes[1].justification == "Answered in prose only."
+    assert outcome["unanimous"] is False
+
+
+def test_the_next_participant_reads_the_earlier_answer_as_one_line_first() -> None:
+    w = world("alpha", "beta")
+    w.agents.scripts = {"alpha": [answer("Small.")], "beta": [answer("Fine.")]}
+    round_of(w)
+    (prompt,) = w.agents.prompts[1]
+    assert (
+        "[Alpha · agent] (position: yes; recommendation: Recommend: Small.)\nSmall."
+        in prompt["content"]
+    )
+
+
+def test_consensus_counts_yes_with_conditions_as_going_ahead() -> None:
+    w = world("alpha", "beta")
+    w.agents.scripts = {
+        "alpha": [answer("Go.")],
+        "beta": [answer("Go, if.", "yes_with_conditions")],
+    }
+    assert round_of(w)["unanimous"] is True
+    w = world("alpha", "beta")
+    w.agents.scripts = {"alpha": [answer("Go.")], "beta": [answer("Stop.", "no")]}
+    assert round_of(w)["unanimous"] is False
+
+
+def test_each_round_stores_its_synthesis_and_the_thread_answers_the_newest() -> None:
+    w = world("alpha", "beta")
+    w.agents.scripts = {
+        "alpha": [answer("Go."), answer("Go again.")],
+        "beta": [answer("Stop.", "no"), answer("Unsure.", "unclear")],
+    }
+    w.runs.start(ADA, BOARD_ID, THREAD, rounds=2, background=False)
+    first, second = w.state.rounds
+    assert json.loads(first.synthesis_json)["suggestion"]["reason"] == (
+        "The participants differ: 1 for going ahead, 1 against."
+    )
+    assert json.loads(second.synthesis_json)["thread_round"] == 2
+    detail = w.discussions.get(BOARD_ID, THREAD)
+    synthesis = detail["synthesis"]
+    assert isinstance(synthesis, dict)
+    assert synthesis["round_id"] == second.id
+    assert synthesis["suggestion"] == {
+        "verdict": "unclear",
+        "reason": "Beta cannot tell yet; read the open questions.",
+    }
+    stances = entries(detail["positions"])
+    assert [(s["participant"], s["position"]) for s in stances] == [
+        ("Alpha", "yes"),
+        ("Beta", "unclear"),
+    ]
+    messages = entries(detail["messages"])
+    assert [answered_position(m) for m in messages] == ["yes", "no", "yes", "unclear"]
+    assert all("answer_json" not in m for m in messages)
+
+
+def test_a_persons_message_has_no_answer_and_a_thread_without_rounds_no_synthesis() -> None:
+    w = world("alpha")
+    w.discussions.add_message(BOT, BOARD_ID, THREAD, DiscussionMessageCreate(content="Note."))
+    detail = w.discussions.get(BOARD_ID, THREAD)
+    assert detail["synthesis"] is None
+    assert detail["positions"] == []
+    assert [m["answer"] for m in entries(detail["messages"])] == [None]

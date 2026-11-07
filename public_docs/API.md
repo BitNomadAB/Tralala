@@ -590,7 +590,7 @@ Editing a template therefore changes future work and never rewrites a past discu
 | GET | `/discussions/overview` (one entrance per board, newest discussion activity first) | `boards:read` + `discussions:read` |
 | GET | `/boards/{board_id}/discussions?status=&limit=` | `discussions:read` |
 | POST | `/boards/{board_id}/discussions` | `discussions:write` |
-| GET | `/boards/{board_id}/discussions/{id}` (participants, messages, votes, runs) | `discussions:read` |
+| GET | `/boards/{board_id}/discussions/{id}` (participants, messages with their answers, positions, synthesis, votes, runs) | `discussions:read` |
 | POST | `/boards/{board_id}/discussions/{id}/messages` | `discussions:write` |
 | POST | `/boards/{board_id}/discussions/{id}/start` (runs one round inline by default) | `discussions:write` |
 | POST | `/boards/{board_id}/discussions/{id}/runs` (`202`, always background) | `discussions:write` |
@@ -645,12 +645,45 @@ A round in which every agent repeated its previous text produced no new argument
 as `no_progress` with `duplicate_answers` and cannot be read as agreement, whatever the recorded
 votes say.
 
-A position is read only from an explicit verdict — a JSON field `verdict`/`position`, a
-`Verdict: AGREE|DISAGREE|ABSTAIN` line, or a line that holds nothing else — so a sentence such as
-"I do not AGREE" counts as no vote rather than agreement, and an unreadable answer records
-`abstain`. Participants answer one after another within a round and each one is shown the answers
-already given in that round; in a `roundtable` thread consensus additionally requires that an
-earlier round produced answers, because whoever opens a thread has read nobody.
+#### The answer standard
+
+Every participant answers a round with one JSON object, and the thread stores its structure beside
+its prose:
+
+| Field | Bound | Meaning |
+| --- | --- | --- |
+| `position` | `yes`, `yes_with_conditions`, `no`, `unclear` | should the person go ahead with what the goal proposes |
+| `recommendation` | 300 characters | one sentence: what the person should do |
+| `pros` / `cons` | 5 items of 200 characters | for going ahead / against, and the risks |
+| `conditions` | 5 items of 200 characters | what must hold; at least one with `yes_with_conditions` |
+| `open_questions` | 5 items of 200 characters | what the participant cannot settle; at least one with `unclear` |
+| `confidence` | `high`, `medium`, `low` | how sure the participant is |
+| `reasoning` | 8 000 characters | the analysis in Markdown; it becomes the message's `content` |
+
+The round prompt states the standard, and an agent whose provider takes a JSON schema gets it as
+`response_format`. An answer that does not follow it is asked once more with what was wrong; one
+that still does not is kept as prose with the position `unclear`, never dropped. A message's
+`answer` is `{version, format, position, recommendation, pros, cons, conditions, open_questions,
+confidence, problem}` with `format` `structured`, `repaired` or `prose` (then `problem` says what
+was wrong), or `null` for a person's message and an answer written before the standard.
+
+A vote is recorded when a participant's position changes, with its recommendation as the
+justification; votes from before the standard read `agree` as `yes`, `disagree` as `no` and
+`abstain` as `unclear`. The thread's `positions` lists each participant's current position,
+recommendation, confidence and round. Consensus is every participant at `yes` or
+`yes_with_conditions`. Participants answer one after another within a round and each one is shown
+the answers already given in that round; in a `roundtable` thread consensus additionally requires
+that an earlier round produced answers, because whoever opens a thread has read nobody.
+
+After every round Tralala computes a `synthesis` from each participant's latest answer and stores it
+on the round; the thread answers the newest one, each run's rounds their own. It is decision
+support (`kind: decision_support`, `written_by: tralala`), never a decision: `suggestion`
+(`verdict` in the position set and `reason`), `counts`, the participants `go` (for going ahead),
+`stop` (against) and `unclear` with each one's recommendation, the `conditions` and
+`open_questions` with who named them, and who is `missing`. The suggestion is `yes` when every
+participant says `yes`, `yes_with_conditions` when every participant is for going ahead and some
+name conditions, `no` when every participant is against, and `unclear` otherwise, with the reason
+naming the split, the unclear participants or the missing answers.
 
 Posting a human message answers it automatically in `roundtable` and `autonomous` threads: the
 message starts one background round (one pass over the participants). In a `manual` thread nothing
@@ -680,7 +713,9 @@ without `EventSource`.
 Event types: `message_created`, `agent_started`, `agent_completed`, `agent_failed`, `vote_recorded`,
 `consensus_proposed`, `discussion_status_changed`, `human_review_completed`, `run_started`,
 `run_finished` and `round_completed`. Every event is committed in the same transaction as the change
-it describes, so the log is always ahead of (never behind) the stream.
+it describes, so the log is always ahead of (never behind) the stream. `message_created` carries a
+participant's `answer`, `agent_completed` its `position` and `format`, and `round_completed` the
+round's `synthesis`.
 
 ### Attachments
 
@@ -827,8 +862,8 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `read_notes` | `loops:read` | The Loop's notes, oldest first, a page at a time (`older` is the next `before`) |
 | `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`; `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id` |
-| `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the messages and positions |
-| `read_discussion` | `discussions:read` | Read a thread with its messages and each agent's position |
+| `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the synthesis, the positions and the structured answers |
+| `read_discussion` | `discussions:read` | Read a thread: the newest round's synthesis, each agent's position and the messages (prose with `include_prose`) |
 | `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |
 
 The flow a person and their worker use to start work is `create_loop` → `write_info` →

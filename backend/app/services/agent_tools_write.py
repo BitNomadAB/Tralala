@@ -9,25 +9,21 @@ routes, so authorization, version checks and workflow gates are the ones REST al
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import JsonValue
 
 from ..core.context import ActorContext
-from ..core.errors import Conflict, NotFound, ValidationFailure, VersionConflict
+from ..core.errors import NotFound, ValidationFailure, VersionConflict
 from ..schemas.cards import CardMove, CardUpdate
-from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from ..schemas.loops import GenerationRequest, InfoRevisionWrite, LoopCreate
 from .agent_tools_read import (
     ToolArguments,
     ToolResult,
     _loop_lists,
     _require,
-    _rows,
     _text,
-    _thread_view,
     _ticket_location,
 )
 
@@ -327,127 +323,11 @@ def _run_roadmap(
     }
 
 
-def _reply_discussion(
-    services: Services, actor: ActorContext, args: ToolArguments
-) -> ToolResult:
-    actor.require("discussions:write")
-    board_id = _require(args, "board_id")
-    discussion_id = _require(args, "discussion_id")
-    content = _require(args, "content")
-    detail = services.discussion.add_message(
-        actor,
-        board_id,
-        discussion_id,
-        DiscussionMessageCreate(
-            content=content, parent_message_id=_text(args.get("parent_message_id"))
-        ),
-    )
-    run: Mapping[str, object] | None = None
-    if bool(args.get("run", True)) and detail["status"] not in {"closed", "decided"}:
-        try:
-            run = services.run.start(
-                actor, board_id, discussion_id, rounds=1, autonomous=False
-            )
-        except Conflict as error:
-            # A run already active is not a failure: the message is posted and the caller can poll.
-            run = {"status": "running", "stop_reason": error.code}
-    thread = services.discussion.get(board_id, discussion_id)
-    view = _thread_view(thread)
-    view["run"] = (
-        {
-            "id": run.get("run_id"),
-            "status": run.get("run_status") or run.get("status"),
-            "stop_reason": run.get("stop_reason"),
-        }
-        if run
-        else None
-    )
-    return view
-
-
-def _ask_agents(
-    services: Services, actor: ActorContext, args: ToolArguments
-) -> ToolResult:
-    actor.require("discussions:write")
-    board_id = _require(args, "board_id")
-    card_id = _require(args, "card_id")
-    question = _require(args, "question")
-    requested = args.get("agent_ids")
-    if isinstance(requested, list) and requested:
-        participants = [str(entry) for entry in requested]
-    else:
-        participants = [entry["id"] for entry in services.agent.askable_agents(board_id)]
-    if not participants:
-        raise ValidationFailure(
-            "No agent can answer on this board. Add one in Settings -> Agents and select it on "
-            "the board.",
-            code="no_agents_available",
-        )
-    recent = [
-        *services.discussion.list(board_id, status="open", limit=50),
-        *services.discussion.list(board_id, status="discussing", limit=50),
-    ]
-    for existing in recent:
-        if (
-            existing.get("card_id") == card_id
-            and existing.get("goal") == question
-            and existing.get("created_by_actor_id") == actor.actor_id
-            and _seconds_since(str(existing["created_at"])) < DEDUPE_WINDOW_SECONDS
-        ):
-            view = _thread_view(services.discussion.get(board_id, str(existing["id"])))
-            view["deduplicated"] = True
-            return view
-    rounds = args.get("rounds")
-    thread = services.discussion.create(
-        actor,
-        board_id,
-        DiscussionCreate(
-            card_id=card_id,
-            goal=question,
-            mode="roundtable",
-            participant_ids=participants[:12],
-            max_rounds=_as_int(rounds or 1),
-        ),
-    )
-    run = services.run.start(actor, board_id, str(thread["id"]), rounds=1, autonomous=False)
-    thread = services.discussion.get(board_id, str(thread["id"]))
-    return {
-        "discussion_id": thread["id"],
-        "title": thread["title"],
-        "status": thread["status"],
-        "run": {
-            "id": run.get("run_id"),
-            "status": run.get("run_status"),
-            "stop_reason": run.get("stop_reason"),
-            "answers": run.get("answers"),
-            "failures": run.get("failures") or [],
-        },
-        "messages": [
-            {
-                "author": message["author_name"],
-                "author_type": message["author_type"],
-                "content": message["content"],
-            }
-            for message in _rows(thread["messages"])
-        ],
-        "positions": [
-            {
-                "agent": vote["display_name"],
-                "position": vote["position"],
-                "justification": vote["justification"],
-            }
-            for vote in _rows(thread.get("votes", []))
-        ],
-    }
-
-
 __all__ = [
     "DEDUPE_WINDOW_SECONDS",
-    "_ask_agents",
     "_assign_ticket",
     "_create_loop",
     "_move_ticket",
-    "_reply_discussion",
     "_resolve_list",
     "_run_analysis",
     "_run_roadmap",

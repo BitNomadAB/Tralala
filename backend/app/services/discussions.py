@@ -22,6 +22,8 @@ from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from .activity import activity_entry
 from .agents import RoleSnapshot
+from .discussion_answers import read_answer
+from .discussion_synthesis import latest_answers, positions, read_synthesis
 from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED, Event, EventService
 from .loops import ensure_ticket_writable
 from .mentions import extract_mentions
@@ -34,7 +36,8 @@ AGENT_TRIGGER = re.compile(r"(?<![\w.-])@agents?\b", re.IGNORECASE)
 
 DiscussionEntry = dict[str, object]
 """A thread as the API answers it: its columns plus counts, its ticket and, in detail, its
-participants, messages, votes and runs."""
+participants, messages (each with its structured ``answer``), the newest round's ``synthesis``,
+each participant's current ``positions``, the votes and the runs."""
 
 
 class BoardChecks(Protocol):
@@ -79,6 +82,36 @@ def _thread(repos: BoardRepositories, discussion_id: str) -> DiscussionThreadsRo
     return thread
 
 
+def message_entry(row: DiscussionMessagesRow) -> dict[str, object]:
+    """A message as the API answers it: its columns, with the stored answer read as ``answer``."""
+    entry: dict[str, object] = dict(asdict(row))
+    entry.pop("answer_json", None)
+    entry["answer"] = read_answer(row.answer_json)
+    return entry
+
+
+def detail(repos: BoardRepositories, thread: DiscussionThreadsRow) -> DiscussionEntry:
+    """What a thread's detail adds to its columns: who takes part, what was said and where each
+    participant stands, the decision support of the newest round, and the runs."""
+    participants = repos.participants.for_thread(thread.id)
+    messages = repos.messages.for_thread(thread.id)
+    newest = repos.rounds.newest_for_thread(thread.id)
+    synthesis: dict[str, object] | None = None
+    if newest is not None:
+        stored = read_synthesis(newest.synthesis_json)
+        synthesis = None if stored is None else {**stored, "round_id": newest.id}
+    runs: list[RunEntry] = recent_runs(repos, thread.id)
+    return {
+        "participants": [asdict(row) for row in participants],
+        "messages": [message_entry(row) for row in messages],
+        "positions": positions(participants, latest_answers(messages, participants)),
+        "synthesis": synthesis,
+        "votes": repos.votes.with_names(thread.id),
+        "runs": runs,
+        "active_run": next((run for run in runs if run["status"] in {"running", "paused"}), None),
+    }
+
+
 def serialize(
     repos: BoardRepositories, thread: DiscussionThreadsRow, *, with_detail: bool = False
 ) -> DiscussionEntry:
@@ -99,14 +132,7 @@ def serialize(
     entry["elapsed_ms"] = thread.elapsed_ms
     entry["run_state"] = thread.run_state or "idle"
     if with_detail:
-        entry["participants"] = [asdict(row) for row in repos.participants.for_thread(thread.id)]
-        entry["messages"] = [asdict(row) for row in repos.messages.for_thread(thread.id)]
-        entry["votes"] = repos.votes.with_names(thread.id)
-        runs: list[RunEntry] = recent_runs(repos, thread.id)
-        entry["runs"] = runs
-        entry["active_run"] = next(
-            (run for run in runs if run["status"] in {"running", "paused"}), None
-        )
+        entry.update(detail(repos, thread))
     return entry
 
 
@@ -376,6 +402,7 @@ class DiscussionService:
                     deleted_at=None,
                     round_number=0,
                     content_sha256=None,
+                    answer_json="{}",
                 )
             )
             self._log(
@@ -436,6 +463,7 @@ class DiscussionService:
                     deleted_at=None,
                     round_number=0,
                     content_sha256=None,
+                    answer_json="{}",
                 )
             )
             repos.threads.note_message(discussion_id, now=now)

@@ -166,9 +166,9 @@ _BELONGS = text("SELECT 1 FROM discussion_messages WHERE id = :id AND discussion
 _ADD_MESSAGE = text(
     "INSERT INTO discussion_messages (id, discussion_id, parent_message_id, author_actor_id, "
     "author_type, author_name, author_role, content, status, model, created_at, deleted_at, "
-    "round_number, content_sha256) VALUES (:id, :discussion_id, :parent_message_id, "
+    "round_number, content_sha256, answer_json) VALUES (:id, :discussion_id, :parent_message_id, "
     ":author_actor_id, :author_type, :author_name, :author_role, :content, :status, :model, "
-    ":created_at, :deleted_at, :round_number, :content_sha256)"
+    ":created_at, :deleted_at, :round_number, :content_sha256, :answer_json)"
 )
 
 
@@ -344,11 +344,15 @@ _LAST_ROUND = text(
     f"SELECT {_ROUNDS} FROM discussion_rounds"  # noqa: S608 - generated
     " WHERE run_id = :id ORDER BY round_number DESC LIMIT 1"
 )
+_NEWEST_ROUND = text(
+    f"SELECT {_ROUNDS} FROM discussion_rounds"  # noqa: S608 - generated
+    " WHERE discussion_id = :id ORDER BY created_at DESC, rowid DESC LIMIT 1"
+)
 _ADD_ROUND = text(
     "INSERT INTO discussion_rounds (id, discussion_id, run_id, round_number, status, answers, "
-    "failures, repeats, tokens_used, elapsed_ms, created_at, finished_at) VALUES (:id, "
-    ":discussion_id, :run_id, :round_number, :status, :answers, :failures, :repeats, "
-    ":tokens_used, :elapsed_ms, :created_at, :finished_at)"
+    "failures, repeats, tokens_used, elapsed_ms, created_at, finished_at, synthesis_json) VALUES "
+    "(:id, :discussion_id, :run_id, :round_number, :status, :answers, :failures, :repeats, "
+    ":tokens_used, :elapsed_ms, :created_at, :finished_at, :synthesis_json)"
 )
 _ADD_OUTCOME = text(
     "INSERT INTO discussion_outcomes (id, discussion_id, summary, payload_json, created_at)"
@@ -413,6 +417,10 @@ class SqlDiscussionRoundRepository:
 
     def last_for_run(self, run_id: str) -> DiscussionRoundsRow | None:
         row = self._connection.execute(_LAST_ROUND, {"id": run_id}).mappings().first()
+        return None if row is None else DiscussionRoundsRow.from_mapping(row)
+
+    def newest_for_thread(self, discussion_id: str) -> DiscussionRoundsRow | None:
+        row = self._connection.execute(_NEWEST_ROUND, {"id": discussion_id}).mappings().first()
         return None if row is None else DiscussionRoundsRow.from_mapping(row)
 
     def add(self, row: DiscussionRoundsRow) -> None:
