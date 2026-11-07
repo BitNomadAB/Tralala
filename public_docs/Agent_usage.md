@@ -80,13 +80,14 @@ certificate. `/llms.txt` is plain text at the same origin.
 | --- | --- | --- |
 | `whoami` | `boards:read` | your key, when it expires, what your scopes open, what you lack and what only a person decides |
 | `list_boards` | `boards:read` | the boards you may read, by name, with status and Loop count: the way in |
-| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who does it, its Tickets by what they wait for |
+| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked) |
 | `read_board` | `boards:read`, `loops:read` | a board's Loops by id and key, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | a Loop's overview (by id or key): documents' state and size, Phases, columns, newest notes |
 | `read_document` | `loops:read` | one document's text a page at a time, or the technical analysis and RoadMap as an outline |
 | `read_ticket` | `cards:read` | one Ticket in full: its summary, description, blockers and what you may do next |
 | `search_tickets` | `cards:read` | find Tickets by words: in one Loop, a board's open Loops or every active board |
-| `list_tickets` | `cards:read`, `loops:read` | which Tickets there are and where they stand, never their text; filter by column, `assignee: me`, Phase, `ready` and more, then `read_ticket` |
+| `list_tickets` | `cards:read`, `loops:read` | which Tickets there are and where they stand, never their text; filter by column, `assignee: me`, Phase, `state`, `workplace`, `needs_person` and more, then `read_ticket` |
+| `set_ticket_wait` | `cards:write` | say what a Ticket waits for (a decision, information, access or a third party) and why; a person clears it |
 | `write_ticket_summaries` | `cards:write` | write the short summaries `read_ticket` shows, up to 100 at a time |
 | `assign_ticket` | `cards:write` | assign a Ticket to a person |
 | `move_ticket` | `cards:write` | move a Ticket to another column (version-checked) |
@@ -113,7 +114,7 @@ Tools are filtered by the key's scopes, so a key without `loops:generate` does n
 ```text
 whoami                          -> what this key may do, when it expires, what only a person decides
 list_boards                     -> pick the board; its id comes from here, never from a prompt
-loop_summaries                  -> where each Loop stands, what comes next and who does it
+loop_summaries                  -> where each Loop stands, what comes next and who it waits for
 list_tickets(loop_id, filters)  -> the Tickets by key and title, e.g. assignee me or column Todo
 read_ticket                     -> read the one you chose in full, including its version
 read_loop                       -> a Loop's overview when you need its documents or Phases
@@ -134,6 +135,25 @@ dialog show. A RoadMap gives each planned Ticket its summary (`summary` on every
 `write_roadmap`); a Ticket you create takes one in `create_ticket`. `list_tickets` with
 `summary: missing` or `summary: stale` lists the ones that need one; write them with
 `write_ticket_summaries`: one or two plain sentences each, no file paths or code.
+
+A person owns every Ticket, and you are a tool in that person's session: nothing on a Ticket says
+an agent does it. A Ticket says where its work is done (`workplace`: `codebase`, `outside` or
+`unknown`) and what it waits for (`waiting_for`, with a reason), and its `state` follows on every
+read: `needs_input` (it waits for a decision, information or access), `blocked` (earlier work in
+the plan, or a third party) or `ready`. Two lists come up most:
+
+```text
+list_tickets(workplace: codebase, state: ready, human_action_required: false)
+                                -> work for a coding session, nothing to wait for
+list_tickets(needs_person: true) -> what needs a person now: an answer, or a person's task
+```
+
+When you cannot go on without an answer, `set_ticket_wait(waiting_for, reason)` says so ("I need
+this answered"); the Ticket then needs input until the person who answers clears the wait. You
+cannot clear or replace a wait, and a Ticket that waits is not completed (`409 ticket_waiting`).
+A RoadMap you hand in (`write_roadmap`) and a Ticket you create (`create_ticket`) may give
+`workplace`, `waiting_for` with `waiting_reason`, and `labels`: names the board has (an unknown one
+is refused with the names there are).
 
 To start something new together:
 
@@ -172,8 +192,8 @@ comment `Follow-up: <NEW KEY> - <title>`. Outside an execution stage the answer 
 
 ## 5. What a worker cannot do, by design
 
-- Approve an analysis or a RoadMap, confirm a human-only Ticket, accept QA, finalize a Loop — these
-  answer `403 human_action_required` even with every scope.
+- Approve an analysis or a RoadMap, confirm a human-only Ticket, clear a Ticket's wait, accept QA,
+  finalize a Loop — these answer `403 human_action_required` even with every scope.
 - Create or archive boards, change board structure, publish or edit a RoadMap, or create a
   *planned* Ticket: the plan does, after a human approves it. Work you find while executing goes
   outside the plan with `create_ticket` (below).
@@ -181,7 +201,8 @@ comment `Follow-up: <NEW KEY> - <title>`. Outside an execution stage the answer 
 - Complete a Ticket by moving it: a column named Done completes nothing. `complete_ticket` is the
   way, and it is offered in `read_ticket`'s `allowed_actions` only while the Ticket is ready, open
   and not a person's. A human-only Ticket answers `403 human_action_required` naming who confirms
-  it; an unfinished prerequisite answers `409 ticket_blocked` with the blockers. Either way your
+  it; an unfinished prerequisite answers `409 ticket_blocked` with the blockers, and an open wait
+  `409 ticket_waiting` naming it. Either way your
   summary is kept as a comment, and the refusal names its `comment_id`.
 - See or change users, credentials or agent configuration.
 

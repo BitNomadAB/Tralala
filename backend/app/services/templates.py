@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Protocol, TypedDict, TypeIs
 from uuid import uuid4
 
+from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.dates import utcnow
 from ..core.errors import Conflict, NotFound, ValidationFailure
@@ -34,6 +35,19 @@ class BoardLookup(Protocol):
 class TemplateLabel(TypedDict):
     name: str
     color: str
+
+
+# The colours the default area labels take in turn, so neighbouring areas tell apart on a card.
+AREA_COLORS = ("#2563eb", "#7c3aed", "#db2777", "#16a34a", "#dc2626", "#ea580c", "#0891b2")
+
+
+def default_labels(settings: Settings) -> list[TemplateLabel]:
+    """The area labels (``TRALALA_DEFAULT_LABELS``) a board created without a template starts
+    with: where its work belongs (Development, UX, QA, Legal, ...), never who does it."""
+    return [
+        {"name": name, "color": AREA_COLORS[index % len(AREA_COLORS)]}
+        for index, name in enumerate(dict.fromkeys(settings.label_names))
+    ]
 
 
 class TemplateEntry(TypedDict):

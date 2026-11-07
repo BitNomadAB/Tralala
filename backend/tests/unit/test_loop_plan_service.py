@@ -519,6 +519,9 @@ def test_a_draft_projects_its_phases_and_items_and_keeps_known_rows_creation() -
         human_instructions="Sign",
         created_at=STAMP,
         summary="",
+        workplace="unknown",
+        waiting_for="nothing",
+        waiting_reason="",
     )
     state.phases[P1] = state.phases[P1].__replace__(created_at=CREATED, is_qa_phase=1)
     state.plan_items[T1] = state.plan_items[T1].__replace__(created_at=CREATED)

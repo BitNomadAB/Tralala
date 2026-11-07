@@ -59,6 +59,36 @@ are replaced by an empty draft, and every approval that depended on them is clea
 analysis has to be generated again before a RoadMap can be. Because the text is retired rather than
 edited, the button asks for confirmation first.
 
+## Who does the work, and a Ticket's state
+
+Tralala never does the work and never looks as if it does. Its own agents keep the board in order
+and write decision support (an analysis, a RoadMap, a discussion); a person always owns a Ticket,
+and a coding agent is a tool in that person's session, not a system that picks Tickets and moves
+on by itself. So no field, label, count or text names an agent as the one who does a Ticket.
+
+Three questions stay apart, and a fourth answer is computed from them:
+
+- **Where the work is done** (`workplace`): `codebase` (in a repository, so it can be taken in a
+  coding session), `outside` (another system or the world outside) or `unknown`, which every
+  Ticket created before the field existed reads.
+- **What it waits for** (`waiting_for`): `nothing`, `decision`, `information`, `access` (a system,
+  key, account, setting or machine) or `third_party` (a supplier, a customer, a lawyer, ...), with
+  a short reason and who set it when. Anyone who may edit the Ticket sets a wait; the person who
+  answers clears it, and a Ticket that waits is not completed (`409 ticket_waiting`).
+- **Its area**: labels. A board created without a template starts with Development, Architecture,
+  UX, QA, Security, Operations, Documentation, Data, Product, Business, Economy, Legal, Support,
+  Communication and Research (`TRALALA_DEFAULT_LABELS`); existing boards keep theirs.
+- **Its state**, never stored or set by hand: `needs_input` when it waits for a decision,
+  information or access; `blocked` when an earlier Ticket, Phase or pre-Phase gate is unfinished or
+  it waits for a third party; `ready` otherwise. `needs_input` wins over `blocked`, because a person
+  can answer now. A completed Ticket has none.
+
+`human_action_required` stays apart: it says the task itself is a person's, and such a Ticket can
+be ready. Two lists follow: work for a coding session (`workplace` codebase, `state` ready, not a
+person's task), and what needs a person (`needs_person`: needs input, or ready and a person's task).
+The RoadMap gives each planned Ticket its starting workplace, wait and labels; the plan describes,
+it never assigns.
+
 ## Approval boundaries
 
 | Action | Who | Endpoint |
@@ -68,6 +98,7 @@ edited, the button asks for confirmation first.
 | Approve or reject RoadMap (publishes Tickets) | Signed-in person | `POST …/reviews/roadmap` |
 | Reset a scope: clears the documents and any approval behind them | Signed-in person | `POST …/reviews/{scope}/reset` |
 | Confirm a human-only Ticket | Signed-in person | `POST …/cards/{card_id}/confirm` |
+| Clear (or replace) a Ticket's wait | Signed-in person | `POST …/cards/{card_id}/wait/clear` |
 | Accept implementation | Signed-in person | `POST …/completion` |
 | Accept QA and finalize | Signed-in person | `POST …/qa/decision` |
 
@@ -167,7 +198,8 @@ change an existing key.
 ## Readiness and human gates
 
 `GET …/readiness` returns every Phase with its state (`pending`, `active`, `complete`) and every
-planned Ticket with `ready`, `blockers`, `human_action_required` and `downstream_phase_numbers`.
+planned Ticket with `ready`, `blockers`, `human_action_required`, `downstream_phase_numbers`,
+`workplace`, `waiting_for` and `state`.
 
 A Phase is entered when its prerequisite Phases are complete, its prerequisite Tickets are
 completed and its own pre-phase gates are confirmed. A gate is available as soon as its own

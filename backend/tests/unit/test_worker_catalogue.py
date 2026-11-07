@@ -66,6 +66,7 @@ CATALOGUE_FILES = tuple(
         "agent_tools_write.py",
         "agent_tools_plan.py",
         "agent_tools_tickets.py",
+        "agent_tools_work.py",
     )
 )
 COMPOSITION_ROOT = SERVICES_ROOT / "__init__.py"
@@ -102,6 +103,14 @@ HUMAN_DECISIONS: tuple[HumanDecision, ...] = (
     HumanDecision("editing Info", ("edit_info", "update_info", "replace_info", "set_info"), ()),
     HumanDecision(
         "confirming a human-only Ticket", ("confirm",), ("LoopService.confirm_human_ticket",)
+    ),
+    # A token sets a wait on a Ticket that waits for nothing (set_ticket_wait); replacing one
+    # clears the old, which TicketWorkService.set_wait refuses to a token itself (unit-tested in
+    # test_ticket_work.py).
+    HumanDecision(
+        "clearing a Ticket's wait",
+        ("clear", "unblock", "resolve_wait"),
+        ("TicketWorkService.clear_wait",),
     ),
     HumanDecision(
         "accepting implementation or QA",

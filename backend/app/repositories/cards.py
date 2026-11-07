@@ -24,6 +24,11 @@ CARD_EDITABLE: Final = (
     "assignee_name",
     "assigned_at",
     "assigned_by_actor_id",
+    "workplace",
+    "waiting_for",
+    "waiting_reason",
+    "waiting_set_at",
+    "waiting_set_by",
     "version",
     "updated_at",
 )
@@ -53,6 +58,11 @@ class CardChanges(TypedDict, total=False):
     assignee_name: str | None
     assigned_at: str | None
     assigned_by_actor_id: str | None
+    workplace: str
+    waiting_for: str
+    waiting_reason: str
+    waiting_set_at: str | None
+    waiting_set_by: str | None
     version: int
     updated_at: str
 

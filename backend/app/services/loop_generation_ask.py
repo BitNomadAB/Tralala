@@ -19,7 +19,13 @@ from pydantic import ValidationError
 
 from ..core.errors import ValidationFailure
 from ..db.generated.registry import AgentsRow
-from .loop_generation_prompts import JsonObject, parse_output, response_schema_for, user_message
+from .loop_generation_prompts import (
+    JsonObject,
+    context_labels,
+    parse_output,
+    response_schema_for,
+    user_message,
+)
 from .loop_generation_report import error_details
 from .loop_generation_runs import Outcome
 from .loop_generation_trace import RunTrace, clip, note
@@ -129,7 +135,7 @@ def generate(
     for attempt in range(MAX_REPAIRS + 1):
         note(trace, "writing", f"The model answered ({len(text)} characters)")
         try:
-            payload = parse_output(purpose, text)
+            payload = parse_output(purpose, text, labels=context_labels(captured))
             note(trace, "checking", "The answer follows the schema and the rules")
             return Outcome(payload=payload, usage=usage, model=model_name)
         except (ValueError, ValidationError, ValidationFailure) as exc:

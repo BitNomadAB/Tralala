@@ -7,10 +7,11 @@ structures, so a model cannot invent, omit or reorder work only in the summary v
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, get_args
+from typing import Annotated, Literal, Self, get_args
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
+from .cards import WaitingFor, WaitingReason, Workplace, wait_needs_reason
 from .common import Id, LongText, Name, OutModel, Priority, StrictModel, Summary
 
 DocumentKind = Literal["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"]
@@ -154,11 +155,27 @@ class PlanTicket(StrictModel):
     human_instructions: LongText = ""
     note: LongText = ""
     priority: Priority = "none"
+    # Where the work is done and what it waits for describe the work and assign nothing.
+    workplace: Workplace = Field(default="unknown", description="codebase, outside or unknown")
+    waiting_for: WaitingFor = Field(
+        default="nothing", description="nothing, decision, information, access or third_party"
+    )
+    waiting_reason: WaitingReason = Field(default="", description="What is needed, with a wait")
+    labels: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Area labels, by the names the board has (context.labels)",
+    )
 
     @field_validator("human_action_reason", "human_instructions")
     @classmethod
     def _strip(cls, value: str) -> str:
         return value.strip()
+
+    @model_validator(mode="after")
+    def _reason(self) -> Self:
+        wait_needs_reason(self.waiting_for, self.waiting_reason)
+        return self
 
 
 class PlanPhase(StrictModel):
@@ -291,6 +308,11 @@ class PlanItemOut(OutModel):
     ready: bool = True
     blockers: list[dict[str, object]] = Field(default_factory=list[dict[str, object]])
     human_action_required: bool = False
+    workplace: str = "unknown"
+    waiting_for: str = "nothing"
+    state: str | None = Field(
+        default=None, description="ready, needs_input or blocked; null once completed"
+    )
 
 
 class PhaseOut(OutModel):
@@ -324,6 +346,9 @@ class UnplannedTicketOut(OutModel):
     title: str
     completed_at: str | None = None
     archived_at: str | None = None
+    workplace: str = "unknown"
+    waiting_for: str = "nothing"
+    state: str | None = None
 
 
 class ReadinessOut(OutModel):

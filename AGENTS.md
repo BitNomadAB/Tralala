@@ -61,11 +61,12 @@ message broker.
 10. **No new infrastructure** without a documented decision in `docs/decisions/` (a local, untracked
     working document) that proves a requirement.
 11a. **Planning decisions are human decisions.** Approving analysis or a RoadMap, resetting a scope,
-    editing Info, confirming a human-only Ticket, accepting implementation or QA, and finalizing a
-    Loop reject agent tokens (`403 human_action_required`) regardless of scope, and are never
-    registered as WebMCP tools. Approvals bind to exact document revision ids; a changed input
-    invalidates them. A reset supersedes the approval and replaces the scope's documents with an empty
-    draft, so nothing downstream executes against text nobody stands behind.
+    editing Info, confirming a human-only Ticket, clearing a Ticket's wait, accepting implementation
+    or QA, and finalizing a Loop reject agent tokens (`403 human_action_required`) regardless of
+    scope, and are never registered as WebMCP tools. Approvals bind to exact document revision ids;
+    a changed input invalidates them. A reset supersedes the approval and replaces the scope's
+    documents with an empty draft, so nothing downstream executes against text nobody stands behind.
+    A token may set a wait on a Ticket that waits for nothing; the person who answers it clears it.
 11b. **Completed Loops are read-only.** Finalization writes an immutable, hashed snapshot to
     `loop_history` in the same transaction and blocks every mutation path afterwards.
 11. **Role templates and agents are separate resources.** `role_templates` holds the shared,

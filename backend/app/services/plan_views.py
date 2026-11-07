@@ -13,6 +13,7 @@ from pydantic import JsonValue
 
 from ..db.generated.board import LoopsRow
 from ..repositories.board import BoardRepositories
+from .ticket_state import TicketState, ticket_state
 
 
 class Blocker(TypedDict):
@@ -51,6 +52,10 @@ class ReadinessItem(TypedDict):
     blockers: list[Blocker]
     human_action_required: bool
     downstream_phase_numbers: list[int]
+    workplace: str
+    waiting_for: str
+    state: TicketState | None
+    """ready, needs_input or blocked from the card's wait and the blockers (``ticket_state``)."""
 
 
 class PhaseView(TypedDict):
@@ -97,6 +102,10 @@ class UnplannedTicket(TypedDict):
     title: str
     completed_at: str | None
     archived_at: str | None
+    workplace: str
+    waiting_for: str
+    state: TicketState | None
+    """Outside the plan nothing blocks it: only its own wait can (``ticket_state``)."""
 
 
 class LoopReadiness(Readiness):
@@ -117,6 +126,13 @@ def unplanned_tickets(repos: BoardRepositories, loop: LoopsRow) -> list[Unplanne
             "title": card.title,
             "completed_at": card.completed_at,
             "archived_at": card.archived_at,
+            "workplace": card.workplace,
+            "waiting_for": card.waiting_for,
+            "state": ticket_state(
+                completed=card.completed_at is not None,
+                waiting_for=card.waiting_for,
+                blocked=False,
+            ),
         }
         for card in repos.cards.manual(loop.id)
     ]

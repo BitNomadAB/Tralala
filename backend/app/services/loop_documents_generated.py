@@ -247,7 +247,7 @@ def store_run_roadmap(
             "RoadMap generation requires a current approved analysis",
             code="approval_required",
         )
-    draft = plans.register_draft(repos, loop, payload, actor)
+    draft = plans.register_draft(repos, loop, payload, actor, drop_unknown_labels=True)
     canonical = draft["payload"]
     technical = write_revision(
         repos,

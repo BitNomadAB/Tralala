@@ -14,6 +14,7 @@ from ..db.generated.board import CardsRow, LabelsRow
 from ..repositories.cards import CardCounts, CardSort
 from .plan_views import Blocker, ReadinessItem
 from .subresources import ChecklistEntry, CommentEntry, LabelEntry, label_entries
+from .ticket_state import TicketState, needs_person, ticket_state
 from .ticket_summaries import summary_stale
 
 
@@ -52,6 +53,11 @@ class CardRecord(TypedDict):
     human_confirmed_at: str | None
     human_confirmed_by_actor_id: str | None
     plan_revision_id: str | None
+    workplace: str
+    waiting_for: str
+    waiting_reason: str
+    waiting_set_at: str | None
+    waiting_set_by: str | None
 
 
 class CardEntry(CardRecord):
@@ -64,11 +70,14 @@ class CardEntry(CardRecord):
     comment_count: int
     human_action_required: bool
     ready: bool
+    """No blocker in the plan; ``state`` also counts the Ticket's own wait."""
     blockers: list[Blocker]
     downstream_phase_numbers: list[int]
     acceptance_criteria: JsonValue
     expected_evidence: JsonValue
     phase_number: int | None
+    state: TicketState | None
+    needs_person: bool
     # The card route adds these when the request asks for them (``?include=``).
     checklists: NotRequired[list[ChecklistEntry]]
     comments: NotRequired[list[CommentEntry]]
@@ -132,6 +141,11 @@ def card_record(row: CardsRow) -> CardRecord:
         "human_confirmed_at": row.human_confirmed_at,
         "human_confirmed_by_actor_id": row.human_confirmed_by_actor_id,
         "plan_revision_id": row.plan_revision_id,
+        "workplace": row.workplace,
+        "waiting_for": row.waiting_for,
+        "waiting_reason": row.waiting_reason,
+        "waiting_set_at": row.waiting_set_at,
+        "waiting_set_by": row.waiting_set_by,
     }
 
 
@@ -147,6 +161,12 @@ def card_entry(
         human_action_required = bool(item["human_action_required"])
     else:
         human_action_required = row.required_actor == "human" and row.completed_at is None
+    blockers = item["blockers"] if item is not None else []
+    state = ticket_state(
+        completed=row.completed_at is not None,
+        waiting_for=row.waiting_for,
+        blocked=item is not None and not item["ready"],
+    )
     return {
         **card_record(row),
         "board_id": board_id,
@@ -156,11 +176,13 @@ def card_entry(
         "comment_count": counts.comment_count,
         "human_action_required": human_action_required,
         "ready": bool(item["ready"]) if item is not None else True,
-        "blockers": item["blockers"] if item is not None else [],
+        "blockers": blockers,
         "downstream_phase_numbers": item["downstream_phase_numbers"] if item is not None else [],
         "acceptance_criteria": item["acceptance_criteria"] if item is not None else [],
         "expected_evidence": item["expected_evidence"] if item is not None else [],
         "phase_number": item["phase_number"] if item is not None else None,
+        "state": state,
+        "needs_person": needs_person(state, human_action_required=human_action_required),
     }
 
 

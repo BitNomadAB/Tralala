@@ -89,6 +89,7 @@ from .loops_views import (
     qa_summary,
 )
 from .plan_views import LoopReadiness, PlanView, PlanViews, unplanned_tickets
+from .ticket_state import ensure_not_waiting
 
 if TYPE_CHECKING:
     from .cards import CardEntry
@@ -394,6 +395,7 @@ class LoopService:
                     details={"ticket_id": card_id},
                 )
             ensure_execution_allowed(loop)
+            ensure_not_waiting(card)
             item = readiness_item(self.plans.readiness(repos, loop), card_id)
             if item is not None and not item["ready"]:
                 raise Conflict(

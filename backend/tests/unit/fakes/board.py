@@ -348,6 +348,11 @@ def card_row(
         summary="",
         summary_source="",
         summary_basis_sha256="",
+        workplace="unknown",
+        waiting_for="nothing",
+        waiting_reason="",
+        waiting_set_at=None,
+        waiting_set_by=None,
     )
 
 
@@ -502,6 +507,9 @@ def plan_item_row(item_id: str, loop_id: str, plan_id: str, phase_id: str) -> Lo
         human_instructions="",
         created_at=CREATED,
         summary="",
+        workplace="unknown",
+        waiting_for="nothing",
+        waiting_reason="",
     )
 
 
@@ -1097,7 +1105,13 @@ class FakeLoopPlanItemRepository:
             # LEFT JOIN cards: one row per card published from the item, or one without a card.
             cards = [card for card in self._state.cards.values() if card.plan_item_id == item.id]
             found += [
-                PlannedItem(item=item, card_id=card.id, completed_at=card.completed_at)
+                PlannedItem(
+                    item=item,
+                    card_id=card.id,
+                    completed_at=card.completed_at,
+                    waiting_for=card.waiting_for,
+                    workplace=card.workplace,
+                )
                 for card in cards
             ] or [PlannedItem(item=item, card_id=None, completed_at=None)]
         return found

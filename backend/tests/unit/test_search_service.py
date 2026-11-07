@@ -250,6 +250,11 @@ def test_a_hit_carries_its_card_its_loop_its_labels_and_its_counts() -> None:
         "summary_stale",
     ]
     assert list(hit)[32:] == [
+        "workplace",
+        "waiting_for",
+        "waiting_reason",
+        "waiting_set_at",
+        "waiting_set_by",
         "board_id",
         "labels",
         "checklist_total",

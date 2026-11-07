@@ -443,6 +443,18 @@ def test_a_new_boards_loop_columns_come_from_the_request_then_the_template_then_
     assert ("template_id" in changes) is (template_id is not None)
 
 
+def test_a_board_without_a_template_starts_with_the_default_area_labels(boards: Boards) -> None:
+    """Where work belongs, never who does it; a template brings its own labels instead."""
+    entry, _ = boards.service.create(ADMIN, BoardCreate(name="Areas"))
+    state = boards.databases.states[str(entry["id"])]
+    names = sorted(label.name for label in state.labels.values())
+    assert names == sorted(boards.settings.label_names)
+    assert {"Development", "UX", "QA", "Legal", "Economy", "Research"} <= set(names)
+    assert not [name for name in names if "agent" in name.casefold()]
+    bare = boards.settings.model_copy(update={"default_labels": ""})
+    assert bare.label_names == []
+
+
 def test_an_empty_template_list_falls_back_to_the_settings_and_a_description_wins(
     boards: Boards,
 ) -> None:

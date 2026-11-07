@@ -108,6 +108,7 @@ def ask(**arguments: JsonValue) -> dict[str, JsonValue]:
 
 def done(item: ReadinessItem) -> ReadinessItem:
     item["completed_at"] = CREATED
+    item["state"] = None
     return item
 
 
@@ -157,46 +158,80 @@ def test_each_open_loop_says_what_comes_next_and_who_does_it(settings: Settings)
     assert "read-only" in str(finished["next"])
 
 
-def test_a_loop_in_delivery_counts_its_tickets_by_what_they_wait_for(settings: Settings) -> None:
+def test_a_loop_in_delivery_counts_its_tickets_by_state(settings: Settings) -> None:
     state = BoardState()
     state.cards = {
         "a": card_row("a", "todo-run", "run"),
         "b": card_row("b", "todo-run", "run"),
         "c": card_row("c", "doing-run", "run"),
+        # Outside the plan: only its own wait holds it up (a third party: blocked).
+        "u": card_row("u", "doing-run", "run").__replace__(
+            kind="manual", ticket_key="L-1-UNP-001", waiting_for="third_party"
+        ),
     }
     items = [
+        readiness_item("x", ready=False, waiting_for="decision"),
         readiness_item("a"),
         readiness_item("b", human=True),
         readiness_item("c", ready=False),
         done(readiness_item("d")),
     ]
-    world = loop_world(settings, [loop("run", "ready", 1)], items=items, state=state)
+    world = loop_world(
+        settings,
+        [loop("run", "ready", 1).__replace__(current_plan_id="plan-1")],
+        items=items,
+        state=state,
+    )
     (row,) = rows(loop_summaries(world, READER, ask()))
+    # needs_input beats blocked, and a person answers it first.
     assert (row["next"], row["waiting_on"], row["execution_allowed"]) == (
-        "1 Ticket can be worked on now.",
-        "agent",
+        "1 Ticket waits for a person's decision, information or access.",
+        "person",
         True,
     )
     assert row["tickets"] == {
-        "total": 4,
+        "ready": 2,
+        "needs_input": 1,
+        "blocked": 2,
         "completed": 1,
-        "ready_for_agent": 1,
-        "ready_for_person": 1,
-        "waiting": 1,
-        "by_column": {"Todo": 2, "Doing": 1},
+        "total": 6,
+        "needs_person": 2,
+        "by_column": {"Todo": 2, "Doing": 2},
     }
-    person_only = loop_world(settings, [loop("run", "in_progress", 1)], items=items[1:])
+    ready = loop_world(settings, [loop("run", "ready", 1)], items=items[1:])
+    (row,) = rows(loop_summaries(ready, READER, ask()))
+    assert (row["next"], row["waiting_on"]) == ("1 Ticket is ready to start.", "anyone")
+    person_only = loop_world(settings, [loop("run", "in_progress", 1)], items=items[2:])
     (row,) = rows(loop_summaries(person_only, READER, ask()))
     assert (row["next"], row["waiting_on"]) == ("1 Ticket is ready and needs a person.", "person")
-    waiting = loop_world(settings, [loop("run", "ready", 1)], items=items[2:])
+    waiting = loop_world(settings, [loop("run", "ready", 1)], items=items[3:])
     (row,) = rows(loop_summaries(waiting, READER, ask()))
     assert (row["next"], row["waiting_on"]) == (
-        "1 Ticket waits for earlier work to be done.",
+        "1 Ticket waits for earlier work or a third party.",
         "anyone",
     )
-    finished = loop_world(settings, [loop("run", "ready", 1)], items=items[3:])
+    finished = loop_world(settings, [loop("run", "ready", 1)], items=items[4:])
     (row,) = rows(loop_summaries(finished, READER, ask()))
     assert (row["waiting_on"], "accepts the implementation" in str(row["next"])) == ("person", True)
+
+
+def test_no_ticket_count_or_ticket_sentence_names_an_agent(settings: Settings) -> None:
+    """A person owns every Ticket: delivery never waits on an agent, and no count says one does
+    the work; only a document may wait on an agent (decision support)."""
+    for items in (
+        [readiness_item("a")],
+        [readiness_item("b", human=True)],
+        [readiness_item("c", ready=False)],
+        [readiness_item("x", waiting_for="access")],
+    ):
+        world = loop_world(settings, [loop("run", "in_progress", 1)], items=items)
+        (row,) = rows(loop_summaries(world, READER, ask()))
+        assert row["waiting_on"] in {"person", "anyone"}
+        assert "agent" not in str(row["next"]).casefold()
+        tickets = row["tickets"]
+        assert isinstance(tickets, Mapping)
+        assert "ready_for_agent" not in tickets
+        assert "ready_for_person" not in tickets
 
 
 def test_loop_summaries_narrows_to_a_stage_and_refuses_an_unknown_one(settings: Settings) -> None:

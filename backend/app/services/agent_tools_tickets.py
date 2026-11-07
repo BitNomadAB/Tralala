@@ -3,7 +3,9 @@
 
 ``create_ticket`` adds work a worker found while executing a Loop: outside the plan, keyed
 ``<LoopKey>-UNP-<nnn>``, never blocking readiness or completion (``CardService.create`` holds the
-rule). A follow-up names the Ticket it came from, which gets a comment pointing at it.
+rule). A follow-up names the Ticket it came from, which gets a comment pointing at it. It may say
+where the work is done, what it waits for (with a reason) and its area labels, by the names the
+board has: an unknown label is refused with the names there are, never created.
 
 A comment goes on a Ticket whether it is done or not; only a Loop or board that takes no writes
 refuses it (the service's rule).
@@ -14,7 +16,8 @@ version conflict) and comments the summary and the evidence. The comment is writ
 the Ticket can be completed: on a Ticket that is already done, and beside a refusal, so what the
 worker did is on the Ticket either way; only a Loop or board that takes no writes refuses it. The
 refusals are the service's: a human-only Ticket (the answer names who confirms it), an unfinished
-prerequisite (``ticket_blocked`` with the blockers) and a Loop that is not executing.
+prerequisite (``ticket_blocked`` with the blockers), an open wait (``ticket_waiting``, which a
+person clears) and a Loop that is not executing.
 
 ``complete_ticket`` is typed on ``TicketCompleting``, the attributes of the composition root it
 uses, so a unit test runs it with the real services on the typed fakes.
@@ -45,7 +48,13 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
 # The refusals a completion meets on a Ticket that still takes comments; any other error (a
 # read-only Loop, an archived board, a missing Ticket) passes through and nothing is written.
 REFUSALS = frozenset(
-    {"human_action_required", "ticket_blocked", "plan_change_required", "approval_required"}
+    {
+        "human_action_required",
+        "ticket_blocked",
+        "ticket_waiting",
+        "plan_change_required",
+        "approval_required",
+    }
 )
 
 
@@ -184,11 +193,20 @@ def _priority(args: ToolArguments) -> Priority:
     )
 
 
-def _retry_key(loop_id: str, title: str, description: str, priority: str, origin: str) -> str:
+def _retry_key(loop_id: str, title: str, description: str, *rest: object) -> str:
     """The idempotency key of a ``create_ticket`` call: the same Ticket asked for again by the
     same actor answers the first one instead of a second Ticket."""
-    material = json.dumps([loop_id, title, description, priority, origin])
+    material = json.dumps([loop_id, title, description, *rest])
     return "create_ticket:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:40]
+
+
+def _labels(args: ToolArguments) -> list[str]:
+    value = args.get("labels")
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValidationFailure("labels must be a list of names", details={"argument": "labels"})
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 def create_ticket(
@@ -211,13 +229,23 @@ def create_ticket(
     columns = services.list.list(board_id, loop_id)
     if not columns:
         raise ValidationFailure("The Loop has no column to add a Ticket to")
+    work = {
+        "workplace": _text(args.get("workplace")) or "unknown",
+        "waiting_for": _text(args.get("waiting_for")) or "nothing",
+        "waiting_reason": _text(args.get("waiting_reason")) or "",
+    }
+    labels = _labels(args)
     try:
-        payload = CardCreate(
-            list_id=columns[0]["id"],
-            title=title,
-            description=description,
-            summary=summary,
-            priority=priority,
+        payload = CardCreate.model_validate(
+            {
+                "list_id": columns[0]["id"],
+                "title": title,
+                "description": description,
+                "summary": summary,
+                "priority": priority,
+                "labels": labels,
+                **work,
+            }
         )
     except ValidationError as error:
         raise ValidationFailure(
@@ -228,7 +256,10 @@ def create_ticket(
         board_id,
         loop_id,
         payload,
-        idempotency_key=_retry_key(loop_id, title, description, priority, origin_id or ""),
+        idempotency_key=_retry_key(
+            loop_id, title, description, priority, origin_id or "", work, labels
+        ),
+        known_labels_only=True,
     )
     card = services.card.get(board_id, loop_id, str(created["id"]))
     answer: ToolResult = {
@@ -238,6 +269,9 @@ def create_ticket(
             "title": card["title"],
             "column": columns[0]["name"],
             "version": card["version"],
+            "state": card["state"],
+            "workplace": card["workplace"],
+            "labels": [label["name"] for label in card["labels"]],
         },
         "unplanned": card["ticket_key"] is not None,
     }
