@@ -34,3 +34,6 @@ playwright-report/
 docs/decisions/
 analysis/
 .ralph/
+
+# Claude Code agent worktrees live here while agents build in parallel; never tracked
+.claude/worktrees/
