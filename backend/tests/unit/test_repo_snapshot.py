@@ -32,6 +32,7 @@ from app.services.repo_snapshot import (
     select_members,
 )
 from app.services.repositories import RepositoryEntry
+from app.services.repository_problems import problem_text
 from tests.unit.fakes.archives import FakeArchiveFiles
 
 SHA = "abc123def456abc123def456abc123def456abcd"
@@ -609,3 +610,46 @@ def test_a_fetch_read_as_a_snapshot_is_the_snapshot_of_the_board(github: GitHub)
         "board-1", budget_chars=10_000
     )
     assert len(seen) == requests * 2  # for_board fetched again; snapshot_of did not
+
+
+# --- a read that failed says so (PLN-012) ------------------------------------------------------
+
+
+def test_a_repository_the_host_will_not_show_carries_the_sentence_a_person_reads(
+    github: GitHub,
+) -> None:
+    github(_github_serving({}))
+    (entry,) = RepositorySnapshotService(Repositories("app")).for_board("board-1")
+    assert entry.get("error") == "not_found"
+    # Read without a key: a private repository looks like a missing one, and the sentence says so.
+    assert entry.get("problem") == problem_text("not_found", "app", has_token=False)
+
+
+@pytest.mark.parametrize(
+    ("files", "focus", "code"),
+    [
+        ({}, (), "empty_archive"),
+        ({"node_modules/x/index.js": b"x", "logo.png": b"png", "pnpm-lock.yaml": b"l"}, (), None),
+        ({"README.md": b"# App", "src/app.py": b"x = 1"}, ("lib/**",), "paths_match_nothing"),
+        ({"README.md": b"# App"}, ("src",), "paths_match_nothing"),
+    ],
+)
+def test_a_snapshot_with_nothing_to_read_is_a_failed_read_that_names_why(
+    files: dict[str, bytes], focus: tuple[str, ...], code: str | None
+) -> None:
+    fetched = repo_snapshot.FetchedRepository(
+        {"id": "repo-app", "name": "app", "commit_sha": SHA}, _tarball(files), focus
+    )
+    (entry,) = RepositorySnapshotService(Repositories()).snapshot_of([fetched])
+    expected = code or "nothing_readable"
+    assert entry.get("error") == expected
+    assert entry.get("problem") == problem_text(expected, "app")
+    assert "files" not in entry
+
+
+def test_a_snapshot_with_files_is_never_marked_empty() -> None:
+    fetched = repo_snapshot.FetchedRepository(
+        {"id": "repo-app", "name": "app", "commit_sha": SHA}, _tarball({"README.md": b"# App"})
+    )
+    (entry,) = RepositorySnapshotService(Repositories()).snapshot_of([fetched])
+    assert "error" not in entry and entry.get("file_count") == 1

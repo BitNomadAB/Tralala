@@ -25,6 +25,8 @@ from typing import Final, Literal, NotRequired, Protocol, TypedDict
 
 from pydantic import JsonValue
 
+from .repository_problems import error_fields
+
 type Stage = Literal["documents", "repository", "writing", "checking", "saving"]
 type StepKind = Literal["step", "tool", "note", "repair", "limit", "error"]
 
@@ -207,10 +209,9 @@ def documents_step(context: Mapping[str, JsonValue]) -> str:
 
 def snapshot_step(entry: Mapping[str, JsonValue], reason: str) -> str:
     """What the fixed snapshot of one repository sent, and why the run sent one."""
+    if entry.get("error"):
+        return repository_unreadable(entry)
     name = f"{entry.get('name')}{_at(entry)}"
-    error = entry.get("error")
-    if isinstance(error, str):
-        return f"Could not read {name}: {error}"
     sent = entry.get("file_count")
     manifest = entry.get("manifest")
     listed = len(manifest) if isinstance(manifest, list) else 0
@@ -223,7 +224,27 @@ def snapshot_step(entry: Mapping[str, JsonValue], reason: str) -> str:
 
 
 def repository_unreadable(entry: Mapping[str, JsonValue]) -> str:
-    return f"Could not read {entry.get('name')}{_at(entry)}: {entry.get('error')}"
+    """A repository the run could not read, in the words of ``repository_problems``: what went
+    wrong and what to do (an ``error`` step, so the stage never shows as done)."""
+    sha = entry.get("commit_sha")
+    at = f" (commit {sha[:8]})" if isinstance(sha, str) and sha else ""
+    return f"{error_fields(entry).get('problem', 'Could not read the repository')}{at}"
+
+
+def unread_summary(entries: Sequence[JsonValue]) -> tuple[StepKind, str] | None:
+    """After the repositories: a step when one or all of them could not be read, so the stage says
+    what the run goes on without. None when every repository was read, or none is linked."""
+    named = [entry for entry in entries if isinstance(entry, dict)]
+    unread = [str(entry.get("name")) for entry in named if entry.get("error")]
+    if not unread:
+        return None
+    if len(unread) == len(named):
+        return (
+            "error",
+            "No code was read: the run goes on from the Loop's documents alone, and an analysis "
+            "says so. Fix what the step above names, then run it again to base it on the code",
+        )
+    return "limit", f"Not read: {_join(unread)}; the run goes on with the rest of the code"
 
 
 def workspace_step(name: str, commit_sha: str, files: int, text_bytes: int, left_out: int) -> str:

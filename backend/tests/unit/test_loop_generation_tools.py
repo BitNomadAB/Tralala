@@ -36,6 +36,7 @@ from app.services.loop_generation_trace import counts_of, documents_step, parse_
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_plans import LoopPlanService
 from app.services.repo_snapshot import FetchedRepository
+from app.services.repository_problems import problem_text
 from app.services.runtime import Completion, ResponseSchema
 from app.services.runtime_tools import ChatMessage, Message, ToolCall, ToolChoice, ToolDefinition
 from tests.unit.fakes.board import (
@@ -500,7 +501,7 @@ def test_with_nothing_readable_the_run_says_so_once_and_sends_no_tools() -> None
     w.repositories.entries = [{"id": "repo-1", "name": "app", "error": "unreachable"}]
     start(w)
     assert w.provider.seen[0].tools == []
-    assert w.texts().count("Could not read app: unreachable") == 1
+    assert w.texts("error").count(problem_text("unreachable", "app")) == 1
 
 
 # --- the pieces ----------------------------------------------------------------------------------

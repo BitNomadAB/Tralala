@@ -1,3 +1,4 @@
+import { repositoryProblem } from "@/lib/runPhases";
 import { describeRunReading } from "@/lib/runTrace";
 import type { GenerationRun, GenerationRunRepository } from "@/lib/types";
 
@@ -28,20 +29,23 @@ function staleness(repository: GenerationRunRepository): string {
   return ` (stale mirror from ${repository.fetched_at ?? "an earlier fetch"})`;
 }
 
-/** What a repository that could not be read means for the person reading the run. */
-const REPOSITORY_ERROR_TEXT: Readonly<Record<string, string>> = {
-  rate_limited: "GitHub's limit of 60 calls an hour without a token was reached; a token raises it",
-  unauthorized: "the token was rejected; it may have expired",
-};
-
+/**
+ * "app @ 1a2b3c4d, 12 files", or for a run that could not read the code what it was written without
+ * and why, in the server's sentence: "no code — written without the repository (The key cannot see
+ * app: give it read access to the repository's contents)".
+ */
 export function describeRunRepositories(run: GenerationRun): string | null {
   const value = run.source_revisions.repositories;
   if (!Array.isArray(value)) return null;
   const repositories = value;
   if (repositories.length === 0) return "no enabled repository linked to this board";
+  if (repositories.every((repository) => Boolean(repository.error))) {
+    const problems = repositories.map(repositoryProblem).join("; ");
+    return `no code — written without the repository (${problems})`;
+  }
   const described = repositories.map((repository) =>
     repository.error
-      ? `${repository.name} (unavailable: ${REPOSITORY_ERROR_TEXT[repository.error] ?? repository.error})`
+      ? `${repository.name} — not read (${repositoryProblem(repository)})`
       : `${repository.name} @ ${(repository.commit_sha ?? "").slice(0, 8)}, ${readSize(repository)}${staleness(repository)}`,
   );
   // A model that read through tools: what it actually read, not what it could have.

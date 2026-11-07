@@ -37,10 +37,18 @@ from .loop_generation_prompts import (
     without_drafts,
 )
 from .loop_generation_report import Ended, log_finished
-from .loop_generation_trace import RunTrace, note, parse_steps, snapshot_step
+from .loop_generation_trace import (
+    RunTrace,
+    StepKind,
+    note,
+    parse_steps,
+    snapshot_step,
+    unread_summary,
+)
 from .loop_links import LoopWorkflowLinks
 from .loops import ensure_writable, refresh_stage, require_loop
 from .repo_snapshot import FetchedRepository
+from .repository_problems import error_fields, unread_notice
 
 logger = logging.getLogger("tralala.loop_generation")
 
@@ -63,6 +71,8 @@ _RUN_HIDDEN = (
 # What a repository read through tools says besides the snapshot's fields: how it was read, and
 # how many files the workspace could not hold.
 _READING_FIELDS = ("reading", "left_out")
+# An analysis written without any code has no baseline revision, whatever the model wrote.
+NO_REVISION = "none: the code was not read"
 
 
 class RepositorySnapshots(Protocol):
@@ -131,7 +141,7 @@ def _public_sources(sources: JsonValue) -> JsonValue:
                 "truncated": bool(item.get("truncated")),
                 **_budget_fields(item),
                 **{name: item[name] for name in _READING_FIELDS if name in item},
-                **({"error": item["error"]} if item.get("error") else {}),
+                **error_fields(item),
             }
             for item in repositories
             if isinstance(item, dict)
@@ -257,7 +267,7 @@ def attach_repositories(
             "truncated": bool(entry.get("truncated")),
             **_budget_fields(entry),
             "files": _paths(entry.get("files", [])),
-            **({"error": entry["error"]} if entry.get("error") else {}),
+            **error_fields(entry),
         }
         for entry in entries
     ]
@@ -267,7 +277,11 @@ def attach_repositories(
     captured["source_revisions"] = sources
     captured["repository_reading"] = "snapshot"
     for entry in entries:
-        note(trace, "repository", snapshot_step(entry, reason))
+        kind: StepKind = "error" if entry.get("error") else "step"
+        note(trace, "repository", snapshot_step(entry, reason), kind)
+    summary = unread_summary(repositories)
+    if summary is not None:
+        note(trace, "repository", summary[1], summary[0])
     if not entries:
         note(trace, "repository", "No enabled repository is linked to this board; no code was read")
     write_input(board_id, loop_id, run_id, captured, sources, store=store)
@@ -303,6 +317,23 @@ def write_input(
 def _included(entry: Mapping[str, JsonValue]) -> int:
     value = entry.get("snapshot_chars_included")
     return value if isinstance(value, int) else 0
+
+
+def with_unread_notice(payload: AnalysisPayload, captured: JsonObject) -> AnalysisPayload:
+    """The analysis as it is saved: when a repository could not be read, its first open question
+    says so, whatever the model wrote, and with no code read at all there is no baseline revision.
+    The run's own output stays the model's answer."""
+    context = captured.get("context")
+    repositories = context.get("repositories") if isinstance(context, dict) else None
+    notice = unread_notice(repositories)
+    if notice is None:
+        return payload
+    questions = [notice, *(item for item in payload.open_questions if item != notice)][:50]
+    read = isinstance(repositories, list) and any(
+        isinstance(entry, dict) and not entry.get("error") for entry in repositories
+    )
+    revision = payload.repository_revision if read else NO_REVISION
+    return payload.model_copy(update={"open_questions": questions, "repository_revision": revision})
 
 
 def promote(
@@ -381,7 +412,7 @@ def _promote_run(
         outputs = documents.store_generated_analysis(
             repos,
             loop,
-            AnalysisPayload.model_validate(payload),
+            with_unread_notice(AnalysisPayload.model_validate(payload), captured),
             _system_actor(row),
             run_id=run_id,
             provenance=provenance,

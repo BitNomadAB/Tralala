@@ -256,7 +256,10 @@ export interface GenerationRunRepository {
   reading?: "tools";
   /** Files too large for the workspace (a run that read through tools). */
   left_out?: number;
+  /** Why it could not be read, as a code (`not_found`). */
   error?: string;
+  /** The same in a sentence a person reads, with what to do (runs since PLN-012). */
+  problem?: string;
 }
 
 /** The stages of a run's process tree, in the order a run reaches them. */

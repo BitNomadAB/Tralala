@@ -48,4 +48,12 @@ describe("RepositoryTokenGuide", () => {
     expect(screen.getByText(/One key for several repositories/)).toBeInTheDocument();
     expect(screen.getByText(/All repositories/)).toBeInTheDocument();
   });
+
+  it("says what a private repository's key needs and checks it the way a run reads", () => {
+    render(<RepositoryTokenGuide url="https://github.com/acme/rocket" />);
+    expect(screen.getByText(/pick\s+the organisation, not yourself/)).toBeInTheDocument();
+    expect(screen.getByText(/reads public\s+repositories only/)).toBeInTheDocument();
+    expect(screen.getAllByText(/repos\/acme\/rocket\/commits\/HEAD/).length).toBe(2);
+    expect(screen.getByText(/Tralala checks\s+access at once/)).toBeInTheDocument();
+  });
 });

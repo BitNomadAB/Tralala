@@ -46,10 +46,13 @@ from .loop_generation_trace import (
     clip,
     note,
     repository_unreadable,
+    unread_summary,
     workspace_step,
 )
-from .repo_snapshot import FetchedRepository
+from .repo_snapshot import FetchedRepository, log_empty
+from .repo_snapshot_select import empty_reason
 from .repo_workspace import TOOL_DEFINITIONS, RepositoryWorkspace, ToolAnswer, WorkspaceSource
+from .repository_problems import error_fields, unread
 from .runtime import Completion
 from .runtime_tools import (
     TOOLS_REFUSED,
@@ -134,7 +137,7 @@ def open_workspace(
     for item in fetched:
         if item.archive is None:
             entries.append(item.entry)
-            trace.add("repository", "step", repository_unreadable(item.entry))
+            trace.add("repository", "error", repository_unreadable(item.entry))
             continue
         manifest = next(manifests)
         entry: JsonObject = {
@@ -145,9 +148,15 @@ def open_workspace(
             "text_bytes": manifest.bytes,
             "left_out": manifest.left_out,
         }
-        if manifest.error is not None:
-            entry["error"] = manifest.error
-            trace.add("repository", "step", repository_unreadable(entry))
+        if manifest.error is None and manifest.files == 0 and manifest.left_out == 0:
+            # Nothing to read is a failed read, never a quiet empty workspace.
+            code = empty_reason(item.archive, item.focus, item.exclude)
+            log_empty(entry, code, item.started)
+            entry = unread(entry, code)
+        elif manifest.error is not None:
+            entry = unread(entry, manifest.error)
+        if entry.get("error"):
+            trace.add("repository", "error", repository_unreadable(entry))
         else:
             opened += 1
             trace.add(
@@ -162,6 +171,9 @@ def open_workspace(
                 ),
             )
         entries.append(entry)
+    summary = unread_summary(entries)
+    if summary is not None:
+        trace.add("repository", *summary)
     return entries, workspace if opened else None
 
 
@@ -207,7 +219,7 @@ def _described(entry: JsonValue) -> JsonValue:
         "left_out": left_out if isinstance(left_out, int) else 0,
         "truncated": isinstance(left_out, int) and left_out > 0,
         "files": [],
-        **({"error": entry["error"]} if entry.get("error") else {}),
+        **error_fields(entry),
     }
 
 

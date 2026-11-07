@@ -81,6 +81,12 @@ REPOSITORY_RULES = (
     "unless the request or list_files shows that it does not exist. Put what you could not "
     "establish under open_questions."
 )
+# A repository that could not be read: the model must not write as if it had read it.
+UNREAD_REPOSITORIES = (
+    "Unread repositories: an entry under context.repositories with an error could not be read; "
+    "its problem says why. You have none of its code: say so in the answer, make no claim about "
+    "that code, and put what you could not check under open_questions."
+)
 # A request whose model reads the repositories through tools (decision 0025): the model decides
 # what to read, so the request only says how and asks it to read before it concludes.
 REPOSITORY_TOOLS = (
@@ -363,6 +369,10 @@ def user_message(
         )
     elif isinstance(repositories, str):
         lines.append("Repository snapshot: no enabled repository is linked to this board.")
+    if isinstance(repositories, list) and any(
+        isinstance(entry, dict) and entry.get("error") for entry in repositories
+    ):
+        lines.append(UNREAD_REPOSITORIES)
     instructions = captured.get("instructions")
     if instructions:
         lines.append(f"Additional instructions: {instructions}")

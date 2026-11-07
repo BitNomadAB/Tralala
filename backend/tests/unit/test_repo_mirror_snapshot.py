@@ -21,6 +21,7 @@ from app.services.repo_mirror import MirrorService
 from app.services.repo_mirror_git import authorization_header
 from app.services.repo_snapshot import RepositorySnapshotService, read_snapshot
 from app.services.repositories import RepositoryEntry
+from app.services.repository_problems import problem_text
 from tests.unit.fakes.mirror import FakeGit, FakeMirrorFiles, FakeRemote
 from tests.unit.log_lines import lines
 
@@ -205,6 +206,8 @@ def test_a_repository_without_a_mirror_is_an_error_entry_and_the_next_gets_its_s
         "branch": None,
         "provider": "git_https",
         "error": "auth_failed",
+        # Read without a key (the test row has none): the sentence asks for one.
+        "problem": problem_text("auth_failed", "app", has_token=False),
     }
     assert (lib["branch"], lib["budget_chars"], lib["commit_sha"]) == ("master", 8_000, SHA)
     assert board.rows.errors == {"app": "auth_failed"}

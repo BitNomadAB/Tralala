@@ -107,8 +107,10 @@ describe("run repository provenance", () => {
         },
       ],
     });
+    // A run recorded before the server wrote the sentence still names the code, and the line says
+    // the run was written without the code.
     expect(describeRunRepositories(entry)).toBe(
-      "acme app (unavailable: the token was rejected; it may have expired)",
+      "no code — written without the repository (acme app could not be read (unauthorized))",
     );
   });
 
@@ -182,11 +184,13 @@ describe("a repository a run could not read", () => {
           file_count: 0,
           truncated: false,
           error: "rate_limited",
+          problem:
+            "The host's limit for the key was reached while reading acme app: try again later",
         },
       ],
     });
     expect(describeRunRepositories(entry)).toBe(
-      "acme app (unavailable: GitHub's limit of 60 calls an hour without a token was reached; a token raises it)",
+      "no code — written without the repository (The host's limit for the key was reached while reading acme app: try again later)",
     );
   });
 });

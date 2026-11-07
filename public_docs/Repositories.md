@@ -73,10 +73,14 @@ the API call that does the same (`/api/v1`, an administrator's session or a toke
    ```
 
    The answer is the repository with its `id`, `has_token` and a short `token_hint`, never the token.
-4. **Test access**: the row's *Test access* button, or `POST /repositories/{id}/check`. For Git over
-   HTTPS this runs `git ls-remote` only: it clones nothing, names the main branch and stores it as
-   the row's *Default branch*. `status` is `ok`, `branch_missing` when the *Branch* field names a
-   branch the remote does not have, or one of the codes under [Troubleshooting](#troubleshooting).
+4. **Test access**: saving a new repository, or a new token, runs the check at once; the row's
+   *Test access* button, or `POST /repositories/{id}/check`, runs it again. It reads the repository
+   the way a run does, its code and not only that it exists: a GitHub repository is asked for its
+   newest commit, so a token that sees the repository but not its contents fails here
+   (`contents_hidden`) instead of in a run. For Git over HTTPS it runs `git ls-remote` only: it
+   clones nothing, names the main branch and stores it as the row's *Default branch*. `status` is
+   `ok`, `branch_missing` when the *Branch* field names a branch the remote does not have, or one of
+   the codes under [Troubleshooting](#troubleshooting); `detail` is the same sentence a run shows.
 5. **Link it to a board**: open the board → **Edit board → Repositories**, or
    `PATCH /boards/{id}` with `{"repository_ids": ["<id>", ...]}`. The list replaces the board's
    selection; an empty list unlinks every repository. A board may link several repositories and a
@@ -208,7 +212,8 @@ Each step also has a kind. Most are plain steps; the others stand out:
 - **repair**: an answer that broke a rule and was sent back;
 - **limit**: a limit the run reached: the tool calls, the context window, or a provider that refused
   the tools;
-- **error**: what failed, such as a provider call, and why nothing was saved.
+- **error**: what failed, such as a provider call or a repository that could not be read, and why
+  nothing was saved.
 
 A run recorded before the steps existed has none (`trace` is `[]`).
 
@@ -311,9 +316,12 @@ Both need `boards:admin` and answer the repository; a GitHub repository answers
 Use a token that can only read, only the repositories it must, and that expires.
 
 **GitHub** (either provider): GitHub → Settings → Developer settings → Personal access tokens →
-Fine-grained tokens. *Resource owner*: the owner of the repository; *Repository access*: *Only select
-repositories*, this one; *Repository permissions* → **Contents: Read-only**; a short expiry. The
-dialog of a GitHub repository carries the same recipe and a command that checks the token.
+Fine-grained tokens. *Resource owner*: the owner of the repository (for an organisation's
+repository the organisation, which may have to approve the token); *Repository access*: *Only select
+repositories*, this one; *Repository permissions* → **Contents: Read-only**; a short expiry. A token
+created without choosing repositories reads public repositories only, so a private one answers as if
+it did not exist. The dialog of a GitHub repository carries the same recipe and a command that
+checks the token the way a run reads.
 
 **Any other Git host**: create the host's read-only access token for the repository (a repository or
 project access token with read access to the code, or a personal token limited to reading
@@ -348,10 +356,19 @@ URLs are not supported: the mirror speaks HTTPS only.
 
 ## Troubleshooting
 
-A failure is named by a code, never by the host's or `git`'s own words. The code appears on the
-repository's row (the last check, or "Last fetch failed:"), in the run's "based on" line and in the
-backend log (`repository_mirror_failed`, `repository_snapshot_failed`, and `git_command_failed` with
-a short excerpt of what `git` said).
+A failure is named by a code, never by the host's or `git`'s own words, and a person reads it as
+one sentence that says what went wrong and what to do: "The key cannot see app: give it read
+access to the repository's contents". The check and the run use the same sentence. It appears on the
+repository's row (the last check, or "Last fetch failed:"), in the run's steps and its "based on"
+line, and the code in the run's `source_revisions.repositories` (`error`, with the sentence as
+`problem`) and in the backend log (`repository_mirror_failed`, `repository_snapshot_failed`,
+`repository_snapshot_empty`, and `git_command_failed` with a short excerpt of what `git` said).
+
+A run whose repository could not be read goes on without that code, and says so everywhere: the
+repository stage shows a cross (a warning when only one of several repositories failed), never a
+check; a warning above the stages reads "Written without the code"; the "based on" line reads "no
+code — written without the repository (...)"; and the analysis it saves opens its open questions
+with the same notice, with `none: the code was not read` as its baseline revision.
 
 | Code | What it means | What to do |
 | --- | --- | --- |
@@ -367,6 +384,10 @@ a short excerpt of what `git` said).
 | `stale_mirror` | The last fetch failed; the run read the last good mirror | See [Stale mirror](#stale-mirror) |
 | `mirror_cleanup_failed` | The mirror's directory could not be removed: the host still holds a file in it | Close what holds it, then *Remove now* |
 | `unauthorized`, `forbidden`, `rate_limited`, `unreachable` | GitHub provider: the token was rejected, lacks access, the API's limit was reached, or GitHub did not answer | Check the token with the dialog's command; add a token to raise the limit; try again later |
+| `contents_hidden` | *Test access* only: the token sees the repository, but not its files | Give the token read access to the repository's contents (see [Tokens](#tokens)) |
+| `empty_archive` | The commit holds no file at all: an empty branch, or only submodules, whose files an archive never carries | Check the *Branch* field, or link the repositories the submodules point to |
+| `nothing_readable` | Every file is one a run skips: build output, dependencies, lock files, binaries | Link the repository that holds the source, or read another branch |
+| `paths_match_nothing` | The board link's focus and exclude globs leave no file | Correct the globs under **Edit board → Repositories**; a folder is `docs/**`, not `docs` |
 
 ### When a run read the code differently than expected
 
@@ -375,6 +396,8 @@ steps that need an operator:
 
 | The step says | What it means | What to do |
 | --- | --- | --- |
+| "The key cannot see app: give it read access to the repository's contents", then "No code was read: the run goes on from the Loop's documents alone, and an analysis says so" | The host answered as if the repository did not exist: a private repository the token was not given, or a token without read access to its contents | Fix the token as the step says (see [Tokens](#tokens)), save it, which checks it at once, and run the analysis again |
+| "app holds no files at this commit", "app has no file a run reads" or "The board's focus and exclude paths for app leave no file" | The run fetched the commit but found nothing to read, which it treats as a failed read | Do what the step says; the codes are `empty_archive`, `nothing_readable` and `paths_match_nothing` above |
 | "Sent a fixed selection of app @ 1a2b3c4d: 42 of 412 files, the rest by name only (the agent's provider does not take tools; its connection test says so)" | The agent is not marked as calling tools, so the model got the snapshot | Run **Test connection** on the agent. If Settings still lists it as "no tool calling", the model or the server in front of it does not call tools: choose a model that supports tool calling, or switch it on in a local server (llama.cpp: `llama-server --jinja`; vLLM: `--enable-auto-tool-choice` with a `--tool-call-parser`), then test again |
 | "Sent a fixed selection of … (an A2A agent cannot be offered tools)" | An A2A agent always gets the snapshot | Run the analysis or RoadMap on an OpenAI-compatible agent if the model should read the code itself |
 | "Reached the 60 tool calls this run allows; asked the model for its answer now" | `TRALALA_GENERATION_TOOL_STEPS` ran out before the model finished reading. It answered from what it had read and should name the rest under open questions | Narrow what it has to read (the board link's focus and exclude globs, a more precise Info), or raise `TRALALA_GENERATION_TOOL_STEPS`. Every call costs time and, on a hosted provider, money |

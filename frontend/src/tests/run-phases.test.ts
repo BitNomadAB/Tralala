@@ -38,7 +38,7 @@ describe("run steps", () => {
     expect(steps.map((step) => step.state)).toEqual(["done", "skipped", "done"]);
   });
 
-  it("warns on the repository step when a repository could not be read", () => {
+  it("fails the repository step when no repository could be read", () => {
     const steps = runSteps("analysis", {
       status: "running",
       phase: "generating",
@@ -56,7 +56,7 @@ describe("run steps", () => {
         ],
       },
     });
-    expect(steps[1]?.state).toBe("warning");
+    expect(steps[1]?.state).toBe("failed");
   });
 
   it("keeps the tick when the snapshot really was captured", () => {
@@ -152,7 +152,10 @@ describe("run steps", () => {
     });
     expect(outcome).toEqual({
       kind: "listed",
-      lines: ["acme app @ abc123de, 12 files (truncated)", "acme api · unavailable (unauthorized)"],
+      lines: [
+        "acme app @ abc123de, 12 files (truncated)",
+        "acme api · not read: acme api could not be read (unauthorized)",
+      ],
     });
   });
 });
