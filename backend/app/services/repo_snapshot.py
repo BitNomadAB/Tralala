@@ -45,6 +45,7 @@ from .repo_mirror_git import MirrorError
 from .repo_snapshot_select import (
     MAX_MANIFEST_ENTRIES,
     ManifestEntry,
+    empty_reason,
     manifest_entry_chars,
     manifest_of,
     manifest_room,
@@ -52,6 +53,7 @@ from .repo_snapshot_select import (
     select_members,
 )
 from .repositories import API_BASE, RepositoryEntry, RepositoryService
+from .repository_problems import status_problem, unread
 
 if TYPE_CHECKING:  # httpx is imported where a client is built
     import httpx
@@ -69,6 +71,7 @@ __all__ = [
     "SnapshotFile",
     "fetch_archive",
     "file_chars",
+    "log_empty",
     "manifest_entry_chars",
     "path_selected",
     "read_snapshot",
@@ -139,16 +142,8 @@ def _headers(token: str | None) -> dict[str, str]:
 
 def _classify(status: int, headers: httpx.Headers | None = None) -> str:
     """Name the failure the way an operator reads it, never with GitHub's body."""
-    if status == 401:
-        return "unauthorized"
-    if status == 404:
-        return "not_found"
-    if status in (403, 429):
-        remaining = ""
-        if headers is not None:
-            remaining = str(headers.get("x-ratelimit-remaining") or "")
-        return "rate_limited" if status == 429 or remaining == "0" else "forbidden"
-    return "unreachable"
+    remaining = "" if headers is None else str(headers.get("x-ratelimit-remaining") or "")
+    return status_problem(status, rate_limited=remaining == "0")
 
 
 def _json_object(value: JsonValue) -> JsonObject:
@@ -325,6 +320,19 @@ def read_snapshot(
     }
 
 
+def log_empty(entry: JsonObject, code: str, started: float) -> None:
+    """A repository whose archive gave a run nothing to read, and which filter left nothing."""
+    logger.warning(
+        "repository_snapshot_empty",
+        extra={
+            "repository_id": entry.get("id"),
+            "commit_sha": entry.get("commit_sha"),
+            "code": code,
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        },
+    )
+
+
 def _log_captured(repository_id: str, sha: str, snapshot: Snapshot, started: float) -> None:
     logger.info(
         "repository_snapshot_captured",
@@ -474,7 +482,13 @@ class RepositorySnapshotService:
             )
         except SnapshotError as exc:
             self._failed(item.entry, exc.code, item.started)
-            return {**item.entry, "error": exc.code}
+            return unread(item.entry, exc.code)
+        if not snapshot["files"] and not snapshot["truncated"]:
+            # Nothing to read is a failed read, never a quiet empty snapshot: say which filter
+            # left nothing, so a person can tell an empty commit from paths that match nothing.
+            code = empty_reason(item.archive, item.focus, item.exclude)
+            log_empty(item.entry, code, item.started)
+            return unread(item.entry, code)
         _log_captured(str(item.entry["id"]), str(item.entry["commit_sha"]), snapshot, item.started)
         return {**item.entry, **_contents(snapshot, budget)}
 
@@ -509,14 +523,14 @@ class RepositorySnapshotService:
         try:
             owner, name = RepositoryService.parse(row["url"])
         except ValidationFailure:
-            return FetchedRepository({**entry, "error": "invalid_url"}, None)
+            return FetchedRepository(unread(entry, "invalid_url"), None)
         token = self.repositories.token(row["id"])
         try:
             sha = resolve_commit(owner, name, row.get("branch"), token)
             archive = self._archive(row["id"], owner, name, sha, token)
         except SnapshotError as exc:
             self._failed(entry, exc.code, started)
-            return FetchedRepository({**entry, "error": exc.code}, None)
+            return FetchedRepository(unread(entry, exc.code, has_token=bool(token)), None)
         return FetchedRepository({**entry, "commit_sha": sha}, archive, focus, exclude, started)
 
     def _archive(
@@ -541,7 +555,7 @@ class RepositorySnapshotService:
             latest = self._read_latest(request)
         except MirrorError as exc:
             self._failed(entry, exc.code, started)
-            return {**entry, "error": exc.code}, None
+            return unread(entry, exc.code, has_token=row["has_token"]), None
         head = latest.head
         if head.fetch_error is not None:
             self.repositories.record_mirror_error(row["id"], head.fetch_error)

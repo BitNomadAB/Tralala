@@ -41,6 +41,7 @@ from ..db.generated.registry import RepositoriesRow
 from ..repositories.registry import RegistryUnitOfWork
 from .repo_mirror import RemoteHead
 from .repo_mirror_git import ERROR_TEXT, MirrorError
+from .repository_problems import problem_text
 
 logger = logging.getLogger("tralala.repositories")
 
@@ -119,7 +120,7 @@ def check_remote(
     try:
         head = _remote_head(mirror, row, token)
     except MirrorError as exc:
-        result = outcome(exc.code, ERROR_TEXT.get(exc.code, exc.code), now)
+        result = outcome(exc.code, problem_text(exc.code, row.name, has_token=bool(token)), now)
     else:
         with store.writer() as repos:
             repos.code_repositories.record_default_branch(row.id, head.default_branch)

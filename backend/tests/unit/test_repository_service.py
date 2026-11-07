@@ -22,8 +22,9 @@ from app.repositories.code_repositories import MirrorRecord
 from app.repositories.registry import RegistryUnitOfWork
 from app.schemas.repositories import RepositoryCreate, RepositoryUpdate
 from app.services.repo_mirror import MirrorService
-from app.services.repo_mirror_git import ERROR_TEXT, authorization_header
-from app.services.repositories import GitHubGet, JsonObject, RepositoryService, rate_limit_detail
+from app.services.repo_mirror_git import authorization_header
+from app.services.repositories import GitHubGet, JsonObject, RepositoryService
+from app.services.repository_problems import problem_text
 from tests.unit.fakes.mirror import FakeGit, FakeMirrorFiles, FakeRemote
 from tests.unit.fakes.registry import (
     CREATED,
@@ -315,23 +316,43 @@ def test_a_readable_repository_reports_what_github_says_with_the_stored_token(
         200,
         {"default_branch": "main", "private": True, "size": 123, "token": "never shown"},
     )
+    repos.github.answers[f"{API}/acme/app/commits/main"] = (200, {"sha": "a" * 40})
     result = repos.service.check(ADMIN, "app")
     assert result == {
         "status": "ok",
-        "detail": "acme/app is readable",
+        "detail": "acme/app is readable, its code included",
         "default_branch": "main",
         "private": True,
         "size_kb": 123,
         "checked_at": NOW,
     }
-    assert repos.github.calls == [(f"{API}/acme/app", TOKEN)]
+    # The metadata, then the commit a run reads: the contents, not only that the repository exists.
+    assert repos.github.calls == [
+        (f"{API}/acme/app", TOKEN),
+        (f"{API}/acme/app/commits/main", TOKEN),
+    ]
     row = repos.state.code_repositories["app"]
     assert (row.last_check_status, row.last_check_detail, row.last_checked_at, row.updated_at) == (
         "ok",
-        "acme/app is readable",
+        "acme/app is readable, its code included",
         NOW,
         NOW,
     )
+
+
+@pytest.mark.parametrize("status", [404, 403])
+def test_a_key_that_sees_the_repository_but_not_its_code_fails_the_check(
+    repos: Repositories, status: int
+) -> None:
+    repos.github.answers[f"{API}/acme/app"] = (200, {"default_branch": "main", "private": True})
+    repos.github.answers[f"{API}/acme/app/commits/main"] = (status, None)
+    result = repos.service.check(ADMIN, "app")
+    assert (result["status"], result["detail"]) == (
+        "contents_hidden",
+        "The key can see acme/app but not its files: give it read access to the repository's "
+        "contents",
+    )
+    assert repos.state.code_repositories["app"].last_check_status == "contents_hidden"
 
 
 def test_a_branch_that_does_not_exist_is_reported_as_missing(repos: Repositories) -> None:
@@ -347,6 +368,7 @@ def test_a_branch_that_does_not_exist_is_reported_as_missing(repos: Repositories
     )
     assert repos.github.calls[1] == (f"{API}/acme/app/branches/feature", TOKEN)
     repos.github.answers[f"{API}/acme/app/branches/feature"] = (200, {"name": "feature"})
+    repos.github.answers[f"{API}/acme/app/commits/feature"] = (200, {"sha": "b" * 40})
     found = repos.service.check(ADMIN, "app")
     assert (found["status"], found["size_kb"], found["private"]) == ("ok", 0, False)
 
@@ -354,12 +376,12 @@ def test_a_branch_that_does_not_exist_is_reported_as_missing(repos: Repositories
 @pytest.mark.parametrize(
     ("answer", "status", "detail"),
     [
-        ((401, None), "unauthorized", "The token was rejected"),
-        ((404, None), "not_found", "Repository not found, or the token cannot see it"),
-        ((403, None), "forbidden", "GitHub refused the request (scope or rate limit)"),
-        ((429, None), "rate_limited", rate_limit_detail(has_token=False)),
-        ((502, None), "unreachable", "GitHub answered 502"),
-        ((200, None), "unreachable", "GitHub answered 200"),
+        ((401, None), "unauthorized", problem_text("unauthorized", "acme/lib")),
+        ((404, None), "not_found", problem_text("not_found", "acme/lib", has_token=False)),
+        ((403, None), "forbidden", problem_text("forbidden", "acme/lib", has_token=False)),
+        ((429, None), "rate_limited", problem_text("rate_limited", "acme/lib", has_token=False)),
+        ((502, None), "unreachable", problem_text("unreachable", "acme/lib") + " (HTTP 502)"),
+        ((200, None), "unreachable", problem_text("unreachable", "acme/lib") + " (HTTP 200)"),
     ],
 )
 def test_a_refusal_is_named_by_its_class_never_by_githubs_words(
@@ -379,12 +401,15 @@ def test_a_refusal_is_named_by_its_class_never_by_githubs_words(
     assert repos.state.code_repositories["lib"].last_check_status == status
 
 
-def test_the_rate_limit_names_the_limit_without_a_token_and_the_remedy() -> None:
-    assert "60 API calls an hour" in rate_limit_detail(has_token=False)
-    assert "5 000 an hour" in rate_limit_detail(has_token=False)
-    assert rate_limit_detail(has_token=True) == (
-        "GitHub's limit for this token was reached; try again later"
+def test_the_check_says_what_the_key_needs_in_the_words_a_run_uses(
+    repos: Repositories,
+) -> None:
+    repos.github.answers[f"{API}/acme/app"] = (404, None)
+    detail = repos.service.check(ADMIN, "app")["detail"]
+    assert detail == (
+        "The key cannot see acme/app: give it read access to the repository's contents"
     )
+    assert detail == problem_text("not_found", "acme/app")
 
 
 def test_a_rejected_token_that_passed_an_earlier_check_has_probably_expired(
@@ -394,11 +419,14 @@ def test_a_rejected_token_that_passed_an_earlier_check_has_probably_expired(
     repos.state.code_repositories["lib"] = row.__replace__(last_check_status="ok")
     repos.github.answers[f"{API}/acme/lib"] = (401, None)
     detail = repos.service.check(ADMIN, "lib")["detail"]
-    assert detail.startswith("The token was rejected; it worked before, so it has probably expired")
+    assert detail.startswith(
+        "The host rejected the key for acme/lib; it worked before, so it has probably expired"
+    )
 
 
 def test_a_size_that_is_not_a_number_fails_as_int_would(repos: Repositories) -> None:
     repos.github.answers[f"{API}/acme/app"] = (200, {"size": [1]})
+    repos.github.answers[f"{API}/acme/app/commits/HEAD"] = (200, {"sha": "a" * 40})
     with pytest.raises(TypeError):
         repos.service.check(ADMIN, "app")
     repos.github.answers[f"{API}/acme/app"] = (200, {"size": "12"})
@@ -586,7 +614,7 @@ def test_the_mirror_check_names_a_missing_branch_and_a_refusal(settings: Setting
     refused = made.repos.service.check(ADMIN, repository_id)
     assert (refused["status"], refused["detail"], refused["default_branch"]) == (
         "auth_failed",
-        ERROR_TEXT["auth_failed"],
+        problem_text("auth_failed", made.repos.state.code_repositories[repository_id].name),
         None,
     )
     row = made.repos.state.code_repositories[repository_id]
@@ -597,7 +625,10 @@ def test_without_git_the_mirror_check_says_so(settings: Settings) -> None:
     made = make_mirrored(settings, mirror=False)
     repository_id = _add_mirrored(made)
     result = made.repos.service.check(ADMIN, repository_id)
-    assert (result["status"], result["detail"]) == ("git_missing", ERROR_TEXT["git_missing"])
+    assert (result["status"], result["detail"]) == (
+        "git_missing",
+        problem_text("git_missing", made.repos.state.code_repositories[repository_id].name),
+    )
 
 
 def test_a_fetch_and_a_failure_are_recorded_on_the_row(settings: Settings) -> None:

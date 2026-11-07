@@ -9,11 +9,15 @@ out; nothing is extracted.
 
 from __future__ import annotations
 
+import io
 import json
 import tarfile
+import zlib
 from collections.abc import Collection, Sequence
 from fnmatch import fnmatchcase
 from typing import TypedDict
+
+from .repository_problems import EMPTY_ARCHIVE, NOTHING_READABLE, PATHS_MATCH_NOTHING
 
 # Directories that never inform an analysis: build output, dependencies, caches.
 SKIPPED_DIRECTORIES = frozenset(
@@ -160,6 +164,28 @@ def select_members(
         selected.append((_priority(relative, len(relative_parts)), member, relative))
     selected.sort(key=lambda entry: entry[0])
     return selected
+
+
+def empty_reason(archive_bytes: bytes, focus: Sequence[str], exclude: Sequence[str]) -> str:
+    """Why an archive gave a run no file to read, as a ``repository_problems`` code: it holds no
+    file at all, every file is one a run skips (or binary), or the board's globs leave none."""
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive:
+            held = any(
+                member.isfile() and member.size > 0 and "/" in member.name.strip("/")
+                for member in archive.getmembers()
+            )
+            if not held:
+                return EMPTY_ARCHIVE
+            if (
+                (focus or exclude)
+                and select_members(archive)
+                and not select_members(archive, focus=focus, exclude=exclude)
+            ):
+                return PATHS_MATCH_NOTHING
+    except (tarfile.TarError, OSError, EOFError, zlib.error):
+        return "malformed_archive"
+    return NOTHING_READABLE
 
 
 def manifest_entry_chars(entry: ManifestEntry) -> int:

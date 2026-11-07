@@ -105,6 +105,31 @@ facts that explain most surprises:
 - **A restored board misses recent uploads** — expected for a snapshot older than the uploads. Check
   `has_attachments` and `created_at` in `GET /api/v1/boards/<id>/backups` before restoring.
 
+## Repositories and analysis runs
+
+- **The run says "The key cannot see app: give it read access to the repository's contents", then
+  "No code was read"** — the host answered as if the repository did not exist. For a private
+  repository that is what a token that cannot see it gets, so the host never says which. The run
+  goes on from the Loop's documents alone and says so: the repository stage shows a cross, the
+  "based on" line reads "no code — written without the repository", and the analysis opens its open
+  questions with the same notice. Give the token what the host needs, save it (saving checks it at
+  once, reading the code the way a run does), and run the analysis again:
+  - a host with fine-grained tokens: choose this repository under the token's repository access
+    (a token created without choosing repositories reads public ones only) and allow reading its
+    **contents**; for an organisation's repository make the organisation the token's owner, which
+    may have to approve it;
+  - a host with repository or project access tokens: a token of this repository with read access to
+    its code;
+  - Git over HTTPS: a read-only token the host accepts over HTTPS, entered as `<user>:<token>` when
+    the host checks the user name.
+- **The check says the token "can see app but not its files"** (`contents_hidden`) — the token reads
+  the repository's description but not its code; give it read access to the contents.
+- **The run found no file to read** — "app holds no files at this commit" (an empty branch, or only
+  submodules), "app has no file a run reads" (only build output, dependencies, lock files or
+  binaries) or "The board's focus and exclude paths for app leave no file" (a folder is `docs/**`,
+  not `docs`). The backend log line `repository_snapshot_empty` names the code. Every code, with
+  what to do, is in [Repositories.md](Repositories.md#troubleshooting).
+
 ## Processes, ports and startup
 
 - **"The generated database rows are missing: run python -m tools.dbgen"** — a backend run from

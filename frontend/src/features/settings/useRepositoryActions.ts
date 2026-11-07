@@ -22,8 +22,9 @@ function payload(value: RepositoryDraft) {
 
 /**
  * The Repositories page's commands, each with its toast: save, check access, delete and the two
- * mirror actions. `checks` keeps the last check's answer per repository until the list reloads it.
- * A refused delete or mirror removal reloads the list too, so a row the server kept shows why.
+ * mirror actions. Saving a new repository or a new key checks access right after. `checks` keeps
+ * the last check's answer per repository until the list reloads it. A refused delete or mirror
+ * removal reloads the list too, so a row the server kept shows why.
  */
 export function useRepositoryActions(onSaved: () => void) {
   const queryClient = useQueryClient();
@@ -35,19 +36,6 @@ export function useRepositoryActions(onSaved: () => void) {
     void invalidate();
     toast.push({ title, description: describeError(error), variant: "error" });
   };
-
-  const save = useMutation({
-    mutationFn: (value: RepositoryDraft) =>
-      value.id
-        ? api.updateRepository(value.id, payload(value))
-        : api.createRepository({ ...payload(value), provider: value.provider }),
-    onSuccess: () => {
-      onSaved();
-      void invalidate();
-      toast.push({ title: "Repository saved", variant: "success" });
-    },
-    onError: failed("Could not save"),
-  });
 
   const check = useMutation({
     mutationFn: (repositoryId: string) => api.checkRepository(repositoryId),
@@ -64,6 +52,22 @@ export function useRepositoryActions(onSaved: () => void) {
       });
     },
     onError: failed("Could not check access"),
+  });
+
+  const save = useMutation({
+    mutationFn: (value: RepositoryDraft) =>
+      value.id
+        ? api.updateRepository(value.id, payload(value))
+        : api.createRepository({ ...payload(value), provider: value.provider }),
+    onSuccess: (repository, value) => {
+      onSaved();
+      void invalidate();
+      toast.push({ title: "Repository saved", variant: "success" });
+      // A new repository, or a new key, is checked at once the way a run reads it (its code, not
+      // only that it exists), so a key that cannot read the code fails here and not in a run.
+      if (!value.id || value.token) check.mutate(repository.id);
+    },
+    onError: failed("Could not save"),
   });
 
   const remove = useMutation({

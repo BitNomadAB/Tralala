@@ -57,12 +57,14 @@ export function RepositoryTokenGuide({ url }: { url: string }) {
             </li>
             <li>
               <strong>Resource owner</strong>: the user or organisation that owns{" "}
-              <span className="font-mono">{slug}</span>.
+              <span className="font-mono">{slug}</span>. For an organisation&apos;s repository pick
+              the organisation, not yourself; it may have to approve the token before it works.
             </li>
             <li>
               <strong>Repository access</strong>: <em>Only select repositories</em>, then pick{" "}
               <span className="font-mono">{slug}</span>. One token per repository keeps the damage
-              small if it leaks.
+              small if it leaks. A token created without choosing repositories reads public
+              repositories only, so a private one answers as if it did not exist.
             </li>
             <li>
               <strong>Permissions</strong> &rarr; <em>Repository permissions</em> &rarr;{" "}
@@ -82,27 +84,28 @@ export function RepositoryTokenGuide({ url }: { url: string }) {
             <Terminal size={13} /> 2. Check it on your machine before pasting
           </p>
           <p className="mt-1">
-            A 200 means the key works; 401 means wrong or expired; 404 means it cannot see this
-            repository.
+            This reads the newest commit, as a run does. A 200 means the key can read the code; 401
+            means wrong or expired; 404 means it cannot see this repository or its contents.
           </p>
           <Code>{`# bash, macOS, Linux
 export GITHUB_TOKEN=github_pat_...
 curl -sS -o /dev/null -w "%{http_code}\\n" \\
   -H "Authorization: Bearer $GITHUB_TOKEN" \\
-  https://api.github.com/repos/${slug}`}</Code>
+  https://api.github.com/repos/${slug}/commits/HEAD`}</Code>
           <Code>{`# PowerShell
 $env:GITHUB_TOKEN = "github_pat_..."
-(Invoke-WebRequest -Uri "https://api.github.com/repos/${slug}" \`
+(Invoke-WebRequest -Uri "https://api.github.com/repos/${slug}/commits/HEAD" \`
   -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" }).StatusCode`}</Code>
         </div>
 
         <div>
           <p className="font-medium text-[var(--foreground)]">3. Store it here</p>
           <p className="mt-1">
-            Paste it into <em>Access token</em>, press <em>Save repository</em>, then{" "}
-            <em>Test access</em>. Tralala seals it with the installation secret, keeps only a short
-            hint, and never returns it again. To rotate, open <em>Edit</em>, paste the new token and
-            save — the old one is replaced, not added.
+            Paste it into <em>Access token</em> and press <em>Save repository</em>: Tralala checks
+            access at once, reading the code the way a run does, and <em>Test access</em> repeats
+            the check. Tralala seals it with the installation secret, keeps only a short hint, and
+            never returns it again. To rotate, open <em>Edit</em>, paste the new token and save —
+            the old one is replaced, not added.
           </p>
         </div>
 

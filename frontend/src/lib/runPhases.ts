@@ -1,4 +1,4 @@
-import type { GenerationPurpose, GenerationRun } from "@/lib/types";
+import type { GenerationPurpose, GenerationRun, GenerationRunRepository } from "@/lib/types";
 
 /** The steps a generation run passes through, in the order the server records them. */
 export type RunPhaseKey = "reading_info" | "analysing_repository" | "generating";
@@ -44,8 +44,8 @@ const CAPTIONS: Record<RunPhaseKey, string> = {
  * failure the step it died on is the failed one — the panel must point at that step, not at the end.
  *
  * A step that ran but produced nothing is not "done": the repository step is `skipped` when the board
- * links none and `warning` when at least one repository could not be read, because a green tick there
- * claimed the model had seen code it never received.
+ * links none, `warning` when one of its repositories could not be read and `failed` when none could,
+ * because a green tick there claimed the model had seen code it never received.
  */
 export function runSteps(purpose: GenerationPurpose, run?: RunFacts | null): RunStep[] {
   const names = labels(purpose === "roadmap" ? "roadmap" : "analysis");
@@ -67,19 +67,42 @@ export function runSteps(purpose: GenerationPurpose, run?: RunFacts | null): Run
     }
     if (key === "analysing_repository" && run && (state === "done" || state === "active")) {
       if (repositoryStepFinished) {
-        const outcome = repositoryOutcome(run);
-        if (outcome.kind === "none") state = "skipped";
-        else if (outcome.kind === "listed" && failedRepositories(run)) state = "warning";
+        const reading = repositoryReading(run);
+        if (reading === "none") state = "skipped";
+        else if (reading === "partial") state = "warning";
+        else if (reading === "unread") state = "failed";
       }
     }
     return { key, label: names[key], caption: CAPTIONS[key], state };
   });
 }
 
-function failedRepositories(run: RunFacts): boolean {
+/** How much of the code a run read: not yet known, no repository linked, all of it, part of it or none. */
+export type RepositoryReading = "waiting" | "none" | "read" | "partial" | "unread";
+
+export function repositoryReading(run: RunFacts): RepositoryReading {
   const value = run.source_revisions?.repositories;
-  if (!Array.isArray(value)) return false;
-  return value.some((repository) => Boolean(repository.error));
+  if (!Array.isArray(value)) return "waiting";
+  if (value.length === 0) return "none";
+  const failed = value.filter((repository) => Boolean(repository.error)).length;
+  if (failed === 0) return "read";
+  return failed === value.length ? "unread" : "partial";
+}
+
+/** Why a repository could not be read, in the server's sentence (an older run has only the code). */
+export function repositoryProblem(repository: GenerationRunRepository): string {
+  return (
+    repository.problem ?? `${repository.name} could not be read (${repository.error ?? "unknown"})`
+  );
+}
+
+/** The repositories a run could not read, each with its sentence; empty while that is not known. */
+export function unreadRepositories(run: RunFacts): { name: string; problem: string }[] {
+  const value = run.source_revisions?.repositories;
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((repository) => Boolean(repository.error))
+    .map((repository) => ({ name: repository.name, problem: repositoryProblem(repository) }));
 }
 
 /** The failing step's own JSON, so a person can copy the provider's answer instead of retyping it. */
@@ -120,7 +143,7 @@ export function repositoryOutcome(run: RunFacts): RepositoryOutcome {
     kind: "listed",
     lines: repositories.map((repository) =>
       repository.error
-        ? `${repository.name} · unavailable (${repository.error})`
+        ? `${repository.name} · not read: ${repositoryProblem(repository)}`
         : `${repository.name} @ ${(repository.commit_sha ?? "").slice(0, 8)}, ${repository.file_count} files${
             repository.truncated ? " (truncated)" : ""
           }`,

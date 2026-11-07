@@ -60,6 +60,7 @@ from .repositories_mirror import (
     sweep,
 )
 from .repository_links import link_paths, replace_links, require_selected
+from .repository_problems import CONTENTS_HIDDEN, problem_text, status_problem
 
 __all__ = [
     "API_BASE",
@@ -69,7 +70,6 @@ __all__ = [
     "MirrorControl",
     "RepositoryEntry",
     "RepositoryService",
-    "rate_limit_detail",
 ]
 
 logger = logging.getLogger("tralala.repositories")
@@ -125,17 +125,6 @@ class GitHubGet(Protocol):
 def _json_object(value: object) -> TypeIs[JsonObject]:
     """A parsed JSON body that is an object: its keys are strings and its values JSON."""
     return isinstance(value, dict)
-
-
-def rate_limit_detail(*, has_token: bool) -> str:
-    """What GitHub's rate limit means for this repository, and what to do about it."""
-    if has_token:
-        return "GitHub's limit for this token was reached; try again later"
-    return (
-        "GitHub allows 60 API calls an hour per address without a token, and that limit was "
-        "reached. A token raises it to 5 000 an hour (a fine-grained token with Contents: read "
-        "is enough), or try again within the hour"
-    )
 
 
 def _size_kb(value: JsonValue) -> int:
@@ -519,6 +508,7 @@ class RepositoryService:
         token = self._open_token(row)
         status_code, payload = self._github_get(f"{API_BASE}/repos/{owner}/{name}", token=token)
         now = self._clock()
+        slug = f"{owner}/{name}"
         result: CheckOutcome
         if status_code == 200 and payload is not None:
             branch = row.branch
@@ -530,31 +520,35 @@ class RepositoryService:
                     result = outcome("branch_missing", f"Branch '{branch}' does not exist", now)
                     store_check(self.store, repository_id, result)
                     return result
+            # The metadata is not the code: read the commit a run would read, so a key that sees
+            # the repository but not its contents fails here and not in the middle of a run.
+            ref = branch or str(payload.get("default_branch") or "HEAD")
+            contents_status, _ = self._github_get(
+                f"{API_BASE}/repos/{owner}/{name}/commits/{ref}", token=token
+            )
+            if contents_status != 200:
+                code = status_problem(contents_status)
+                code = CONTENTS_HIDDEN if code in {"not_found", "forbidden"} else code
+                detail = problem_text(code, slug, has_token=bool(token))
+                result = outcome(code, detail, now)
+                store_check(self.store, repository_id, result)
+                return result
             result = {
                 "status": "ok",
-                "detail": f"{owner}/{name} is readable",
+                "detail": f"{slug} is readable, its code included",
                 "default_branch": payload.get("default_branch"),
                 "private": bool(payload.get("private")),
                 "size_kb": _size_kb(payload.get("size")),
                 "checked_at": now,
             }
-        elif status_code == 401:
-            # A token that passed an earlier check has most likely expired or been revoked.
-            detail = (
-                "The token was rejected; it worked before, so it has probably expired or been "
-                "revoked. Create a new one and replace it"
-                if row.last_check_status == "ok"
-                else "The token was rejected"
-            )
-            result = outcome("unauthorized", detail, now)
-        elif status_code == 429:
-            result = outcome("rate_limited", rate_limit_detail(has_token=bool(token)), now)
-        elif status_code == 404:
-            result = outcome("not_found", "Repository not found, or the token cannot see it", now)
-        elif status_code == 403:
-            result = outcome("forbidden", "GitHub refused the request (scope or rate limit)", now)
+        elif status_code in (401, 403, 404, 429):
+            code = status_problem(status_code)
+            worked_before = row.last_check_status == "ok"
+            detail = problem_text(code, slug, has_token=bool(token), worked_before=worked_before)
+            result = outcome(code, detail, now)
         else:
-            result = outcome("unreachable", f"GitHub answered {status_code}", now)
+            detail = problem_text("unreachable", slug) + f" (HTTP {status_code})"
+            result = outcome("unreachable", detail, now)
         store_check(self.store, repository_id, result)
         return result
 

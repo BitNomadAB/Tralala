@@ -42,6 +42,7 @@ from app.services.loop_generation_trace import parse_steps
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_plans import LoopPlanService
 from app.services.repo_snapshot import FetchedRepository
+from app.services.repository_problems import problem_text
 from app.services.runtime import Completion, ResponseSchema
 from app.services.runtime_tools import Message, ToolChoice, ToolDefinition
 from tests.unit.fakes.board import (
@@ -1183,6 +1184,7 @@ def test_a_repository_snapshot_reaches_the_model_but_its_paths_stay_in_the_run()
                 "truncated": False,
                 "files": [],
                 "error": "unreachable",
+                "problem": problem_text("unreachable", "docs"),
             },
         ],
     }
@@ -1210,6 +1212,7 @@ def test_a_repository_snapshot_reaches_the_model_but_its_paths_stay_in_the_run()
                 "file_count": 0,
                 "truncated": False,
                 "error": "unreachable",
+                "problem": problem_text("unreachable", "docs"),
             },
         ],
     }

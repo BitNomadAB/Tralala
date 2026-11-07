@@ -1,4 +1,4 @@
-import { repositoryOutcome, type RunStepState } from "@/lib/runPhases";
+import { repositoryReading, type RunStepState } from "@/lib/runPhases";
 import type { GenerationPurpose, GenerationRun, RunStage, RunTraceStep } from "@/lib/types";
 
 /** The stages of a run's tree, in the order the server reaches them. */
@@ -73,7 +73,9 @@ export function hasTree(run: Pick<GenerationRun, "status" | "trace">): boolean {
  * not reached yet is `pending` and has no steps. The stage the run is in is `active`, one it left
  * `done`; a stage with an error step is `failed`, one that hit a limit is `warning`, and the
  * repository stage of a board without repositories is `skipped` — a tick there would claim code was
- * read. A run that failed without naming where fails the last stage it reached.
+ * read. The repository stage is `failed` when no repository could be read and `warning` when one of
+ * several could not, whatever its steps say, so an older run's quiet "could not read" step never
+ * shows a tick either. A run that failed without naming where fails the last stage it reached.
  */
 export function traceStages(purpose: Purpose, run: GenerationRun): TraceStage[] {
   const steps = run.trace ?? [];
@@ -89,14 +91,24 @@ export function traceStages(purpose: Purpose, run: GenerationRun): TraceStage[] 
       if (own.some((step) => step.kind === "error")) state = "failed";
       else if (stage === last && run.status === "failed" && !anyError) state = "failed";
       else if (own.some((step) => step.kind === "limit") && state === "done") state = "warning";
-      if (stage === "repository" && state === "done" && repositoryOutcome(run).kind === "none") {
-        state = "skipped";
-      }
+      if (stage === "repository") state = repositoryState(state, run);
     } else if (inFlight(run) && last === undefined && index === 0) {
       state = "active"; // started, and nothing recorded yet
     }
     return { stage, label: stageLabel(stage, purpose), state, steps: own };
   });
+}
+
+/** The repository stage by what the run could read; a stage still working or that ended the run
+ * keeps its own state. */
+function repositoryState(state: RunStepState, run: GenerationRun): RunStepState {
+  if (state === "active") return state;
+  const reading = repositoryReading(run);
+  if (reading === "none") return state === "done" ? "skipped" : state;
+  if (reading === "unread") return "failed";
+  if (reading === "partial")
+    return state === "failed" && run.status === "failed" ? state : "warning";
+  return state;
 }
 
 /** What a run read through the tools: tool calls, distinct files read and searches. */

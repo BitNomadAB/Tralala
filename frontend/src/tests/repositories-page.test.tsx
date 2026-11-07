@@ -43,6 +43,15 @@ const MIRRORED: Repository = {
   mirror_bytes: 1_572_864,
 };
 
+const READABLE = {
+  status: "ok",
+  detail: "acme/app is readable, its code included",
+  default_branch: "main",
+  private: false,
+  size_kb: 12,
+  checked_at: "2026-11-03T10:00:00Z",
+};
+
 /** The page for an administrator over `repositories`; `sent` is every write it made, in order. */
 async function renderPage(repositories: Repository[]) {
   const sent: { path: string; body: unknown }[] = [];
@@ -59,6 +68,10 @@ async function renderPage(repositories: Repository[]) {
     http.post(apiPath("/repositories/:id/mirror/:action"), async (info) => {
       await record(info);
       return ok({ ...MIRRORED, last_sha: null, fetched_at: null, mirror_bytes: null });
+    }),
+    http.post(apiPath("/repositories/:id/check"), async (info) => {
+      await record(info);
+      return ok(READABLE);
     }),
   );
   const queryClient = new QueryClient({
@@ -116,6 +129,8 @@ describe("the Repositories page", () => {
     );
     await user.click(dialog.getByRole("button", { name: "Save repository" }));
     expect(await screen.findByText("Repository saved")).toBeInTheDocument();
+    // A new repository is checked at once, the way a run reads it.
+    expect(await screen.findByText("Access verified")).toBeInTheDocument();
     expect(sent).toEqual([
       {
         path: "POST /repositories",
@@ -126,7 +141,25 @@ describe("the Repositories page", () => {
           enabled: true,
         },
       },
+      { path: "POST /repositories/repo-new/check", body: null },
     ]);
+  });
+
+  it("says at once when the key of a new repository cannot read its code", async () => {
+    const { user } = await renderPage([]);
+    const cannotSee =
+      "The key cannot see acme/app: give it read access to the repository's contents";
+    server.use(
+      http.post(apiPath("/repositories/:id/check"), () =>
+        ok({ ...READABLE, status: "not_found", detail: cannotSee }),
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: /New repository/ }));
+    const dialog = within(screen.getByRole("dialog", { name: "New repository" }));
+    await user.type(dialog.getByLabelText("Repository URL"), "https://github.com/acme/app");
+    await user.click(dialog.getByRole("button", { name: "Save repository" }));
+    expect(await screen.findByText("Access failed")).toBeInTheDocument();
+    expect(screen.getAllByText(new RegExp(cannotSee.slice(0, 30))).length).toBeGreaterThan(0);
   });
 
   it("keeps the provider of a repository being edited", async () => {

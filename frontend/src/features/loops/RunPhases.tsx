@@ -10,12 +10,14 @@ import { hasTree } from "@/lib/runTrace";
 import type { GenerationRun } from "@/lib/types";
 import type { RunPurpose } from "./loopUi";
 import { RunTree } from "./RunTree";
+import { UnreadRepositories } from "./UnreadRepositories";
 
 /** What the step achieved, not what it was supposed to do: a skipped step says so. */
 function stepCaption(step: RunStep): string {
   if (step.key === "analysing_repository") {
     if (step.state === "skipped") return "Skipped: no code was sent to the model";
-    if (step.state === "warning") return "Only part of the snapshot could be read";
+    if (step.state === "warning") return "Only part of the code could be read";
+    if (step.state === "failed") return "Not read: no code was sent to the model";
   }
   return step.caption;
 }
@@ -67,6 +69,7 @@ export function RunPhases({
           </button>
         ) : null}
       </div>
+      <UnreadRepositories run={run} compact={compact} />
       {hasTree(run) ? (
         <RunTree purpose={purpose} run={run} compact={compact} failureJson={failureJson} />
       ) : (

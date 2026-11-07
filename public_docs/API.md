@@ -293,7 +293,7 @@ trace existed answers `[]`. Each step is an object:
 | Field | Value |
 | --- | --- |
 | `stage` | `documents`, `repository`, `writing`, `checking` or `saving`, in the order a run reaches them; a QA run has no `repository` stage |
-| `kind` | `step`, `tool` (a tool call), `note` (the model's own words beside a call), `repair` (an answer sent back), `limit` (a limit the run reached) or `error` |
+| `kind` | `step`, `tool` (a tool call), `note` (the model's own words beside a call), `repair` (an answer sent back), `limit` (a limit the run reached, or a repository of several not read) or `error` (a failure, a repository that could not be read among them) |
 | `text` | One plain-language sentence, at most 500 characters (a `note` at most 1 000) |
 | `at` | When the step happened, ISO 8601 UTC |
 | `tool` | A tool call only: `list_files`, `read_file` or `search` |
@@ -386,8 +386,13 @@ run in which no repository could be read. [Repositories.md](Repositories.md#how-
 describes the tools, the workspace's bounds and the fallbacks.
 
 A repository that cannot be read does not fail the run: it appears in the snapshot as
-`{id, name, error}` with a class such as `unauthorized`, `not_found`, `rate_limited`, `too_large` or
-`timeout`, and the analysis is expected to say which part of the code it did not see. The run record
+`{id, name, error, problem}` with a class such as `unauthorized`, `not_found`, `rate_limited`,
+`too_large`, `timeout` or, for a commit that gave nothing to read, `empty_archive`,
+`nothing_readable` or `paths_match_nothing`; `problem` is the same in one sentence that says what to
+do, the sentence the repository check answers as `detail`. The run's repository stage then holds an
+`error` step with that sentence, the model is told that it has none of that code, and a saved
+analysis opens its `open_questions` with a notice that it was written without it (with
+`repository_revision` `none: the code was not read` when no repository could be read). The run record
 keeps the commit and the file paths (`source_revisions.repositories`); the file contents stay in the
 run's own input, and `GET …/generation-runs/{run_id}` returns only the name, branch, commit,
 file count and `truncated` flag, plus `budget_chars` (the repository's share),
