@@ -49,7 +49,7 @@ jobs:
         run: python -m pytest -n auto --cov=app --cov-report=term --cov-report=xml
       - name: Upload the coverage report
         if: always() && matrix.python-version == '3.13'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: backend/coverage.xml
@@ -78,7 +78,7 @@ jobs:
         run: python -m pytest tests/infrastructure --junitxml=infrastructure-junit.xml
       - name: Upload the JUnit report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-infrastructure-junit
           path: backend/infrastructure-junit.xml
@@ -113,7 +113,7 @@ jobs:
         run: pnpm test:coverage
       - name: Upload the coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-coverage
           path: frontend/coverage
@@ -273,7 +273,7 @@ jobs:
         run: node ../scripts/run-playwright.mjs test
       - name: Upload the report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: frontend/playwright-report
