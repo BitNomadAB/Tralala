@@ -6,6 +6,7 @@ import {
   createBoard,
   login,
   openBoardFromDashboard,
+  openCard,
   openPlanDocument,
   showTab,
   uniqueName,
@@ -50,6 +51,21 @@ test.describe("accessibility", () => {
     expect(await blockingViolations(page, testInfo, "axe-loop-plan")).toEqual([]);
     await showTab(page, "Notes");
     expect(await blockingViolations(page, testInfo, "axe-loop-notes")).toEqual([]);
+  });
+
+  test("a Ticket over the Kanban has no serious or critical axe violations", async ({
+    page,
+  }, testInfo) => {
+    await login(page);
+    await boardWithLoop(page, uniqueName("Accessible board"));
+    await addCard(page, "Todo", "An accessible Ticket");
+    const dialog = await openCard(page, "Todo", "An accessible Ticket");
+    await expect(dialog.getByRole("heading", { name: "An accessible Ticket" })).toBeVisible();
+    await expect(dialog.getByLabel("Add a note", { exact: true })).toBeVisible();
+
+    expect(await blockingViolations(page, testInfo)).toEqual([]);
+    await dialog.getByRole("tab", { name: "Raw text" }).click();
+    expect(await blockingViolations(page, testInfo, "axe-ticket-raw")).toEqual([]);
   });
 
   test("Settings has no serious or critical axe violations", async ({ page }, testInfo) => {
