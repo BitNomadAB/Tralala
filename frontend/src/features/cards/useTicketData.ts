@@ -40,6 +40,7 @@ export function useTicketData(boardId: string, loopId: string, cardId: string) {
     void queryClient.invalidateQueries({ queryKey: keys.activity(boardId, cardId) });
     void queryClient.invalidateQueries({ queryKey: keys.activity(boardId) });
     void queryClient.invalidateQueries({ queryKey: keys.mentions(boardId, loopId, cardId) });
+    void queryClient.invalidateQueries({ queryKey: keys.cardNotes(boardId, loopId, cardId) });
   }, [queryClient, boardId, loopId, cardId]);
 
   const live = useCardEvents(boardId, loopId, cardId, refresh);

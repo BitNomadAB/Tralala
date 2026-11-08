@@ -114,13 +114,18 @@ test.describe("browser safety", () => {
       .getByRole("button", { name: "Unsafe card" })
       .click();
     await expect(dialog).toBeVisible();
+    await dialog.getByRole("tab", { name: "Raw text" }).click();
+    await dialog.getByRole("button", { name: "Edit description" }).click();
     await dialog
       .getByLabel("Card description (Markdown)")
       .fill('<script>window.__pwned = true</script> <img src=x onerror="window.__pwned = true">');
-    await dialog.getByRole("button", { name: "Save description" }).click();
     await dialog.getByRole("tab", { name: "Preview" }).click();
+    await expect(dialog.getByRole("tabpanel", { name: "Preview" })).toContainText("<script>");
+    await dialog.getByRole("button", { name: "Save description" }).click();
+    // For you renders the saved description: as text, never as HTML.
+    await dialog.getByRole("tab", { name: "For you" }).click();
 
-    await expect(dialog).toContainText("<script>");
+    await expect(dialog.getByRole("tabpanel", { name: "For you" })).toContainText("<script>");
     const pwned = await page.evaluate(() => (window as unknown as { __pwned?: boolean }).__pwned);
     expect(pwned).toBeUndefined();
     expect(await dialog.locator("img").count()).toBe(0);

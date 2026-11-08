@@ -135,11 +135,16 @@ test.describe("the planning journey over /mcp", () => {
       ).toBeVisible();
 
       const after = await openTicket(page, plan.AFTER);
-      await expect(after.getByText("Phase 2", { exact: true })).toBeVisible();
-      await expect(after.getByText(/^Blocked by:/)).toBeVisible();
+      // The head names the Phase; the rail's state says what holds the Ticket up.
+      await expect(after.getByText(/^Phase 2 · /)).toBeVisible();
+      await expect(
+        after.getByRole("region", { name: "Status" }).getByText("Blocked", { exact: true }),
+      ).toBeVisible();
+      // For you shows the face the worker wrote: the steps, nothing of the agent's own text.
+      await expect(after.getByRole("list", { name: "Steps" })).toBeVisible();
       await closeDialog(page);
       const ready = await openTicket(page, plan.READY);
-      await expect(ready.getByText("Phase 1", { exact: true })).toBeVisible();
+      await expect(ready.getByText(/^Phase 1 · /)).toBeVisible();
       await expect(ready.getByText("Ready", { exact: true })).toBeVisible();
       await closeDialog(page);
     });
@@ -227,6 +232,9 @@ test.describe("the planning journey over /mcp", () => {
 
       const dialog = await openTicket(page, plan.AFTER);
       await expect(dialog.getByText("No files yet")).toBeVisible();
+      await expect(
+        dialog.getByRole("button", { name: /^Drop a file here, or use Add file\./ }),
+      ).toBeVisible();
       await dialog.getByLabel("Choose files to attach").setInputFiles({
         name: plan.FILE_NAME,
         mimeType: "text/plain",

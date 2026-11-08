@@ -24,8 +24,12 @@ export const CSRF = "csrf-ticket";
  * Loop page (or, from `TICKET_URL`, the Ticket's page), signed in as the member, with the CSRF
  * cookie set so every write carries the header. Resolves once the title is on screen.
  */
-export async function renderTicket(card: CardDetail = ticketCard(), url = LOOP_URL) {
-  const view = ticketViewHandlers(card);
+export async function renderTicket(
+  card: CardDetail = ticketCard(),
+  url = LOOP_URL,
+  options: Parameters<typeof ticketViewHandlers>[1] = {},
+) {
+  const view = ticketViewHandlers(card, options);
   server.use(...view.handlers);
   document.cookie = `tralala_csrf=${CSRF}`;
   const user = userEvent.setup();

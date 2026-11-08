@@ -14,10 +14,10 @@ const MENTION_TONES: Record<MentionJob["status"], "neutral" | "brand" | "success
 };
 
 /**
- * The agent mention jobs, the comment thread and the composer with @-mention suggestions. The
- * composer stays open on a Ticket of a completed, archived or cancelled Loop: such a Loop takes
- * comments on its Tickets (only an archived board refuses one), and a comment written after the
- * Loop was completed says so.
+ * The agent mention jobs, the comment thread and the composer with @-mention suggestions; Ctrl
+ * (or Cmd) + Enter sends, as the Send button does. The composer stays open on a Ticket of a
+ * completed, archived or cancelled Loop: such a Loop takes comments on its Tickets (only an
+ * archived board refuses one), and a comment written after the Loop was completed says so.
  */
 export function CardComments({
   live,
@@ -51,15 +51,14 @@ export function CardComments({
   onSubmitComment: (content: string) => void;
 }) {
   return (
-    <section>
-      <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-sm font-semibold">Comments</h3>
-        {live ? (
+    <div>
+      {live ? (
+        <div className="mb-2">
           <Badge tone="success" className="align-middle">
             live
           </Badge>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {mentions.length > 0 ? (
         <ul aria-label="Agent mentions" className="mb-2 flex flex-col gap-1">
           {mentions.map((job) => (
@@ -129,7 +128,7 @@ export function CardComments({
             ref={commentField}
             id="new-comment"
             className="min-h-16"
-            placeholder="Add a comment — type @ to mention an agent"
+            placeholder="Write a comment. Type @ to bring in an agent."
             aria-label="New comment"
             aria-autocomplete="list"
             // A textarea is a textbox, which takes no aria-expanded (axe: aria-allowed-attr); it
@@ -138,6 +137,11 @@ export function CardComments({
             value={comment}
             onChange={(event) => onCommentChange(event.target.value, event.target.selectionStart)}
             onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                if (comment.trim()) onSubmitComment(comment.trim());
+                return;
+              }
               if (suggestions.length === 0) return;
               if (event.key === "ArrowDown") {
                 event.preventDefault();
@@ -192,6 +196,9 @@ export function CardComments({
           <Send size={14} />
         </Button>
       </form>
-    </section>
+      <p className="m-0 mt-1.5 text-xs text-[var(--foreground-faint)]">
+        <kbd className="font-sans">Ctrl</kbd> + <kbd className="font-sans">Enter</kbd> sends
+      </p>
+    </div>
   );
 }

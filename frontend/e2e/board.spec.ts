@@ -29,17 +29,14 @@ test.describe("boards and cards", () => {
     await title.fill(`${cardTitle} (final)`);
     await title.press("Enter");
     await expect(dialog.getByRole("heading", { name: `${cardTitle} (final)` })).toBeVisible();
+    // The description's source is the agent's text: it is edited under Raw text.
+    await dialog.getByRole("tab", { name: "Raw text" }).click();
+    await dialog.getByRole("button", { name: "Edit description" }).click();
     await dialog
       .getByLabel("Card description (Markdown)")
       .fill(
         "## Launch plan\n\n- **Publish** release notes\n- `pnpm publish`\n\nSee https://example.com.",
       );
-    await dialog.getByRole("button", { name: "Save description" }).click();
-    await expect(dialog.getByRole("button", { name: "Save description" })).toBeDisabled();
-    // A fact in the rail turns into its control when clicked and saves itself.
-    await dialog.getByRole("button", { name: "Priority: None" }).click();
-    await dialog.getByRole("option", { name: "High" }).click();
-    await expect(dialog.getByRole("button", { name: "Priority: High" })).toBeVisible();
     await dialog.getByRole("tab", { name: "Preview" }).click();
     const preview = dialog.getByRole("tabpanel", { name: "Preview" });
     await expect(preview.getByRole("heading", { name: "Launch plan" })).toBeVisible();
@@ -51,6 +48,20 @@ test.describe("boards and cards", () => {
     await expect(
       dialog.getByText("Links to other sites open in a new tab; only http(s) links become links."),
     ).toBeVisible();
+    await dialog.getByRole("button", { name: "Save description" }).click();
+    await expect(dialog.getByRole("button", { name: "Save description" })).toHaveCount(0);
+    await expect(dialog.getByRole("tabpanel", { name: "Raw text" })).toContainText(
+      "## Launch plan",
+    );
+    // A Ticket without a face reads by its description under For you.
+    await dialog.getByRole("tab", { name: "For you" }).click();
+    const forYou = dialog.getByRole("tabpanel", { name: "For you" });
+    await expect(forYou.getByRole("heading", { name: "Launch plan" })).toBeVisible();
+    await expect(forYou).toContainText("Written before Tickets had a plain summary.");
+    // A fact in the rail turns into its control when clicked and saves itself.
+    await dialog.getByRole("button", { name: "Priority: None" }).click();
+    await dialog.getByRole("option", { name: "High" }).click();
+    await expect(dialog.getByRole("button", { name: "Priority: High" })).toBeVisible();
 
     await closeDialog(page);
     await expect(cardTile(page, "Todo", `${cardTitle} (final)`)).toContainText("high");

@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactElement, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useToast } from "@/components/ui/useToast";
 import { useAuth } from "@/features/auth/useAuth";
 import { describeError } from "@/lib/describeError";
@@ -8,6 +9,7 @@ import { clipboard, cn } from "@/lib/utils";
 import { useCardTools } from "@/webmcp/useWebMcp";
 import { CardChecklists } from "./CardChecklists";
 import { TicketActions, type PrimaryAction } from "./TicketActions";
+import type { ActivityTab } from "./TicketActivity";
 import { TicketBody } from "./TicketBody";
 import { TicketHead } from "./TicketHead";
 import { TicketRail } from "./TicketRail";
@@ -139,6 +141,7 @@ function TicketLayout({
   const toast = useToast();
   const picker = useRef<HTMLInputElement | null>(null);
   const [waitOpen, setWaitOpen] = useState(false);
+  const [activityTab, setActivityTab] = useState<ActivityTab>("comments");
   const actions = useTicketActions({
     boardId,
     loopId,
@@ -200,7 +203,11 @@ function TicketLayout({
             completed={completed}
             waiting={card.waiting_for !== "nothing"}
             onWait={() => setWaitOpen(true)}
-            onComment={() => comments.commentField.current?.focus()}
+            onComment={() => {
+              // The composer is in the Comments tab: show it before it takes the focus.
+              flushSync(() => setActivityTab("comments"));
+              comments.commentField.current?.focus();
+            }}
             onAddFile={() => picker.current?.click()}
             onCopyLink={copyLink}
             onReopen={() => void actions.setCompleted(false)}
@@ -214,14 +221,24 @@ function TicketLayout({
         <div className="grid grid-cols-1 gap-7 min-[860px]:grid-cols-[minmax(0,1fr)_280px] min-[860px]:gap-11">
           <TicketBody
             boardId={boardId}
+            loopId={loopId}
             card={card}
             readOnly={data.readOnly}
+            readOnlyReason={
+              data.loop?.stage === "completed"
+                ? "This Loop is completed; notes are read-only."
+                : "This Ticket is read-only, so notes cannot be added or changed."
+            }
             actorId={actorId}
             live={data.live}
             comments={comments}
             history={data.history}
+            readiness={data.readiness}
+            people={data.people}
             ticketHref={ticketHref}
             picker={picker}
+            activityTab={activityTab}
+            onActivityTabChange={setActivityTab}
             onSaveDescription={(description) => actions.update({ description })}
             refresh={data.refresh}
           />

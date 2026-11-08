@@ -10,6 +10,7 @@ import { cardsApi } from "./cards";
 import { discussionsApi } from "./discussions";
 import { loopsApi } from "./loops";
 import { loopWorkflowApi } from "./loopWorkflow";
+import { notesApi } from "./notes";
 import { templatesApi } from "./templates";
 import { ticketWorkApi } from "./ticketWork";
 
@@ -26,6 +27,7 @@ export const api = {
   ...loopWorkflowApi,
   ...cardsApi,
   ...ticketWorkApi,
+  ...notesApi,
   ...attachmentsApi,
   ...discussionsApi,
 };

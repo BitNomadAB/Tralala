@@ -78,3 +78,32 @@ export function attachmentRefusal(file: Pick<File, "name" | "size">): string | n
 export function uploadContentType(file: Pick<File, "name" | "type">): string {
   return (file.type || ATTACHMENT_TYPES[extensionOf(file.name)]) ?? "application/octet-stream";
 }
+
+/** What a person calls each accepted extension, for the line under a drop zone. */
+const KINDS: Readonly<Record<string, string>> = {
+  ".docx": "documents",
+  ".ppt": "presentations",
+  ".pptx": "presentations",
+  ".xlsx": "spreadsheets",
+  ".pdf": "PDF",
+  ".txt": "text",
+  ".md": "Markdown",
+  ".json": "JSON",
+  ".jpg": "images",
+  ".jpeg": "images",
+  ".png": "images",
+  ".gif": "images",
+};
+
+/**
+ * The kinds of file the server accepts and the size limit, in words: "Documents, presentations,
+ * spreadsheets, PDF, text, Markdown, JSON and images, up to 8 MB each." An extension without a
+ * word of its own is named as it is.
+ */
+export function attachmentKindsText(): string {
+  const kinds = [...new Set(ATTACHMENT_EXTENSIONS.map((ext) => KINDS[ext] ?? ext))];
+  const last = kinds.pop() ?? "";
+  const named = kinds.length > 0 ? `${kinds.join(", ")} and ${last}` : last;
+  const size = formatSize(ATTACHMENT_MAX_BYTES).replace(".0 ", " ");
+  return `${named.charAt(0).toUpperCase()}${named.slice(1)}, up to ${size} each.`;
+}

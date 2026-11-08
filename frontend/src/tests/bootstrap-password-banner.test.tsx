@@ -20,7 +20,9 @@ const META: ApiMeta = {
 
 const BANNER = /generated administrator password is still stored/;
 
-describe("the bootstrap password banner on Settings", () => {
+// The first test imports the whole app, which the heading's 10 s wait allows for; the test's own
+// limit has to allow for it too, or a loaded machine fails it before the wait is over.
+describe("the bootstrap password banner on Settings", { timeout: 15_000 }, () => {
   let metaAnswered: boolean;
 
   beforeEach(() => {

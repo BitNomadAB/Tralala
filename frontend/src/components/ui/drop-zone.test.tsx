@@ -27,6 +27,12 @@ function setup(props: { disabled?: boolean } = {}) {
 }
 
 describe("DropZone", () => {
+  it("hands its picker to a ref, so a button elsewhere opens the same input", () => {
+    const ref: { current: HTMLInputElement | null } = { current: null };
+    render(<DropZone hint="Drop here" onFiles={() => undefined} inputRef={ref} />);
+    expect(ref.current).toBe(screen.getByLabelText("Choose files"));
+  });
+
   it("calls onFiles with the files of a drop", () => {
     const { onFiles, zone } = setup();
     const dropped = [file("a.txt"), file("b.txt")];

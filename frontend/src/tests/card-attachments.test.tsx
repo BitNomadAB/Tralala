@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CardAttachments } from "@/features/cards/CardAttachments";
+import { TicketFiles } from "@/features/cards/TicketFiles";
 import {
   attachmentErrorText,
   NETWORK_HINT,
@@ -40,7 +40,7 @@ async function renderSection(
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <CardAttachments
+      <TicketFiles
         boardId={BOARD_ID}
         cardId={CARD_ID}
         readOnly={readOnly}
@@ -48,7 +48,7 @@ async function renderSection(
       />
     </QueryClientProvider>,
   );
-  const section = await screen.findByRole("region", { name: "Files" });
+  const section = await screen.findByRole("region", { name: /^Files/ });
   await waitFor(() => expect(within(section).queryByText("Loading files…")).toBeNull());
   // applyAccept off: the picker's "All files" lets a person choose what `accept` leaves out.
   return { files, section, user: userEvent.setup({ applyAccept: false }) };
@@ -115,10 +115,25 @@ describe("the rules the client checks before sending", () => {
 });
 
 describe("the Files section of a Ticket", () => {
-  it("says so when nothing is attached", async () => {
+  it("says so when nothing is attached, with the count, Add file and the drop zone", async () => {
     const { section } = await renderSection([]);
     expect(within(section).getByText("No files yet")).toBeInTheDocument();
-    expect(within(section).getByRole("button", { name: "Add file" })).toBeInTheDocument();
+    expect(within(section).getByRole("heading", { name: /^Files\s*0$/ })).toBeInTheDocument();
+    const zone = within(section).getByRole("button", {
+      name: /Drop a file here, or use Add file\./,
+    });
+    expect(zone).toHaveTextContent(
+      "Documents, presentations, spreadsheets, PDF, text, Markdown, JSON and images, up to 8 MB each.",
+    );
+    // Add file and a click on the drop zone open the same picker.
+    let opened = 0;
+    chooser(section).addEventListener("click", () => {
+      opened += 1;
+    });
+    const user = userEvent.setup();
+    await user.click(within(section).getByRole("button", { name: "Add file" }));
+    await user.click(zone);
+    expect(opened).toBe(2);
   });
 
   it("lists each file with its size, who uploaded it, a download link and a thumbnail for an image", async () => {
@@ -164,7 +179,7 @@ describe("the Files section of a Ticket", () => {
 
   it("uploads several dropped files one after another, each with its own result", async () => {
     const { files, section } = await renderSection([]);
-    fireEvent.drop(section, {
+    fireEvent.drop(within(section).getByRole("button", { name: /Drop a file here/ }), {
       dataTransfer: {
         types: ["Files"],
         files: [textFile("one.txt", "1"), textFile("two.json", "{}"), textFile("three.txt", "3")],
@@ -250,6 +265,6 @@ describe("the Files section of a Ticket", () => {
     expect(within(section).queryByRole("button", { name: "Add file" })).toBeNull();
     expect(within(section).queryByLabelText("Choose files to attach")).toBeNull();
     expect(within(section).queryByRole("button", { name: /^Delete/ })).toBeNull();
-    expect(within(section).queryByText(/Drop files here/)).toBeNull();
+    expect(within(section).queryByRole("button", { name: /Drop a file here/ })).toBeNull();
   });
 });

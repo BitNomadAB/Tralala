@@ -28,6 +28,8 @@ export const keys = {
   boardCardsPrefix: (boardId: string) => ["cards", boardId] as const,
   card: (boardId: string, loopId: string, cardId: string) =>
     ["card", boardId, loopId, cardId] as const,
+  cardNotes: (boardId: string, loopId: string, cardId: string) =>
+    ["card-notes", boardId, loopId, cardId] as const,
   mentions: (boardId: string, loopId: string, cardId: string) =>
     ["mentions", boardId, loopId, cardId] as const,
   search: (boardId: string, loopId: string, params: Record<string, unknown>) =>
