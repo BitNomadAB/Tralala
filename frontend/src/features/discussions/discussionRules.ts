@@ -1,6 +1,11 @@
 import type { MarkTone } from "@/components/ui/chip";
 import { loopPagePath, ticketPagePath } from "@/features/cards/ticketRules";
-import type { Discussion, DiscussionPosition, DiscussionSynthesis } from "@/lib/types";
+import type {
+  Discussion,
+  DiscussionPosition,
+  DiscussionRun,
+  DiscussionSynthesis,
+} from "@/lib/types";
 
 /**
  * The words a person reads about a discussion. A database status, a run state or a stop code is
@@ -180,11 +185,175 @@ export function reviewedText(decision: ReviewDecision): string {
   return REVIEWED[decision];
 }
 
-/** What the reply's composer says under it; a manual thread answers only when asked by name. */
+/** The agents are answering or paused between rounds: a run is under way. */
+export function isTalking(discussion: Discussion): boolean {
+  return discussion.run_state === "running" || discussion.run_state === "paused";
+}
+
+/** What the reply's composer says under it: a reply is a new round, or why it must wait. */
 export function replyHint(discussion: Discussion): string {
-  return discussion.mode === "manual"
-    ? "Mention @agents to make them answer."
-    : `One round per reply. Up to ${String(discussion.max_rounds)} rounds in a discussion.`;
+  return isTalking(discussion)
+    ? "The agents are answering. Reply once they are done."
+    : "The agents answer in a new round.";
+}
+
+/**
+ * Whether the UI starts the round a reply asks for: the server starts it itself on a thread that
+ * answers every reply (`auto_run` is then set, also when it could not start one), and leaves it
+ * to the caller on a thread that answers only when asked.
+ */
+export function replyNeedsRound(saved: Discussion): boolean {
+  return (saved.auto_run ?? null) === null && !isClosed(saved);
+}
+
+/** The most rounds one run may ask for (the server's cap). */
+export const RUN_ROUNDS = 4;
+
+/** The rounds the discussion has left before it reaches its most. */
+export function roundsLeft(discussion: Discussion): number {
+  return Math.max(0, discussion.max_rounds - discussion.round_count);
+}
+
+/** The rounds "Let them talk it out" offers: the rounds left, at most four. */
+export function talkRounds(discussion: Discussion): number {
+  return Math.min(roundsLeft(discussion), RUN_ROUNDS);
+}
+
+/** Why "Let them talk it out" cannot be pressed now, or null when it can. */
+export function talkBlocked(discussion: Discussion): string | null {
+  if (discussion.status === "cancelled") return "The discussion was cancelled";
+  if (isClosed(discussion)) return "The discussion is decided";
+  if (isTalking(discussion)) return "The agents are already answering";
+  if (roundsLeft(discussion) === 0) {
+    return `No round is left: the discussion has had all ${String(discussion.max_rounds)}`;
+  }
+  return null;
+}
+
+/** The one sentence of the "Let them talk it out" dialog. */
+export function talkSentence(rounds: number): string {
+  return `The agents answer each other for up to ${countText(
+    rounds,
+    "round",
+  )} and stop when they agree or when the budget is spent.`;
+}
+
+/** What "Let them talk it out" sends: the rounds, and a budget only where one was given. */
+export interface TalkRequest {
+  autonomous: true;
+  rounds: number;
+  token_budget?: number;
+  time_budget_seconds?: number;
+}
+
+const WHOLE = /^\d+$/;
+
+function budget(value: string, most: number): number | null | undefined {
+  const trimmed = value.trim();
+  if (trimmed === "") return undefined;
+  if (!WHOLE.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return parsed <= most ? parsed : null;
+}
+
+/** The dialog's fields as the start call takes them, or null while one of them is not valid. */
+export function talkRequest(
+  fields: { rounds: string; tokens: string; seconds: string },
+  most: number,
+): TalkRequest | null {
+  const rounds = budget(fields.rounds, most);
+  const tokens = budget(fields.tokens, 5_000_000);
+  const seconds = budget(fields.seconds, 3600);
+  if (rounds === null || rounds === undefined || rounds < 1) return null;
+  if (tokens === null || seconds === null) return null;
+  return {
+    autonomous: true,
+    rounds,
+    ...(tokens === undefined ? {} : { token_budget: tokens }),
+    ...(seconds === undefined ? {} : { time_budget_seconds: seconds }),
+  };
+}
+
+/** The progress line while the agents answer: "2 of 3 agents have answered this round". */
+export function progressLine(answered: number, agents: number): string {
+  const verb = agents === 1 ? "agent has" : "agents have";
+  return `${String(answered)} of ${String(agents)} ${verb} answered this round`;
+}
+
+/**
+ * How a run ended, in plain words; null while it runs. The run's status and stop reason are
+ * codes, shown only in Raw text.
+ */
+export function outcomeWords(run: DiscussionRun, stoppedBy: string | null = null): string | null {
+  switch (run.status) {
+    case "running":
+      return null;
+    case "paused":
+      return "Paused";
+    case "stopped":
+      return by("Stopped", stoppedBy);
+    case "budget_exhausted":
+      return "The budget ran out";
+    case "no_progress":
+      return "The agents repeated themselves, so the run stopped";
+    case "failed":
+      if (run.stop_reason === "all_participants_failed") return "No agent could be reached";
+      if (run.stop_reason === "process_restart") {
+        return "The run broke off when the server restarted";
+      }
+      return "The run broke off with an error";
+    case "completed":
+      return run.stop_reason === "consensus" ? "The agents agree" : "Rounds used up";
+    default:
+      return "The run ended";
+  }
+}
+
+/**
+ * The line under the sign about the latest run, or null: nothing while it runs or is paused (the
+ * state says so), when the agents agree (the sign says so), or after one round asked for by a
+ * reply, which simply ran.
+ */
+export function outcomeLine(run: DiscussionRun | null, stoppedBy: string | null): string | null {
+  if (run === null || run.status === "running" || run.status === "paused") return null;
+  if (run.status === "completed" && (run.stop_reason === "consensus" || !run.autonomy)) {
+    return null;
+  }
+  return outcomeWords(run, stoppedBy);
+}
+
+/** Under the row of an agent the latest round could not reach. */
+export function failedLine(name: string): string {
+  return `No answer from ${name}: the agent could not be reached.`;
+}
+
+export type RunAction = "pause" | "resume" | "stop";
+
+/**
+ * The run's items under More: Pause while the agents answer, Resume while paused; the rail's More
+ * also offers Stop the run (`withStop`), which the actions row shows as its own button.
+ */
+export function runControls(
+  discussion: Discussion,
+  withStop = false,
+): { action: RunAction; label: string }[] {
+  const stop = withStop ? [{ action: "stop" as const, label: "Stop the run" }] : [];
+  if (discussion.run_state === "running") {
+    return [{ action: "pause", label: "Pause while they talk" }, ...stop];
+  }
+  if (discussion.run_state === "paused") return [{ action: "resume", label: "Resume" }, ...stop];
+  return [];
+}
+
+const CONTROLLED: Record<RunAction, string> = {
+  pause: "The run is paused",
+  resume: "The agents go on",
+  stop: "The run is stopped",
+};
+
+/** What the toast says once Pause, Resume or Stop is through. */
+export function controlledText(action: RunAction): string {
+  return CONTROLLED[action];
 }
 
 /**

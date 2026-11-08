@@ -8,6 +8,7 @@ import type {
 } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { countText, positionLabel } from "./discussionRules";
+import type { RunFailure } from "./runEvents";
 
 /**
  * What the discussion view reads out of the thread the API gives: one row per participant, one
@@ -18,6 +19,8 @@ export type StanceKind = "answer" | "prose" | "none";
 
 export interface StanceRow {
   id: string;
+  /** The agent's id, which the run's events name it by. */
+  participantId: string;
   name: string;
   role: string | null;
   /** `answer`: in the standard; `prose`: answered, but not in the standard; `none`: no answer. */
@@ -47,6 +50,7 @@ export function stanceRows(discussion: Discussion): StanceRow[] {
         : "none";
     return {
       id: participant.id,
+      participantId: participant.participant_id,
       name: participant.display_name,
       role: participant.role_template_name,
       kind,
@@ -133,25 +137,41 @@ function elapsed(ms: number): string {
   return ms < 1000 ? `${String(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
-/** A run and its rounds as the API gives them, codes included: the Raw text's run log. */
-export function runText(run: DiscussionRun): string {
+/**
+ * A run and its rounds as the API gives them, codes included: the Raw text's run log, numbered
+ * from the oldest run, with each agent that failed and the code it failed with.
+ */
+export function runText(
+  run: DiscussionRun,
+  number: number,
+  failures: readonly RunFailure[] = [],
+): string {
   const sum = (field: "answers" | "failures" | "repeats") =>
     run.rounds.reduce((total, round) => total + round[field], 0);
   const head = [
-    `Run ${run.created_at}`,
+    `Run ${String(number)}`,
+    run.created_at,
     run.status,
+    run.autonomy ? "autonomous" : "asked",
     `rounds ${String(run.rounds_completed)} of ${String(run.rounds_requested)}`,
     `answers ${String(sum("answers"))}`,
     `failures ${String(sum("failures"))}`,
     `repeats ${String(sum("repeats"))}`,
     `${String(run.tokens_used)} tokens`,
+    `token budget ${run.token_budget === null ? "none" : String(run.token_budget)}`,
     elapsed(run.elapsed_ms),
+    `time budget ${run.time_budget_seconds === null ? "none" : `${String(run.time_budget_seconds)} s`}`,
     `stop: ${run.stop_reason ?? "none"}`,
+    `error: ${run.error ?? "none"}`,
     `started by ${run.started_by_name}`,
   ].join(" · ");
   const rounds = run.rounds.map(
     (round) =>
       `  Round ${String(round.round_number)} · ${round.status} · answers ${String(round.answers)} · failures ${String(round.failures)} · repeats ${String(round.repeats)} · ${String(round.tokens_used)} tokens · ${elapsed(round.elapsed_ms)}`,
   );
-  return [head, ...(run.error ? [`  error: ${run.error}`] : []), ...rounds].join("\n");
+  const failed = failures.map(
+    (entry) =>
+      `  Failed${entry.round === null ? "" : ` in round ${String(entry.round)}`} · ${entry.name} · ${entry.error}`,
+  );
+  return [head, ...rounds, ...failed].join("\n");
 }

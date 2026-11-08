@@ -2,6 +2,7 @@ import { http } from "msw";
 import type {
   Discussion,
   DiscussionAnswer,
+  DiscussionEvent,
   DiscussionMessage,
   DiscussionParticipant,
   DiscussionPosition,
@@ -136,7 +137,7 @@ function run(
     tokens_used: 6200,
     time_budget_seconds: null,
     elapsed_ms: 24000,
-    stop_reason: "rounds_exhausted",
+    stop_reason: "rounds_completed",
     error: null,
     started_by_name: MEMBER.name,
     created_at: at(minute - 1),
@@ -265,14 +266,32 @@ export function discussion(extra: Partial<Discussion> = {}): Discussion {
   };
 }
 
-/** The discussion's API: the thread, the review and the reply; `bodies` holds every write. */
+/**
+ * What the discussion's API answers and has been sent: the thread, its stored events, every write
+ * in `bodies`, and in `next` the thread a write turns it into, by route ("messages", "start",
+ * "pause", "resume", "stop").
+ */
+export interface DiscussionApiState {
+  discussion: Discussion;
+  events: DiscussionEvent[];
+  bodies: { route: string; body: unknown; csrf: string | null }[];
+  next: Partial<Record<string, Discussion>>;
+}
+
+/** The thread after a write to `route`: what the test set in `next`, or as it was. */
+export function after(state: DiscussionApiState, route: string): Discussion {
+  state.discussion = state.next[route] ?? state.discussion;
+  return state.discussion;
+}
+
+/** The discussion's API: the thread, its events, the review and the reply. */
 export function discussionHandlers(initial: Discussion = discussion()) {
-  const state = {
-    discussion: initial,
-    bodies: [] as { route: string; body: unknown; csrf: string | null }[],
-  };
+  const state: DiscussionApiState = { discussion: initial, events: [], bodies: [], next: {} };
   const handlers = [
     http.get(apiPath(DISCUSSION_PATH), () => ok(state.discussion)),
+    http.get(apiPath(`${DISCUSSION_PATH}/events/history`), () =>
+      ok({ items: state.events, total: state.events.length }),
+    ),
     http.post(apiPath(`${DISCUSSION_PATH}/review`), async ({ request }) => {
       const body: unknown = await request.json();
       state.bodies.push({ route: "review", body, csrf: request.headers.get("X-CSRF-Token") });
@@ -283,7 +302,9 @@ export function discussionHandlers(initial: Discussion = discussion()) {
     http.post(apiPath(`${DISCUSSION_PATH}/messages`), async ({ request }) => {
       const body: unknown = await request.json();
       state.bodies.push({ route: "messages", body, csrf: request.headers.get("X-CSRF-Token") });
-      return ok({ ...state.discussion, auto_run: "started" });
+      const thread = after(state, "messages");
+      // The server answers every reply on a roundtable thread; a manual one leaves it to the UI.
+      return ok({ ...thread, auto_run: thread.mode === "manual" ? null : "started" });
     }),
   ];
   return { state, handlers };

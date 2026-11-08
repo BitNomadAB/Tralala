@@ -4,15 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 
 /**
- * Your reply: one message, which the agents answer in a new round ("Ask again"). The hint under
- * it says how many rounds a discussion has, or, for a thread that answers only when asked, that
- * the agents answer when mentioned.
+ * Your reply: one message, which the agents answer in a new round ("Ask again"); the hint under
+ * it says so, or while the agents answer, why the reply waits (`disabled`).
  */
 export function DiscussionReply({
   author,
   value,
   onChange,
   hint,
+  disabled,
   sending,
   onSend,
 }: {
@@ -20,6 +20,7 @@ export function DiscussionReply({
   value: string;
   onChange: (value: string) => void;
   hint: string;
+  disabled: boolean;
   sending: boolean;
   onSend: () => void;
 }) {
@@ -40,14 +41,20 @@ export function DiscussionReply({
           aria-describedby={hintId}
           className="min-h-20"
           value={value}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="Ask again. The agents answer in a new round."
+          placeholder="Ask a follow-up question, or add what they missed."
         />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <small id={hintId} className="text-[12.5px] text-[var(--foreground-faint)]">
             {hint}
           </small>
-          <Button type="submit" variant="secondary" size="sm" disabled={!value.trim() || sending}>
+          <Button
+            type="submit"
+            variant="secondary"
+            size="sm"
+            disabled={disabled || !value.trim() || sending}
+          >
             Ask again
           </Button>
         </div>

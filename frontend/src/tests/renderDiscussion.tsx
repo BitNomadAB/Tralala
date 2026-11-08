@@ -8,9 +8,10 @@ import { AuthContext } from "@/features/auth/useAuth";
 import { TicketPage } from "@/features/cards/TicketPage";
 import { DiscussionPage } from "@/features/discussions/DiscussionPage";
 import { LoopPage } from "@/features/loops/LoopPage";
-import type { Discussion } from "@/lib/types";
+import type { Discussion, DiscussionEvent } from "@/lib/types";
 import { LocationProbe } from "./LocationProbe";
 import { ticketCard } from "./msw/cards";
+import { runHandlers } from "./msw/discussionRuns";
 import { discussion, discussionHandlers, DISCUSSION_ID, QUESTION } from "./msw/discussions";
 import { apiPath, ok } from "./msw/envelope";
 import { BOARD_ID, LOOP_ID, LOOP_PATH, planningDialogHandlers } from "./msw/loops";
@@ -27,13 +28,20 @@ export const PAGE_URL = `${TICKET_PAGE_URL}/discussions/${DISCUSSION_ID}`;
  * The discussion as the app shows it, over `thread` answered by `discussionHandlers`: on the Loop
  * page inside the Ticket's dialog (`MODAL_URL`), or as a page of its Ticket (`PAGE_URL`), signed in
  * as the member with the CSRF cookie set. The Ticket, its page and the Loop page are answered too,
- * so Back to the Ticket and Close can be followed. Resolves once the question is on screen.
+ * so Back to the Ticket and Close can be followed; `events` is what the event history replays.
+ * Resolves once the question is on screen.
  */
-export async function renderDiscussion(thread: Discussion = discussion(), url = MODAL_URL) {
+export async function renderDiscussion(
+  thread: Discussion = discussion(),
+  url = MODAL_URL,
+  events: DiscussionEvent[] = [],
+) {
   const api = discussionHandlers(thread);
+  api.state.events = events;
   const ticket = ticketViewHandlers(ticketCard());
   server.use(
     ...api.handlers,
+    ...runHandlers(api.state),
     http.get(apiPath(`/boards/${BOARD_ID}/loop-summaries`), () =>
       ok({ board_id: BOARD_ID, loops: [], count: 0 }),
     ),

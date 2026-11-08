@@ -4,9 +4,24 @@ import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
-import type { Discussion } from "@/lib/types";
-import { reviewedText, type ReviewDecision } from "./discussionRules";
+import type { Discussion, DiscussionEvent } from "@/lib/types";
+import { replyNeedsRound, reviewedText, type ReviewDecision } from "./discussionRules";
+import { runView } from "./runEvents";
 import { useDiscussionEvents } from "./useDiscussionEvents";
+import { useDiscussionRuns } from "./useDiscussionRuns";
+
+const EVENT_PAGE = 500;
+
+/** Every stored event of the thread, oldest first, a page of the server's most at a time. */
+async function allEvents(boardId: string, discussionId: string): Promise<DiscussionEvent[]> {
+  const events: DiscussionEvent[] = [];
+  for (;;) {
+    const after = events.at(-1)?.seq ?? 0;
+    const page = await api.listDiscussionEvents(boardId, discussionId, after, EVENT_PAGE);
+    events.push(...page);
+    if (page.length < EVENT_PAGE) return events;
+  }
+}
 
 /** What a saved reply did when it did not start a round, in the words of the toast. */
 function replyNotice(discussion: Discussion) {
@@ -35,9 +50,10 @@ function replyNotice(discussion: Discussion) {
 }
 
 /**
- * One discussion for the view: the thread (refetched while the agents answer and the event
- * stream is down), its server-sent events, the person's decision with the review dialog, and the
- * reply that asks again.
+ * One discussion for the view: the thread and its stored events (refetched while the agents answer
+ * and the event stream is down), its server-sent events, the person's decision with the review
+ * dialog, the reply that asks again (starting the round itself where the server does not) and the
+ * runs.
  */
 export function useDiscussionView(boardId: string, discussionId: string) {
   const queryClient = useQueryClient();
@@ -59,6 +75,14 @@ export function useDiscussionView(boardId: string, discussionId: string) {
     refetchInterval: (current) =>
       current.state.data?.run_state === "running" && !live ? 1500 : false,
   });
+  const running = query.data?.run_state === "running";
+  const events = useQuery({
+    queryKey: keys.discussionEvents(boardId, discussionId),
+    queryFn: () => allEvents(boardId, discussionId),
+    enabled: Boolean(boardId && discussionId),
+    refetchInterval: running && !live ? 1500 : false,
+  });
+  const runs = useDiscussionRuns(boardId, discussionId, invalidate);
 
   const reviewMutation = useMutation({
     mutationFn: (input: { decision: ReviewDecision; reason: string }) =>
@@ -82,6 +106,7 @@ export function useDiscussionView(boardId: string, discussionId: string) {
     onSuccess: (discussion) => {
       setReply("");
       invalidate();
+      if (replyNeedsRound(discussion)) runs.askRound();
       const notice = replyNotice(discussion);
       if (notice) toast.push(notice);
     },
@@ -96,6 +121,8 @@ export function useDiscussionView(boardId: string, discussionId: string) {
 
   return {
     query,
+    run: query.data ? runView(query.data, events.data ?? []) : null,
+    runs,
     live,
     invalidate,
     reviewing,
@@ -110,7 +137,7 @@ export function useDiscussionView(boardId: string, discussionId: string) {
       const content = reply.trim();
       if (content) replyMutation.mutate(content);
     },
-    sending: replyMutation.isPending,
+    sending: replyMutation.isPending || runs.starting,
   };
 }
 

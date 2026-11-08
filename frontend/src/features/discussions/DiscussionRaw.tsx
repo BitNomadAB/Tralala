@@ -1,13 +1,22 @@
 import { RawBlock, RawText } from "@/components/ui/raw-text";
 import type { Discussion } from "@/lib/types";
 import { answersJson, messageHeading, runText } from "./discussionData";
+import type { RunFailure } from "./runEvents";
 
 /**
  * "Raw text": what the agents wrote to each other, as it is and unstyled on purpose: the
  * transcript (every message with its author, role, round and time), the answers in the standard
- * as JSON, and the runs with their codes, tokens, time and stop reasons as the API gives them.
+ * as JSON, and every run with its codes, rounds, answers, failures, repeats, tokens, time, stop
+ * reason and error as the API gives them, and the agents that failed with their codes.
  */
-export function DiscussionRaw({ discussion }: { discussion: Discussion }) {
+export function DiscussionRaw({
+  discussion,
+  failures,
+}: {
+  discussion: Discussion;
+  /** Each run's failed agents with their codes, by run id, from the events. */
+  failures: ReadonlyMap<string, readonly RunFailure[]>;
+}) {
   const runs = discussion.runs ?? [];
   const answered = discussion.messages.some((message) => message.answer);
   return (
@@ -35,7 +44,11 @@ export function DiscussionRaw({ discussion }: { discussion: Discussion }) {
       ) : null}
       {runs.length > 0 ? (
         <RawBlock label="Runs">
-          <RawText text={runs.map(runText).join("\n\n")} />
+          <RawText
+            text={runs
+              .map((run, index) => runText(run, runs.length - index, failures.get(run.id)))
+              .join("\n\n")}
+          />
         </RawBlock>
       ) : null}
     </div>

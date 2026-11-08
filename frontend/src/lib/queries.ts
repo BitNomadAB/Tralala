@@ -50,6 +50,9 @@ export const keys = {
   discussions: (boardId: string) => ["discussions", boardId] as const,
   discussion: (boardId: string, discussionId: string) =>
     ["discussion", boardId, discussionId] as const,
+  /** Under the thread's key, so invalidating the thread refetches its events too. */
+  discussionEvents: (boardId: string, discussionId: string) =>
+    ["discussion", boardId, discussionId, "events"] as const,
 };
 
 export function useBoards(filters: {
