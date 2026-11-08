@@ -98,7 +98,8 @@ export function Menu({
   }
 
   return (
-    <div ref={root} className={cn("relative", className)}>
+    // While open, Escape belongs to the menu: a dialog around it (`DialogFrame`) stays open.
+    <div ref={root} className={cn("relative", className)} data-keeps-escape={open ? "" : undefined}>
       <button
         ref={button}
         type="button"

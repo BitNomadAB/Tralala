@@ -16,6 +16,10 @@ const DashboardPage = lazyPage(() => import("@/features/boards/DashboardPage"), 
 const BoardLoopsPage = lazyPage(() => import("@/features/loops/BoardLoopsPage"), "BoardLoopsPage");
 const LoopPage = lazyPage(() => import("@/features/loops/LoopPage"), "LoopPage");
 const TicketPage = lazyPage(() => import("@/features/cards/TicketPage"), "TicketPage");
+const DiscussionPage = lazyPage(
+  () => import("@/features/discussions/DiscussionPage"),
+  "DiscussionPage",
+);
 const HistoryPage = lazyPage(() => import("@/features/history/HistoryPage"), "HistoryPage");
 const DiscussionsPage = lazyPage(
   () => import("@/features/discussions/DiscussionsPage"),
@@ -102,6 +106,10 @@ export function App() {
                       <Route
                         path="/boards/:boardId/loops/:loopId/tickets/:cardId"
                         element={<TicketPage />}
+                      />
+                      <Route
+                        path="/boards/:boardId/loops/:loopId/tickets/:cardId/discussions/:discussionId"
+                        element={<DiscussionPage />}
                       />
                       <Route path="/boards/:boardId/history" element={<HistoryPage />} />
                       <Route path="/discussions" element={<DiscussionsPage />} />

@@ -84,4 +84,14 @@ describe("Menu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     expect(archive).not.toHaveBeenCalled();
   });
+
+  it("keeps Escape from a dialog around it only while it is open", async () => {
+    const { user, button } = setup();
+    const root = button.parentElement;
+    expect(root).not.toHaveAttribute("data-keeps-escape");
+    await user.click(button);
+    expect(root).toHaveAttribute("data-keeps-escape", "");
+    await user.keyboard("{Escape}");
+    expect(root).not.toHaveAttribute("data-keeps-escape");
+  });
 });

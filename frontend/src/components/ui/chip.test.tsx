@@ -52,6 +52,7 @@ describe("ToneMark", () => {
     ["success", "--success"],
     ["warning", "--warning"],
     ["danger", "--destructive"],
+    ["neutral", "--foreground-faint"],
   ] as const)("marks a %s word with a dot the screen reader skips", (tone, colour) => {
     const { container } = render(<ToneMark tone={tone} word="Yes" />);
     expect(screen.getByText("Yes")).toBeInTheDocument();
