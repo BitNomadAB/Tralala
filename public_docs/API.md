@@ -638,14 +638,20 @@ Loop and deep-links the Ticket as `/boards/{board_id}/loops/{loop_id}?card={card
 keep an immutable role snapshot, so later template edits never rewrite what an agent was told.
 
 `GET /discussions/inbox` is the Discussions page: every thread that is not cancelled, on every
-board, one row each with the board, the Loop, the Ticket, the question, the newest round's
-suggested `verdict`, `counts` (`go`, `stop`, `unclear`, `missing`), the rounds, who asked,
-`decided_by_name` and `waits_for`: `your_decision` (no run active and not decided), `agents` (a run
-is running or paused) or `nobody` (approved, vetoed or rework requested). The rows come in that
-order, each group newest activity first, at most 200 of them with `total` counting all. It
-discloses board metadata, so it requires both `boards:read` and `discussions:read`. `card_id` on
-the board's list narrows it to one Ticket's threads, and every thread carries `decided_by_name`,
-the person who recorded its newest decision.
+board, as `{items, total}`. A row is `{discussion_id, board_id, board_name, loop_id, loop_key,
+loop_name, card_id, ticket_key, card_title, question, status, run_state, verdict, counts,
+participant_count, round_count, max_rounds, asked_by_name, last_activity_at, decided_by_name,
+waits_for}`: `question` is the thread's goal, `verdict` the newest round's suggested verdict (`null`
+before a round), `counts` how its answers stand (`go`, `stop`, `unclear`, `missing`), and
+`waits_for` is `your_decision` (no run active and not decided, a thread without a round included),
+`agents` (a run is running or paused) or `nobody` (approved, vetoed or rework requested). The rows
+come in that order, each group newest activity first, at most 200 of them with `total` counting
+all; a board whose database cannot be opened is left out. It discloses board metadata, so it
+requires both `boards:read` and `discussions:read`. It replaces `GET /discussions/overview`, which
+is gone, as is the per-board summary it answered.
+
+`card_id` on the board's list narrows it to one Ticket's threads (the Ticket's Discussions tab), and
+every thread carries `decided_by_name`, the person who recorded its newest decision, or `null`.
 
 `start` and `runs` take the same body:
 
@@ -687,16 +693,33 @@ its prose:
 | Field | Bound | Meaning |
 | --- | --- | --- |
 | `position` | `yes`, `yes_with_conditions`, `no`, `unclear` | should the person go ahead with what the goal proposes |
-| `recommendation` | 300 characters | one sentence: what the person should do |
-| `pros` / `cons` | 5 items of 200 characters | for going ahead / against, and the risks |
-| `conditions` | 5 items of 200 characters | what must hold; at least one with `yes_with_conditions` |
-| `open_questions` | 5 items of 200 characters | what the participant cannot settle; at least one with `unclear` |
+| `recommendation` | one sentence of at most 20 words (200 characters), plain text | what the person should do |
+| `pros` / `cons` | 3 items of 140 characters, plain text | for going ahead / against, and the risks |
+| `conditions` | 3 items of 140 characters, plain text | what must hold; at least one with `yes_with_conditions` |
+| `open_questions` | 3 items of 140 characters, plain text | what the participant cannot settle; at least one with `unclear` |
 | `confidence` | `high`, `medium`, `low` | how sure the participant is |
-| `reasoning` | 8 000 characters | the analysis in Markdown; it becomes the message's `content` |
+| `reasoning` | 8 000 characters, no rule on its content | the analysis in Markdown; it becomes the message's `content` |
 
-The round prompt states the standard, and an agent whose provider takes a JSON schema gets it as
-`response_format`. An answer that does not follow it is asked once more with what was wrong; one
-that still does not is kept as prose with the position `unclear`, never dropped. A message's
+The recommendation and the four lists are the answer's sign, what a person reads by default.
+"Plain text" is the rule a Ticket's face follows: no file path or file name, no code span or fence,
+no code symbol, no UUID or other id. The server counts and matches it, never a model. The
+reasoning is read by the other agents and shown to the person as raw text, so it may be as long
+and technical as it needs to be.
+
+The round prompt states the standard and says who reads which part, and an agent whose provider
+takes a JSON schema gets it as `response_format` (with `maxItems` and `maxLength`). An answer that
+does not follow it is asked once more with every finding, one line each that names the field (a
+list item by its 0-based index), the rule and the text:
+
+```text
+recommendation: 27 words; at most 20
+conditions[1]: looks like a file path (Banner.tsx)
+pros: 5 items; at most 3
+```
+
+One that still does not follow it is kept as prose with the position `unclear`, never dropped, and
+its `problem` holds those lines (cut at 300 characters). An answer stored under the earlier, looser
+limits is read as it was written. A message's
 `answer` is `{version, format, position, recommendation, pros, cons, conditions, open_questions,
 confidence, problem}` with `format` `structured`, `repaired` or `prose` (then `problem` says what
 was wrong), or `null` for a person's message and an answer written before the standard.
@@ -716,8 +739,10 @@ support (`kind: decision_support`, `written_by: tralala`), never a decision: `su
 `stop` (against) and `unclear` with each one's recommendation, the `conditions` and
 `open_questions` with who named them, and who is `missing`. The suggestion is `yes` when every
 participant says `yes`, `yes_with_conditions` when every participant is for going ahead and some
-name conditions, `no` when every participant is against, and `unclear` otherwise, with the reason
-naming the split, the unclear participants or the missing answers.
+name conditions, `no` when every participant is against, and `unclear` otherwise. The `reason` is
+one sentence of at most 20 words that counts each side and names nobody ("The participants differ:
+1 for going ahead, 1 against and 1 cannot tell."); who cannot tell and who is missing are in
+`unclear` and `missing`.
 
 Posting a human message answers it automatically in `roundtable` and `autonomous` threads: the
 message starts one background round (one pass over the participants). In a `manual` thread nothing
@@ -1019,8 +1044,8 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
 | `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Every Ticket carries its face, or the RoadMap answers `422 face_invalid` naming each Ticket, field and rule. Both take an optional `brief`, stored as the human view instead of asking a board agent; an analysis brief that breaks the sign answers `422 brief_invalid` |
 | `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval; an analysis brief keeps the sign (`422 brief_invalid`) |
-| `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the synthesis, the positions and the structured answers |
-| `read_discussion` | `discussions:read` | Read a thread: the newest round's synthesis, each agent's position and the messages (prose with `include_prose`) |
+| `ask_agents` | `discussions:write` | Create a `roundtable` discussion on the Ticket (the board's askable agents, or `agent_ids`; at most 12) and run one round; returns the synthesis, the positions and the structured answers, which the person sees in the Ticket's Discussions tab as the sign; without an askable agent `422 no_agents_available` |
+| `read_discussion` | `discussions:read` | Read a thread: the newest round's synthesis, each agent's position and the messages with their structured answers (the reasoning, which the person reads as raw text, with `include_prose`) |
 | `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |
 
 The flow a person and their worker use to plan is `create_loop` → `write_info` → `write_analysis`

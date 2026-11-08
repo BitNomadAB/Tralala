@@ -272,15 +272,19 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   page and Settings: a serious or critical violation fails it, moderate and minor ones are
   annotations on the test.
 - Card content is untrusted: Markdown is rendered by `src/lib/markdown.tsx`, which never injects HTML.
-- Text for people is plain. A Ticket's face (summary, why, if skipped, for and against, steps) and
-  the analysis brief are what a person reads by default, so the server holds every writer to their
-  limits and refuses a file path or file name, a code symbol, a code span or fence, a UUID or
-  another id in them (`422 face_invalid`, `422 brief_invalid`, `422 brief_rejected`), counted and
-  matched, never judged by a model. The face's rules live in `services/ticket_face.py`, the brief's
-  sign in `services/loop_documents_human_limits.py`, and the plain-text rules both share in
+- Text for people is plain. A Ticket's face (summary, why, if skipped, for and against, steps), the
+  analysis brief and a discussion answer's sign (the recommendation, one sentence of at most 20
+  words, and for, against, conditions and open questions, at most three items of 140 characters
+  each) are what a person reads by default, so the server holds every writer to their limits and
+  refuses a file path or file name, a code symbol, a code span or fence, a UUID or another id in
+  them (`422 face_invalid`, `422 brief_invalid`, `422 brief_rejected`; a discussion answer is
+  repaired once and otherwise kept as prose with the position `unclear`), counted and matched,
+  never judged by a model. The face's rules live in `services/ticket_face.py`, the brief's sign in
+  `services/loop_documents_human_limits.py`, the discussion answer's sign in
+  `services/discussion_answers.py`, and the plain-text rules all three share in
   `services/plain_text.py`; change a limit there, with its unit tests, and nowhere else. Files,
-  routes and symbols belong in the text for the AI (acceptance criteria, evidence, findings), which
-  the UI shows as it is behind Raw text.
+  routes and symbols belong in the text for the AI (acceptance criteria, evidence, findings, a
+  discussion answer's reasoning), which the UI shows as it is behind Raw text.
 
 ## Verification contract
 

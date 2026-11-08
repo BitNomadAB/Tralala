@@ -238,8 +238,8 @@ Board / Loop / Phase / key and **Back to the board**. Nothing is a form until yo
   the summary under it. The actions: **Start work** while the Ticket sits in the first column (it
   makes you the owner when nobody owns it and moves it to the next column) or **Mark complete**
   (off, with the reason on hover, while it waits or earlier work comes first), then **Mark as
-  waiting**, **Comment**, **Add file**, and **More actions** (**Copy link**, **Mark incomplete** for
-  a completed Ticket, **Archive**).
+  waiting**, **Comment**, **Add file**, and **More actions** (**Copy link**, **Ask the agents**,
+  **Mark incomplete** for a completed Ticket, **Archive**).
 - **What will be done**, with **For you | Raw text**. For you is the face: the steps as a numbered
   list ("3 of 5"; at five, the line says a Ticket that needs more is split), then sections that
   expand: **Why it is needed**, **If we skip it**, **Pro and con** ("2 for, 1 against", in two
@@ -249,9 +249,10 @@ Board / Loop / Phase / key and **Back to the board**. Nothing is a form until yo
   choice lasts while the view is open.
 - **Files**: a drop zone and **Add file**; [API.md](API.md#attachments) lists the kinds a Ticket
   takes.
-- **Activity**, with the tabs **Comments** (Ctrl+Enter sends), **History** (what happened, one row
-  each) and **Work** (the summary and the completion with its evidence that a coding session
-  recorded).
+- **Activity**, with the tabs **Comments** (Ctrl+Enter sends), **Discussions** with their count
+  ([Ask the agents](#ask-the-agents)), **History** (what happened, one row each) and **Work** (the
+  summary and the completion with its evidence that a coding session recorded). **Ask the agents**
+  sits in Activity's head.
 - **The rail**: the column as a menu, the state with *Mark as waiting…* or the wait with **Clear
   the wait**, **Confirm human action** for a Ticket only a person can do, **Details** (Owner,
   Phase, Work is done, Depends on, Priority, Due, Labels, Created; each value turns into its control
@@ -259,7 +260,7 @@ Board / Loop / Phase / key and **Back to the board**. Nothing is a form until yo
 
 When someone else changed the Ticket since it was opened, a write answers "Someone changed this
 Ticket. Reload to see it." A completed, cancelled or archived Loop shows the view read only, with
-Comment and Copy link.
+Comment and Copy link; its Discussions tab still lists what was discussed, without Ask the agents.
 
 ### Your notes
 
@@ -269,6 +270,110 @@ wrote. A note holds up to 4 000 characters. Your coding agent reads them: `read_
 as `person_notes`, apart from the plan, and no key can write, edit or delete one. Only the author
 changes a note, an edit names the version it read, and a completed, cancelled or archived Loop, like
 an archived board, takes no note.
+
+## Ask the agents
+
+A discussion is a question to the board's agents about one Ticket. It belongs to that Ticket and
+opens inside it. The agents advise; a person decides, and nothing a discussion says changes the
+Ticket.
+
+### Asking
+
+**Ask the agents** sits in the head of a Ticket's **Activity** and under its **More actions**. The
+dialog asks one thing and one choice: the **Question**, and the **Agents** that can answer on the
+board, each with its role, all chosen to begin with (at most 12). **Ask** opens the discussion and
+the chosen agents answer one round; the dialog waits for that round and then shows the discussion
+with their answers. If the round cannot start, the discussion opens anyway and says "The agents
+could not start answering". On a board where no agent can answer the dialog says "No agent can
+answer on this board. Add one in Settings → Agents and select it on the board.", offers **Open
+Settings** and keeps Ask off. A Ticket of a completed, cancelled or archived Loop offers no Ask the
+agents.
+
+Activity's tab **Discussions** carries the count, between Comments and History. Each row shows the
+state while the agents answer, otherwise Tralala's verdict, or "No answer yet"; the question; who it
+waits for ("Waits for your decision", "Waits for the agents", "Waits for you to resume") or the
+decision with who took it ("Vetoed by Mike"); and a line such as "3 agents · 2 for · 1 against ·
+round 2 of 3 · asked by Mike · Nov 8, 2026". Discussions that wait for your decision come first,
+then those the agents are answering, then the decided ones, each newest first. A Ticket without one
+reads "No discussion yet. Ask the agents what they think."
+
+### The discussion
+
+A row opens the discussion in the Ticket's dialog over the Kanban. **Back to the Ticket** returns
+to the Ticket, and **Open as page** shows the same view on a page of the Ticket, with the
+breadcrumb Board / Loop / Ticket / question. The question is the heading, with a line under it:
+"Asked by Mike · 3 agents · round 2 of 4".
+
+- **The sign** comes first: Tralala's verdict as one word (**Yes**, **Yes, with conditions**,
+  **No** or **Unclear**) and one sentence of at most 20 words that counts who stands where and
+  names nobody ("The participants differ: 1 for going ahead, 1 against and 1 cannot tell."). Under
+  it, by name, who cannot tell yet and who has not answered, and the faint line "Tralala's summary
+  of the answers after round 2. A suggestion, never a decision: you decide below." No model writes
+  the sign: fixed rules count the answers.
+- **Who stands where**, with **For you | Raw text**. For you is one row per agent: its role, its
+  position, its one recommendation and how confident it is. **Details** opens what that agent
+  named **For**, **Against**, under **Conditions** and as **Open questions**. An agent that
+  answered outside the agreed shape reads "Answered in prose only", one that has not answered "No
+  answer yet", and one the round could not reach "No answer from Cy: the agent could not be
+  reached."
+- Under the rows, sections that open with a click: **Conditions to accept if you go ahead** and
+  **Open questions**, each point with who said it, and **Rounds**: one line per round with who asked
+  or replied before it, how many answered and the verdict after it.
+- **Your reply** and **Ask again**: one message, which the agents answer in a new round. While
+  they are answering, the reply waits ("The agents are answering. Reply once they are done.").
+- **The rail**: **Status** in the words of the sign ("Waits for your decision · after round 2",
+  "Agents are answering · round 2 of 3", "Paused", "Approved by Mike", "Vetoed by Mike", "Rework
+  requested by Mike", "Stopped by Mike", "No answer yet"), **Facts** (Ticket, Asked by, Agents,
+  Rounds, Tokens, Started) and **More** (Copy link, and Pause, Resume or Stop the run while one is
+  under way).
+
+What an agent writes for you is held to limits the server counts, never a model: the
+recommendation is one sentence of at most 20 words; For, Against, Conditions and Open questions
+hold at most three points each, a point at most 140 characters; and none of them holds a file name
+or path, code or an id. An answer that breaks a limit goes back to its agent once, with every
+finding named; one that still breaks it is kept as written and reads "Answered in prose only". The
+agent's reasoning has no such limit, because it is the agents' side: the other agents read it, and
+you find it in Raw text.
+
+**Raw text** holds what the agents wrote, as it is and unstyled on purpose: the **Transcript**
+(every message with its author, role, round and time), **Answers · JSON** and the **Runs** with
+their codes, tokens, budgets, elapsed time and stop reasons.
+
+### Rounds: Ask again, Let them talk it out, Stop
+
+A discussion has three rounds unless it was opened with another number, and never more than four.
+**Ask again** is one round. **Let them talk it out** lets the agents answer each other: "The
+agents answer each other for up to 2 rounds and stop when they agree or when the budget is spent."
+Its **Options** set the **Rounds** (the rounds left, at most four), a **Token budget** and a **Time
+budget in seconds**; an empty field means the server's default. **Start** begins.
+
+While the agents talk, the sign opens with "Agents are answering · round 2 of 3" and "2 of 3 agents
+have answered this round", **Stop** takes the place of the decision buttons, and **More actions**
+holds **Pause while they talk** or **Resume**. When a run ends without agreement, a line under the
+sign says why: "The budget ran out", "The agents repeated themselves, so the run stopped", "No
+agent could be reached", "Stopped by Mike", "Rounds used up" or "The run broke off when the server
+restarted". Let them talk it out is off, with the reason on hover, while the agents answer, once
+no round is left and once the discussion is decided.
+
+### Your decision
+
+**Approve**, **Request rework** and **Veto** are a person's decision; a key is refused
+(`403 human_action_required`). They are off, with the reason on hover, until there is an answer to
+decide on, and while the agents answer Stop takes their place. Request rework and Veto ask for an
+explanation. A decision
+is recorded on the discussion only and never changes the Ticket: what follows from it is yours to
+do. After Request rework, Ask again starts the next round; Approve and Veto close the discussion.
+
+### The inbox
+
+**Discussions** in the main navigation is an inbox over every board: **Waits for your decision**,
+**Agents are talking** and **Decided**, each with its count and newest first. A row shows the
+verdict (or the round while the agents talk), the question, when it last moved (or the decision
+with who took it) and a line such as "SES-1-PH01-001 · Session expiry · Platform · 3 agents · 2 for
+· 1 against · round 2 of 4". A row opens the discussion as a page of its Ticket. A cancelled
+discussion is not listed, and a discussion starts from a Ticket, never from the inbox. The
+dashboard's **Waits for you** lists the discussions that wait for your decision after the Loops,
+each with **Open discussion**.
 
 ## Approval boundaries
 
@@ -445,12 +550,11 @@ and its original bytes. It is never converted into an active Loop, never creates
 counts as a verified QA result; every view labels it
 `Imported legacy reference - may not follow the current standard`.
 
-## Discussions and search
+## Search
 
-A discussion and every search result keep the Loop context of the Ticket they point at. A thread
-carries `loop_id`, `loop_key`, `loop_name` and `ticket_key`, and opens
-`/boards/{board_id}/loops/{loop_id}?card={card_id}`, so the Loop page shows the Ticket that the
-conversation is about instead of an inferred default Loop.
+Every search result keeps the Loop context of the Ticket it points at: it names the Loop and opens
+that Loop's page with the Ticket showing over it, never an inferred default Loop. A discussion does
+the same through its Ticket ([Ask the agents](#ask-the-agents)).
 
 ## Clean schema transition
 

@@ -74,9 +74,11 @@ is no shared password. See [the first sign-in](public_docs/Installation.md#first
   signed-in person approves plans, confirms human-only actions, accepts QA and finalizes a Loop.
 - **QA handover** with one QA Task carrying an agent view and a human view of the same scenarios,
   scenario-level results, and a human acceptance decision.
-- **Discussions** per Ticket with the role agents: sequential rounds, a duplicate guard, consensus
-  that needs an actual review round, pause/resume/stop, and a cap of four rounds plus a default
-  token and time budget per run.
+- **Discussions** per Ticket with the role agents: asked from the Ticket and read as a short sign
+  (a verdict, one sentence, each agent's position and one recommendation, with the reasoning as raw
+  text), sequential rounds, a duplicate guard, consensus that needs an actual review round,
+  pause/resume/stop, a cap of four rounds plus a default token and time budget per run, and an
+  inbox of what waits for your decision.
 - **Tickets** with labels, checklists, comments, mentions, due dates, a stable ticket key, an
   attachment allowlist and complete activity history.
 - **Agents** as registry resources: a shared, editable role prompt plus identity, connection and a
