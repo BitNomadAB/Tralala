@@ -280,8 +280,8 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops/{loop_id}/documents` | Current and approved revisions per kind |
 | GET | `/boards/{board_id}/loops/{loop_id}/documents/{kind}/revisions` | Revision history |
 | PUT | `/boards/{board_id}/loops/{loop_id}/documents/info` | New immutable revision. A person while the Loop is open; a token (`write_info`) only while the Loop is `draft` or `analysis_review`, then `403 human_action_required` |
-| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval. `expected_info_revision_id` / `expected_analysis_revision_id` answer `409 document_stale` when that document changed; a token gets `403 human_action_required` while the scope's approval is current. An optional `analysis_brief` or `roadmap_brief` is stored as the human view (`422 brief_rejected` when it breaks a rule); without one the answer adds `human_view`: the run that writes the brief for people, or `skipped` with the reason |
-| POST | `/boards/{board_id}/loops/{loop_id}/briefs` | `{kind, brief, expected_revision_id?}`: the brief for people of the current `analysis_ai` or `roadmap_ai`, stored as the `analysis` or `roadmap` revision. It approves nothing; a token gets `403 human_action_required` while the scope's approval is current, a person never; `409 document_stale` when `expected_revision_id` is no longer current; `422 brief_rejected` names every problem |
+| POST | `/boards/{board_id}/loops/{loop_id}/candidates` | Submits an analysis or RoadMap candidate; validation only, never approval. `expected_info_revision_id` / `expected_analysis_revision_id` answer `409 document_stale` when that document changed; a token gets `403 human_action_required` while the scope's approval is current. An optional `analysis_brief` or `roadmap_brief` is stored as the human view (`422 brief_invalid` when an analysis brief breaks the sign, `422 brief_rejected` when a brief breaks another rule); without one the answer adds `human_view`: the run that writes the brief for people, or `skipped` with the reason. A RoadMap whose Tickets' faces break the template answers `422 face_invalid` and stores nothing |
+| POST | `/boards/{board_id}/loops/{loop_id}/briefs` | `{kind, brief, expected_revision_id?}`: the brief for people of the current `analysis_ai` or `roadmap_ai`, stored as the `analysis` or `roadmap` revision. It approves nothing; a token gets `403 human_action_required` while the scope's approval is current, a person never; `409 document_stale` when `expected_revision_id` is no longer current; `422 brief_invalid` names every way an analysis brief breaks the sign, `422 brief_rejected` every other problem |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/analysis` | Human-only decision bound to exact revision ids; `409 generation_in_progress` while the analysis's brief is being written for people (the RoadMap's review likewise) |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/roadmap` | Human-only; publishes the plan atomically |
 | POST | `/boards/{board_id}/loops/{loop_id}/reviews/{scope}/reset` | Human-only; clears the scope's documents and supersedes any approval behind them |
@@ -789,6 +789,79 @@ empty without one) and `summary_stale`, which is `true` once the title or descri
 the summary was written. A summary is part of a Ticket's content: `read_ticket` shows it, and
 `list_tickets` never does.
 
+### A Ticket's face for people
+
+The face is what a person reads of a Ticket by default: the `summary` above and five fields beside
+it, held to one template for every writer.
+
+| Field | Limit |
+| --- | --- |
+| `summary` | at most 20 words |
+| `why` | at most 3 sentences |
+| `if_skipped` | at most 3 sentences |
+| `pros` | at most 3 points |
+| `cons` | at most 3 points |
+| `steps` | 1 to 5 steps |
+
+Every field is plain text: no code fence, code span, file path, file name, UUID, id or code symbol
+(`snake_case`, `camelCase`, `()`, `::`, `->`, `=>`, `${`), and a step says what changes for the
+person, never where in the code. A Ticket that needs more than five steps is split into two when
+the RoadMap is written. The words and sentences are counted on the server
+(`services/ticket_face.py`), never judged by a model.
+
+- **The plan.** Each Ticket of a RoadMap (`PlanTicket`, the `roadmap_ai` payload) ends with
+  `summary`, `why`, `if_skipped`, `pros`, `cons` and `steps`, and every Ticket must carry them: a
+  candidate, `write_roadmap` and a generated RoadMap are checked whole, and approving the RoadMap
+  publishes each card with its face. A plan stored before the face existed still parses and
+  publishes cards without one.
+- **The card.** `CardOut`, the search hits and `read_ticket` carry `face`: an object with
+  `summary`, `why`, `if_skipped`, `pros`, `cons` and `steps`, or `null` for a Ticket written without
+  one.
+- **Writing it.** `POST .../cards` and `PATCH .../cards/{card_id}` take `why`, `if_skipped`,
+  `pros`, `cons` and `steps`, each optional (at the boundary a text holds at most 400 characters, a
+  point or step 140, a list 20 items). When a request gives any of them, the whole face is checked
+  with the summary the request leaves; a request with every field empty removes the face. A
+  person's `PATCH` is version-checked (`409 version_conflict`) and recorded in the activity log; a
+  token's `PATCH` that gives a face field answers `403 human_action_required`, because a token
+  changes a face through a new RoadMap revision. `create_ticket` takes the same optional fields.
+
+A face that breaks the template answers `422 face_invalid` with one message per Ticket, field and
+rule, the first five in the message: `details.errors` holds the messages ("Ticket PLN-023, steps:
+7 items, at most 5. Split the Ticket into two."), `details.error_count` how many there were, and
+`details.faces` one `{ticket_id, field, rule}` each. A RoadMap names its Tickets by the ids its
+writer gave them, a card by its key, else by its quoted title; a list item is named from 0
+(`steps[2]`). The rules are `missing`, `words`, `sentences`, `too_many`, `empty_item`,
+`code_fence`, `code_span`, `file_path`, `id`, `finding_id` and `code_symbol`.
+
+### A person's notes on a Ticket
+
+A note is a person's own words on a Ticket, beside the plan: the Ticket view shows it under **Your
+notes**, and `read_ticket` hands every note to a worker as `person_notes` (`author`, `written_at`,
+`text`), apart from the description and the comments. A note holds 1 to 4 000 characters.
+
+| Method | Path | Rule |
+| --- | --- | --- |
+| GET | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/notes` | `cards:read`; oldest first |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/notes` (`{text}`, `201`) | `cards:write`, a signed-in person only |
+| PATCH | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/notes/{note_id}` (`{text, version}`) | `cards:write`, its author only |
+| DELETE | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/notes/{note_id}` | `cards:write`, its author only |
+
+A note answers `id`, `card_id`, `author` (the name when it was written), `author_actor_id`,
+`written_at`, `updated_at`, `text` and `version`. The codes:
+
+| Code | When |
+| --- | --- |
+| `403 human_action_required` | a token writes, edits or deletes a note, whatever its scopes |
+| `403 note_author_only` | someone other than its author edits or deletes it |
+| `404 note_not_found` | the note does not exist on that Ticket |
+| `409 version_conflict` | the edit names a version that is no longer current |
+| `409 loop_read_only` | the Loop is completed, cancelled or archived: a note is content, not a comment |
+| `409 board_archived` | the board is archived |
+| `409 loop_mismatch` | the Loop in the path does not own the Ticket |
+
+Every write adds an activity entry on the card (the note's id and size, never its text) and a
+`note_added`, `note_edited` or `note_deleted` event on the Ticket's event stream.
+
 ### Where a Ticket's work is done and what it waits for
 
 A person owns every Ticket; nothing here names who does it. A Ticket answers:
@@ -923,7 +996,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `read_board` | `boards:read`, `loops:read` | The board's Loops by id, key, name and stage, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | The Loop's overview, by its id or its key: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases and the columns with their Ticket counts, the work outside the plan and the newest five notes cut to 500 characters; the Tickets themselves are `list_tickets`' answer |
 | `read_document` | `loops:read` | One document of a Loop named by its id or its key, by `kind` (`info`, `analysis`, `analysis_ai`, `roadmap`, `roadmap_ai`): as numbered lines, at most 60 000 characters, with `continue_from` for the rest; `analysis_ai` and `roadmap_ai` also as `view: structured`, an outline of the findings or the Phases and Tickets, and one of them in full with `item` |
-| `read_ticket` | `cards:read` | The Ticket's summary (with `summary_source` and `summary_stale`), description, acceptance criteria, evidence, checklist, comments, column, version, `state`, `workplace`, `wait` (what it waits for, the reason, who set it and when; `null` without one), the plan's `blockers`, `needs_person`, `attachments` (the newest 50 files, one row each: `id`, `filename`, `content_type`, `size_bytes`, `uploaded_at` and `text`) with `attachment_count`, and `allowed_actions` (only `comment_ticket` in a completed, archived or cancelled Loop) |
+| `read_ticket` | `cards:read` | The Ticket's `face` (its summary, why, if skipped, for and against and steps; `null` without one), summary (with `summary_source` and `summary_stale`), `person_notes` (a person's notes, oldest first: `author`, `written_at`, `text`), description, acceptance criteria, evidence, checklist, comments, column, version, `state`, `workplace`, `wait` (what it waits for, the reason, who set it and when; `null` without one), the plan's `blockers`, `needs_person`, `attachments` (the newest 50 files, one row each: `id`, `filename`, `content_type`, `size_bytes`, `uploaded_at` and `text`) with `attachment_count`, and `allowed_actions` (only `comment_ticket` in a completed, archived or cancelled Loop) |
 | `list_attachments` | `cards:read` | Every live file of one Ticket, newest first, in the rows `read_ticket` shows; `text` is true for `.txt`, `.md` and `.json`. `next_step` names `read_attachment` for a text file and the download route for the rest |
 | `read_attachment` | `cards:read` | One file by `attachment_id`. A text file answers as numbered lines by `read_document`'s rule: at most 60 000 characters a page, `lines`, `text` and `continue_from` (the next `start_line`); a file whose bytes are not UTF-8 is refused with `422 attachment_not_text` naming it. Any other file answers its metadata, `text: false` and `download`, the route that answers its bytes with the same key; no tool answer carries a binary file |
 | `search_tickets` | `cards:read` | Tickets by words in one Loop, a board's open Loops or every active board, each with board, Loop key, key and column |
@@ -932,7 +1005,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `set_ticket_wait` | `cards:write` | Say what an open Ticket that waits for nothing now waits for (`decision`, `information`, `access` or `third_party`) and why (`reason`); the version is read for the caller. Clearing or replacing a wait is a person's act and never a tool |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
-| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
+| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, face (`why`, `if_skipped`, `pros`, `cons`, `steps`; any one given checks the whole face, `422 face_invalid`), `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket, in a completed, archived or cancelled Loop too (a later Loop can point back at the work it replaced); only an archived board refuses it (`409 board_archived`) |
 | `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id`. A completed, archived or cancelled Loop refuses the call whole (`409 loop_read_only`, nothing written) |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
@@ -942,8 +1015,8 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
 | `write_analysis` | `loops:generate` | Hand in the worker's own analysis through the candidate route; schema errors answer one `loc: message` line each |
 | `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
-| `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Both take an optional `brief`, stored as the human view instead of asking a board agent |
-| `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval |
+| `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Every Ticket carries its face, or the RoadMap answers `422 face_invalid` naming each Ticket, field and rule. Both take an optional `brief`, stored as the human view instead of asking a board agent; an analysis brief that breaks the sign answers `422 brief_invalid` |
+| `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval; an analysis brief keeps the sign (`422 brief_invalid`) |
 | `ask_agents` | `discussions:write` | Create a discussion on the Ticket and run one round; returns the synthesis, the positions and the structured answers |
 | `read_discussion` | `discussions:read` | Read a thread: the newest round's synthesis, each agent's position and the messages (prose with `include_prose`) |
 | `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |

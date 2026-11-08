@@ -13,6 +13,37 @@ Board
     Phases: planning groups that appear in the RoadMap and on Tickets, never as columns
 ```
 
+## The Loop page
+
+The Loop page shows the Loop's name as its title, its key and stage under it with how many Tickets
+are done, and one line on what the Loop waits for ("Waits for you to approve the analysis", "2
+Tickets ready to start"). Beside it sits at most one primary button, the person's next decision:
+**Approve analysis** or **Approve RoadMap** opens that document on the Plan tab, because an
+approval binds to the revisions on screen and the header approves nothing unseen; **Accept work**
+and **Finalize Loop** open the completion dialog. Everything else is in the quiet **Loop actions**
+menu: **Edit Loop**, **Loop agents**, **Finalize Loop** (when it is not the primary button),
+**Save columns as template**, **Board activity**, **Export board** and **Cancel Loop**. A completed
+Loop greys out what would change it ("The Loop is read-only").
+
+Three tabs follow, each kept in the address (`?tab=kanban`, `?tab=plan`, `?tab=notes`), so a link
+opens the same view:
+
+- **Kanban**: the Loop's columns and their Tickets. A column's heading is its name with its count;
+  **Rename column** and **Archive column** sit in its quiet menu, and **Add card** and **Add
+  column** are quiet controls at the end.
+- **Plan**: **Planning documents** (**Info**, **Analysis**, **RoadMap**; `?doc=` names the one
+  shown, by default the one the stage is about) and **Phases and readiness**.
+- **Notes**: the Loop's log of notes ([Notes](#notes)).
+
+`?card=<card_id>` opens a Ticket over any tab ([The Ticket view](#the-ticket-view)).
+
+A Ticket on the Kanban shows the first line of its face: the title in two lines at most, its plain
+summary muted under it, and a bottom row with the key, *Needs input* or *Blocked* only when it
+waits (the reason on hover), *Needs a person* for a person's task, *Unplanned* for a Ticket outside
+the plan, *QA*, the priority and the due date when set (red when overdue), *done* with a check once
+it is completed, and the owner's initials on the right. Labels, checklists and comment counts are
+in the Ticket, not on the card.
+
 ## The five documents
 
 | Slot | Author | Purpose |
@@ -34,21 +65,34 @@ the Loop as a whole is a note, and work found along the way is a Ticket outside 
 
 A person and a model read differently, so the analysis and the RoadMap each have two views: the
 technical one (`analysis_ai`, `roadmap_ai`), complete and unchanged, and a short **brief** for the
-person who decides. The analysis brief answers what that person asks: can it be done (`yes`,
-`yes_with_conditions`, `no` or `unclear`, with one sentence why), the highlights in two or three
-sentences, what stands in the way (business, technical, security, legal, people and time; only
-obstacles that exist), up to five points for and five against, what a person must decide (as
-questions) and a recommendation. The RoadMap brief says what happens in each Phase and when it is
-done, the reader's own part (every Ticket a person must do) and what could block the plan. The
-brief is the revision's payload, and its Markdown rendering is the revision's text.
+person who decides. The analysis brief is a sign, read in the order a decision is made:
+
+| Part | Field | Limit |
+| --- | --- | --- |
+| In short | `verdict` (`yes`, `yes_with_conditions`, `no` or `unclear`) and `verdict_line` | the line in at most 20 words, on one line |
+| Why | `obstacles`: business, technical, security, legal, people and time; only obstacles that exist | at most 3 |
+| What you decide | `decisions`: each a question to the person | at most 5, each on one line |
+| How big | `size`: `small`, `medium` or `large`, and why | one sentence |
+| For and against | `pros` and `cons` | at most 3 each |
+
+Every item holds at most 140 characters. The brief also keeps a sentence why (`verdict_reason`),
+the highlights and a recommendation, which the sign does not show. A question reads like "Do we
+keep the addresses of people who never confirm, and if so, for how long?". The RoadMap brief says
+what happens in each Phase and when it is done, the reader's own part (every Ticket a person must
+do) and what could block the plan. The brief is the revision's payload, and its Markdown rendering
+is the revision's text.
 
 Each item of a brief names the findings it rests on (`finding_ids`), or the Phases and Tickets
 (`phase_ids`, `ticket_ids`); those ids carry the traceability and are never shown in the text.
 Every brief is checked before it is stored: together its items name every finding of category risk,
 blocker, legal, security, question or decision (a RoadMap brief: every Phase exactly once, every
 Ticket a person must do), it names no id the technical revision lacks, and its text holds no
-finding id (`F01`, `[F01]`), other id, file path or code. A refusal is `422 brief_rejected` with
-every problem named by its field.
+finding id (`F01`, `[F01]`), other id, file path or code. A new analysis brief is held to the sign
+first: one that breaks a limit is refused with `422 brief_invalid`, one message per field and rule
+("Brief, obstacles: 4 items, at most 3."), and the content problems of the same brief follow them,
+so one round fixes everything. A brief that keeps the sign but breaks coverage, an id or the
+wording is `422 brief_rejected` with every problem named by its field. A brief stored before the
+sign existed is read as it is and never checked again.
 
 Who writes the brief: a connected worker, which may hold its organisation's own sources, policies
 and decisions, gives it as `brief` with `write_analysis` or `write_roadmap`, or later with
@@ -57,20 +101,39 @@ first rendered from its structure (provenance `rendered`), and the Loop's analys
 writes the brief in a run of its own (purpose `analysis_human` or `roadmap_human`): it gets the Info
 and the technical revision, no repository, and answers the brief's JSON schema. A brief that breaks
 a rule is sent back once with the problems named; if it still breaks one, the run fails with
-`brief_rejected` and the rendered view stays. A board without an enabled agent keeps the rendered
+`brief_invalid` (the sign) or `brief_rejected` and the rendered view stays. A board without an enabled agent keeps the rendered
 view. The scope cannot be approved while that run is queued or running
 (`409 generation_in_progress`); an approved scope is not rewritten by a token until a person
 requests changes or resets it. A person may rewrite a brief at any time, and writing a brief never
 approves it: a new brief needs a new review.
 
-The Analysis and RoadMap tabs switch between **For people** and **For AI**. For people shows the
-brief's sections, each item with a *Where does this come from?* disclosure listing the findings (or
-the Phases and Tickets) by title from the technical revision, and a label: *Written by* its author,
-or *Rendered from the structure*. A revision written before briefs existed still shows as Markdown,
-labelled *Earlier format*. **Rewrite for people** starts the board agent's run again for the current
-technical revision; when it cannot, it says why (*Approved: request changes or reset to rewrite*,
-*Writing for people...* while a run is on). While one runs, the tab says so and approval waits for
-it.
+On the Plan tab, **Analysis** switches between **For people** (the brief) and **For AI** (the
+technical analysis). The brief has its own **For you | Raw text**. For you is the sign, in order:
+**In short** (the verdict and its line), **Why** (each obstacle with its level), **What you
+decide** (each question, with the findings it rests on as small chips that name them), **How big**
+and **For and against**. Raw text holds the findings as they were written and the technical
+analysis as JSON. The brief ends with **Approve analysis** and the line naming what it approves
+("Approves revision 3 of this analysis, written from technical revision 2."); **Request changes**
+sits under it with an optional feedback field.
+
+**RoadMap** is reviewed the way a Ticket is read, so its switch is **For you | Raw text** instead
+of For people and For AI. For you is **In short** (the brief; the plan's own summary when nobody
+wrote one) and one section per Phase (*Phase 2 · Sign-in*, its Ticket count and its objective) with
+a row per Ticket: the title, its summary, the key, *Needs a person*, where the work is done and
+what it waits for. A row opens to the Ticket's face (the steps, **Why it is needed**, **If we skip
+it**, **Pro and con**), read only; a Ticket written without a face shows its objective, with its
+acceptance criteria behind **More**. Raw text is the technical RoadMap with the plan as JSON. The
+decision is **Approve RoadMap · 3 Tickets**, with the count of what it publishes and the line
+"Revision 2 of 7 Nov 2026. Approving publishes its 3 Tickets to the Kanban." under it, beside
+**Request changes**.
+
+A RoadMap brief's items each have a *Where does this come from?* disclosure listing the Phases and
+Tickets by title from the technical revision, and a document carries a label: *Written by* its
+author, or *Rendered from the structure*. A revision written before briefs existed still shows as
+Markdown, labelled *Earlier format*. **Rewrite for people** starts the board agent's run again for
+the current technical revision; when it cannot, it says why (*Approved: request changes or reset to
+rewrite*, *Writing for people...* while a run is on). While one runs, the tab says so and approval
+waits for it.
 
 Once the plan executes (`ready`, `in_progress`, `awaiting_qa`), a person or a worker may still add
 a Ticket *outside the plan*: it is keyed `<LoopKey>-UNP-<nnn>`, carries an **Unplanned** badge, is
@@ -83,13 +146,14 @@ Changing an input invalidates what depended on it: a new Info revision makes the
 both RoadMap views stale, the Loop moves to `replanning`, and execution transitions are rejected
 with `409 plan_change_required` until a replacement plan is approved.
 
-Withdrawing an approval is the heavier action, and the dialog offers it as the red *Reset* button in
-the bottom-left corner of the Analysis and RoadMap tabs — available for a draft as well as for an
-approved document. It is not a rejection: a rejection keeps the text and asks for changes, while a
-reset clears it. Any approval behind the text is superseded and kept as history, the scope's documents
-are replaced by an empty draft, and every approval that depended on them is cleared — so a reset
-analysis has to be generated again before a RoadMap can be. Because the text is retired rather than
-edited, the button asks for confirmation first.
+Withdrawing an approval is the heavier action: **Reset analysis** is the red button beside the
+analysis's review, and **Reset RoadMap** sits in the quiet **RoadMap actions** menu beside the
+RoadMap's approve button. Both are available for a draft as well as for an approved document. A
+reset is not a rejection: a rejection keeps the text and asks for changes, while a reset clears it.
+Any approval behind the text is superseded and kept as history, the scope's documents are replaced
+by an empty draft, and every approval that depended on them is cleared — so a reset analysis has
+to be generated again before a RoadMap can be. Because the text is retired rather than edited, a
+reset asks for confirmation first (**Reset and clear**).
 
 ## Who does the work, and a Ticket's state
 
@@ -121,11 +185,90 @@ person's task), and what needs a person (`needs_person`: needs input, or ready a
 The RoadMap gives each planned Ticket its starting workplace, wait and labels; the plan describes,
 it never assigns.
 
-In the Ticket dialog, **Where and what it waits for** shows the state, sets **Where the work is
-done** and marks a wait (**Mark as waiting**: what it waits for and why). A worker marks one with
+In the Ticket view the rail shows the state under the column (*Ready*, *Needs input* or *Blocked*,
+with what holds it up), and **Work is done** under Details says where the work is done (*In the
+code base*, *Outside the code base*, *Not decided*). **Mark as waiting** in the actions row, or
+*Mark as waiting…* in the rail, asks what it waits for (*A decision*, *Information*, *Access*, *A
+third party*) and why (required, at most 500 characters). A worker marks one with
 `set_ticket_wait` when it cannot go on without an answer. **Clear the wait** is a person's: a token
 can neither clear nor replace a wait (`403 human_action_required`), and **Mark complete** stays off
-while one is open. The Kanban card shows *Needs input* or *Blocked*.
+while one is open ("Clear the wait first"). The Kanban card shows *Needs input* or *Blocked*.
+
+## A Ticket's face for people
+
+Every Ticket a RoadMap plans ends with its **face**: what a person reads of it by default. It is a
+fixed template, the same for every writer (a RoadMap handed in by a worker, one written by the
+Loop's RoadMap agent, a worker's Ticket outside the plan and a person's edit):
+
+| Field | What it says | Limit |
+| --- | --- | --- |
+| `summary` | what the Ticket means | at most 20 words |
+| `why` | why it is needed | at most 3 sentences |
+| `if_skipped` | what happens if we skip it | at most 3 sentences |
+| `pros` | for | at most 3 points |
+| `cons` | against | at most 3 points |
+| `steps` | what will be done, concretely | 1 to 5 steps |
+
+Every field is plain text for a person: no code fence, code span, file path, file name, UUID, id or
+code symbol (`snake_case`, `camelCase`, `()`, `::`, `->`). A step names what changes for the person,
+never where in the code: "Under each open question, put an answer field and a Go on without my
+answer button." keeps the template, "Add QuestionList to BriefView.tsx." breaks it. A Ticket that
+needs more than five steps is split into another Ticket when the RoadMap is written. Files, tables,
+routes and symbols belong in the acceptance criteria and the evidence, which stay text for the AI.
+
+The server holds every writer to the template and counts words and sentences itself; nothing
+judges the text with a model. A face that breaks it is refused with `422 face_invalid`, one message
+per Ticket, field and rule ("Ticket t3, steps: 7 items, at most 5. Split the Ticket into two."). The
+Loop's RoadMap agent is sent the messages back and repairs its answer; a worker fixes its payload
+and hands the RoadMap in again. Approving the RoadMap publishes each Ticket with its face.
+
+A person changes a face in the Ticket (**Edit** beside *What will be done*): the fields with live
+counters, saved whole with the Ticket's version, each refusal shown under its field. A token never
+changes a face (`403 human_action_required`); it writes a new RoadMap revision instead. A Ticket
+written before the face existed keeps its description, marked "Written before Tickets had a plain
+summary.", until someone writes one.
+
+## The Ticket view
+
+A Ticket opens as a dialog over the Kanban (`?card=`), and **Open as page** shows the same view on
+a page of its own, `/boards/{board_id}/loops/{loop_id}/tickets/{card_id}`, with the breadcrumb
+Board / Loop / Phase / key and **Back to the board**. Nothing is a form until you click it.
+
+- **The head**: the key with **Copy key**, the Phase, the title as a heading (a click edits it) and
+  the summary under it. The actions: **Start work** while the Ticket sits in the first column (it
+  makes you the owner when nobody owns it and moves it to the next column) or **Mark complete**
+  (off, with the reason on hover, while it waits or earlier work comes first), then **Mark as
+  waiting**, **Comment**, **Add file**, and **More actions** (**Copy link**, **Mark incomplete** for
+  a completed Ticket, **Archive**).
+- **What will be done**, with **For you | Raw text**. For you is the face: the steps as a numbered
+  list ("3 of 5"; at five, the line says a Ticket that needs more is split), then sections that
+  expand: **Why it is needed**, **If we skip it**, **Pro and con** ("2 for, 1 against", in two
+  columns) and **Your notes**. Raw text is everything the agent wrote, as it is: **Summary for
+  AI**, **Description** (the Markdown source; **Edit description** opens it with Write and Preview),
+  **Accepted when**, **Evidence** and **Plan entry** (the RoadMap's entry for the Ticket). The
+  choice lasts while the view is open.
+- **Files**: a drop zone and **Add file**; [API.md](API.md#attachments) lists the kinds a Ticket
+  takes.
+- **Activity**, with the tabs **Comments** (Ctrl+Enter sends), **History** (what happened, one row
+  each) and **Work** (the summary and the completion with its evidence that a coding session
+  recorded).
+- **The rail**: the column as a menu, the state with *Mark as waiting…* or the wait with **Clear
+  the wait**, **Confirm human action** for a Ticket only a person can do, **Details** (Owner,
+  Phase, Work is done, Depends on, Priority, Due, Labels, Created; each value turns into its control
+  on a click and saves itself) and **More** (Checklists, Copy link, Archive).
+
+When someone else changed the Ticket since it was opened, a write answers "Someone changed this
+Ticket. Reload to see it." A completed, cancelled or archived Loop shows the view read only, with
+Comment and Copy link.
+
+### Your notes
+
+**Your notes** is what people wrote on the Ticket in their own words: each note with its author and
+date, a field to add one ("Written by you, never by an agent."), and Edit and Delete on the notes you
+wrote. A note holds up to 4 000 characters. Your coding agent reads them: `read_ticket` carries them
+as `person_notes`, apart from the plan, and no key can write, edit or delete one. Only the author
+changes a note, an edit names the version it read, and a completed, cancelled or archived Loop, like
+an archived board, takes no note.
 
 ## Approval boundaries
 
@@ -148,7 +291,11 @@ started a new Info revision would invalidate approvals, so the edit returns
 A worker token may write the Info while the Loop is speculative, hand in or ask for candidates and
 briefs, set a wait on a Ticket that waits for nothing, move and complete eligible Tickets, add
 Tickets outside the plan, write notes, record QA results and comment. It is rejected with
-`403 human_action_required` for every other action in the table, even when it holds the scope. WebMCP registers inspection, generation and permitted Ticket tools, never these decisions.
+`403 human_action_required` for every other action in the table, even when it holds the scope.
+Two writes are a person's too, although they decide nothing: changing a Ticket's face (a token
+writes a new RoadMap revision instead) and writing, editing or deleting a note on a Ticket (the
+person's own words). WebMCP registers inspection, generation and permitted Ticket tools, never
+these decisions.
 
 ## The agent and its repository context
 
@@ -170,10 +317,10 @@ board created before this selection existed still generates. The server enforces
 run that asks for an agent the board does not list is rejected with `422 agent_not_on_board`, and the
 default pick is the first board agent by name.
 
-Inside that set a Loop can remember one agent per purpose (**Loop agents** on the Loop header):
-analysis, RoadMap and QA. The stored choice only fills in the default of the next run and shows as
-`Default (<agent name>)`; the run dialog can still deviate for a single run, and a stored agent that
-is no longer available falls back to the board default.
+Inside that set a Loop can remember one agent per purpose (**Loop agents** in the **Loop actions**
+menu): analysis, RoadMap and QA. The stored choice only fills in the default of the next run and
+shows as `Default (<agent name>)`; the agent menu beside **Generate** can still deviate for a single
+run, and a stored agent that is no longer available falls back to the board default.
 
 Which code that agent may look at is decided on the same dialog: the repositories from
 **Settings -> Repositories** (`repository_ids`), read from GitHub or from a mirror of any allowed
@@ -183,8 +330,8 @@ only the repositories of the boards it serves. An agent whose connection test fo
 reads that code itself during an analysis or RoadMap run; any other agent gets a fixed snapshot
 ([How a run reads the code](Repositories.md#how-a-run-reads-the-code)).
 
-A run works in the background, so the document dialog shows what it is doing in a second panel
-beside the dialog (inline at the top of the dialog on a narrow screen): the run's steps in plain
+A run works in the background, so the Plan tab shows what it is doing, in a second column beside
+the documents on a wide screen and under the button that started it otherwise: the run's steps in plain
 words, grouped by stage — *Reading the Loop's documents*, *Reading the repository*, *Writing the
 analysis* (or *RoadMap*), *Checking the answer* and *Saving*. The list grows while the run works:
 which documents it read, which repository it opened or which fixed selection it sent, every file the
@@ -195,9 +342,7 @@ what its name promises: the repository stage is *skipped* when the board links n
 ("no code was read") and *warned* when a limit applied. The same panel is where a failure appears: the
 stage that failed is marked, the last step says what was not saved and why, the provider's own answer
 is shown as JSON, and the panel stays on screen until it is dismissed. *Generate* is locked and glows
-for the duration, so the same document cannot be started twice by accident. The red *Reset* button at the bottom-left corner clears the
-analysis or the RoadMap — an approved one as well as a draft — and asks first, because the text is
-retired rather than edited.
+for the duration, so the same document cannot be started twice by accident.
 
 ## Board profiles and organisation profiles
 
@@ -292,7 +437,7 @@ for a cancelled or archived Loop; an archived board refuses the comment (`409 bo
 The history snapshot is the record of the Loop as it was completed: a later comment never changes
 it or its content hash, and `GET /boards/{board_id}/history/{history_id}` answers the comments as
 they were at completion. The live Ticket shows every comment, and one written (or last edited) after the Loop was completed carries
-`after_loop_completed: true`, which the Ticket dialog shows as "written after the Loop was
+`after_loop_completed: true`, which the Ticket view shows as "written after the Loop was
 completed".
 
 Legacy material is stored with `source_kind = imported_legacy`, `conformance = legacy_unvalidated`

@@ -130,7 +130,10 @@ Deciding a discussion is a signed-in person's too, and managing users, credentia
 scope no token can hold. No worker tool changes a board's structure; over REST that needs
 `boards:write`, which only an administrator can put on a key. A key also cannot attach a file
 through the catalogue, publish or edit an approved RoadMap, create a planned Ticket, or change a
-completed Loop beyond a comment on its Tickets.
+completed Loop beyond a comment on its Tickets. A token never writes, edits or deletes a person's
+note on a Ticket, and never changes a Ticket's face for people (`403 human_action_required`): the
+notes are the person's own words, and a face changes through a person's edit or a new RoadMap
+revision.
 
 ## Secrets and provider credentials
 

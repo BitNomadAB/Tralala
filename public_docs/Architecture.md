@@ -43,8 +43,9 @@ WebMCP adapter stays a separate, UI-contextual surface for a person's own sessio
 App (Tralala shell, Board overview)
   Board (a project, application or defined part of one)
     Loop (one feature or coherent change initiative)
-      Kanban header: Info, Analysis, RoadMap, Loop status, approvals, QA status
-      Kanban: Loop-owned columns containing Tickets
+      Loop page: the next decision and the Loop actions menu, then the tabs Kanban, Plan, Notes
+      Kanban: Loop-owned columns containing Tickets, each opening the Ticket view
+      Plan: Info, Analysis, RoadMap with their reviews, and the Phases' readiness
       Numbered delivery Phases, shown in the RoadMap and on Tickets
 ```
 
@@ -72,7 +73,8 @@ planning groups, not Kanban columns.
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | App shell | `frontend/src/app` | Router, providers, layout |
-| Features | `frontend/src/features` | Boards, Loops, Loop Kanban and planning dialogs, history, discussions, settings, auth |
+| Features | `frontend/src/features` | The dashboard and boards, the Loop page (Kanban, Plan, Notes), the Ticket view as dialog and page, history, discussions, settings, auth |
+| UI kit | `frontend/src/components/ui` | The primitives every feature draws with (tabs, segmented control, expander, chip, avatar, menus, section, empty state, drop zone, facts), built on the platform and the tokens of `src/index.css`; a feature never draws its own |
 | API client | `frontend/src/lib/api` | Typed REST client, one module per domain composed into `api`; `client.ts` unwraps the envelope and sends the CSRF header |
 | WebMCP | `frontend/src/webmcp` | Capability detection, registry adapter, contextual tools |
 | Theme | `frontend/src/themes` | Theme kits (`data-theme-kit`) x dark/light/system over semantic CSS variables |
@@ -314,7 +316,7 @@ invalidate it.
 A thread belongs to one Ticket and therefore to one Loop, so every thread records `loop_id`,
 `loop_key`, `loop_name` and `ticket_key`. The thread view shows that Loop and links to
 `/boards/{board_id}/loops/{loop_id}?card={card_id}`, which the Loop page opens with the Ticket
-dialog already showing; closing the dialog drops the `card` parameter. Nothing infers a default
+view already showing over the Kanban; closing it drops the `card` parameter. Nothing infers a default
 Loop from a board.
 
 ## Ticket mentions
@@ -337,7 +339,7 @@ channel (`queued` → `running` → `completed`/`failed`) and work runs on an in
   guarded answer insert make retry idempotent: a retry can only run a job that failed and never
   produced an answer, and a completed job refuses a retry with `409`.
 - Each step publishes `agent_started`, `agent_completed` or `agent_failed` on the ticket's event
-  stream; the card dialog refreshes comments and jobs from those hints. Payloads carry ids and
+  stream; the Ticket view refreshes comments and jobs from those hints. Payloads carry ids and
   counters only, so no comment text is duplicated in the event log.
 - The mention autocomplete reads `GET /agents/directory`, which returns enabled agents with id,
   name and role only — connection details stay in the Settings view that needs them.

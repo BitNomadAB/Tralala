@@ -92,7 +92,7 @@ is no shared password. See [the first sign-in](public_docs/Installation.md#first
 
 ```text
 backend/app/{api,core,schemas,services,storage}   FastAPI service layer and SQLite storage
-frontend/src/{app,features,lib,webmcp,themes}     React UI, typed API client, WebMCP adapter
+frontend/src/{app,components,features,lib,webmcp,themes}   React UI on its UI kit (components/ui), typed API client, WebMCP adapter
 frontend/Caddyfile                                web tier: SPA, API proxy, TLS
 public_docs/                                      everything a user or operator follows, incl. API + Loops
 docs/                                             maintainer notes: the database and schema reference
@@ -110,7 +110,6 @@ machine that produced them; they are not part of the repository.
   process-local, so horizontal scaling needs a shared coordination store.
 - No per-board access control yet: a member sees every board in the installation. Private boards are
   a separate feature.
-- Attachments have a complete API but no upload UI yet.
 - Search and board views page at 200 items; deeper result sets use `offset`/`limit` or filters.
 - No real-time collaboration, notifications or cloud sync (explicit MVP exclusions).
 - WebMCP execution is not automated because the browser API is experimental and absent from the test
