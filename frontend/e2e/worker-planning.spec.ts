@@ -117,7 +117,9 @@ test.describe("the planning journey over /mcp", () => {
       await expect(sign.getByText(plan.TECHNICAL_DETAIL)).toHaveCount(0);
       await analysis.getByRole("tab", { name: "Raw text" }).click();
       const raw = analysis.getByRole("tabpanel", { name: "Raw text" });
-      await expect(raw.getByText(plan.TECHNICAL_DETAIL)).toBeVisible();
+      // Raw text shows the findings as written and the technical payload as JSON, so the detail
+      // appears in both; the first one is the finding.
+      await expect(raw.getByText(plan.TECHNICAL_DETAIL).first()).toBeVisible();
       await analysis.getByRole("tab", { name: "For you" }).click();
       await expect(analysis.getByText(/^Approves revision 1 of this analysis/)).toBeVisible();
       await analysis.getByRole("button", { name: "Approve analysis" }).click();
