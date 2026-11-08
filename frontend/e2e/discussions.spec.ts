@@ -1,116 +1,212 @@
-import { expect, test, type Locator, type Page } from "playwright/test";
-import { addCard, boardWithLoop, login, uniqueName } from "./support";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { expect, test } from "playwright/test";
+import { blockingViolations } from "./axe";
+import { activityTab, askOnly, createAgent } from "./discussion";
+import { addCard, boardWithLoop, login, openCard, uniqueName } from "./support";
 
-async function selectTicket(dialog: Locator, title: string): Promise<void> {
-  // Every option names the owning Loop, so the visible label is not the bare Ticket title.
-  const select = dialog.getByLabel("Ticket", { exact: true });
-  const value = await select
-    .locator("option")
-    .filter({ hasText: title })
-    .first()
-    .getAttribute("value");
-  if (!value) throw new Error(`Ticket ${title} is not selectable`);
-  await select.selectOption(value);
+/** How long the endpoint holds a request before it hangs up, so the first state can be seen. */
+const HOLD_MS = 4_000;
+
+/**
+ * An endpoint nobody gets an answer from: it takes the connection, holds it for `HOLD_MS` and
+ * hangs up without a word (the agent's timeout is longer). A closed port fails before the view
+ * can show the agents answering; this one fails the same way a moment later, so the journey
+ * sees Stop while a run is under way and the plain words once it has failed.
+ */
+async function hangUpEndpoint(): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = http.createServer((request) => {
+    setTimeout(() => request.socket.destroy(), HOLD_MS);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${String(port)}/v1`,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
 }
 
-async function createAgent(page: Page, name: string): Promise<void> {
-  await page.getByRole("link", { name: "Settings" }).click();
-  await expect(page.getByRole("heading", { name: "AI agents", level: 2 })).toBeVisible();
-  await page.getByRole("button", { name: "New agent" }).click();
-  await expect(page.getByRole("heading", { name: "New AI agent", level: 1 })).toBeVisible();
-  await page.getByLabel("Agent name").fill(name);
-  await page.getByLabel("Role template").selectOption({ label: "QA Engineer" });
-  await page.getByLabel("API base URL").fill("http://127.0.0.1:8099/v1");
-  await page.getByLabel("Model identifier").fill("offline-model");
-  await page.getByLabel("Timeout (seconds)").fill("5");
-  await page.getByRole("button", { name: "Save agent" }).click();
-  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
-}
+const RUN_TIMEOUT = { timeout: 30_000 };
 
-test.describe("discussion run control", () => {
-  test("runs bounded rounds and reports budgets and failures", async ({ page }) => {
+test.describe("a discussion on a Ticket", () => {
+  test.use({ viewport: { width: 1600, height: 900 } });
+
+  let endpoint: Awaited<ReturnType<typeof hangUpEndpoint>> | null = null;
+  test.beforeAll(async () => {
+    endpoint = await hangUpEndpoint();
+  });
+  test.afterAll(async () => {
+    await endpoint?.close();
+  });
+
+  test("a person asks the agents, reads what happened, lets them talk and decides", async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(180_000);
     await login(page);
-    const boardName = uniqueName("Run board");
-    await boardWithLoop(page, boardName);
-    await addCard(page, "Todo", "Rate limit review");
+    const me = (await (await page.request.get("/api/v1/auth/me")).json()) as {
+      data: { name: string };
+    };
+    const person = me.data.name;
+    const { boardId, loopId } = await boardWithLoop(page, uniqueName("Discussion board"));
+    const ticket = "Rate limit review";
+    await addCard(page, "Todo", ticket);
+    const agentName = uniqueName("Offline Agent");
+    if (!endpoint) throw new Error("The endpoint did not start");
+    await createAgent(page, agentName, endpoint.url);
+    const question = `Should we throttle per actor? ${uniqueName("Q")}`;
 
-    const agentName = uniqueName("Run Agent");
-    await createAgent(page, agentName);
+    const loopPath = `/boards/${boardId}/loops/${loopId}`;
+    await page.goto(loopPath);
+    await openCard(page, "Todo", ticket);
+    const ticketDialog = page.getByRole("dialog", { name: ticket });
+    const thread = page.getByRole("dialog", { name: question });
+    const sign = thread.getByRole("region", { name: "Tralala's suggestion" });
 
-    await page.getByRole("link", { name: "Discussions" }).click();
-    await expect(page.getByRole("heading", { name: "Discussions", level: 1 })).toBeVisible();
-    await page.getByRole("button", { name: `Open discussions for ${boardName}` }).click();
-    await expect(page.getByRole("button", { name: "All boards" })).toBeVisible();
+    await test.step("the Ticket's Discussions tab is empty and offers Ask the agents", async () => {
+      const panel = await activityTab(ticketDialog, /^Discussions/);
+      await expect(
+        panel.getByText("No discussion yet. Ask the agents what they think."),
+      ).toBeVisible();
+      await expect(
+        ticketDialog.getByRole("tab", { name: "Discussions 0", exact: true }),
+      ).toBeVisible();
+      await panel.getByRole("button", { name: "Ask the agents" }).click();
+    });
 
-    await page.getByRole("button", { name: "New discussion" }).click();
-    const createDialog = page.getByRole("dialog", { name: "New discussion" });
-    await selectTicket(createDialog, "Rate limit review");
-    await createDialog.getByLabel("Goal or question").fill("Should we throttle per actor?");
-    await createDialog.getByRole("checkbox", { name: new RegExp(agentName) }).check();
-    await createDialog.getByRole("button", { name: "Create discussion" }).click();
+    await test.step("the dialog preselects the agent; Ask opens the discussion", async () => {
+      await askOnly(page, agentName, question, async () => {
+        expect(await blockingViolations(page, testInfo, "axe-ask-dialog")).toEqual([]);
+      });
+      // Whether the first round runs before the discussion opens or after, it ends the same way;
+      // the state while the agents answer is checked during Let them talk it out.
+      await expect(thread).toBeVisible(RUN_TIMEOUT);
+      await expect(page).toHaveURL(/\?card=[^&]+&discussion=/);
+    });
 
-    const counter = page.getByTestId("round-counter");
-    await expect(counter).toHaveText("Rounds 0");
-    // The thread subscribes to its event stream as soon as it is opened.
-    await expect(page.getByText("live", { exact: true })).toBeVisible();
+    await test.step("the agent cannot be reached: the view says so in plain words", async () => {
+      // Every round leaves a suggestion; with no answer it cannot tell and names who is missing.
+      await expect(sign).toContainText(`No answer yet from ${agentName}`, RUN_TIMEOUT);
+      await expect(sign).toContainText("Unclear");
+      await expect(thread.getByRole("region", { name: "Status" })).toContainText(
+        "Waits for your decision",
+      );
+      await expect(thread.getByText("No agent could be reached", { exact: true })).toBeVisible();
+      const answers = thread.getByRole("list", { name: "Answers" });
+      await expect(
+        answers.getByText(`No answer from ${agentName}: the agent could not be reached.`),
+      ).toBeVisible();
+      const facts = thread.getByRole("region", { name: "Facts" });
+      await expect(facts).toContainText("1 of 3");
+      // The stop code is for Raw text only.
+      await expect(thread.getByRole("tabpanel", { name: "For you" })).not.toContainText(
+        "all_participants_failed",
+      );
+      expect(await blockingViolations(page, testInfo, "axe-discussion-modal")).toEqual([]);
 
-    // The agent endpoint is offline, so the round fails fast and is reported, not swallowed.
-    await page.getByRole("button", { name: "Run round" }).click();
-    await expect(counter).toHaveText(/Rounds 1/, { timeout: 30_000 });
-    await expect(page.getByText(/all_participants_failed/).first()).toBeVisible();
-    await expect(page.getByText("1 failed")).toBeVisible();
+      await thread
+        .getByRole("tablist", { name: "View" })
+        .getByRole("tab", { name: "Raw text" })
+        .click();
+      await expect(thread.getByText(/all_participants_failed/).first()).toBeVisible();
+      await thread
+        .getByRole("tablist", { name: "View" })
+        .getByRole("tab", { name: "For you" })
+        .click();
+    });
 
-    await page.getByRole("button", { name: "Run autonomously" }).click();
-    const runDialog = page.getByRole("dialog", { name: "Run discussion" });
-    await expect(runDialog.getByLabel("Rounds")).toHaveValue("3");
-    await runDialog.getByLabel("Rounds").fill("2");
-    await runDialog.getByLabel("Token budget (optional)").fill("1000");
-    await runDialog.getByLabel("Time budget in seconds (optional)").fill("30");
-    await runDialog.getByRole("button", { name: "Start run" }).click();
+    await test.step("Let them talk it out runs the rounds left within a budget", async () => {
+      await thread.getByRole("button", { name: "Let them talk it out" }).click();
+      const talk = page.getByRole("dialog", { name: "Let them talk it out" });
+      await talk.getByText("Options", { exact: true }).click();
+      await expect(talk.getByLabel("Rounds")).toHaveValue("2");
+      await talk.getByLabel("Rounds").fill("2");
+      await talk.getByLabel("Token budget").fill("1000");
+      await talk.getByLabel("Time budget in seconds").fill("30");
+      await talk.getByRole("button", { name: "Start" }).click();
+      await expect(talk).toHaveCount(0);
+      // While the agents answer, the sign says where they are and Stop replaces the decision.
+      await expect(sign).toContainText("Agents are answering");
+      await expect(sign).toContainText("round 2 of 3");
+      await expect(thread.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+      await expect(thread.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
 
-    // A failing run stops instead of retrying the same broken endpoint for every round.
-    await expect(counter).toHaveText(/Rounds 2/, { timeout: 30_000 });
-    await expect(page.getByText(/all_participants_failed/).first()).toBeVisible();
+      // A failing run stops instead of retrying the same broken endpoint for every round.
+      await expect(thread.getByRole("region", { name: "Facts" })).toContainText(
+        "2 of 3",
+        RUN_TIMEOUT,
+      );
+      await expect(thread.getByRole("button", { name: "Stop", exact: true })).toHaveCount(
+        0,
+        RUN_TIMEOUT,
+      );
+      await expect(thread.getByText("No agent could be reached", { exact: true })).toBeVisible();
+    });
 
-    const stopButton = page.getByRole("button", { name: "Stop run" });
-    await expect(stopButton).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Pause run" })).toBeDisabled();
+    await test.step("back on the Ticket, the Discussions tab lists the thread", async () => {
+      await thread.getByRole("button", { name: "Back to the Ticket" }).click();
+      const panel = await activityTab(ticketDialog, /^Discussions/);
+      await expect(
+        ticketDialog.getByRole("tab", { name: "Discussions 1", exact: true }),
+      ).toBeVisible();
+      const row = panel
+        .getByRole("list", { name: "Discussions" })
+        .getByRole("link")
+        .filter({ hasText: question });
+      await expect(row).toContainText("Waits for your decision");
+      await expect(row).toContainText("round 2 of 3");
+    });
 
-    // A human decision is still possible once the loop is idle.
-    await page.getByRole("button", { name: "Approve" }).click();
-    const reviewDialog = page.getByRole("dialog", { name: "Approve outcome" });
-    await reviewDialog.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByText("Discussion approved")).toBeVisible();
+    await test.step("the inbox and the dashboard list it as waiting for a decision", async () => {
+      await page.goto("/discussions");
+      await expect(page.getByRole("heading", { name: "Discussions", level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole("list", { name: "Waits for your decision" }).getByText(question),
+      ).toBeVisible();
+      expect(await blockingViolations(page, testInfo, "axe-inbox")).toEqual([]);
 
-    // A manual thread stays quiet until the message asks for an answer with @agents.
-    await page.getByRole("button", { name: "New discussion" }).click();
-    const manualDialog = page.getByRole("dialog", { name: "New discussion" });
-    await selectTicket(manualDialog, "Rate limit review");
-    await manualDialog.getByLabel("Goal or question").fill("Ask the agents explicitly");
-    await manualDialog.getByRole("checkbox", { name: new RegExp(agentName) }).check();
-    await manualDialog.getByRole("button", { name: "Create discussion" }).click();
+      await page.goto("/");
+      await expect(
+        page
+          .getByRole("list", { name: "Waits for you" })
+          .getByRole("button", { name: `Open discussion: ${question}` }),
+      ).toBeVisible();
+    });
 
-    const mentionCounter = page.getByTestId("round-counter");
-    await expect(mentionCounter).toHaveText("Rounds 0");
-    const replyBox = page.getByLabel("Reply");
-    await expect(replyBox).toHaveAttribute("placeholder", /@agents/);
-    await replyBox.fill("@agents please answer this message");
-    await page.getByRole("button", { name: "Send" }).click();
-    await expect(mentionCounter).toHaveText(/Rounds 1/, { timeout: 30_000 });
+    await test.step("the discussion as a page; Approve records the decision", async () => {
+      await page.goto(loopPath);
+      await openCard(page, "Todo", ticket);
+      const panel = await activityTab(ticketDialog, /^Discussions/);
+      await panel.getByText(question).click();
+      await expect(thread).toBeVisible();
+      await thread.getByRole("button", { name: "Open as page" }).click();
+      await expect(page.getByRole("heading", { name: question, level: 1 })).toBeVisible();
+      await expect(page).toHaveURL(/\/tickets\/[^/]+\/discussions\/[^/?]+$/);
+      expect(await blockingViolations(page, testInfo, "axe-discussion-page")).toEqual([]);
 
-    // The board with the newest discussion activity is the first entrance in the board list.
-    await page.getByRole("button", { name: "All boards" }).click();
-    const boardEntries = page
-      .getByRole("list", { name: "Boards with discussions" })
-      .getByRole("listitem");
-    await expect(boardEntries.first()).toContainText(boardName);
+      await page.getByRole("button", { name: "Approve", exact: true }).click();
+      const review = page.getByRole("dialog", { name: "Approve outcome" });
+      await review.getByRole("button", { name: "Confirm" }).click();
+      await expect(page.getByRole("region", { name: "Status" })).toContainText(
+        `Approved by ${person}`,
+      );
+    });
 
-    // A thread names its Loop and deep-links the Ticket it is about.
-    await page.getByRole("button", { name: `Open discussions for ${boardName}` }).click();
-    await page.getByRole("listitem").filter({ hasText: "Rate limit review" }).first().click();
-    await expect(page.getByText("in Delivery", { exact: false })).toBeVisible();
-    await page.getByRole("link", { name: "Open Rate limit review" }).click();
-    await expect(page.getByRole("dialog", { name: "Rate limit review" })).toBeVisible();
-    await expect(page).toHaveURL(/\?card=/);
+    await test.step("the decision shows on the Ticket's row and in the inbox's Decided", async () => {
+      await page.getByRole("button", { name: "Back to the Ticket" }).click();
+      const panel = await activityTab(page.locator("main"), /^Discussions/);
+      await expect(panel.getByRole("list", { name: "Discussions" })).toContainText(
+        `Approved by ${person}`,
+      );
+      await page.goto("/discussions");
+      const decided = page.getByRole("list", { name: "Decided" });
+      await expect(decided.getByRole("link").filter({ hasText: question })).toContainText(
+        `Approved by ${person}`,
+      );
+    });
   });
 });
