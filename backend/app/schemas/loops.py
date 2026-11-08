@@ -141,13 +141,6 @@ class AnalysisPayload(StrictModel):
 class PlanTicket(StrictModel):
     id: Id
     title: Name
-    summary: Summary = Field(
-        default="",
-        description=(
-            "What the Ticket means in at most 20 plain words, for a list of Tickets and the "
-            "first line of its face for people; no file paths or code"
-        ),
-    )
     objective: LongText = ""
     instructions: LongText = ""
     required_actor: RequiredActor = "any"
@@ -171,8 +164,15 @@ class PlanTicket(StrictModel):
         max_length=10,
         description="Area labels, by the names the board has (context.labels)",
     )
-    # The face for people, last so it is written with the whole Ticket before it (the summary is
-    # its first line); its counts and rules are the face check's (``services/ticket_face.py``).
+    # The face for people, last so it is written with the whole Ticket before it (read by name, so
+    # a plan stored with the summary earlier parses); its rules are ``services/ticket_face.py``'s.
+    summary: Summary = Field(
+        default="",
+        description=(
+            "What the Ticket means in at most 20 plain words, for a list of Tickets and the "
+            "first line of its face for people; no file paths or code"
+        ),
+    )
     why: FaceText = Field(default="", description="Face: why it is needed, at most 3 sentences")
     if_skipped: FaceText = Field(default="", description="Face: if we skip it, at most 3 sentences")
     pros: FaceList = Field(default_factory=list, description="Face: at most 3 points for")

@@ -54,16 +54,20 @@ class TraceStep(TypedDict):
     tool: NotRequired[str]
     arguments: NotRequired[dict[str, JsonValue]]
     answer: NotRequired[dict[str, JsonValue]]
+    # A repair round of a face for people that broke its template: how many problems it had.
+    face: NotRequired[int]
 
 
 class TraceCounts(TypedDict):
-    """What the steps add up to: tool calls, distinct files read, searches, listings, repairs."""
+    """What the steps add up to: tool calls, distinct files read, searches, listings, repairs, and
+    the repairs that were about the face for people."""
 
     tool_calls: int
     files_read: int
     searches: int
     listings: int
     repairs: int
+    face_repairs: int
 
 
 class TraceWriter(Protocol):
@@ -111,8 +115,10 @@ class RunTrace:
         tool: str | None = None,
         arguments: JsonValue = None,
         answer: Mapping[str, JsonValue] | None = None,
+        face: int | None = None,
     ) -> bool:
-        """Record one step and write the trace; False once the run has been cancelled."""
+        """Record one step and write the trace; False once the run has been cancelled. ``face``
+        is the number of face problems a repair round had."""
         if len(self.steps) < MAX_STEPS:
             step: TraceStep = {
                 "stage": stage,
@@ -125,6 +131,8 @@ class RunTrace:
                 step["arguments"] = _arguments(arguments)
             if answer is not None:
                 step["answer"] = dict(answer)
+            if face is not None:
+                step["face"] = face
             self.steps.append(step)
         if self._write is not None and self._write(self.dumps()) == "cancelled":
             self.cancelled = True
@@ -152,6 +160,7 @@ def counts_of(steps: Sequence[JsonValue]) -> TraceCounts:
         "searches": 0,
         "listings": 0,
         "repairs": 0,
+        "face_repairs": 0,
     }
     for step in steps:
         if not isinstance(step, dict):
@@ -159,6 +168,8 @@ def counts_of(steps: Sequence[JsonValue]) -> TraceCounts:
         kind = step.get("kind")
         if kind == "repair":
             counted["repairs"] += 1
+            face = step.get("face")
+            counted["face_repairs"] += isinstance(face, int) and face > 0
         if kind != "tool":
             continue
         counted["tool_calls"] += 1

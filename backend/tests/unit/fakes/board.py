@@ -1099,9 +1099,32 @@ class FakeLoopPlanItemRepository:
             expected_evidence_json=row.expected_evidence_json,
             human_action_reason=row.human_action_reason,
             human_instructions=row.human_instructions,
+            summary=row.summary,
+            workplace=row.workplace,
+            waiting_for=row.waiting_for,
+            waiting_reason=row.waiting_reason,
+            face=row.face,
         )
         self._check_unique(changed)
         self._state.plan_items[row.id] = changed
+
+    def approved_faces(self, limit: int) -> list[LoopPlanItemsRow]:
+        plans = self._state.plans
+        approvals = {row.id: row for row in self._state.approvals if row.decision == "approved"}
+
+        def approval_of(item: LoopPlanItemsRow) -> LoopApprovalsRow | None:
+            plan = plans.get(item.plan_id)
+            return approvals.get(plan.approval_id or "") if plan is not None else None
+
+        found = [
+            (approval, item)
+            for item in self._state.plan_items.values()
+            if item.face and (approval := approval_of(item)) is not None
+        ]
+        # Newest approval first (created_at, then id, both descending), then in plan order.
+        found.sort(key=lambda pair: (pair[1].phase_number, pair[1].ticket_sequence, pair[1].key))
+        found.sort(key=lambda pair: (pair[0].created_at, pair[0].id), reverse=True)
+        return [item for _, item in found[:limit]]
 
     def with_cards(self, loop_id: str) -> list[PlannedItem]:
         items = sorted(

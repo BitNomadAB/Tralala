@@ -4,8 +4,10 @@ A failed run keeps an application error's code, message and details, the details
 that names a prompt, the messages or a credential and bounded in size, and any other exception as
 its class name and the start of its text. Every run logs ``generation_run_started`` when it starts
 and one ``generation_run_finished`` when it ends, whichever way, with its status, error code,
-duration, token counts, the repository text it carried and the tool calls it made; neither line
-holds a prompt, a message or the model's answer.
+duration, token counts, the repository text it carried, the tool calls it made and its repair
+rounds; neither line holds a prompt, a message or the model's answer. A run that needed a repair
+says how many in its process tree (``repairs_line``), the face's rounds counted apart, so a model
+that keeps failing the template is visible.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pydantic import JsonValue
 
 from ..core.errors import ApiError
 from ..db.generated.board import LoopGenerationRunsRow
-from .loop_generation_trace import counts_of, parse_steps
+from .loop_generation_trace import TraceCounts, counts_of, parse_steps
 
 logger = logging.getLogger("tralala.loop_generation")
 
@@ -117,6 +119,12 @@ def _duration_ms(started_at: str | None, finished_at: str) -> int | None:
     return round(elapsed.total_seconds() * 1000)
 
 
+def repairs_line(counts: TraceCounts) -> str:
+    """``Repairs: 2 (face: 2)``: the run's repair rounds, and how many of them were about the face
+    for people."""
+    return f"Repairs: {counts['repairs']} (face: {counts['face_repairs']})"
+
+
 def log_started(row: LoopGenerationRunsRow) -> None:
     logger.info(
         "generation_run_started",
@@ -142,5 +150,7 @@ def log_finished(row: LoopGenerationRunsRow, ended: Ended, captured: JsonValue) 
             # What a model that reads through tools did: its tool calls and the files it read.
             "tool_calls": counted["tool_calls"],
             "files_read": counted["files_read"],
+            "repairs": counted["repairs"],
+            "face_repairs": counted["face_repairs"],
         },
     )

@@ -47,7 +47,7 @@ from .agent_tools_schema import (
     string_argument,
 )
 from .loops import DOCUMENT_KINDS
-from .ticket_face import FACE_INVALID
+from .ticket_face import FACE_INVALID, FACE_STEP_BAD, FACE_STEP_GOOD
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from .loop_documents import LoopDocumentService
@@ -454,9 +454,11 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
             "summary of at most 20 words, why and if_skipped in at most 3 sentences each, at "
             "most 3 pros and 3 cons, and 1 to 5 steps saying what changes for the person (a "
             "Ticket that needs more is split), all plain text without file paths, code symbols "
-            "or ids; a face that breaks this is refused with face_invalid, one message per "
-            "Ticket, field and rule. A person approves it, and the approval publishes the "
-            "Tickets with their keys."
+            "or ids. "
+            f'Step, good: "{FACE_STEP_GOOD}" Step, bad: "{FACE_STEP_BAD}" '
+            "A face that breaks this is refused with face_invalid, one message per Ticket, "
+            "field and rule. A person approves it, and the approval publishes the Tickets with "
+            "their keys."
         ),
         scopes=("loops:generate",),
         input_schema=object_schema(

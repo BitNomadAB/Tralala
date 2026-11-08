@@ -21,7 +21,6 @@ class CanonicalTicket(TypedDict):
 
     id: str
     title: str
-    summary: str
     objective: str
     instructions: str
     required_actor: str
@@ -38,6 +37,7 @@ class CanonicalTicket(TypedDict):
     waiting_for: str
     waiting_reason: str
     labels: list[str]
+    summary: str
     why: str
     if_skipped: str
     pros: list[str]
@@ -97,7 +97,6 @@ def canonical_ticket(
     return {
         "id": ticket.id,
         "title": ticket.title,
-        "summary": ticket.summary,
         "objective": ticket.objective,
         "instructions": ticket.instructions,
         "required_actor": ticket.required_actor,
@@ -114,6 +113,7 @@ def canonical_ticket(
         "waiting_for": ticket.waiting_for,
         "waiting_reason": ticket.waiting_reason,
         "labels": list(ticket.labels),
+        "summary": ticket.summary,
         "why": ticket.why,
         "if_skipped": ticket.if_skipped,
         "pros": list(ticket.pros),

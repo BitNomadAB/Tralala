@@ -127,6 +127,16 @@ _ITEMS_WITH_CARDS = text(
     " LEFT JOIN cards c ON c.plan_item_id = i.id"
     " WHERE i.loop_id = :id ORDER BY i.phase_number, i.ticket_sequence, i.key"
 )
+# An item's text is that of the plan it names; a later draft takes the item over, so an item of
+# an approved plan still holds the text that was approved.
+_APPROVED_FACES = text(
+    f"SELECT {sql.column_list(LOOP_PLAN_ITEMS_COLUMNS, 'i')} FROM loop_plan_items i"  # noqa: S608 - from LOOP_PLAN_ITEMS_COLUMNS
+    " JOIN loop_plans p ON p.id = i.plan_id"
+    " JOIN loop_approvals a ON a.id = p.approval_id"
+    " WHERE i.face != '' AND a.decision = 'approved'"
+    " ORDER BY a.created_at DESC, a.id DESC, i.phase_number, i.ticket_sequence, i.key"
+    " LIMIT :limit"
+)
 
 # --- dependencies --------------------------------------------------------------------------------
 
@@ -315,6 +325,10 @@ class SqlLoopPlanItemRepository:
             )
             for row in result.mappings()
         ]
+
+    def approved_faces(self, limit: int) -> list[LoopPlanItemsRow]:
+        result = self._connection.execute(_APPROVED_FACES, {"limit": limit})
+        return [LoopPlanItemsRow.from_mapping(row) for row in result.mappings()]
 
 
 class SqlLoopDependencyRepository:

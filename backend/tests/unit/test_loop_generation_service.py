@@ -35,6 +35,7 @@ from app.services.loop_documents import LoopDocumentService
 from app.services.loop_documents_human import render_brief
 from app.services.loop_documents_views import DocumentsView
 from app.services.loop_generation import MAX_REPAIRS, PURPOSE_PROMPTS, LoopGenerationService
+from app.services.loop_generation_ask import FACE_REPAIR
 from app.services.loop_generation_prompts import DEFAULT_CONTEXT_CHARS
 from app.services.loop_generation_report import MAX_EXCEPTION_TEXT
 from app.services.loop_generation_runs import MAX_OUTPUT_CHARS, stored_output
@@ -864,11 +865,9 @@ def test_a_roadmap_whose_face_breaks_the_template_is_repaired_with_ticket_field_
     start(w, "roadmap")
     first, repair = w.provider.calls
     assert repair.messages[:2] == [first.messages[0], {"role": "assistant", "content": broken}]
+    # The face's messages come first, one per line, then what to do (test_loop_generation_face).
     content = repair.messages[2]["content"]
-    assert content == (
-        "That response did not validate. Fix it and return the corrected JSON object only. "
-        f"Error: {TOO_MANY_STEPS}"
-    )
+    assert content == f"{TOO_MANY_STEPS}\n{FACE_REPAIR}"
     run = w.run()
     assert (run.status, run.error_code) == ("completed", None)
     assert w.kinds() == ["info", "analysis_ai", "analysis", "roadmap_ai", "roadmap"]
@@ -1017,6 +1016,8 @@ def test_a_run_logs_its_start_and_its_end_once(
             # A snapshot run makes no tool call.
             "tool_calls": 0,
             "files_read": 0,
+            "repairs": 0,
+            "face_repairs": 0,
         },
     ]
 

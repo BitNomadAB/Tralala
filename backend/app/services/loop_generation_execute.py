@@ -30,10 +30,16 @@ from ..db.generated.registry import AgentsRow
 from ..repositories.board import BoardUnitOfWork
 from ..repositories.registry import RegistryUnitOfWork
 from .loop_documents import LoopDocumentService
-from .loop_generation_ask import CompletionCall, generate
+from .loop_generation_ask import CompletionCall, RunIds, generate
 from .loop_generation_human import write_for_people
 from .loop_generation_prompts import JsonObject
-from .loop_generation_report import Ended, failure_of, log_finished, log_started
+from .loop_generation_report import (
+    Ended,
+    failure_of,
+    log_finished,
+    log_started,
+    repairs_line,
+)
 from .loop_generation_runs import (
     Outcome,
     RepositorySnapshots,
@@ -157,6 +163,9 @@ class _Run:
             captured, workspace = self.read_repositories(captured, agent)
         self.phase("writing_for_people" if purpose in FOR_PEOPLE else "generating")
         captured, result = self.ask(purpose, captured, agent, workspace)
+        counts = self.trace.counts()
+        if counts["repairs"] and not result.cancelled:
+            self.trace.add("checking", "step", repairs_line(counts))
         if result.cancelled:
             self.trace.add("saving", "step", "Not saved: the run was cancelled")
             traced = row.__replace__(trace_json=self.trace.dumps())
@@ -274,6 +283,7 @@ class _Run:
                 settings=self.context.settings,
                 limits=self.context.limits,
                 trace=self.trace,
+                ids=RunIds(self.loop_id, self.run_id),
             )
             if result.error_code != TOOLS_REFUSED_CODE:
                 return captured, result
@@ -293,6 +303,7 @@ class _Run:
             settings=self.context.settings,
             context_chars=self.context.limits.context_chars,
             trace=self.trace,
+            ids=RunIds(self.loop_id, self.run_id),
         )
         return captured, result
 
