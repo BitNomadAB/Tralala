@@ -619,8 +619,8 @@ Editing a template therefore changes future work and never rewrites a past discu
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/discussions/overview` (one entrance per board, newest discussion activity first) | `boards:read` + `discussions:read` |
-| GET | `/boards/{board_id}/discussions?status=&limit=` | `discussions:read` |
+| GET | `/discussions/inbox` (every board's threads that are not cancelled, by who they wait for) | `boards:read` + `discussions:read` |
+| GET | `/boards/{board_id}/discussions?status=&card_id=&limit=` | `discussions:read` |
 | POST | `/boards/{board_id}/discussions` | `discussions:write` |
 | GET | `/boards/{board_id}/discussions/{id}` (participants, messages with their answers, positions, synthesis, votes, runs) | `discussions:read` |
 | POST | `/boards/{board_id}/discussions/{id}/messages` | `discussions:write` |
@@ -637,13 +637,15 @@ thread carries `loop_id`, `loop_key`, `loop_name` and `ticket_key`, so the clien
 Loop and deep-links the Ticket as `/boards/{board_id}/loops/{loop_id}?card={card_id}`. Participants
 keep an immutable role snapshot, so later template edits never rewrite what an agent was told.
 
-`GET /discussions/overview` is the Discussions page's first level: one entry per board with
-`discussion_count`, `open_count`, `ticket_count` and the board's newest `last_activity_at`, ordered
-newest activity first (boards without threads come last, by name). `ticket_count` is what lets the
-new-discussion dialog offer a board first and still say which boards cannot host a thread yet, since
-a discussion must reference a Ticket. It discloses board metadata, so it requires both
-`boards:read` and `discussions:read`. The client then loads threads for the selected board only, so
-the page never ships every thread of every board to the browser.
+`GET /discussions/inbox` is the Discussions page: every thread that is not cancelled, on every
+board, one row each with the board, the Loop, the Ticket, the question, the newest round's
+suggested `verdict`, `counts` (`go`, `stop`, `unclear`, `missing`), the rounds, who asked,
+`decided_by_name` and `waits_for`: `your_decision` (no run active and not decided), `agents` (a run
+is running or paused) or `nobody` (approved, vetoed or rework requested). The rows come in that
+order, each group newest activity first, at most 200 of them with `total` counting all. It
+discloses board metadata, so it requires both `boards:read` and `discussions:read`. `card_id` on
+the board's list narrows it to one Ticket's threads, and every thread carries `decided_by_name`,
+the person who recorded its newest decision.
 
 `start` and `runs` take the same body:
 

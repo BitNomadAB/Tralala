@@ -15,7 +15,7 @@ from app.db.generated.board import (
     DiscussionThreadsRow,
     DiscussionVotesRow,
 )
-from app.repositories.discussions import DiscussionCounts, NamedVote
+from app.repositories.discussions import InboxThread, NamedVote
 from tests.unit.fakes.registry import ConstraintError
 
 if TYPE_CHECKING:
@@ -31,13 +31,45 @@ class FakeDiscussionThreadRepository:
     def get(self, discussion_id: str) -> DiscussionThreadsRow | None:
         return self._state.discussions.get(discussion_id)
 
-    def newest(self, *, status: str | None, limit: int) -> list[DiscussionThreadsRow]:
+    def newest(
+        self, *, status: str | None, card_id: str | None, limit: int
+    ) -> list[DiscussionThreadsRow]:
         rows = [
             row
             for row in self._state.discussions.values()
-            if not status or row.status == status
+            if (not status or row.status == status) and (not card_id or row.card_id == card_id)
         ]
         return sorted(rows, key=lambda row: row.last_activity_at, reverse=True)[:limit]
+
+    def inbox(self, *, limit: int) -> list[InboxThread]:
+        rounds = FakeDiscussionRoundRepository(self._state)
+        outcomes = FakeDiscussionOutcomeRepository(self._state)
+        rows = sorted(
+            (row for row in self._state.discussions.values() if row.status != "cancelled"),
+            key=lambda row: row.id,
+        )
+        rows.sort(key=lambda row: row.last_activity_at, reverse=True)
+        entries: list[InboxThread] = []
+        for row in rows[:limit]:
+            card = self._state.cards.get(row.card_id) if row.card_id is not None else None
+            loop = (
+                self._state.loops.get(card.loop_id)
+                if card is not None
+                else None
+            )
+            entries.append(
+                InboxThread(
+                    thread=row,
+                    card=card,
+                    loop=loop,
+                    latest_round=rounds.newest_for_thread(row.id),
+                    outcome=outcomes.newest(row.id),
+                    participant_count=sum(
+                        1 for p in self._state.participants if p.discussion_id == row.id
+                    ),
+                )
+            )
+        return entries
 
     def add(self, row: DiscussionThreadsRow) -> None:
         if row.id in self._state.discussions:
@@ -87,17 +119,6 @@ class FakeDiscussionThreadRepository:
         for discussion_id, row in list(self._state.discussions.items()):
             if row.run_state in ACTIVE and discussion_id not in active:
                 self._state.discussions[discussion_id] = row.__replace__(run_state="idle")
-
-    def counts(self) -> DiscussionCounts:
-        threads = list(self._state.discussions.values())
-        return {
-            "ticket_count": sum(
-                1 for card in self._state.cards.values() if card.archived_at is None
-            ),
-            "last_activity_at": max((row.last_activity_at for row in threads), default=None),
-            "discussion_count": len(threads),
-            "open_count": sum(1 for row in threads if row.status == "open"),
-        }
 
 
 class FakeDiscussionMessageRepository:
@@ -392,6 +413,15 @@ class FakeMentionJobRepository:
 class FakeDiscussionOutcomeRepository:
     def __init__(self, state: BoardState) -> None:
         self._state = state
+
+    def newest(self, discussion_id: str) -> DiscussionOutcomesRow | None:
+        # Ties on created_at go to the later insert, as rowid breaks them in SQLite.
+        rows = [
+            (row.created_at, position, row)
+            for position, row in enumerate(self._state.outcomes)
+            if row.discussion_id == discussion_id
+        ]
+        return max(rows, key=lambda entry: (entry[0], entry[1]))[2] if rows else None
 
     def add(self, row: DiscussionOutcomesRow) -> None:
         self._state.outcomes.append(row)

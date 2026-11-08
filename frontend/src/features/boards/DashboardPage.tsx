@@ -10,7 +10,7 @@ import { SectionHeader } from "@/components/ui/section";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
-import { useBoards } from "@/lib/queries";
+import { useBoards, useDiscussionInbox } from "@/lib/queries";
 import { useDashboardTools } from "@/webmcp/useWebMcp";
 import { useBoardSummaries, waitingRows } from "./boardSummaries";
 import { BoardTile } from "./BoardTile";
@@ -46,6 +46,8 @@ export function DashboardPage() {
   const allBoards = everyBoard.data?.items ?? [];
   const summaries = useBoardSummaries([...allBoards, ...boards]);
   const rows = waitingRows(allBoards, summaries);
+  const inbox = useDiscussionInbox();
+  const decisions = (inbox.data?.items ?? []).filter((row) => row.waits_for === "your_decision");
   const states = allBoards.flatMap((board) => {
     const entry = summaries.get(board.id);
     return board.status === "active" && entry ? [entry] : [];
@@ -102,7 +104,8 @@ export function DashboardPage() {
 
       <WaitsForYou
         rows={rows}
-        pending={everyBoard.isLoading || states.some((entry) => entry.pending)}
+        discussions={decisions}
+        pending={everyBoard.isLoading || inbox.isLoading || states.some((entry) => entry.pending)}
         failed={states.filter((entry) => entry.failed).length}
       />
 

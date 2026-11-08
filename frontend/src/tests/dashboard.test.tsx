@@ -7,8 +7,9 @@ import { describe, expect, it } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
 import { AuthContext } from "@/features/auth/useAuth";
 import { DashboardPage } from "@/features/boards/DashboardPage";
-import type { Board, LoopSummary } from "@/lib/types";
+import type { Board, DiscussionInboxRow, LoopSummary } from "@/lib/types";
 import { board, dashboardHandlers, summary } from "./msw/boards";
+import { inboxRow } from "./msw/discussionInbox";
 import { apiPath, failure, ok } from "./msw/envelope";
 import { server } from "./msw/server";
 import { MEMBER } from "./msw/session";
@@ -33,8 +34,9 @@ function renderDashboard(
   boards: Board[],
   summaries: Record<string, LoopSummary[]> = {},
   overrides: HttpHandler[] = [],
+  discussions: DiscussionInboxRow[] = [],
 ) {
-  const { state, handlers } = dashboardHandlers(boards, summaries);
+  const { state, handlers } = dashboardHandlers(boards, summaries, discussions);
   server.use(...handlers);
   server.use(...overrides);
   const queryClient = new QueryClient({
@@ -114,6 +116,50 @@ describe("the dashboard", () => {
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/boards/board-1/loops/loop-1?tab=plan",
     );
+  });
+
+  it("lists a discussion that waits for a decision after the Loop rows, and opens it", async () => {
+    const waiting = inboxRow("wait-1", { question: "Should the key rotate every week?" });
+    const talking = inboxRow("talk-1", { waits_for: "agents", run_state: "running" });
+    const decided = inboxRow("done-1", { waits_for: "nobody", status: "approved" });
+    const { user } = renderDashboard(
+      [PLATFORM],
+      { "board-1": [REVIEW] },
+      [],
+      [waiting, talking, decided],
+    );
+
+    const waits = await screen.findByRole("list", { name: "Waits for you" });
+    await within(waits).findByText("Should the key rotate every week?");
+    const rows = within(waits).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("Session expiry");
+    const row = within(rows[1] ?? waits);
+    expect(row.getByText("Waits for your decision on a discussion")).toBeInTheDocument();
+    expect(rows[1]).toHaveTextContent("Platform · SES-1-PH01-001");
+    expect(screen.getByRole("heading", { name: "Waits for you 2" })).toBeInTheDocument();
+
+    await user.click(
+      row.getByRole("button", { name: "Open discussion: Should the key rotate every week?" }),
+    );
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/boards/board-1/loops/loop-1/tickets/card-1/discussions/wait-1",
+    );
+  });
+
+  it("says nothing waits when neither a Loop nor a discussion needs a decision", async () => {
+    renderDashboard(
+      [PLATFORM],
+      { "board-1": [DELIVERY] },
+      [],
+      [
+        inboxRow("talk-1", { waits_for: "agents", run_state: "running" }),
+        inboxRow("done-1", { waits_for: "nobody", status: "vetoed" }),
+      ],
+    );
+
+    expect(await screen.findByText("Nothing waits for you.")).toBeInTheDocument();
+    expect(screen.queryByText("Waits for your decision on a discussion")).toBeNull();
   });
 
   it("says nothing waits when no Loop needs a decision, and marks a read-only board", async () => {

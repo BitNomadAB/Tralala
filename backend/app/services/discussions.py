@@ -4,12 +4,12 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
-from typing import Protocol, TypedDict
+from typing import Protocol
 from uuid import uuid4
 
 from ..core.context import ActorContext
 from ..core.dates import utcnow
-from ..core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, ValidationFailure
+from ..core.errors import Conflict, Forbidden, NotFound, ValidationFailure
 from ..db.generated.board import (
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
@@ -17,12 +17,12 @@ from ..db.generated.board import (
     DiscussionThreadsRow,
 )
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
-from ..repositories.discussions import DiscussionCounts
 from ..repositories.registry import RegistryUnitOfWork
 from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
 from .activity import activity_entry
 from .agents import RoleSnapshot
 from .discussion_answers import read_answer
+from .discussion_inbox import InboxPage, decided_by, read_inbox
 from .discussion_synthesis import latest_answers, positions, read_synthesis
 from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED, Event, EventService
 from .loops import ensure_ticket_writable
@@ -48,16 +48,6 @@ class BoardChecks(Protocol):
 
 class RoleSnapshots(Protocol):
     def role_snapshot(self, agent_id: str) -> RoleSnapshot: ...
-
-
-class BoardOverview(TypedDict):
-    board_id: str
-    board_name: str
-    status: str
-    discussion_count: int
-    open_count: int
-    last_activity_at: str | None
-    ticket_count: int
 
 
 def requests_agent_reply(content: str, participants: Sequence[Mapping[str, object]]) -> bool:
@@ -131,6 +121,7 @@ def serialize(
     entry["tokens_used"] = thread.tokens_used
     entry["elapsed_ms"] = thread.elapsed_ms
     entry["run_state"] = thread.run_state or "idle"
+    entry["decided_by_name"] = decided_by(repos.outcomes.newest(thread.id))
     if with_detail:
         entry.update(detail(repos, thread))
     return entry
@@ -240,7 +231,12 @@ class DiscussionService:
                     discussion_id=discussion_id,
                     summary=f"{decision} by {actor.actor_name}" + (f": {stated}" if stated else ""),
                     payload_json=json.dumps(
-                        {"decision": decision, "reason": stated, "actor_id": actor.actor_id}
+                        {
+                            "decision": decision,
+                            "reason": stated,
+                            "actor_id": actor.actor_id,
+                            "actor_name": actor.actor_name,
+                        }
                     ),
                     created_at=now,
                 )
@@ -269,11 +265,20 @@ class DiscussionService:
     # --- queries -------------------------------------------------------------
 
     def list(
-        self, board_id: str, *, status: str | None = None, limit: int = 50
+        self,
+        board_id: str,
+        *,
+        status: str | None = None,
+        card_id: str | None = None,
+        limit: int = 50,
     ) -> list[DiscussionEntry]:
+        """The board's threads by most recent activity, optionally in one status or on one
+        Ticket (its Discussions tab)."""
         self.board_service.require_row(board_id)
         with self.store.reader(board_id) as repos:
-            threads = repos.threads.newest(status=status or None, limit=limit)
+            threads = repos.threads.newest(
+                status=status or None, card_id=card_id or None, limit=limit
+            )
             return [serialize(repos, thread) for thread in threads]
 
     def get(self, board_id: str, discussion_id: str) -> DiscussionEntry:
@@ -281,50 +286,13 @@ class DiscussionService:
         with self.store.reader(board_id) as repos:
             return serialize(repos, _thread(repos, discussion_id), with_detail=True)
 
-    def _board_counts(self, board_id: str) -> DiscussionCounts:
-        """Threads and Tickets for one board, in a single read.
-
-        The discussion dialog offers a board first and then its Tickets, so a board with no Tickets
-        has to be visible as such without opening it. One statement covers both counts.
-        """
-        try:
-            with self.store.reader(board_id) as repos:
-                return repos.threads.counts()
-        except (NotFound, ServiceUnavailable):
-            # A board whose schema is mid-repair must still appear in the overview.
-            return {
-                "ticket_count": 0,
-                "last_activity_at": None,
-                "discussion_count": 0,
-                "open_count": 0,
-            }
-
-    def board_overview(self) -> list[BoardOverview]:
-        """One entrance per board, newest discussion activity first.
-
-        The browser only needs this summary to pick a board; threads are fetched for the selected
-        board alone. Boards without threads sort last, alphabetically, so an empty board is still
-        reachable.
-        """
-        with self.registry.reader() as registry:
-            boards = registry.boards.all()
-        entries: list[BoardOverview] = []
-        for board in boards:
-            counts = self._board_counts(board.id)
-            entries.append(
-                {
-                    "board_id": board.id,
-                    "board_name": board.name,
-                    "status": board.status,
-                    "discussion_count": counts["discussion_count"],
-                    "open_count": counts["open_count"],
-                    "last_activity_at": counts["last_activity_at"],
-                    "ticket_count": counts["ticket_count"],
-                }
-            )
-        entries.sort(key=lambda entry: entry["board_name"].casefold())
-        entries.sort(key=lambda entry: entry["last_activity_at"] or "", reverse=True)
-        return entries
+    def inbox(self, actor: ActorContext) -> InboxPage:
+        """What waits for the person across every board: the threads that wait for a decision,
+        the ones the agents are talking in and the decided ones (``discussion_inbox``). It names
+        the boards, so it needs ``boards:read`` beside ``discussions:read``."""
+        actor.require("boards:read")
+        actor.require("discussions:read")
+        return read_inbox(self.registry, self.store)
 
     # --- commands ------------------------------------------------------------
 

@@ -305,13 +305,11 @@ one publish path covers both streams.
 
 ## Discussion navigation
 
-The Discussions page loads one lightweight entry per board (`GET /discussions/overview`) and only
-then the threads of the selected board. The overview aggregates `MAX(last_activity_at)`, the thread
-count and the open count per board database, so ordering follows the newest post or LLM round
-without shipping every thread to the browser. Boards without threads stay reachable, sorted last.
-The overview is refreshed when the page opens, after a discussion is created and when the user
-returns to the board list (plus a 30 s interval while the list is visible), and thread events
-invalidate it.
+The Discussions page is an inbox (`GET /discussions/inbox`): one statement per board database
+reads its threads with their Ticket, Loop, newest round and newest decision, and the service
+groups them by who they wait for (a decision, the agents, nobody), newest activity first in each
+group. The dashboard's "Waits for you" lists the threads that wait for a decision after the Loops.
+Both refresh every 30 s while visible, and a discussion's events invalidate them.
 
 A thread belongs to one Ticket and therefore to one Loop, so every thread records `loop_id`,
 `loop_key`, `loop_name` and `ticket_key`. The thread view shows that Loop and links to

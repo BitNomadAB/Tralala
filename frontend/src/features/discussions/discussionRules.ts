@@ -114,7 +114,7 @@ export interface StateNames {
   stoppedBy?: string | null | undefined;
 }
 
-function by(word: string, name: string | null | undefined): string {
+export function by(word: string, name: string | null | undefined): string {
   return name ? `${word} by ${name}` : word;
 }
 

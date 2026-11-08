@@ -10,12 +10,16 @@ from sqlalchemy.engine import Connection
 from ...core import sql
 from ...db import values
 from ...db.generated.board import (
+    CARDS_COLUMNS,
     DISCUSSION_MESSAGES_COLUMNS,
+    DISCUSSION_OUTCOMES_COLUMNS,
     DISCUSSION_PARTICIPANTS_COLUMNS,
     DISCUSSION_ROUNDS_COLUMNS,
     DISCUSSION_RUNS_COLUMNS,
     DISCUSSION_THREADS_COLUMNS,
     DISCUSSION_VOTES_COLUMNS,
+    LOOPS_COLUMNS,
+    CardsRow,
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
@@ -23,8 +27,9 @@ from ...db.generated.board import (
     DiscussionRunsRow,
     DiscussionThreadsRow,
     DiscussionVotesRow,
+    LoopsRow,
 )
-from ..discussions import DiscussionCounts, NamedVote
+from ..discussions import InboxThread, NamedVote
 
 _THREADS = sql.column_list(DISCUSSION_THREADS_COLUMNS)
 _MESSAGES = sql.column_list(DISCUSSION_MESSAGES_COLUMNS)
@@ -32,6 +37,11 @@ _PARTICIPANTS = sql.column_list(DISCUSSION_PARTICIPANTS_COLUMNS)
 _VOTES = sql.column_list(DISCUSSION_VOTES_COLUMNS)
 _RUNS = sql.column_list(DISCUSSION_RUNS_COLUMNS)
 _ROUNDS = sql.column_list(DISCUSSION_ROUNDS_COLUMNS)
+_OUTCOMES = sql.column_list(DISCUSSION_OUTCOMES_COLUMNS)
+_CARD = "card__"
+_LOOP = "loop__"
+_ROUND = "round__"
+_OUTCOME = "outcome__"
 
 
 # --- threads -------------------------------------------------------------------------------------
@@ -39,11 +49,27 @@ _ROUNDS = sql.column_list(DISCUSSION_ROUNDS_COLUMNS)
 _THREAD = text(f"SELECT {_THREADS} FROM discussion_threads WHERE id = :id")  # noqa: S608 - generated
 _NEWEST_THREADS = text(
     f"SELECT {_THREADS} FROM discussion_threads"  # noqa: S608 - generated
+    " WHERE (:status IS NULL OR status = :status) AND (:card_id IS NULL OR card_id = :card_id)"
     " ORDER BY last_activity_at DESC LIMIT :limit"
 )
-_NEWEST_THREADS_IN = text(
-    f"SELECT {_THREADS} FROM discussion_threads"  # noqa: S608 - generated
-    " WHERE status = :status ORDER BY last_activity_at DESC LIMIT :limit"
+# The inbox reads a board's threads in one statement: each joined row under its own prefix, the
+# newest round and the newest outcome picked by the same order their single reads use.
+_INBOX = text(
+    f"SELECT {sql.column_list(DISCUSSION_THREADS_COLUMNS, 't')},"  # noqa: S608 - generated
+    f" {sql.column_list(CARDS_COLUMNS, 'c', _CARD)},"
+    f" {sql.column_list(LOOPS_COLUMNS, 'l', _LOOP)},"
+    f" {sql.column_list(DISCUSSION_ROUNDS_COLUMNS, 'r', _ROUND)},"
+    f" {sql.column_list(DISCUSSION_OUTCOMES_COLUMNS, 'o', _OUTCOME)},"
+    " (SELECT COUNT(*) FROM discussion_participants p WHERE p.discussion_id = t.id)"
+    " AS participant_count"
+    " FROM discussion_threads t"
+    " LEFT JOIN cards c ON c.id = t.card_id"
+    " LEFT JOIN loops l ON l.id = c.loop_id"
+    " LEFT JOIN discussion_rounds r ON r.id = (SELECT lr.id FROM discussion_rounds lr"
+    "   WHERE lr.discussion_id = t.id ORDER BY lr.created_at DESC, lr.rowid DESC LIMIT 1)"
+    " LEFT JOIN discussion_outcomes o ON o.id = (SELECT lo.id FROM discussion_outcomes lo"
+    "   WHERE lo.discussion_id = t.id ORDER BY lo.created_at DESC, lo.rowid DESC LIMIT 1)"
+    " WHERE t.status != 'cancelled' ORDER BY t.last_activity_at DESC, t.id LIMIT :limit"
 )
 _ADD_THREAD = text(
     "INSERT INTO discussion_threads (id, card_id, title, goal, mode, status, "
@@ -76,12 +102,23 @@ _SETTLE = text(
     " AND NOT EXISTS (SELECT 1 FROM discussion_runs r"
     "   WHERE r.discussion_id = discussion_threads.id AND r.status IN ('running','paused'))"
 )
-_COUNTS = text(
-    "SELECT (SELECT COUNT(*) FROM cards WHERE archived_at IS NULL) AS ticket_count,"
-    " MAX(last_activity_at) AS last_activity_at, COUNT(*) AS discussion_count,"
-    " COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0) AS open_count"
-    " FROM discussion_threads"
-)
+
+
+def _inbox_thread(row: values.ColumnValues) -> InboxThread:
+    """One inbox result row as its rows; a joined row whose ``id`` is NULL was not there."""
+
+    def joined(prefix: str) -> values.ColumnValues | None:
+        return None if row[f"{prefix}id"] is None else values.prefixed(row, prefix)
+
+    card, loop, latest, outcome = (joined(p) for p in (_CARD, _LOOP, _ROUND, _OUTCOME))
+    return InboxThread(
+        thread=DiscussionThreadsRow.from_mapping(row),
+        card=None if card is None else CardsRow.from_mapping(card),
+        loop=None if loop is None else LoopsRow.from_mapping(loop),
+        latest_round=None if latest is None else DiscussionRoundsRow.from_mapping(latest),
+        outcome=None if outcome is None else DiscussionOutcomesRow.from_mapping(outcome),
+        participant_count=values.integer(row, "participant_count"),
+    )
 
 
 class SqlDiscussionThreadRepository:
@@ -92,14 +129,16 @@ class SqlDiscussionThreadRepository:
         row = self._connection.execute(_THREAD, {"id": discussion_id}).mappings().first()
         return None if row is None else DiscussionThreadsRow.from_mapping(row)
 
-    def newest(self, *, status: str | None, limit: int) -> list[DiscussionThreadsRow]:
-        if status:
-            result = self._connection.execute(
-                _NEWEST_THREADS_IN, {"status": status, "limit": limit}
-            )
-        else:
-            result = self._connection.execute(_NEWEST_THREADS, {"limit": limit})
+    def newest(
+        self, *, status: str | None, card_id: str | None, limit: int
+    ) -> list[DiscussionThreadsRow]:
+        parameters = {"status": status or None, "card_id": card_id or None, "limit": limit}
+        result = self._connection.execute(_NEWEST_THREADS, parameters)
         return [DiscussionThreadsRow.from_mapping(row) for row in result.mappings()]
+
+    def inbox(self, *, limit: int) -> list[InboxThread]:
+        result = self._connection.execute(_INBOX, {"limit": limit})
+        return [_inbox_thread(row) for row in result.mappings()]
 
     def add(self, row: DiscussionThreadsRow) -> None:
         self._connection.execute(_ADD_THREAD, asdict(row))
@@ -131,15 +170,6 @@ class SqlDiscussionThreadRepository:
 
     def settle_run_states(self) -> None:
         self._connection.execute(_SETTLE)
-
-    def counts(self) -> DiscussionCounts:
-        row = self._connection.execute(_COUNTS).mappings().one()
-        return {
-            "ticket_count": values.integer(row, "ticket_count"),
-            "last_activity_at": values.text_or_none(row, "last_activity_at"),
-            "discussion_count": values.integer(row, "discussion_count"),
-            "open_count": values.integer(row, "open_count"),
-        }
 
 
 # --- messages ------------------------------------------------------------------------------------
@@ -354,6 +384,10 @@ _ADD_ROUND = text(
     "(:id, :discussion_id, :run_id, :round_number, :status, :answers, :failures, :repeats, "
     ":tokens_used, :elapsed_ms, :created_at, :finished_at, :synthesis_json)"
 )
+_NEWEST_OUTCOME = text(
+    f"SELECT {_OUTCOMES} FROM discussion_outcomes"  # noqa: S608 - generated
+    " WHERE discussion_id = :id ORDER BY created_at DESC, rowid DESC LIMIT 1"
+)
 _ADD_OUTCOME = text(
     "INSERT INTO discussion_outcomes (id, discussion_id, summary, payload_json, created_at)"
     " VALUES (:id, :discussion_id, :summary, :payload_json, :created_at)"
@@ -430,6 +464,10 @@ class SqlDiscussionRoundRepository:
 class SqlDiscussionOutcomeRepository:
     def __init__(self, connection: Connection) -> None:
         self._connection = connection
+
+    def newest(self, discussion_id: str) -> DiscussionOutcomesRow | None:
+        row = self._connection.execute(_NEWEST_OUTCOME, {"id": discussion_id}).mappings().first()
+        return None if row is None else DiscussionOutcomesRow.from_mapping(row)
 
     def add(self, row: DiscussionOutcomesRow) -> None:
         self._connection.execute(_ADD_OUTCOME, asdict(row))

@@ -2,33 +2,35 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Section } from "@/components/ui/section";
+import { inboxPath, WAITS_ON_DISCUSSION } from "@/features/discussions/inboxRules";
 import { loopHref } from "@/features/loops/loopNextAction";
+import type { DiscussionInboxRow } from "@/lib/types";
 import type { WaitingRow } from "./boardSummaries";
 
 /**
  * What waits for the person, first: one row per Loop, across their boards, whose next step is a
  * decision only a person makes. Each row names the board and the Loop, says what it waits for and
- * offers the button that opens the Loop page where the decision is made. Rows appear as each
- * board answers; `pending` says some have not answered yet.
+ * offers the button that opens the Loop page where the decision is made. After the Loops come the
+ * discussions that wait for the person's decision, each opening the discussion on its Ticket. Rows
+ * appear as each board answers; `pending` says some have not answered yet.
  */
 export function WaitsForYou({
   rows,
+  discussions,
   pending,
   failed,
 }: {
   rows: readonly WaitingRow[];
+  /** Inbox rows that wait for the person's decision. */
+  discussions: readonly DiscussionInboxRow[];
   pending: boolean;
   failed: number;
 }) {
   const navigate = useNavigate();
+  const count = rows.length + discussions.length;
   return (
-    <Section
-      title="Waits for you"
-      count={rows.length > 0 ? rows.length : undefined}
-      size="lg"
-      level={2}
-    >
-      {rows.length === 0 ? (
+    <Section title="Waits for you" count={count > 0 ? count : undefined} size="lg" level={2}>
+      {count === 0 ? (
         <EmptyState
           message={pending ? "Looking through your boards…" : "Nothing waits for you."}
           className="card-surface px-4 py-3.5"
@@ -59,6 +61,35 @@ export function WaitsForYou({
                 }}
               >
                 {action.label ?? "Open Loop"}
+              </Button>
+            </li>
+          ))}
+          {discussions.map((discussion) => (
+            <li
+              key={`${discussion.board_id}/${discussion.discussion_id}`}
+              className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="m-0 text-xs text-[var(--foreground-faint)]">
+                  {discussion.board_name}
+                  {discussion.ticket_key ? (
+                    <span className="font-mono"> · {discussion.ticket_key}</span>
+                  ) : null}
+                </p>
+                <p className="m-0 text-[15px] font-semibold text-[var(--foreground)]">
+                  {discussion.question}
+                </p>
+                <p className="m-0 text-sm text-[var(--muted-foreground)]">{WAITS_ON_DISCUSSION}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-label={`Open discussion: ${discussion.question}`}
+                onClick={() => {
+                  void navigate(inboxPath(discussion));
+                }}
+              >
+                Open discussion
               </Button>
             </li>
           ))}

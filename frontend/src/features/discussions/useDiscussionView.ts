@@ -64,6 +64,7 @@ export function useDiscussionView(boardId: string, discussionId: string) {
   const invalidate = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: keys.discussion(boardId, discussionId) });
     void queryClient.invalidateQueries({ queryKey: keys.discussions(boardId) });
+    void queryClient.invalidateQueries({ queryKey: keys.discussionInbox });
   }, [queryClient, boardId, discussionId]);
 
   const live = useDiscussionEvents(boardId, discussionId, invalidate);

@@ -490,14 +490,6 @@ def test_review_is_a_human_decision_with_a_reason_for_a_veto() -> None:
     assert w.state.outcomes[-1].summary == "approve by Ada"
 
 
-def test_the_overview_sorts_by_activity_then_name() -> None:
-    w = world()
-    w.registry.boards["b-2"] = board_row("b-2", name="beta")
-    overview = w.discussions.board_overview()
-    assert [entry["board_name"] for entry in overview] == ["Board", "beta"]
-    assert overview[0]["discussion_count"] == 1
-
-
 def test_a_participant_name_or_at_agents_asks_for_an_answer() -> None:
     people: list[Mapping[str, object]] = [{"participant_id": "a1", "display_name": "Alpha"}]
     assert requests_agent_reply("@agents go", people)

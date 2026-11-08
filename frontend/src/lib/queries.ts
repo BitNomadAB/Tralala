@@ -46,8 +46,11 @@ export const keys = {
   agents: ["agents"] as const,
   agentDirectory: ["agent-directory"] as const,
   agent: (agentId: string) => ["agent", agentId] as const,
-  discussionBoards: ["discussion-boards"] as const,
+  discussionInbox: ["discussion-inbox"] as const,
   discussions: (boardId: string) => ["discussions", boardId] as const,
+  /** Under `["discussions", boardId]`, so a board's thread events refresh the Ticket's tab too. */
+  ticketDiscussions: (boardId: string, cardId: string) =>
+    ["discussions", boardId, "card", cardId] as const,
   discussion: (boardId: string, discussionId: string) =>
     ["discussion", boardId, discussionId] as const,
   /** Under the thread's key, so invalidating the thread refetches its events too. */
@@ -236,5 +239,18 @@ export function useActivity(boardId: string, entityId?: string) {
     queryKey: keys.activity(boardId, entityId),
     queryFn: () => api.listActivity(boardId, { entity_id: entityId, limit: 50 }),
     enabled: Boolean(boardId),
+  });
+}
+
+/**
+ * The Discussions inbox across every board, shared by the Discussions page and the dashboard's
+ * "Waits for you". It refetches every 30 s while the tab is visible; a discussion's events
+ * invalidate it as well.
+ */
+export function useDiscussionInbox() {
+  return useQuery({
+    queryKey: keys.discussionInbox,
+    queryFn: () => api.discussionInbox(),
+    refetchInterval: 30_000,
   });
 }

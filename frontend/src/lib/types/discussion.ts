@@ -154,15 +154,41 @@ export interface DiscussionEvent {
   created_at: string;
 }
 
-export interface DiscussionBoard {
+/** Who an inbox row waits for: the person's decision, the agents talking, or nobody (decided). */
+export type DiscussionWaitsFor = "your_decision" | "agents" | "nobody";
+
+/** One thread in the Discussions inbox, on any board the person may read. */
+export interface DiscussionInboxRow {
+  discussion_id: string;
   board_id: string;
   board_name: string;
+  loop_id: string | null;
+  loop_key: string | null;
+  loop_name: string | null;
+  card_id: string | null;
+  ticket_key: string | null;
+  card_title: string | null;
+  /** The question the person asked (the thread's goal). */
+  question: string;
   status: string;
-  discussion_count: number;
-  open_count: number;
-  last_activity_at: string | null;
-  /** Tickets in the board: a discussion needs one, so a board with none cannot host one yet. */
-  ticket_count: number;
+  run_state: string;
+  /** The newest round's suggested verdict; null before a round. */
+  verdict: string | null;
+  /** For going ahead, against, cannot tell, not answered, after the newest round. */
+  counts: { go: number; stop: number; unclear: number; missing: number };
+  participant_count: number;
+  round_count: number;
+  max_rounds: number;
+  asked_by_name: string;
+  last_activity_at: string;
+  decided_by_name: string | null;
+  waits_for: DiscussionWaitsFor;
+}
+
+/** At most 200 rows, decision first, then talking, then decided; `total` counts them all. */
+export interface DiscussionInbox {
+  items: DiscussionInboxRow[];
+  total: number;
 }
 
 export interface Discussion {
@@ -188,6 +214,8 @@ export interface Discussion {
   last_activity_at: string;
   participant_count: number;
   message_count: number;
+  /** Who recorded the newest decision (approve, veto, rework); null before any. */
+  decided_by_name?: string | null;
   participants: DiscussionParticipant[];
   messages: DiscussionMessage[];
   active_run?: DiscussionRun | null;

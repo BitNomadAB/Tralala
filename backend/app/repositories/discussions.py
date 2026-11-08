@@ -3,9 +3,11 @@ as ``DiscussionService``, ``RunService`` and the round engine use them."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol, TypedDict
 
 from ..db.generated.board import (
+    CardsRow,
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
@@ -13,16 +15,22 @@ from ..db.generated.board import (
     DiscussionRunsRow,
     DiscussionThreadsRow,
     DiscussionVotesRow,
+    LoopsRow,
 )
 
 
-class DiscussionCounts(TypedDict):
-    """One board's threads and open Tickets, as the discussion overview shows them."""
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboxThread:
+    """A thread as the inbox reads it, with its rows side by side: the Ticket and its Loop (both
+    ``None`` unless the Ticket and its Loop exist), the newest round over all its runs (whose
+    synthesis is current), the newest outcome (who decided) and how many take part."""
 
-    ticket_count: int
-    last_activity_at: str | None
-    discussion_count: int
-    open_count: int
+    thread: DiscussionThreadsRow
+    card: CardsRow | None
+    loop: LoopsRow | None
+    latest_round: DiscussionRoundsRow | None
+    outcome: DiscussionOutcomesRow | None
+    participant_count: int
 
 
 class NamedVote(TypedDict):
@@ -39,8 +47,16 @@ class NamedVote(TypedDict):
 class DiscussionThreadRepository(Protocol):
     def get(self, discussion_id: str) -> DiscussionThreadsRow | None: ...
 
-    def newest(self, *, status: str | None, limit: int) -> list[DiscussionThreadsRow]:
-        """Threads by most recent activity, optionally in one status."""
+    def newest(
+        self, *, status: str | None, card_id: str | None, limit: int
+    ) -> list[DiscussionThreadsRow]:
+        """Threads by most recent activity, optionally in one status and on one Ticket."""
+        ...
+
+    def inbox(self, *, limit: int) -> list[InboxThread]:
+        """Every thread that is not cancelled, by most recent activity, read in one statement
+        with its Ticket, its Loop, its newest round, its newest outcome and its participant
+        count."""
         ...
 
     def add(self, row: DiscussionThreadsRow) -> None: ...
@@ -64,8 +80,6 @@ class DiscussionThreadRepository(Protocol):
     def settle_run_states(self) -> None:
         """A thread marked running or paused without such a run goes back to idle."""
         ...
-
-    def counts(self) -> DiscussionCounts: ...
 
 
 class DiscussionMessageRepository(Protocol):
@@ -169,4 +183,8 @@ class DiscussionRoundRepository(Protocol):
 
 
 class DiscussionOutcomeRepository(Protocol):
+    def newest(self, discussion_id: str) -> DiscussionOutcomesRow | None:
+        """The thread's latest outcome: the decision a person recorded last."""
+        ...
+
     def add(self, row: DiscussionOutcomesRow) -> None: ...

@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from ...schemas.discussions import (
-    DiscussionBoardListOut,
     DiscussionCreate,
     DiscussionEventListOut,
+    DiscussionInboxOut,
     DiscussionListOut,
     DiscussionMessageCreate,
     DiscussionOut,
@@ -24,15 +24,12 @@ from .streaming import STREAM_HEADERS, event_stream
 router = APIRouter(tags=["discussions"])
 
 
-@router.get("/discussions/overview", response_model=Envelope[DiscussionBoardListOut])
-def discussion_board_overview(
+@router.get("/discussions/inbox", response_model=Envelope[DiscussionInboxOut])
+def discussion_inbox(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
 ) -> dict[str, object]:
-    ctx.actor.require("boards:read")
-    ctx.actor.require("discussions:read")
-    items = ctx.services.discussion.board_overview()
-    return ok(request, {"items": items, "total": len(items)})
+    return ok(request, ctx.services.discussion.inbox(ctx.actor))
 
 
 @router.get("/boards/{board_id}/discussions", response_model=Envelope[DiscussionListOut])
@@ -41,10 +38,11 @@ def list_discussions(
     ctx: Annotated[RequestContext, Depends(get_context)],
     request: Request,
     status: Annotated[str | None, Query(max_length=40)] = None,
+    card_id: Annotated[str | None, Query(max_length=64)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, object]:
     ctx.actor.require("discussions:read")
-    items = ctx.services.discussion.list(board_id, status=status, limit=limit)
+    items = ctx.services.discussion.list(board_id, status=status, card_id=card_id, limit=limit)
     return ok(request, {"items": items, "total": len(items)})
 
 

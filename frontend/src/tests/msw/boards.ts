@@ -1,5 +1,5 @@
 import { http } from "msw";
-import type { Board, Loop, LoopSummary } from "@/lib/types";
+import type { Board, DiscussionInboxRow, Loop, LoopSummary } from "@/lib/types";
 import { apiPath, ok, requestPath } from "./envelope";
 import { LOOP, NOW } from "./loops";
 
@@ -72,9 +72,14 @@ export function summary(
 
 /**
  * The dashboard's network: `GET /boards` answers `boards` (any filter), each board's summaries
- * answer `summaries[board id]`. `state.requests` is every request, as "METHOD /path".
+ * answer `summaries[board id]`, the discussion inbox answers `discussions`. `state.requests` is
+ * every request, as "METHOD /path".
  */
-export function dashboardHandlers(boards: Board[], summaries: Record<string, LoopSummary[]> = {}) {
+export function dashboardHandlers(
+  boards: Board[],
+  summaries: Record<string, LoopSummary[]> = {},
+  discussions: DiscussionInboxRow[] = [],
+) {
   const state = { requests: [] as string[] };
   const handlers = [
     // Answers nothing, so MSW moves on to the next handler: this one only records the request.
@@ -83,6 +88,9 @@ export function dashboardHandlers(boards: Board[], summaries: Record<string, Loo
     }),
     http.get(apiPath("/boards"), () =>
       ok(boards, { total: boards.length, limit: 50, offset: 0, has_more: false }),
+    ),
+    http.get(apiPath("/discussions/inbox"), () =>
+      ok({ items: discussions, total: discussions.length }),
     ),
     http.get(apiPath("/boards/:boardId/loop-summaries"), ({ params }) => {
       const id = String(params.boardId);
