@@ -18,4 +18,11 @@ describe("Button", () => {
     expect(button).toHaveClass("border-transparent", "bg-transparent");
     expect(button).toHaveClass("text-[var(--muted-foreground)]");
   });
+
+  it("draws the quiet danger variant in the danger colour without a fill", () => {
+    render(<Button variant="danger-quiet">Stop</Button>);
+    const button = screen.getByRole("button", { name: "Stop" });
+    expect(button).toHaveClass("border-transparent", "bg-transparent");
+    expect(button).toHaveClass("text-[var(--destructive)]");
+  });
 });

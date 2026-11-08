@@ -150,9 +150,15 @@ describe("the words of the view", () => {
     expect(holdOutsLine({ ...synthesis, unclear: [], missing: [] })).toBeNull();
   });
 
-  it("hints how a reply is answered", () => {
-    expect(replyHint(thread())).toBe("One round per reply. Up to 4 rounds in a discussion.");
-    expect(replyHint(thread({ mode: "manual" }))).toBe("Mention @agents to make them answer.");
+  it("hints that a reply is a new round, and why it waits while the agents answer", () => {
+    expect(replyHint(thread())).toBe("The agents answer in a new round.");
+    expect(replyHint(thread({ mode: "manual" }))).toBe("The agents answer in a new round.");
+    expect(replyHint(thread({ run_state: "running" }))).toBe(
+      "The agents are answering. Reply once they are done.",
+    );
+    expect(replyHint(thread({ run_state: "paused" }))).toBe(
+      "The agents are answering. Reply once they are done.",
+    );
   });
 
   it("builds the discussion's page and the Ticket over the Kanban", () => {

@@ -33,7 +33,7 @@ describe("the discussion view", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Request rework" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Veto" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Let them talk it out" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Let them talk it out" })).toBeEnabled();
   });
 
   it("says No answer yet before the first round, and keeps the decision until there is one", async () => {
@@ -159,7 +159,7 @@ describe("the discussion view", () => {
     expect(raw).toHaveTextContent("I would rather wait for the export owner.");
     expect(raw).toHaveTextContent('"position": "yes_with_conditions"');
     expect(raw).toHaveTextContent('"problem": "the answer holds no JSON object"');
-    expect(raw).toHaveTextContent("stop: rounds_exhausted");
+    expect(raw).toHaveTextContent("stop: rounds_completed");
     expect(raw).toHaveTextContent("failures 0 · repeats 0 · 6200 tokens · 24.0 s");
   });
 
@@ -196,9 +196,11 @@ describe("the discussion view", () => {
     expect(screen.queryByRole("textbox", { name: "Reply" })).toBeNull();
   });
 
-  it("asks again with the reply, and tells a manual thread to mention the agents", async () => {
+  it("asks again with the reply, and leaves the round to the server on a roundtable thread", async () => {
     const { user, api } = await renderDiscussion();
-    expect(screen.getByText("One round per reply. Up to 4 rounds in a discussion.")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAccessibleDescription(
+      "The agents answer in a new round.",
+    );
     await user.type(screen.getByRole("textbox", { name: "Reply" }), "And if it is wrong?");
     await user.click(screen.getByRole("button", { name: "Ask again" }));
     await waitFor(() =>
@@ -209,10 +211,18 @@ describe("the discussion view", () => {
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("");
   });
 
-  it("hints a manual thread to mention the agents", async () => {
-    await renderDiscussion(discussion({ mode: "manual" }));
+  it("starts the round itself on a manual thread, so nobody has to mention the agents", async () => {
+    const { user, api } = await renderDiscussion(discussion({ mode: "manual" }));
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAccessibleDescription(
-      "Mention @agents to make them answer.",
+      "The agents answer in a new round.",
+    );
+    await user.type(screen.getByRole("textbox", { name: "Reply" }), "And if it is wrong?");
+    await user.click(screen.getByRole("button", { name: "Ask again" }));
+    await waitFor(() =>
+      expect(api.state.bodies).toEqual([
+        { route: "messages", body: { content: "And if it is wrong?" }, csrf: "csrf-discussion" },
+        { route: "start", body: { rounds: 1 }, csrf: "csrf-discussion" },
+      ]),
     );
   });
 });

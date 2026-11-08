@@ -137,6 +137,23 @@ export interface DiscussionRunSummary {
   run: DiscussionRun;
 }
 
+/**
+ * One stored event of a discussion, as the event history replays it: what the run engine wrote
+ * (a run started or finished, an agent started, answered or failed, a round completed). The
+ * payload is the engine's JSON and is read field by field.
+ */
+export interface DiscussionEvent {
+  seq: number;
+  id: string;
+  discussion_id: string;
+  type: string;
+  payload: Record<string, unknown>;
+  actor_id: string | null;
+  actor_type: string | null;
+  actor_name: string | null;
+  created_at: string;
+}
+
 export interface DiscussionBoard {
   board_id: string;
   board_name: string;

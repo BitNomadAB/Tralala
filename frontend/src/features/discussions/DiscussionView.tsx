@@ -18,14 +18,20 @@ import { DiscussionReply } from "./DiscussionReply";
 import {
   discussionPagePath,
   isClosed,
+  isTalking,
+  outcomeLine,
+  progressLine,
   replyHint,
   roundsText,
+  stateOf,
+  talkRounds,
   ticketOnLoopPath,
+  type RunAction,
 } from "./discussionRules";
 import { DiscussionSign } from "./DiscussionSign";
 import { ReviewDiscussionDialog } from "./ReviewDiscussionDialog";
-import { RunPanel } from "./RunPanel";
 import { StanceRows } from "./StanceRows";
+import { TalkItOutDialog } from "./TalkItOutDialog";
 import { useDiscussionView, type DiscussionViewState } from "./useDiscussionView";
 
 type View = "you" | "raw";
@@ -154,6 +160,23 @@ function DiscussionLayout({
   }
 
   const synthesis = discussion.synthesis ?? null;
+  const { runs, run } = view;
+  const talking = isTalking(discussion);
+  const busy = runs.starting || runs.controlling;
+  const stoppedBy = run?.stoppedBy ?? null;
+  const control = (action: RunAction) => {
+    const runId = discussion.active_run?.id;
+    if (runId) runs.control(runId, action);
+  };
+  const activity = talking
+    ? {
+        state: stateOf(discussion),
+        progress:
+          discussion.run_state === "running"
+            ? progressLine(run?.answered ?? 0, discussion.participants.length)
+            : null,
+      }
+    : null;
   return (
     <div className={cn(modal && "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]")}>
       <DiscussionHead
@@ -165,18 +188,24 @@ function DiscussionLayout({
         onOpenPage={host !== "page" && pagePath ? () => void navigate(pagePath) : undefined}
         onClose={modal ? onClose : undefined}
       >
-        <DiscussionSign synthesis={synthesis} />
+        <DiscussionSign
+          synthesis={synthesis}
+          activity={activity}
+          outcome={talking ? null : outcomeLine(run?.run ?? null, stoppedBy)}
+        />
         <DiscussionActions
           discussion={discussion}
           onReview={view.setReviewing}
+          onTalk={() => runs.setTalkOpen(true)}
+          onControl={control}
+          busy={busy}
           onCopyLink={copyLink}
         />
       </DiscussionHead>
       <div
         className={cn("px-4 pb-10 pt-[18px] sm:px-7", modal && "overflow-y-auto scrollbar-thin")}
       >
-        <RunPanel boardId={boardId} discussion={discussion} onChanged={view.invalidate} />
-        <div className="mt-[26px] grid grid-cols-1 gap-7 min-[860px]:grid-cols-[minmax(0,1fr)_280px] min-[860px]:gap-11">
+        <div className="mt-2 grid grid-cols-1 gap-7 min-[860px]:grid-cols-[minmax(0,1fr)_280px] min-[860px]:gap-11">
           <section aria-labelledby={headingId} className="grid min-w-0 content-start">
             <SectionHeader
               id={headingId}
@@ -193,7 +222,7 @@ function DiscussionLayout({
               }
             />
             <SegmentedPanel idBase={idBase} value="you" active={tab} className="grid gap-6">
-              <StanceRows rows={stanceRows(discussion)} />
+              <StanceRows rows={stanceRows(discussion)} failed={run?.failed ?? new Map()} />
               <DiscussionExpanders
                 conditions={synthesis?.conditions ?? []}
                 openQuestions={synthesis?.open_questions ?? []}
@@ -206,18 +235,34 @@ function DiscussionLayout({
                   value={view.reply}
                   onChange={view.setReply}
                   hint={replyHint(discussion)}
+                  disabled={talking}
                   sending={view.sending}
                   onSend={view.sendReply}
                 />
               )}
             </SegmentedPanel>
             <SegmentedPanel idBase={idBase} value="raw" active={tab}>
-              <DiscussionRaw discussion={discussion} />
+              <DiscussionRaw discussion={discussion} failures={run?.failures ?? new Map()} />
             </SegmentedPanel>
           </section>
-          <DiscussionRail boardId={boardId} discussion={discussion} onCopyLink={copyLink} />
+          <DiscussionRail
+            boardId={boardId}
+            discussion={discussion}
+            stoppedBy={stoppedBy}
+            onControl={control}
+            busy={busy}
+            onCopyLink={copyLink}
+          />
         </div>
       </div>
+      <TalkItOutDialog
+        key={runs.talkOpen ? "open" : "closed"}
+        open={runs.talkOpen}
+        rounds={talkRounds(discussion)}
+        pending={runs.starting}
+        onClose={() => runs.setTalkOpen(false)}
+        onStart={runs.talk}
+      />
       <ReviewDiscussionDialog
         key={view.reviewing ?? "none"}
         decision={view.reviewing}

@@ -3,7 +3,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { ToneMark } from "@/components/ui/chip";
 import type { DiscussionAnswer } from "@/lib/types";
 import type { StanceRow } from "./discussionData";
-import { confidenceText, positionLabel, positionTone } from "./discussionRules";
+import { confidenceText, failedLine, positionLabel, positionTone } from "./discussionRules";
 
 const TOGGLE =
   "rounded border-0 bg-transparent p-0 text-[13px] text-[var(--muted-foreground)] hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]";
@@ -77,7 +77,7 @@ function AnswerDetails({
   );
 }
 
-function Stance({ row }: { row: StanceRow }) {
+function Stance({ row, failed }: { row: StanceRow; failed: boolean }) {
   const detailsId = useId();
   const [open, setOpen] = useState(false);
   const { stance, answer } = row;
@@ -129,6 +129,11 @@ function Stance({ row }: { row: StanceRow }) {
           ) : null}
         </div>
       </div>
+      {failed ? (
+        <p className="m-0 mt-2 pl-11 text-[13.5px] text-[var(--destructive)]">
+          {failedLine(row.name)}
+        </p>
+      ) : null}
       {row.kind === "answer" && answer ? (
         <AnswerDetails id={detailsId} answer={answer} open={open} />
       ) : null}
@@ -140,9 +145,15 @@ function Stance({ row }: { row: StanceRow }) {
  * Who stands where: one row per agent with its position, its one recommendation and its
  * confidence; Details opens what it said for and against, its conditions and its open questions.
  * An agent with no answer, or with an answer outside the standard, says so; its prose is in Raw
- * text.
+ * text. An agent the latest round could not reach (`failed`, by agent id) says so under its row.
  */
-export function StanceRows({ rows }: { rows: readonly StanceRow[] }) {
+export function StanceRows({
+  rows,
+  failed,
+}: {
+  rows: readonly StanceRow[];
+  failed: ReadonlyMap<string, string>;
+}) {
   if (rows.length === 0) {
     return (
       <p className="m-0 text-sm text-[var(--foreground-faint)]">No agents in this discussion.</p>
@@ -151,7 +162,7 @@ export function StanceRows({ rows }: { rows: readonly StanceRow[] }) {
   return (
     <ul aria-label="Answers" className="m-0 grid list-none p-0">
       {rows.map((row) => (
-        <Stance key={row.id} row={row} />
+        <Stance key={row.id} row={row} failed={failed.has(row.participantId)} />
       ))}
     </ul>
   );

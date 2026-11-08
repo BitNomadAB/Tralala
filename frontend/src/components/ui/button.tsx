@@ -17,6 +17,9 @@ const buttonVariants = cva(
           "border border-[var(--border)] bg-transparent text-[var(--foreground)] hover:bg-[var(--surface-raised)]",
         quiet:
           "border border-transparent bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)]",
+        /** A quiet button for an action that ends something (Stop): the danger colour, no fill. */
+        "danger-quiet":
+          "border border-transparent bg-transparent text-[var(--destructive)] hover:bg-[var(--surface-raised)]",
       },
       size: {
         sm: "h-8 px-2.5",

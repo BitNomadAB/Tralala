@@ -1,4 +1,10 @@
-import type { Discussion, DiscussionBoard, DiscussionRun, DiscussionRunSummary } from "../types";
+import type {
+  Discussion,
+  DiscussionBoard,
+  DiscussionEvent,
+  DiscussionRun,
+  DiscussionRunSummary,
+} from "../types";
 import { json, request } from "./client";
 
 /** Ticket-bound discussions and their runs. */
@@ -68,6 +74,21 @@ export const discussionsApi = {
     return json(
       await request<DiscussionRun>(`/boards/${boardId}/discussions/${discussionId}/runs/${runId}`),
     );
+  },
+
+  /** The thread's stored events after `after`, oldest first, at most `limit` (the server caps 500). */
+  async listDiscussionEvents(
+    boardId: string,
+    discussionId: string,
+    after = 0,
+    limit = 500,
+  ): Promise<DiscussionEvent[]> {
+    const query = `after=${String(after)}&limit=${String(limit)}`;
+    return json(
+      await request<{ items: DiscussionEvent[] }>(
+        `/boards/${boardId}/discussions/${discussionId}/events/history?${query}`,
+      ),
+    ).items;
   },
 
   async controlDiscussionRun(
