@@ -1,13 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import { Fragment } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Breadcrumb, CRUMB_LINK } from "@/components/ui/breadcrumb";
 import { api } from "@/lib/api";
 import { keys, useBoard, useLoop, useReadiness } from "@/lib/queries";
 import { loopPagePath, phaseText } from "./ticketRules";
 import { TicketView } from "./TicketView";
-
-const CRUMB_LINK = "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:underline";
 
 /**
  * A Ticket on its own page (`/boards/:boardId/loops/:loopId/tickets/:cardId`), a URL that can be
@@ -43,24 +41,14 @@ export function TicketPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3.5 border-b border-[var(--border-soft)] pb-2.5 text-[13px] text-[var(--muted-foreground)]">
-        <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2">
-          {crumbs.map((crumb, index) => (
-            <Fragment key={crumb.key}>
-              {index > 0 ? (
-                <span aria-hidden="true" className="text-[var(--foreground-faint)]">
-                  /
-                </span>
-              ) : null}
-              {crumb}
-            </Fragment>
-          ))}
-        </nav>
-        <span className="flex-1" />
-        <Link to={loopPath} className={`inline-flex items-center gap-1.5 ${CRUMB_LINK}`}>
-          <ArrowLeft size={15} aria-hidden="true" /> Back to the board
-        </Link>
-      </div>
+      <Breadcrumb
+        crumbs={crumbs}
+        trailing={
+          <Link to={loopPath} className={`inline-flex items-center gap-1.5 ${CRUMB_LINK}`}>
+            <ArrowLeft size={15} aria-hidden="true" /> Back to the board
+          </Link>
+        }
+      />
       <article className="mx-auto w-full max-w-[1180px]">
         <TicketView
           boardId={boardId}

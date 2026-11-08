@@ -1,68 +1,49 @@
-import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/useToast";
-import { api } from "@/lib/api";
-import { describeError } from "@/lib/describeError";
-import type { ReviewDecision } from "./DiscussionThread";
+import type { ReviewDecision } from "./discussionRules";
 
-/** Records a human decision on a thread's outcome; veto and rework need an explanation. */
+const TITLES: Record<ReviewDecision, string> = {
+  approve: "Approve outcome",
+  veto: "Veto outcome",
+  rework: "Request rework",
+};
+
+/**
+ * Asks for the person's decision on a discussion: a note for an approval, an explanation for a
+ * veto or rework. `onConfirm` records it (the view's review mutation); a decision never changes
+ * the Ticket.
+ */
 export function ReviewDiscussionDialog({
-  boardId,
-  discussionId,
   decision,
+  pending,
   onClose,
-  onReviewed,
+  onConfirm,
 }: {
-  boardId: string;
-  discussionId: string | null;
   decision: ReviewDecision | null;
+  pending: boolean;
   onClose: () => void;
-  onReviewed: () => void;
+  onConfirm: (decision: ReviewDecision, reason: string) => void;
 }) {
-  const toast = useToast();
   const [reason, setReason] = useState("");
-
-  const reviewMutation = useMutation({
-    mutationFn: (input: { decision: ReviewDecision; reason: string }) =>
-      api.reviewDiscussion(boardId, String(discussionId), input),
-    onSuccess: (discussion) => {
-      onClose();
-      setReason("");
-      onReviewed();
-      toast.push({ title: `Discussion ${discussion.status}`, variant: "success" });
-    },
-    onError: (error) => {
-      toast.push({
-        title: "Could not record the decision",
-        description: describeError(error, undefined),
-        variant: "error",
-      });
-    },
-  });
+  const close = () => {
+    setReason("");
+    onClose();
+  };
 
   return (
-    <Dialog open={decision !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={decision !== null} onOpenChange={(open) => !open && close()}>
       <DialogContent
-        title={
-          decision === "approve"
-            ? "Approve outcome"
-            : decision === "veto"
-              ? "Veto outcome"
-              : "Request rework"
-        }
-        description="Approval records a decision only — it never changes the ticket. Veto and rework require an explanation."
+        title={decision ? TITLES[decision] : "Decision"}
+        description="A decision is recorded on the discussion only; it never changes the Ticket. Veto and rework need an explanation."
       >
         <form
           className="flex flex-col gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             if (!decision) return;
-            if (decision === "approve" || reason.trim()) {
-              reviewMutation.mutate({ decision, reason: reason.trim() });
-            }
+            if (decision === "approve" || reason.trim()) onConfirm(decision, reason.trim());
           }}
         >
           <Field
@@ -78,13 +59,13 @@ export function ReviewDiscussionDialog({
             />
           </Field>
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={close}>
               Cancel
             </Button>
             <Button
               type="submit"
               variant={decision === "approve" ? "primary" : "danger"}
-              disabled={reviewMutation.isPending || (decision !== "approve" && !reason.trim())}
+              disabled={pending || (decision !== "approve" && !reason.trim())}
             >
               Confirm
             </Button>

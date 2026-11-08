@@ -48,6 +48,8 @@ export const keys = {
   agent: (agentId: string) => ["agent", agentId] as const,
   discussionBoards: ["discussion-boards"] as const,
   discussions: (boardId: string) => ["discussions", boardId] as const,
+  discussion: (boardId: string, discussionId: string) =>
+    ["discussion", boardId, discussionId] as const,
 };
 
 export function useBoards(filters: {

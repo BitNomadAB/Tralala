@@ -31,7 +31,8 @@ export function Chip({
   );
 }
 
-export type MarkTone = "success" | "warning" | "danger";
+/** `neutral` is a state that asks nothing of anyone (paused, cancelled, no answer yet). */
+export type MarkTone = "success" | "warning" | "danger" | "neutral";
 
 const DOTS: Record<MarkTone, string> = {
   success:
@@ -40,6 +41,8 @@ const DOTS: Record<MarkTone, string> = {
     "bg-[var(--warning)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--warning)_20%,transparent)]",
   danger:
     "bg-[var(--destructive)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--destructive)_20%,transparent)]",
+  neutral:
+    "bg-[var(--foreground-faint)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--foreground-faint)_20%,transparent)]",
 };
 
 const STATES: Record<TicketState, { word: string; tone: MarkTone }> = {

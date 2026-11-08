@@ -1,43 +1,13 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MarkdownField } from "@/components/ui/markdown-field";
+import { RawBlock as Block, RawText as Raw } from "@/components/ui/raw-text";
 import type { MarkdownOptions } from "@/lib/markdown";
 import type { Card, LoopReadiness } from "@/lib/types";
 import { planEntryText } from "./ticketText";
 
 const LINK =
   "rounded border-0 bg-transparent p-0 text-[13px] text-[var(--muted-foreground)] hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]";
-
-/** One block of agent text: the uppercase label, a link beside it, the text as it is. */
-function Block({
-  label,
-  action,
-  children,
-}: {
-  label: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div>
-      <div className="mb-1.5 flex items-baseline justify-between gap-3">
-        <h4 className="m-0 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[var(--foreground-faint)]">
-          {label}
-        </h4>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Raw({ text }: { text: string }) {
-  return (
-    <pre className="m-0 whitespace-pre-wrap rounded-md border border-[var(--border-soft)] bg-[var(--surface)] px-3.5 py-3 font-mono text-[13px] leading-[1.6] [overflow-wrap:anywhere] text-[var(--muted-foreground)]">
-      {text}
-    </pre>
-  );
-}
 
 /**
  * "Raw text": everything the agent wrote, as it is and unstyled on purpose: the summary for AI,

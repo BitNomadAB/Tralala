@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/useToast";
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
@@ -20,10 +20,12 @@ import { LoopPlanTab } from "./LoopPlanTab";
 import { LoopToolbar } from "./LoopToolbar";
 import { NO_FILTERS, useLoopCards, type TicketFilters } from "./useLoopCards";
 import { parseTab, useLoopView } from "./useLoopView";
+import { useTicketDialog } from "./useTicketDialog";
 
 /**
  * The Loop page: the header with the person's next decision, then the tabs Kanban, Plan and Notes
- * (`?tab=`, the Kanban when absent). `?card=` opens a Ticket over whichever tab is shown.
+ * (`?tab=`, the Kanban when absent). `?card=` opens a Ticket over whichever tab is shown, and
+ * `?discussion=` one of its discussions in the same dialog.
  */
 export function LoopPage() {
   const { boardId = "", loopId = "" } = useParams();
@@ -34,9 +36,8 @@ export function LoopPage() {
   const listsQuery = useLists(boardId, loopId);
   const summaries = useLoopSummaries(boardId);
   const view = useLoopView(loopQuery.data?.stage ?? "draft");
-  // A discussion or search result deep-links the Ticket it points at.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(searchParams.get("card"));
+  // A search result or a discussion deep-links the Ticket it points at.
+  const dialog = useTicketDialog();
   const [showActivity, setShowActivity] = useState(false);
   const [addingList, setAddingList] = useState(false);
   const [listName, setListName] = useState("");
@@ -53,19 +54,6 @@ export function LoopPage() {
     lists,
     filters,
   });
-
-  const openCard = useCallback((id: string) => setSelectedCardId(id), []);
-  const closeCard = useCallback(() => {
-    setSelectedCardId(null);
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        next.delete("card");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [setSearchParams]);
 
   const invalidateLists = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: keys.lists(boardId, loopId) });
@@ -100,7 +88,7 @@ export function LoopPage() {
     loopName: loopQuery.data?.name ?? "",
     lists,
     cardsByList,
-    onOpenCard: openCard,
+    onOpenCard: dialog.openCard,
   });
 
   if (boardQuery.isLoading || loopQuery.isLoading) {
@@ -166,7 +154,7 @@ export function LoopPage() {
             cardsByList={cardsByList}
             matchingIds={matchingIds}
             readOnly={readOnly}
-            onOpenCard={openCard}
+            onOpenCard={dialog.openCard}
             onListsChanged={invalidateLists}
             onCardsChanged={invalidateCards}
           >
@@ -203,12 +191,14 @@ export function LoopPage() {
         <ActivityPanel boardId={boardId} onClose={() => setShowActivity(false)} />
       ) : null}
 
-      {selectedCardId ? (
+      {dialog.open ? (
         <TicketModal
           boardId={boardId}
           loopId={loopId}
-          cardId={selectedCardId}
-          onClose={closeCard}
+          cardId={dialog.cardId}
+          discussionId={dialog.discussionId}
+          onClose={dialog.close}
+          onBackToTicket={dialog.backToTicket}
           ticketHref={ticketHref}
         />
       ) : null}
