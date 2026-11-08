@@ -158,6 +158,9 @@ export const cardsApi = {
       clear_due_at?: boolean;
       completed?: boolean | undefined;
       labels?: string[];
+      /** A person's actor id (or an enabled agent's) who owns the Ticket from now on. */
+      assignee_actor_id?: string | undefined;
+      clear_assignee?: boolean;
     },
   ): Promise<Card> {
     return json(

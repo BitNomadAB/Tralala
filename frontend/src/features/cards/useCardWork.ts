@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
-import type { Card, CardDetail, Wait, Workplace } from "@/lib/types";
+import type { Card, CardDetail, Wait } from "@/lib/types";
 
 /** What a refused change reads as under the section. */
 export function workErrorText(error: unknown): string {
@@ -14,9 +14,9 @@ export function workErrorText(error: unknown): string {
 }
 
 /**
- * The three changes a person makes to where a Ticket's work is done and what it waits for. Each
- * sends the card's current version; the answer is the updated card, written into the card's
- * query at once so the next change carries the new version, before `onChanged` refetches the rest.
+ * The two changes a person makes to what a Ticket waits for: set a wait, clear it. Each sends the
+ * card's current version; the answer is the updated card, written into the card's query at once so
+ * the next change carries the new version, before `onChanged` refetches the rest.
  */
 export function useCardWork({
   boardId,
@@ -49,12 +49,6 @@ export function useCardWork({
     },
   };
 
-  const workplace = useMutation({
-    mutationFn: (value: Workplace) =>
-      api.setWorkplace(boardId, loopId, card.id, { version: card.version, workplace: value }),
-    ...settled,
-  });
-
   const wait = useMutation({
     mutationFn: (value: { waiting_for: Wait; reason: string }) =>
       api.setWait(boardId, loopId, card.id, { version: card.version, ...value }),
@@ -68,10 +62,7 @@ export function useCardWork({
 
   return {
     error,
-    pending: workplace.isPending || wait.isPending || clear.isPending,
-    setWorkplace: (value: Workplace) => {
-      workplace.mutate(value);
-    },
+    pending: wait.isPending || clear.isPending,
     /** Resolves true once the wait is saved, so the form can close. */
     setWait: async (value: { waiting_for: Wait; reason: string }): Promise<boolean> => {
       try {

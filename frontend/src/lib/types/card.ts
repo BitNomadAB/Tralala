@@ -18,6 +18,11 @@ export interface Card {
   priority: Priority;
   due_at: string | null;
   completed_at: string | null;
+  /** Who owns the Ticket: a person's or an agent's actor id; null when nobody does. */
+  assignee_actor_id: string | null;
+  assignee_type: string | null;
+  assignee_name: string | null;
+  assigned_at: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;

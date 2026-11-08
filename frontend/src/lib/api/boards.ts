@@ -1,5 +1,6 @@
 import type {
   Board,
+  BoardPerson,
   HistoryDetail,
   HistorySummary,
   Label,
@@ -89,6 +90,12 @@ export const boardsApi = {
 
   async retryMigration(boardId: string): Promise<{ status: string; to_revision: string | null }> {
     return json(await request(`/boards/${boardId}/migrate`, { method: "POST" }));
+  },
+
+  /** The people a Ticket on this board may be given to. */
+  async listBoardPeople(boardId: string): Promise<BoardPerson[]> {
+    const actors = json(await request<{ people: BoardPerson[] }>(`/boards/${boardId}/actors`));
+    return actors.people;
   },
 
   async listLabels(boardId: string): Promise<Label[]> {

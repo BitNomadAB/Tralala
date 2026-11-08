@@ -50,3 +50,39 @@ export function DialogContent({
     </DialogPrimitive.Portal>
   );
 }
+
+export const DialogTitle = DialogPrimitive.Title;
+
+/**
+ * A dialog that draws its own head: the overlay and the panel, nothing inside. The content names
+ * the dialog with a `DialogTitle`. Escape closes it, except while the focus sits in something that
+ * takes Escape itself (an open listbox, or an element marked `data-keeps-escape`, such as a field
+ * being edited inline): Radix listens on the document before the field sees the key, so without
+ * this one Escape would close the menu and the whole dialog at once.
+ */
+export function DialogFrame({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
+      <DialogPrimitive.Content
+        aria-describedby={undefined}
+        onEscapeKeyDown={(event) => {
+          if (keepsEscape(event.target)) event.preventDefault();
+        }}
+        className={cn(
+          "fixed z-50 overflow-hidden border border-[var(--border)] bg-[var(--background)] shadow-2xl",
+          className,
+        )}
+      >
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Portal>
+  );
+}
+
+/** Whether a key press on `target` belongs to an open listbox or a field that handles Escape. */
+function keepsEscape(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element && target.closest('[role="listbox"], [data-keeps-escape]') !== null
+  );
+}

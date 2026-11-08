@@ -1,5 +1,5 @@
 import { Paperclip } from "lucide-react";
-import { useId, useRef, useState, type DragEvent } from "react";
+import { useId, useRef, useState, type DragEvent, type RefObject } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ATTACHMENT_EXTENSIONS, ATTACHMENT_MAX_BYTES, formatSize } from "@/lib/api/attachmentRules";
@@ -23,6 +23,7 @@ export function CardAttachments({
   readOnly,
   currentActorId,
   onChanged,
+  picker,
 }: {
   boardId: string;
   cardId: string;
@@ -30,9 +31,12 @@ export function CardAttachments({
   /** The person looking, so their own uploads read as "you". */
   currentActorId?: string | null | undefined;
   onChanged?: (() => void) | undefined;
+  /** The file input, when something outside the section (the Ticket's Add file) opens it. */
+  picker?: RefObject<HTMLInputElement | null> | undefined;
 }) {
   const headingId = useId();
-  const input = useRef<HTMLInputElement>(null);
+  const own = useRef<HTMLInputElement>(null);
+  const input = picker ?? own;
   const [dragging, setDragging] = useState(false);
   const files = useCardAttachments({ boardId, cardId, onChanged });
 
@@ -79,14 +83,17 @@ export function CardAttachments({
         {files.attachments.length > 0 ? <Badge>{files.attachments.length}</Badge> : null}
         {readOnly ? null : (
           <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-auto"
-              onClick={() => input.current?.click()}
-            >
-              <Paperclip size={14} aria-hidden="true" /> Add file
-            </Button>
+            {/* With an outside picker, the Ticket's own Add file opens it; one button is enough. */}
+            {picker ? null : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-auto"
+                onClick={() => input.current?.click()}
+              >
+                <Paperclip size={14} aria-hidden="true" /> Add file
+              </Button>
+            )}
             <input
               ref={input}
               type="file"

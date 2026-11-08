@@ -32,6 +32,7 @@ export const keys = {
     ["search", boardId, loopId, params] as const,
   attachments: (boardId: string, cardId: string) => ["attachments", boardId, cardId] as const,
   labels: (boardId: string) => ["labels", boardId] as const,
+  boardPeople: (boardId: string) => ["board-people", boardId] as const,
   activity: (boardId: string, entityId?: string) =>
     ["activity", boardId, entityId ?? "board"] as const,
   credentials: ["credentials"] as const,
@@ -164,6 +165,14 @@ export function useLabels(boardId: string) {
   return useQuery({
     queryKey: keys.labels(boardId),
     queryFn: () => api.listLabels(boardId),
+    enabled: Boolean(boardId),
+  });
+}
+
+export function useBoardPeople(boardId: string) {
+  return useQuery({
+    queryKey: keys.boardPeople(boardId),
+    queryFn: () => api.listBoardPeople(boardId),
     enabled: Boolean(boardId),
   });
 }

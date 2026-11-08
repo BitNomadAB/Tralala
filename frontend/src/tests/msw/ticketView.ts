@@ -1,0 +1,190 @@
+import { http } from "msw";
+import {
+  PRIORITIES,
+  type BoardList,
+  type BoardPerson,
+  type CardDetail,
+  type Label,
+  type LoopReadiness,
+  type PlanTicketView,
+} from "@/lib/types";
+import { CARD_ID, CARD_PATH, changeCard, ticketCard, ticketWorkHandlers } from "./cards";
+import { apiPath, failure, ok, requestPath } from "./envelope";
+import { BOARD_ID, LOOP, LOOP_ID, LOOP_PATH, NOW } from "./loops";
+import { MEMBER } from "./session";
+
+function column(id: string, name: string, position: number, count: number): BoardList {
+  return {
+    id,
+    board_id: BOARD_ID,
+    loop_id: LOOP_ID,
+    name,
+    position,
+    created_at: NOW,
+    updated_at: NOW,
+    archived_at: null,
+    card_count: count,
+  };
+}
+
+/** The Loop's three columns; the card starts in the first. */
+export const COLUMNS: BoardList[] = [
+  column("list-1", "Backlog", 0, 13),
+  column("list-2", "In Progress", 1, 0),
+  column("list-3", "Done", 2, 21),
+];
+
+export const LABELS: Label[] = [
+  { id: "label-1", name: "Backend", color: "#4b8bf5" },
+  { id: "label-2", name: "Security", color: "#e3b341" },
+];
+
+/** The board's people: the signed-in member and one more. */
+export const PEOPLE: BoardPerson[] = [
+  { id: MEMBER.id, name: MEMBER.name, type: "user", role: "member" },
+  { id: "user-2", name: "Grace Hopper", type: "user", role: "admin" },
+];
+
+export const PHASE_NAME = "Session limits";
+export const PREREQUISITE_KEY = "SES-1-PH01-000";
+
+function planItem(id: string, key: string, extra: Partial<PlanTicketView>): PlanTicketView {
+  return {
+    id,
+    key,
+    title: key,
+    phase_id: "phase-1",
+    phase_number: 1,
+    objective: "",
+    instructions: "",
+    required_actor: "any",
+    execution_mode: "normal",
+    acceptance_criteria: [],
+    expected_evidence: [],
+    human_action_reason: "",
+    human_instructions: "",
+    prerequisite_ticket_ids: [],
+    prerequisite_phase_ids: [],
+    card_id: null,
+    completed_at: null,
+    ready: true,
+    blockers: [],
+    human_action_required: false,
+    downstream_phase_numbers: [],
+    workplace: "unknown",
+    waiting_for: "nothing",
+    state: "ready",
+    ...extra,
+  };
+}
+
+/** The plan as readiness serves it: the card's item depends on one completed Ticket. */
+export const READINESS: LoopReadiness = {
+  loop_id: LOOP_ID,
+  stage: "in_progress",
+  execution_allowed: true,
+  blocked_reason: null,
+  items: [
+    planItem("item-0", PREREQUISITE_KEY, { card_id: "card-0", completed_at: NOW, state: null }),
+    planItem("item-1", "SES-1-PH01-001", { card_id: CARD_ID, prerequisite_ticket_ids: ["item-0"] }),
+  ],
+  phases: [
+    {
+      id: "phase-1",
+      number: 1,
+      name: PHASE_NAME,
+      objective: "",
+      entry_conditions: [],
+      exit_conditions: [],
+      prerequisite_phase_ids: [],
+      prerequisite_ticket_ids: [],
+      state: "active",
+      blocked_by: [],
+      tickets: [],
+    },
+  ],
+  unplanned: [],
+};
+
+/** The fields of a card `PATCH` the server applies, as the card they change. */
+function patched(body: Record<string, unknown>): Partial<CardDetail> {
+  const changes: Partial<CardDetail> = {};
+  if (typeof body.title === "string") changes.title = body.title;
+  if (typeof body.description === "string") changes.description = body.description;
+  const priority = PRIORITIES.find((value) => value === body.priority);
+  if (priority) changes.priority = priority;
+  if (typeof body.due_at === "string") changes.due_at = body.due_at;
+  if (body.clear_due_at === true) changes.due_at = null;
+  const ids = body.labels;
+  if (Array.isArray(ids)) changes.labels = LABELS.filter((label) => ids.includes(label.id));
+  if (typeof body.assignee_actor_id === "string") {
+    const person = PEOPLE.find((candidate) => candidate.id === body.assignee_actor_id);
+    changes.assignee_actor_id = body.assignee_actor_id;
+    changes.assignee_name = person?.name ?? null;
+    changes.assignee_type = "user";
+  }
+  if (body.clear_assignee === true) {
+    changes.assignee_actor_id = null;
+    changes.assignee_name = null;
+    changes.assignee_type = null;
+  }
+  if (body.completed === true) changes.completed_at = NOW;
+  if (body.completed === false) changes.completed_at = null;
+  return changes;
+}
+
+/**
+ * Everything the Ticket view reads and writes over one card in `state.card`: the card and its
+ * wait routes (`ticketWorkHandlers`), the board, the Loop, its columns, the plan's readiness, the
+ * labels, the people, the history, mentions and files, and the card's `PATCH`, move, archive and
+ * confirm, each checking the version as the server does. `state.bodies` holds every write's body,
+ * `state.csrf` the CSRF header of every write.
+ */
+export function ticketViewHandlers(initial: CardDetail = ticketCard()) {
+  const work = ticketWorkHandlers(initial);
+  const state = Object.assign(work.state, { csrf: [] as (string | null)[] });
+  const change = (
+    request: Request,
+    route: string,
+    apply: (body: Record<string, unknown>) => Partial<CardDetail> | Response,
+  ) => changeCard(state, request, route, apply);
+
+  const handlers = [
+    // Answers nothing, so MSW moves on to the next handler: this one only records the header.
+    http.all(apiPath("/*"), ({ request }) => {
+      if (request.method !== "GET") state.csrf.push(request.headers.get("X-CSRF-Token"));
+    }),
+    ...work.handlers,
+    http.get(apiPath(`/boards/${BOARD_ID}`), () =>
+      ok({ id: BOARD_ID, name: "Platform", status: "active", agent_ids: [], repository_ids: [] }),
+    ),
+    http.get(apiPath(LOOP_PATH), () => ok({ ...LOOP, stage: "in_progress" })),
+    http.get(apiPath(`${LOOP_PATH}/lists`), () => ok(COLUMNS)),
+    http.get(apiPath(`${LOOP_PATH}/readiness`), () => ok(READINESS)),
+    http.get(apiPath(`/boards/${BOARD_ID}/labels`), () => ok(LABELS)),
+    http.get(apiPath(`/boards/${BOARD_ID}/actors`), () => ok({ people: PEOPLE, agents: [] })),
+    http.get(apiPath(`/boards/${BOARD_ID}/activity`), () => ok([])),
+    http.get(apiPath(`/boards/${BOARD_ID}/attachments`), () => ok([])),
+    http.get(apiPath(`${CARD_PATH}/mentions`), () => ok([])),
+    http.get(apiPath("/agents/directory"), () => ok([])),
+    http.patch(apiPath(CARD_PATH), ({ request }) => change(request, `PATCH ${CARD_PATH}`, patched)),
+    http.post(apiPath(`${CARD_PATH}/move`), ({ request }) =>
+      change(request, `POST ${CARD_PATH}/move`, (body) =>
+        typeof body.list_id === "string"
+          ? { list_id: body.list_id }
+          : failure(422, "validation_error", "list_id is required"),
+      ),
+    ),
+    http.post(apiPath(`${CARD_PATH}/confirm`), ({ request }) =>
+      change(request, `POST ${CARD_PATH}/confirm`, () => ({
+        completed_at: NOW,
+        human_confirmed_at: NOW,
+      })),
+    ),
+    http.post(apiPath(`${CARD_PATH}/archive`), ({ request }) => {
+      state.bodies.push({ route: `POST ${requestPath(request)}`, body: null });
+      return ok({ ...state.card, archived_at: NOW });
+    }),
+  ];
+  return { state, handlers };
+}
