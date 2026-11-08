@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Chip, StateChip } from "./chip";
+import { Chip, StateChip, ToneMark } from "./chip";
 
 describe("Chip", () => {
   it("shows its text with the trailing mark after it", () => {
@@ -37,5 +37,18 @@ describe("StateChip", () => {
     expect(screen.getByText("Blocked").parentElement).toHaveTextContent(
       "Blocked· waits for PLN-017",
     );
+  });
+});
+
+describe("ToneMark", () => {
+  it.each([
+    ["success", "--success"],
+    ["warning", "--warning"],
+    ["danger", "--destructive"],
+  ] as const)("marks a %s word with a dot the screen reader skips", (tone, colour) => {
+    const { container } = render(<ToneMark tone={tone} word="Yes" />);
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+    const dot = container.querySelector('[aria-hidden="true"]');
+    expect(dot?.className).toContain(`bg-[var(${colour})]`);
   });
 });

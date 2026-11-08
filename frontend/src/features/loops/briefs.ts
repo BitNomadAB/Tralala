@@ -1,5 +1,5 @@
-import type { BadgeTone } from "@/components/ui/badge";
-import type { BriefVerdict, HumanBrief, ObstacleLevel, RoadmapBrief } from "@/lib/types";
+import type { MarkTone } from "@/components/ui/chip";
+import type { BriefVerdict, HumanBrief, ObstacleLevel, RoadmapBrief, SizeKind } from "@/lib/types";
 
 /**
  * Reading a brief and the technical revision it was written from. The ids of a brief's items lead
@@ -13,11 +13,18 @@ export const VERDICT_TEXT: Record<BriefVerdict, string> = {
   unclear: "Unclear",
 };
 
-export const VERDICT_TONE: Record<BriefVerdict, BadgeTone> = {
+/** The verdict as the sign's mark: go, go with care, stop. */
+export const VERDICT_MARK: Record<BriefVerdict, MarkTone> = {
   yes: "success",
-  yes_with_conditions: "brand",
+  yes_with_conditions: "warning",
   no: "danger",
   unclear: "warning",
+};
+
+export const SIZE_TEXT: Record<SizeKind, string> = {
+  small: "Small",
+  medium: "Medium",
+  large: "Large",
 };
 
 export const LEVEL_TEXT: Record<ObstacleLevel, string> = {
@@ -58,6 +65,27 @@ export function findingTitles(technical: unknown): Map<string, string> {
     titles.set(text(finding.id), text(finding.title) || "A finding without a title");
   }
   return titles;
+}
+
+/** A finding of a technical analysis as the Raw text view lists it, every field as written. */
+export interface RawFinding {
+  id: string;
+  category: string;
+  title: string;
+  technical_detail: string;
+  plain_language: string;
+}
+
+/** The findings of a technical analysis, in its order. */
+export function findingsOf(technical: unknown): RawFinding[] {
+  if (!isRecord(technical)) return [];
+  return records(technical.findings).map((finding) => ({
+    id: text(finding.id),
+    category: text(finding.category),
+    title: text(finding.title),
+    technical_detail: text(finding.technical_detail),
+    plain_language: text(finding.plain_language),
+  }));
 }
 
 export interface PlanTitles {

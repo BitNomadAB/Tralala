@@ -31,20 +31,48 @@ export function Chip({
   );
 }
 
-const STATES: Record<TicketState, { word: string; dot: string }> = {
-  ready: {
-    word: "Ready",
-    dot: "bg-[var(--success)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_20%,transparent)]",
-  },
-  needs_input: {
-    word: "Needs input",
-    dot: "bg-[var(--warning)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--warning)_20%,transparent)]",
-  },
-  blocked: {
-    word: "Blocked",
-    dot: "bg-[var(--destructive)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--destructive)_20%,transparent)]",
-  },
+export type MarkTone = "success" | "warning" | "danger";
+
+const DOTS: Record<MarkTone, string> = {
+  success:
+    "bg-[var(--success)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_20%,transparent)]",
+  warning:
+    "bg-[var(--warning)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--warning)_20%,transparent)]",
+  danger:
+    "bg-[var(--destructive)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--destructive)_20%,transparent)]",
 };
+
+const STATES: Record<TicketState, { word: string; tone: MarkTone }> = {
+  ready: { word: "Ready", tone: "success" },
+  needs_input: { word: "Needs input", tone: "warning" },
+  blocked: { word: "Blocked", tone: "danger" },
+};
+
+/**
+ * A word with a coloured dot in front of it (the state line's mark, an analysis verdict): the dot
+ * only repeats the word, so it is hidden from a screen reader; `reason` follows muted.
+ */
+export function ToneMark({
+  tone,
+  word,
+  reason,
+  className,
+}: {
+  tone: MarkTone;
+  word: ReactNode;
+  reason?: ReactNode;
+  className?: string | undefined;
+}) {
+  return (
+    <span className={cn("inline-flex items-center gap-2 text-sm", className)}>
+      <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", DOTS[tone])} />
+      <b className="font-semibold text-[var(--foreground)]">{word}</b>
+      {reason === undefined ? null : (
+        <span className="text-[var(--muted-foreground)]">· {reason}</span>
+      )}
+    </span>
+  );
+}
 
 /**
  * Where a Ticket stands, in words with a coloured dot: Ready, Needs input or Blocked. The dot only
@@ -61,13 +89,5 @@ export function StateChip({
   className?: string | undefined;
 }) {
   const shown = STATES[state];
-  return (
-    <span className={cn("inline-flex items-center gap-2 text-sm", className)}>
-      <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", shown.dot)} />
-      <b className="font-semibold text-[var(--foreground)]">{shown.word}</b>
-      {reason === undefined ? null : (
-        <span className="text-[var(--muted-foreground)]">· {reason}</span>
-      )}
-    </span>
-  );
+  return <ToneMark tone={shown.tone} word={shown.word} reason={reason} className={className} />;
 }

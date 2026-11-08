@@ -6,6 +6,7 @@
 
 export type BriefVerdict = "yes" | "yes_with_conditions" | "no" | "unclear";
 export type ObstacleLevel = "business" | "technical" | "security" | "legal" | "people_time";
+export type SizeKind = "small" | "medium" | "large";
 
 export interface BriefObstacle {
   level: ObstacleLevel;
@@ -23,13 +24,25 @@ export interface BriefDecision {
   finding_ids: string[];
 }
 
+/** How big the work is: a kind a person can compare, and one sentence why. */
+export interface BriefSize {
+  kind: SizeKind;
+  text: string;
+}
+
+/**
+ * The analysis brief, a sign: `verdict_line` and `size` are absent (or empty) in a brief written
+ * before the sign existed, and such a brief may hold more items than a new one may.
+ */
 export interface HumanBrief {
   schema_version: number;
   obstacles: BriefObstacle[];
   pros: BriefPoint[];
   cons: BriefPoint[];
   decisions: BriefDecision[];
+  size?: BriefSize | null | undefined;
   verdict: BriefVerdict;
+  verdict_line?: string | undefined;
   verdict_reason: string;
   summary: string;
   recommendation: string;
