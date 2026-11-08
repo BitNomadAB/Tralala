@@ -39,9 +39,12 @@ export function SectionHeader({
       >
         {title}
         {count === undefined ? null : (
-          <span className="ml-1.5 font-medium tabular-nums text-[var(--foreground-faint)]">
-            {count}
-          </span>
+          <>
+            {/* The space keeps the accessible name "Files 0", not "Files0". */}{" "}
+            <span className="ml-1 font-medium tabular-nums text-[var(--foreground-faint)]">
+              {count}
+            </span>
+          </>
         )}
       </Heading>
       {trailing}
