@@ -1,10 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
-import { ToastProvider } from "@/components/ui/toast";
-import { LoopDocumentDialog } from "@/features/loops/LoopDocumentDialog";
 import type { PlanTab } from "@/features/loops/loopUi";
 import { candidateMarkdown, staleCandidate } from "@/lib/keptCandidate";
 import { keys } from "@/lib/queries";
@@ -14,22 +11,22 @@ import {
   BOARD_ID,
   DOCUMENTS,
   generationRun,
-  LOOP,
   LOOP_ID,
   LOOP_PATH,
   planningDialogHandlers,
 } from "./msw/loops";
 import { server } from "./msw/server";
+import { renderDocuments } from "./renderDocuments";
 
 const SAVE_INFO = `PUT ${LOOP_PATH}/documents/info`;
 const CANCEL_RUN = `POST ${LOOP_PATH}/generation-runs/run-1/cancel`;
 const START_RUN = `POST ${LOOP_PATH}/generation-runs`;
 
 /**
- * The planning dialog against a Loop whose run list is `runs`: saving Info, cancelling run-1 and
+ * The Plan tab's documents against a Loop whose run list is `runs`: saving Info, cancelling run-1 and
  * starting a run are answered, and a cancelled run-1 is listed as cancelled from then on.
  */
-async function openDialog(initialTab: PlanTab, runs: GenerationRun[]) {
+async function openDocuments(initialTab: PlanTab, runs: GenerationRun[]) {
   const { state, handlers } = planningDialogHandlers(runs);
   const startedPurposes: string[] = [];
   server.use(
@@ -52,22 +49,7 @@ async function openDialog(initialTab: PlanTab, runs: GenerationRun[]) {
       ok(generationRun("running", "generating", { id: "run-2" })),
     ),
   );
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <LoopDocumentDialog
-          boardId={BOARD_ID}
-          loop={LOOP}
-          initialTab={initialTab}
-          isHuman
-          readOnly={false}
-          onClose={() => undefined}
-          onChanged={() => undefined}
-        />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  const queryClient = renderDocuments(initialTab);
   // The guard reads the Loop's run list, so a save is only meaningful once that list has arrived.
   await waitFor(() => {
     expect(queryClient.getQueryData(keys.generationRuns(BOARD_ID, LOOP_ID))).toBeDefined();
@@ -83,7 +65,7 @@ async function saveInfo(user: ReturnType<typeof userEvent.setup>) {
 
 describe("saving Info while a generation run is in flight", () => {
   it("saves at once when no run is in flight", async () => {
-    const { state, user } = await openDialog("info", [generationRun("completed", "generating")]);
+    const { state, user } = await openDocuments("info", [generationRun("completed", "generating")]);
     await saveInfo(user);
 
     await waitFor(() => {
@@ -93,7 +75,7 @@ describe("saving Info while a generation run is in flight", () => {
   });
 
   it("asks first, and Save anyway saves without touching the run", async () => {
-    const { state, user } = await openDialog("info", [generationRun("running", "generating")]);
+    const { state, user } = await openDocuments("info", [generationRun("running", "generating")]);
     await saveInfo(user);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -111,7 +93,7 @@ describe("saving Info while a generation run is in flight", () => {
   });
 
   it("Cancel the run first cancels the run, then saves", async () => {
-    const { state, user } = await openDialog("info", [generationRun("queued", null)]);
+    const { state, user } = await openDocuments("info", [generationRun("queued", null)]);
     await saveInfo(user);
 
     await user.click(await screen.findByRole("button", { name: "Cancel the run first" }));
@@ -125,7 +107,7 @@ describe("saving Info while a generation run is in flight", () => {
   });
 
   it("Back keeps the draft unsaved", async () => {
-    const { state, user } = await openDialog("info", [generationRun("running", "generating")]);
+    const { state, user } = await openDocuments("info", [generationRun("running", "generating")]);
     await saveInfo(user);
 
     await user.click(await screen.findByRole("button", { name: "Back" }));
@@ -148,7 +130,7 @@ const inputChanged = (output: Record<string, unknown>) =>
 
 describe("a run whose input changed while it worked", () => {
   it("shows the kept result as not promoted and regenerates from the current Info", async () => {
-    const { state, startedPurposes, user } = await openDialog("analysis", [
+    const { state, startedPurposes, user } = await openDocuments("analysis", [
       inputChanged({ stale_candidate: CANDIDATE }),
     ]);
 
@@ -168,7 +150,7 @@ describe("a run whose input changed while it worked", () => {
   });
 
   it("shows nothing kept for a run that failed for another reason", async () => {
-    await openDialog("analysis", [
+    await openDocuments("analysis", [
       generationRun("failed", "generating", {
         error_code: "provider_error",
         output: { stale_candidate: CANDIDATE },

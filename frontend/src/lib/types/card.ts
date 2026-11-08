@@ -2,6 +2,16 @@ import type { Label, Priority } from "./board";
 import type { LoopBlocker } from "./loop";
 import type { TicketState, WaitingFor, Workplace } from "./work";
 
+/** The face for people (`FaceView` on the server): what a person reads first, summary included. */
+export interface TicketFace {
+  summary: string;
+  why: string;
+  if_skipped: string;
+  pros: string[];
+  cons: string[];
+  steps: string[];
+}
+
 export interface Card {
   id: string;
   board_id: string;
@@ -14,6 +24,8 @@ export interface Card {
   summary_source: "" | "plan" | "person" | "agent";
   /** The title or description changed after the summary was written. */
   summary_stale: boolean;
+  /** The face for people; null for a Ticket written without one. */
+  face: TicketFace | null;
   position: number;
   priority: Priority;
   due_at: string | null;

@@ -44,13 +44,7 @@ function openPanel(readOnly = false) {
   render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <LoopNotesPanel
-          boardId={BOARD_ID}
-          loop={LOOP}
-          open
-          readOnly={readOnly}
-          onClose={() => undefined}
-        />
+        <LoopNotesPanel boardId={BOARD_ID} loop={LOOP} readOnly={readOnly} />
       </ToastProvider>
     </QueryClientProvider>,
   );

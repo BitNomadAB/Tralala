@@ -19,6 +19,9 @@ const META: ApiMeta = {
 };
 
 const BANNER = /generated administrator password is still stored/;
+// Each test imports the whole App afresh (below), and the first import of a file pays for the
+// module graph; the page's own wait is 10 s, so the test may take longer than vitest's 5 s default.
+const IMPORTS_THE_APP = { timeout: 15_000 };
 
 describe("the bootstrap password banner on Settings", () => {
   let metaAnswered: boolean;
@@ -56,21 +59,25 @@ describe("the bootstrap password banner on Settings", () => {
     await expect(screen.findByText(BANNER, {}, { timeout: 300 })).rejects.toThrow();
   }
 
-  it("tells an administrator while the generated password file is there", async () => {
-    await renderSettings(ADMIN, { ...META, bootstrap_password_file_present: true });
+  it(
+    "tells an administrator while the generated password file is there",
+    IMPORTS_THE_APP,
+    async () => {
+      await renderSettings(ADMIN, { ...META, bootstrap_password_file_present: true });
 
-    const banner = await screen.findByText(BANNER);
-    expect(banner).toHaveTextContent("<data>/.bootstrap-password");
-    expect(banner).toHaveTextContent(/change that password under Your password/);
-  });
+      const banner = await screen.findByText(BANNER);
+      expect(banner).toHaveTextContent("<data>/.bootstrap-password");
+      expect(banner).toHaveTextContent(/change that password under Your password/);
+    },
+  );
 
-  it("says nothing to an administrator once the file is gone", async () => {
+  it("says nothing to an administrator once the file is gone", IMPORTS_THE_APP, async () => {
     await renderSettings(ADMIN, { ...META, bootstrap_password_file_present: false });
 
     await expectNoBanner();
   });
 
-  it("never shows a member the banner", async () => {
+  it("never shows a member the banner", IMPORTS_THE_APP, async () => {
     // The server does not send a member the flag; the page does not show it to one either.
     await renderSettings(MEMBER, { ...META, bootstrap_password_file_present: true });
 

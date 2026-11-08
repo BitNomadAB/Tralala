@@ -63,6 +63,31 @@ export async function addCard(page: Page, listName: string, title: string): Prom
   await expect(cardTile(page, listName, title)).toBeVisible();
 }
 
+/** Shows one of the Loop page's tabs; the tab is in the URL, so a reload stays on it. */
+export async function showTab(page: Page, name: "Kanban" | "Plan" | "Notes"): Promise<Locator> {
+  await page.getByRole("tab", { name, exact: true }).click();
+  const panel = page.getByRole("tabpanel", { name });
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+/** Opens one of the Loop's planning documents on the Plan tab; returns the documents section. */
+export async function openPlanDocument(
+  page: Page,
+  name: "Info" | "Analysis" | "RoadMap",
+): Promise<Locator> {
+  const plan = await showTab(page, "Plan");
+  const documents = plan.getByRole("region", { name: "Planning documents" });
+  await documents.getByRole("button", { name, exact: true }).click();
+  return documents;
+}
+
+/** Chooses an action from the Loop header's quiet "Loop actions" menu. */
+export async function loopAction(page: Page, label: string): Promise<void> {
+  await page.getByRole("button", { name: "Loop actions" }).click();
+  await page.getByRole("menuitem", { name: label }).click();
+}
+
 export async function openCard(page: Page, listName: string, title: string): Promise<Locator> {
   await listRegion(page, listName).getByRole("button", { name: title }).click();
   const dialog = page.getByRole("dialog");

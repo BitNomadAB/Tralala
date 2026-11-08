@@ -38,4 +38,11 @@ describe("StateChip", () => {
       "Blocked· waits for PLN-017",
     );
   });
+
+  it("is a small bordered pill when compact, with the longer reason for a pointer", () => {
+    render(<StateChip state="needs_input" compact title="Which provider?" />);
+    const chip = screen.getByText("Needs input").parentElement;
+    expect(chip).toHaveClass("rounded-full", "border", "text-xs");
+    expect(chip).toHaveAttribute("title", "Which provider?");
+  });
 });

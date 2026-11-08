@@ -6,6 +6,7 @@ import {
   cardTile,
   csrfToken,
   login,
+  loopAction,
   resolveLoopId,
   uniqueName,
 } from "./support";
@@ -68,7 +69,7 @@ test.describe("agent access", () => {
     await page.reload();
     await expect(cardTile(page, "Done", "Agent-created task")).toBeVisible();
 
-    await page.getByRole("button", { name: "Activity" }).click();
+    await loopAction(page, "Board activity");
     const activity = page.getByRole("complementary", { name: "Board activity" });
     await expect(activity).toContainText("card.created");
     await expect(activity.getByText("agent", { exact: true }).first()).toBeVisible();

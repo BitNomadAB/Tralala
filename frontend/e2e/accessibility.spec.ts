@@ -1,6 +1,15 @@
 import { expect, test } from "playwright/test";
 import { blockingViolations } from "./axe";
-import { boardWithLoop, createBoard, login, openBoardFromDashboard, uniqueName } from "./support";
+import {
+  addCard,
+  boardWithLoop,
+  createBoard,
+  login,
+  openBoardFromDashboard,
+  openPlanDocument,
+  showTab,
+  uniqueName,
+} from "./support";
 
 test.describe("accessibility", () => {
   test("the dashboard has no serious or critical axe violations", async ({ page }, testInfo) => {
@@ -31,8 +40,16 @@ test.describe("accessibility", () => {
   test("a Loop page has no serious or critical axe violations", async ({ page }, testInfo) => {
     await login(page);
     await boardWithLoop(page, uniqueName("Accessible board"));
+    await addCard(page, "Todo", "An accessible card");
+    await page.getByRole("button", { name: "Loop actions" }).click();
+    await expect(page.getByRole("menu", { name: "Loop actions" })).toBeVisible();
 
     expect(await blockingViolations(page, testInfo)).toEqual([]);
+    await page.keyboard.press("Escape");
+    await openPlanDocument(page, "Info");
+    expect(await blockingViolations(page, testInfo, "axe-loop-plan")).toEqual([]);
+    await showTab(page, "Notes");
+    expect(await blockingViolations(page, testInfo, "axe-loop-notes")).toEqual([]);
   });
 
   test("Settings has no serious or critical axe violations", async ({ page }, testInfo) => {

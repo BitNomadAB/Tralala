@@ -5,14 +5,21 @@ import { GripVertical, Plus } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Menu } from "@/components/ui/menu";
 import type { BoardList, Card } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { CardTile } from "./CardTile";
 import type { DragData } from "./dragData";
+import { TicketCard } from "./TicketCard";
 
-export function ListColumn({
+/**
+ * One column of the Loop's Kanban: its name and count, the cards, and "Add card" at the bottom. A
+ * column named Done is a column like any other; only completing a Ticket completes it. Renaming and
+ * archiving sit in the column's quiet menu.
+ */
+export function KanbanColumn({
   list,
   cards,
+  readOnly,
   onOpenCard,
   onCreateCard,
   onRename,
@@ -20,6 +27,7 @@ export function ListColumn({
 }: {
   list: BoardList;
   cards: Card[];
+  readOnly: boolean;
   onOpenCard: (card: Card) => void;
   onCreateCard: (title: string) => Promise<void>;
   onRename: (name: string) => void;
@@ -39,11 +47,6 @@ export function ListColumn({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(list.name);
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
   async function submitCard() {
     if (!title.trim()) return;
     await onCreateCard(title.trim());
@@ -51,20 +54,25 @@ export function ListColumn({
     setAdding(false);
   }
 
+  function finishRename() {
+    if (name.trim() && name.trim() !== list.name) onRename(name.trim());
+    setRenaming(false);
+  }
+
   return (
     <section
       ref={setNodeRef}
-      style={style}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       aria-label={`List ${list.name}`}
       className={cn(
-        "flex h-full w-[300px] shrink-0 flex-col rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_65%,transparent)]",
+        "flex h-full w-[280px] shrink-0 flex-col rounded-[10px] border border-[var(--border-soft)] bg-[var(--surface)]",
         isDragging && "opacity-60",
       )}
     >
-      <header className="flex items-center gap-1.5 px-3 pt-3">
+      <header className="flex items-center gap-1.5 px-2.5 pt-2.5">
         <button
           type="button"
-          className="cursor-grab text-[var(--muted-foreground)]"
+          className="cursor-grab text-[var(--foreground-faint)] hover:text-[var(--muted-foreground)]"
           aria-label={`Reorder list ${list.name}`}
           {...attributes}
           {...listeners}
@@ -76,8 +84,7 @@ export function ListColumn({
             className="flex-1"
             onSubmit={(event) => {
               event.preventDefault();
-              if (name.trim() && name.trim() !== list.name) onRename(name.trim());
-              setRenaming(false);
+              finishRename();
             }}
           >
             <Input
@@ -85,34 +92,30 @@ export function ListColumn({
               autoFocus
               aria-label={`Rename list ${list.name}`}
               onChange={(event) => setName(event.target.value)}
-              onBlur={() => {
-                if (name.trim() && name.trim() !== list.name) onRename(name.trim());
-                setRenaming(false);
-              }}
+              onBlur={finishRename}
               className="h-7 text-sm"
             />
           </form>
         ) : (
-          <button
-            type="button"
-            onDoubleClick={() => setRenaming(true)}
-            onClick={() => setRenaming(true)}
-            className="flex-1 truncate text-left text-sm font-semibold"
-            title="Rename list"
-          >
-            {list.name}
-          </button>
+          <h2 className="m-0 flex flex-1 items-baseline justify-between gap-2 truncate text-[13px] font-semibold text-[var(--muted-foreground)]">
+            <span className="truncate">{list.name}</span>
+            <span className="tabular-nums text-[var(--foreground-faint)]">{cards.length}</span>
+          </h2>
         )}
-        <span className="text-[11px] text-[var(--muted-foreground)]">{cards.length}</span>
-        <Button
-          size="icon"
-          variant="ghost"
-          title={`Archive list ${list.name}`}
-          aria-label={`Archive list ${list.name}`}
-          onClick={onArchive}
-        >
-          <span aria-hidden>×</span>
-        </Button>
+        <Menu
+          label={`Column actions for ${list.name}`}
+          items={[
+            {
+              label: "Rename column",
+              disabled: readOnly,
+              onSelect: () => {
+                setName(list.name);
+                setRenaming(true);
+              },
+            },
+            { label: "Archive column", danger: true, disabled: readOnly, onSelect: onArchive },
+          ]}
+        />
       </header>
 
       <div
@@ -128,18 +131,18 @@ export function ListColumn({
         >
           <ul className="flex flex-col gap-2">
             {cards.map((card) => (
-              <CardTile key={card.id} card={card} onOpen={onOpenCard} />
+              <TicketCard key={card.id} card={card} onOpen={onOpenCard} />
             ))}
           </ul>
         </SortableContext>
         {cards.length === 0 ? (
-          <p className="px-1 py-3 text-center text-[11px] text-[var(--muted-foreground)]">
+          <p className="px-1 py-3 text-center text-xs text-[var(--foreground-faint)]">
             Drop cards here
           </p>
         ) : null}
       </div>
 
-      <div className="p-2.5 pt-0">
+      <div className="px-2.5 pb-2.5">
         {adding ? (
           <form
             onSubmit={(event) => {
@@ -179,12 +182,13 @@ export function ListColumn({
           </form>
         ) : (
           <Button
-            variant="ghost"
+            variant="quiet"
             size="sm"
             className="w-full justify-start"
+            disabled={readOnly}
             onClick={() => setAdding(true)}
           >
-            <Plus size={14} /> Add card
+            <Plus size={14} aria-hidden="true" /> Add card
           </Button>
         )}
       </div>

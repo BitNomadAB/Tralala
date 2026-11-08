@@ -1,10 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
-import { ToastProvider } from "@/components/ui/toast";
-import { LoopDocumentDialog } from "@/features/loops/LoopDocumentDialog";
 import { rewriteBlockedReason } from "@/features/loops/loopUi";
 import type {
   DocumentKind,
@@ -15,16 +12,15 @@ import type {
 } from "@/lib/types";
 import { apiPath, ok } from "./msw/envelope";
 import {
-  BOARD_ID,
   DOCUMENTS,
   emptyDocument,
   generationRun,
-  LOOP,
   LOOP_ID,
   LOOP_PATH,
   planningDialogHandlers,
 } from "./msw/loops";
 import { server } from "./msw/server";
+import { renderDocuments } from "./renderDocuments";
 
 const BRIEF: HumanBrief = {
   schema_version: 1,
@@ -109,22 +105,7 @@ function open(
     ),
     ...handlers,
   );
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <LoopDocumentDialog
-          boardId={BOARD_ID}
-          loop={LOOP}
-          initialTab={initialTab}
-          isHuman
-          readOnly={false}
-          onClose={() => undefined}
-          onChanged={() => undefined}
-        />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  renderDocuments(initialTab);
 }
 
 describe("the brief for people", () => {

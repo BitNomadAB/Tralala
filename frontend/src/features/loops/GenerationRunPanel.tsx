@@ -1,4 +1,3 @@
-import { createPortal } from "react-dom";
 import { describeRunCost, describeRunRepositories } from "@/lib/loopRuns";
 import type { GenerationRun } from "@/lib/types";
 import type { PlanScope, RunPurpose } from "./loopUi";
@@ -15,7 +14,7 @@ interface RunPanelProps {
   onDismiss: (() => void) | undefined;
 }
 
-/** The run's steps inside the dialog, on screens too narrow for the panel beside it. */
+/** The run's steps under the button that started it, on screens too narrow for the panel beside. */
 export function GenerationRunPanel({ scope, run, onDismiss }: RunPanelProps) {
   return (
     <div className="mt-2 2xl:hidden">
@@ -24,17 +23,15 @@ export function GenerationRunPanel({ scope, run, onDismiss }: RunPanelProps) {
   );
 }
 
-/** The run's steps beside the dialog on a wide screen. */
+/**
+ * The run's steps beside the documents on a wide screen: the Plan tab's second column, and it
+ * stays in view below the app bar while the page scrolls.
+ */
 export function GenerationRunAside({ scope, run, onDismiss }: RunPanelProps) {
-  return createPortal(
-    // Outside the dialog content on purpose: that element scrolls, so a panel positioned
-    // beside it would be clipped. This one is fixed 24 px right of the centred 960 px dialog
-    // (half of 960 plus 24 from the middle of the window), and it takes pointer events because
-    // a modal dialog sets `pointer-events: none` on the body.
-    <aside className="pointer-events-auto fixed left-[calc(50%+504px)] top-1/2 z-50 hidden w-60 -translate-y-1/2 2xl:block">
+  return (
+    <aside className="sticky top-20 hidden self-start 2xl:block">
       <RunPhases purpose={runPurpose(scope, run)} run={run} onDismiss={onDismiss} />
-    </aside>,
-    document.body,
+    </aside>
   );
 }
 

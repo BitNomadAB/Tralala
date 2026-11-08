@@ -1,5 +1,13 @@
 import { expect, test, type Page } from "playwright/test";
-import { boardWithLoop, createBoard, createLoop, listRegion, login, uniqueName } from "./support";
+import {
+  boardWithLoop,
+  createBoard,
+  createLoop,
+  listRegion,
+  login,
+  loopAction,
+  uniqueName,
+} from "./support";
 
 function templateRow(page: Page, name: string) {
   return page.getByRole("listitem").filter({ hasText: name });
@@ -91,7 +99,7 @@ test.describe("board templates", () => {
     const boardName = uniqueName("Snapshot");
     await boardWithLoop(page, boardName);
 
-    await page.getByRole("button", { name: "Save columns as template" }).click();
+    await loopAction(page, "Save columns as template");
     const dialog = page.getByRole("dialog", { name: "Save as template" });
     const templateName = uniqueName("Snapshot template");
     await dialog.getByLabel("Template name").fill(templateName);

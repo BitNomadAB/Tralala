@@ -72,48 +72,55 @@ function renderAt(path: string, routePath: string, element: ReactNode) {
 }
 
 describe("the focus and exclude globs of a board's repositories", () => {
-  it("shows a selected repository's stored globs in Edit board and saves what was typed", async () => {
-    const sent: unknown[] = [];
-    server.use(
-      http.get(apiPath("/boards/board-1"), () => ok(BOARD)),
-      http.get(apiPath("/boards/board-1/loops"), () => ok([])),
-      http.get(apiPath("/boards/board-1/loop-summaries"), () =>
-        ok({ board_id: "board-1", loops: [], count: 0 }),
-      ),
-      http.get(apiPath("/agents"), () => ok([])),
-      http.get(apiPath("/repositories"), () => ok(REPOSITORIES)),
-      http.patch(apiPath("/boards/board-1"), async ({ request }) => {
-        sent.push(await request.json());
-        return ok(BOARD);
-      }),
-    );
-    renderAt("/boards/board-1", "/boards/:boardId", <BoardLoopsPage />);
-    const user = userEvent.setup();
-    // Edit board sits in the board's quiet menu.
-    await user.click(await screen.findByRole("button", { name: "Board actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Edit board" }));
+  // It types four globs key by key, which takes longer than vitest's 5 s default under coverage.
+  it(
+    "shows a selected repository's stored globs in Edit board and saves what was typed",
+    {
+      timeout: 15_000,
+    },
+    async () => {
+      const sent: unknown[] = [];
+      server.use(
+        http.get(apiPath("/boards/board-1"), () => ok(BOARD)),
+        http.get(apiPath("/boards/board-1/loops"), () => ok([])),
+        http.get(apiPath("/boards/board-1/loop-summaries"), () =>
+          ok({ board_id: "board-1", loops: [], count: 0 }),
+        ),
+        http.get(apiPath("/agents"), () => ok([])),
+        http.get(apiPath("/repositories"), () => ok(REPOSITORIES)),
+        http.patch(apiPath("/boards/board-1"), async ({ request }) => {
+          sent.push(await request.json());
+          return ok(BOARD);
+        }),
+      );
+      renderAt("/boards/board-1", "/boards/:boardId", <BoardLoopsPage />);
+      const user = userEvent.setup();
+      // Edit board sits in the board's quiet menu.
+      await user.click(await screen.findByRole("button", { name: "Board actions" }));
+      await user.click(screen.getByRole("menuitem", { name: "Edit board" }));
 
-    expect(await screen.findByLabelText("Focus paths in app")).toHaveValue("docs/**\nsrc/*.py");
-    expect(screen.getByLabelText("Exclude paths in app")).toHaveValue("");
-    // Only a selected repository takes globs.
-    expect(screen.queryByLabelText("Focus paths in web")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox", { name: /^web/ }));
-    await user.type(screen.getByLabelText("Exclude paths in app"), "docs/old/**");
-    await user.type(
-      screen.getByLabelText("Focus paths in web"),
-      "  public_docs/*  {Enter}{Enter}README.md",
-    );
-    await user.click(screen.getByRole("button", { name: "Save board" }));
+      expect(await screen.findByLabelText("Focus paths in app")).toHaveValue("docs/**\nsrc/*.py");
+      expect(screen.getByLabelText("Exclude paths in app")).toHaveValue("");
+      // Only a selected repository takes globs.
+      expect(screen.queryByLabelText("Focus paths in web")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("checkbox", { name: /^web/ }));
+      await user.type(screen.getByLabelText("Exclude paths in app"), "docs/old/**");
+      await user.type(
+        screen.getByLabelText("Focus paths in web"),
+        "  public_docs/*  {Enter}{Enter}README.md",
+      );
+      await user.click(screen.getByRole("button", { name: "Save board" }));
 
-    await waitFor(() => expect(sent).toHaveLength(1));
-    expect(sent[0]).toMatchObject({
-      repository_ids: ["repo-app", "repo-web"],
-      repository_paths: {
-        "repo-app": { focus_paths: ["docs/**", "src/*.py"], exclude_paths: ["docs/old/**"] },
-        "repo-web": { focus_paths: ["public_docs/*", "README.md"], exclude_paths: [] },
-      },
-    });
-  });
+      await waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent[0]).toMatchObject({
+        repository_ids: ["repo-app", "repo-web"],
+        repository_paths: {
+          "repo-app": { focus_paths: ["docs/**", "src/*.py"], exclude_paths: ["docs/old/**"] },
+          "repo-web": { focus_paths: ["public_docs/*", "README.md"], exclude_paths: [] },
+        },
+      });
+    },
+  );
 
   it("names the glob the server refused when a new board is created", async () => {
     const sent: unknown[] = [];

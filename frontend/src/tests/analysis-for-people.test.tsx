@@ -1,25 +1,21 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
-import { ToastProvider } from "@/components/ui/toast";
-import { LoopDocumentDialog } from "@/features/loops/LoopDocumentDialog";
 import { viewAuthorship } from "@/features/loops/loopUi";
 import { stageLabel, traceStages } from "@/lib/runTrace";
 import type { DocumentKind, GenerationRun, LoopDocument } from "@/lib/types";
 import { apiPath, ok } from "./msw/envelope";
 import {
-  BOARD_ID,
   DOCUMENTS,
   emptyDocument,
   generationRun,
-  LOOP,
   LOOP_ID,
   LOOP_PATH,
   planningDialogHandlers,
 } from "./msw/loops";
 import { server } from "./msw/server";
+import { renderDocuments } from "./renderDocuments";
 
 function written(kind: DocumentKind, content: string, provenance: Record<string, unknown>) {
   return {
@@ -45,7 +41,7 @@ function analysisDocuments(provenance: Record<string, unknown>) {
 function openAnalysis(provenance: Record<string, unknown>, runs: GenerationRun[] = []) {
   const { state, handlers } = planningDialogHandlers(runs);
   const started: unknown[] = [];
-  // Before the dialog's defaults: MSW answers with the first handler that matches.
+  // Before the panel's defaults: MSW answers with the first handler that matches.
   server.use(
     http.get(apiPath(`${LOOP_PATH}/documents`), () =>
       ok({
@@ -64,22 +60,7 @@ function openAnalysis(provenance: Record<string, unknown>, runs: GenerationRun[]
     ),
     ...handlers,
   );
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <LoopDocumentDialog
-          boardId={BOARD_ID}
-          loop={LOOP}
-          initialTab="analysis"
-          isHuman
-          readOnly={false}
-          onClose={() => undefined}
-          onChanged={() => undefined}
-        />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  renderDocuments("analysis");
   return { state, started };
 }
 
@@ -121,7 +102,8 @@ describe("the analysis written for people", () => {
     expect(await screen.findByText("Written by Alpha")).toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Rewrite for people/ }));
-    // The run panel, in the dialog and beside it, names the stages of writing for people.
+    // The run panel, under the button and beside the documents, names the stages of writing
+    // for people.
     expect(await screen.findAllByText("Writing for people")).not.toHaveLength(0);
     expect(started).toEqual([{ purpose: "analysis_human" }]);
   });

@@ -53,7 +53,7 @@ test.describe("boards and cards", () => {
     ).toBeVisible();
 
     await closeDialog(page);
-    await expect(cardTile(page, "Todo", `${cardTitle} (final)`)).toContainText("high");
+    await expect(cardTile(page, "Todo", `${cardTitle} (final)`)).toContainText("High");
   });
 
   test("filters the board with server-side search", async ({ page }) => {

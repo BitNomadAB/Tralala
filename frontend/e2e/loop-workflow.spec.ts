@@ -1,5 +1,13 @@
 import { expect, test } from "playwright/test";
-import { boardIdFromUrl, boardWithLoop, csrfToken, login, uniqueName } from "./support";
+import {
+  boardIdFromUrl,
+  boardWithLoop,
+  csrfToken,
+  login,
+  openPlanDocument,
+  showTab,
+  uniqueName,
+} from "./support";
 
 test.describe("loop planning and completion", () => {
   test("plans a Loop, publishes Tickets, completes work and finds it in history", async ({
@@ -12,14 +20,13 @@ test.describe("loop planning and completion", () => {
     const loopId = page.url().split("/loops/")[1];
 
     // Info is written in the UI by a person.
-    await page.getByRole("button", { name: /^Info/ }).click();
-    const infoDialog = page.getByRole("dialog", { name: /planning documents/ });
+    const infoDialog = await openPlanDocument(page, "Info");
     await infoDialog
       .getByLabel("Write or revise Info")
       .fill("Users must confirm their email address before signing in.");
     await infoDialog.getByRole("button", { name: "Save as new revision" }).click();
     await expect(infoDialog.getByText(/revision 1/)).toBeVisible();
-    await page.getByRole("button", { name: "Close dialog" }).click();
+    await showTab(page, "Kanban");
 
     const headers = { "X-CSRF-Token": await csrfToken(page) };
     const loopBase = `/api/v1/boards/${boardId}/loops/${loopId}`;
@@ -50,12 +57,11 @@ test.describe("loop planning and completion", () => {
 
     // A person approves the analysis in the UI (reload: the candidate came through the API).
     await page.reload();
-    await page.getByRole("button", { name: "Analysis" }).click();
-    const analysisDialog = page.getByRole("dialog", { name: /planning documents/ });
+    const analysisDialog = await openPlanDocument(page, "Analysis");
     await expect(analysisDialog.getByText(/sign-in code already exists/)).toBeVisible();
     await analysisDialog.getByRole("button", { name: "Approve analysis" }).click();
     await expect(analysisDialog.getByRole("button", { name: "Approved" })).toBeVisible();
-    await page.getByRole("button", { name: "Close dialog" }).click();
+    await showTab(page, "Kanban");
 
     const plan = await page.request.post(`${loopBase}/candidates`, {
       headers,
@@ -85,12 +91,11 @@ test.describe("loop planning and completion", () => {
     expect(plan.status()).toBe(201);
 
     await page.reload();
-    await page.getByRole("button", { name: "RoadMap" }).click();
-    const roadmapDialog = page.getByRole("dialog", { name: /planning documents/ });
+    const roadmapDialog = await openPlanDocument(page, "RoadMap");
     await expect(roadmapDialog.getByText(/Database update/)).toBeVisible();
     await roadmapDialog.getByRole("button", { name: "Approve RoadMap" }).click();
     await expect(roadmapDialog.getByText(/revision 1/).first()).toBeVisible();
-    await page.getByRole("button", { name: "Close dialog" }).click();
+    await showTab(page, "Kanban");
 
     // Publishing materialises the Ticket with its stable key.
     await page.reload();
@@ -110,8 +115,10 @@ test.describe("loop planning and completion", () => {
     await expect(cardDialog.getByRole("button", { name: "Mark complete" })).toHaveCount(0);
     await page.getByRole("button", { name: "Close dialog" }).click();
 
-    // Accept implementation together with a human QA attestation and finalize.
-    await page.getByRole("button", { name: "Complete & QA" }).click();
+    // Accept implementation together with a human QA attestation and finalize: the header's one
+    // decision once every Ticket is done (its words follow the stage).
+    await page.reload();
+    await page.getByRole("button", { name: /^(Accept work|Finalize Loop)$/ }).click();
     const completion = page.getByRole("dialog", { name: /completion and QA/ });
     await completion.getByLabel("QA status").selectOption("passed");
     await completion.getByLabel("What was tested").fill("Manual smoke test");
@@ -141,13 +148,12 @@ test.describe("loop planning and completion", () => {
     const loopBase = `/api/v1/boards/${boardId}/loops/${loopId}`;
     const headers = { "X-CSRF-Token": await csrfToken(page) };
 
-    await page.getByRole("button", { name: /^Info/ }).click();
-    const infoDialog = page.getByRole("dialog", { name: /planning documents/ });
+    const infoDialog = await openPlanDocument(page, "Info");
     await infoDialog
       .getByLabel("Write or revise Info")
       .fill("Sessions must expire after 30 minutes of inactivity.");
     await infoDialog.getByRole("button", { name: "Save as new revision" }).click();
-    await page.getByRole("button", { name: "Close dialog" }).click();
+    await showTab(page, "Kanban");
 
     const candidate = {
       headers,
@@ -176,8 +182,7 @@ test.describe("loop planning and completion", () => {
 
     // A draft that was never approved can be thrown away too: that is the way back from a bad run.
     await page.reload();
-    await page.getByRole("button", { name: "Analysis" }).click();
-    const dialog = page.getByRole("dialog", { name: /planning documents/ });
+    const dialog = await openPlanDocument(page, "Analysis");
     await expect(dialog.getByText(/Sessions never time out today/)).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Reset analysis" })).toBeEnabled();
     await dialog.getByRole("button", { name: "Reset analysis" }).click();
@@ -189,7 +194,7 @@ test.describe("loop planning and completion", () => {
     // The same button clears an approved analysis, and asks first because the text is retired.
     expect((await page.request.post(`${loopBase}/candidates`, candidate)).status()).toBe(201);
     await page.reload();
-    await page.getByRole("button", { name: "Analysis" }).click();
+    await openPlanDocument(page, "Analysis");
     await expect(dialog.getByText(/Sessions never time out today/)).toBeVisible();
     await dialog.getByRole("button", { name: "Approve analysis" }).click();
     await expect(dialog.getByRole("button", { name: "Approved" })).toBeVisible();
