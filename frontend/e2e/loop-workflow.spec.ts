@@ -102,9 +102,12 @@ test.describe("loop planning and completion", () => {
     await expect(ticket).toContainText(/[A-Z]{2}\d{3}-/);
 
     await ticket.getByRole("button", { name: /Add verification columns/ }).click();
-    const cardDialog = page.getByRole("dialog");
+    const cardDialog = page.getByRole("dialog", { name: "Add verification columns" });
+    // In the first column the decision is Start work; Mark complete takes its place afterwards.
+    await cardDialog.getByRole("button", { name: "Start work" }).click();
     await cardDialog.getByRole("button", { name: "Mark complete" }).click();
-    await expect(cardDialog.getByRole("button", { name: "Mark incomplete" })).toBeVisible();
+    await expect(cardDialog.getByRole("region", { name: "Status" })).toContainText("Completed");
+    await expect(cardDialog.getByRole("button", { name: "Mark complete" })).toHaveCount(0);
     await page.getByRole("button", { name: "Close dialog" }).click();
 
     // Accept implementation together with a human QA attestation and finalize.

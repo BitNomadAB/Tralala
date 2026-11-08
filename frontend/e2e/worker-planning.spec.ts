@@ -25,7 +25,7 @@ async function openTicket(page: Page, title: string): Promise<Locator> {
     .getByRole("button", { name: new RegExp(title) })
     .click();
   const dialog = page.getByRole("dialog", { name: title });
-  await expect(dialog.getByRole("heading", { name: "Where and what it waits for" })).toBeVisible();
+  await expect(dialog.getByRole("region", { name: "Status" })).toBeVisible();
   return dialog;
 }
 

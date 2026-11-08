@@ -27,6 +27,8 @@ export function SelectMenu<T extends string>({
   options,
   onChange,
   disabled,
+  defaultOpen = false,
+  onClose,
   className,
 }: {
   /** What is chosen ("Column"); the button reads "Column: Backlog". */
@@ -35,10 +37,14 @@ export function SelectMenu<T extends string>({
   options: readonly SelectMenuOption<T>[];
   onChange: (value: T) => void;
   disabled?: boolean | undefined;
+  /** Opens at once, for a value that turns into this menu when it is clicked (a fact in a rail). */
+  defaultOpen?: boolean | undefined;
+  /** Called each time the menu closes, after `onChange` when a value was chosen. */
+  onClose?: (() => void) | undefined;
   className?: string | undefined;
 }) {
   const listId = useId();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -58,12 +64,13 @@ export function SelectMenu<T extends string>({
     function outside(event: MouseEvent) {
       if (event.target instanceof Node && root.current?.contains(event.target)) return;
       setOpen(false);
+      onClose?.();
     }
     document.addEventListener("mousedown", outside);
     return () => {
       document.removeEventListener("mousedown", outside);
     };
-  }, [open]);
+  }, [open, onClose]);
 
   function close() {
     setOpen(false);
@@ -71,8 +78,10 @@ export function SelectMenu<T extends string>({
   }
 
   function choose(next: T) {
-    close();
+    setOpen(false);
+    button.current?.focus();
     if (next !== value) onChange(next);
+    onClose?.();
   }
 
   function onOptionKeyDown(event: KeyboardEvent<HTMLElement>, option: T) {
@@ -84,10 +93,12 @@ export function SelectMenu<T extends string>({
     if (event.key === "Escape") {
       event.preventDefault();
       close();
+      onClose?.();
       return;
     }
     if (event.key === "Tab") {
       setOpen(false);
+      onClose?.();
       return;
     }
     const items = optionElements(list.current);
@@ -112,7 +123,10 @@ export function SelectMenu<T extends string>({
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         disabled={disabled}
-        onClick={() => setOpen((was) => !was)}
+        onClick={() => {
+          setOpen(!open);
+          if (open) onClose?.();
+        }}
         onKeyDown={(event) => {
           if (open || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
           event.preventDefault();

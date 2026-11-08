@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MarkdownField } from "@/components/ui/markdown-field";
 import { MarkdownHelp } from "@/components/ui/markdown-help";
 import { FORMATTING_EXAMPLES, type FormattingExampleName } from "@/components/ui/markdownExamples";
-import { CardDialogForm, type CardDraft } from "@/features/cards/CardDialogForm";
+import { CardDialogForm } from "@/features/cards/CardDialogForm";
 import { ticketHrefResolver } from "@/features/loops/ticketLinks";
 
 const LABEL = "Card description (Markdown)";
@@ -212,40 +212,50 @@ describe("How to format", () => {
 });
 
 describe("CardDialogForm description", () => {
-  it("edits the description through the Markdown field and keeps the other fields", async () => {
+  it("edits the description through the Markdown field and saves it once it changed", async () => {
     const user = userEvent.setup();
-    const drafts: CardDraft[] = [];
+    const saved: string[] = [];
     function Form() {
-      const [draft, setDraft] = useState<CardDraft>({
-        title: "Ticket",
-        description: "",
-        priority: "medium",
-        due: "",
-        labels: [],
-      });
+      const [description, setDescription] = useState("");
       const [preview, setPreview] = useState(false);
       return (
         <CardDialogForm
-          draft={draft}
-          onDraftChange={(next) => {
-            drafts.push(next);
-            setDraft(next);
-          }}
+          description={description}
+          onDescriptionChange={setDescription}
           preview={preview}
           onPreviewChange={setPreview}
-          lists={[]}
-          listId=""
-          onMove={() => undefined}
-          labelOptions={[]}
+          dirty={description !== ""}
+          saving={false}
+          onSave={() => saved.push(description)}
         />
       );
     }
     render(<Form />);
+    const save = screen.getByRole("button", { name: "Save description" });
+    expect(save).toBeDisabled();
     await user.type(field(), "hi");
-    expect(drafts.at(-1)).toMatchObject({ title: "Ticket", description: "hi" });
-    expect(screen.getByLabelText("Title")).toHaveValue("Ticket");
-    expect(screen.getByLabelText("Priority")).toBeInTheDocument();
+    await user.click(save);
+    expect(saved).toEqual(["hi"]);
+    // The title and priority moved to the Ticket's head and rail (ticket-view.test.tsx).
+    expect(screen.queryByLabelText("Title")).toBeNull();
+    expect(screen.queryByLabelText("Priority")).toBeNull();
     await user.click(screen.getByRole("tab", { name: "Preview" }));
     expect(screen.getByRole("tabpanel", { name: "Preview" })).toHaveTextContent("hi");
+  });
+
+  it("offers no Save on a read-only Ticket", () => {
+    render(
+      <CardDialogForm
+        description="Saved"
+        onDescriptionChange={() => undefined}
+        preview={false}
+        onPreviewChange={() => undefined}
+        dirty={false}
+        saving={false}
+        onSave={() => undefined}
+        readOnly
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Save description" })).toBeNull();
   });
 });

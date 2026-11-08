@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { CardTile } from "@/features/board/CardTile";
-import { CardWorkSection } from "@/features/cards/CardWorkSection";
+import { TicketState } from "@/features/cards/TicketState";
 import { api } from "@/lib/api";
 import { keys } from "@/lib/queries";
 import type { CardDetail } from "@/lib/types";
@@ -11,23 +12,32 @@ import { CARD_ID, CARD_PATH, PERSON_ID, ticketCard, ticketWorkHandlers } from ".
 import { BOARD_ID, LOOP_ID, NOW } from "./msw/loops";
 import { server } from "./msw/server";
 
-/** The section as the dialog holds it: the card comes from its query, a change refetches it. */
+/** The rail's state block as the view holds it: the card from its query, a change refetches it. */
 function Section() {
   const queryClient = useQueryClient();
+  const [waitOpen, setWaitOpen] = useState(false);
   const card = useQuery({
     queryKey: keys.card(BOARD_ID, LOOP_ID, CARD_ID),
     queryFn: () => api.getCard(BOARD_ID, LOOP_ID, CARD_ID),
   });
   if (!card.data) return <p>Loading card…</p>;
   return (
-    <CardWorkSection
-      boardId={BOARD_ID}
-      loopId={LOOP_ID}
-      card={card.data}
-      onChanged={() => {
-        void queryClient.invalidateQueries({ queryKey: keys.card(BOARD_ID, LOOP_ID, CARD_ID) });
-      }}
-    />
+    <section aria-label="Status">
+      <TicketState
+        boardId={BOARD_ID}
+        loopId={LOOP_ID}
+        card={card.data}
+        readOnly={false}
+        onChanged={() => {
+          void queryClient.invalidateQueries({ queryKey: keys.card(BOARD_ID, LOOP_ID, CARD_ID) });
+        }}
+        waitOpen={waitOpen}
+        onWaitOpenChange={setWaitOpen}
+        onConfirm={() => undefined}
+        confirmBlocked={null}
+        pending={false}
+      />
+    </section>
   );
 }
 
@@ -40,7 +50,7 @@ async function renderSection(card: CardDetail) {
       <Section />
     </QueryClientProvider>,
   );
-  const section = await screen.findByRole("region", { name: "Where and what it waits for" });
+  const section = await screen.findByRole("region", { name: "Status" });
   return { work, section, user: userEvent.setup() };
 }
 
@@ -54,18 +64,18 @@ const DECISION = {
 } as const;
 
 describe("where a Ticket's work is done and what it waits for", () => {
-  it("shows a ready Ticket with its workplace and a way to mark it as waiting", async () => {
+  it("shows a ready Ticket with nothing holding it up and a way to mark it as waiting", async () => {
     const { section } = await renderSection(ticketCard({ workplace: "codebase" }));
     expect(within(section).getByText("Ready")).toBeInTheDocument();
-    expect(within(section).getByLabelText("Where the work is done")).toHaveDisplayValue(
-      "In the code base",
-    );
-    expect(within(section).getByRole("button", { name: "Mark as waiting" })).toBeInTheDocument();
+    expect(section).toHaveTextContent("· nothing holds it up");
+    // Where the work is done is a fact in the rail now (ticket-view.test.tsx).
+    expect(within(section).getByRole("button", { name: "Mark as waiting…" })).toBeInTheDocument();
   });
 
   it("shows a wait with its kind, its reason, who set it and when", async () => {
     const { section } = await renderSection(ticketCard(DECISION));
     expect(within(section).getByText("Needs input")).toBeInTheDocument();
+    expect(section).toHaveTextContent("· waits for a decision: Which key store do we use?");
     expect(section).toHaveTextContent("Waits for: A decision");
     expect(section).toHaveTextContent("Which key store do we use?");
     expect(section).toHaveTextContent(`Set by ${PERSON_ID}`);
@@ -83,28 +93,18 @@ describe("where a Ticket's work is done and what it waits for", () => {
   it("shows no state on a completed Ticket and offers no change", async () => {
     const { section } = await renderSection(ticketCard({ completed_at: NOW, state: null }));
     expect(within(section).queryByText(/^(Ready|Needs input|Blocked)$/)).not.toBeInTheDocument();
-    expect(within(section).getByLabelText("Where the work is done")).toBeDisabled();
-    expect(within(section).queryByRole("button", { name: "Mark as waiting" })).toBeNull();
+    expect(within(section).getByText("Completed")).toBeInTheDocument();
+    expect(within(section).queryByRole("button", { name: "Mark as waiting…" })).toBeNull();
   });
 
-  it("saves the workplace on change with the version, and the next change with the new one", async () => {
-    const { work, section, user } = await renderSection(ticketCard());
-    const select = within(section).getByLabelText("Where the work is done");
-    await user.selectOptions(select, "codebase");
-    await waitFor(() => expect(select).toHaveDisplayValue("In the code base"));
-    await waitFor(() => expect(select).toBeEnabled());
-    await user.selectOptions(select, "outside");
-    await waitFor(() => expect(select).toHaveDisplayValue("Outside the code base"));
-    expect(work.state.bodies).toEqual([
-      { route: `PATCH ${CARD_PATH}/workplace`, body: { version: 3, workplace: "codebase" } },
-      { route: `PATCH ${CARD_PATH}/workplace`, body: { version: 4, workplace: "outside" } },
-    ]);
-    expect(within(section).queryByRole("alert")).toBeNull();
+  it("puts a person's confirmation in the state block of a human-only Ticket", async () => {
+    const { section } = await renderSection(ticketCard({ human_action_required: true }));
+    expect(within(section).getByRole("button", { name: "Confirm human action" })).toBeEnabled();
   });
 
   it("sets a wait only with a reason, and sends the kind and the reason", async () => {
     const { work, section, user } = await renderSection(ticketCard());
-    await user.click(within(section).getByRole("button", { name: "Mark as waiting" }));
+    await user.click(within(section).getByRole("button", { name: "Mark as waiting…" }));
     const save = within(section).getByRole("button", { name: "Save the wait" });
     expect(save).toBeDisabled();
     await user.type(within(section).getByLabelText("Why (required)"), "   ");
@@ -127,7 +127,7 @@ describe("where a Ticket's work is done and what it waits for", () => {
     const { work, section, user } = await renderSection(ticketCard(DECISION));
     await user.click(within(section).getByRole("button", { name: "Clear the wait" }));
     await waitFor(() =>
-      expect(within(section).getByRole("button", { name: "Mark as waiting" })).toBeInTheDocument(),
+      expect(within(section).getByRole("button", { name: "Mark as waiting…" })).toBeInTheDocument(),
     );
     expect(section).not.toHaveTextContent("Waits for");
     expect(within(section).getByText("Ready")).toBeInTheDocument();
@@ -137,9 +137,9 @@ describe("where a Ticket's work is done and what it waits for", () => {
   });
 
   it("says to reload when someone else changed the Ticket first", async () => {
-    const { work, section, user } = await renderSection(ticketCard());
+    const { work, section, user } = await renderSection(ticketCard(DECISION));
     work.state.card = { ...work.state.card, version: 7 };
-    await user.selectOptions(within(section).getByLabelText("Where the work is done"), "outside");
+    await user.click(within(section).getByRole("button", { name: "Clear the wait" }));
     expect(await within(section).findByRole("alert")).toHaveTextContent(
       "Someone else changed this Ticket. Reload to see the latest version.",
     );
@@ -147,7 +147,7 @@ describe("where a Ticket's work is done and what it waits for", () => {
 
   it("never says an agent does the work", async () => {
     const { section, user } = await renderSection(ticketCard());
-    await user.click(within(section).getByRole("button", { name: "Mark as waiting" }));
+    await user.click(within(section).getByRole("button", { name: "Mark as waiting…" }));
     expect(section).not.toHaveTextContent(/agent/i);
   });
 });

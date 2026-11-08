@@ -137,4 +137,30 @@ describe("SelectMenu", () => {
     await user.tab();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  it("can start open and reports every close, after the choice", async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    render(
+      <SelectMenu
+        label="Priority"
+        value="none"
+        options={[
+          { value: "none", label: "None" },
+          { value: "high", label: "High" },
+        ]}
+        defaultOpen
+        onChange={(next) => calls.push(`change ${next}`)}
+        onClose={() => calls.push("close")}
+      />,
+    );
+    expect(screen.getByRole("option", { name: "None" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(calls).toEqual(["change high", "close"]);
+    await user.click(screen.getByRole("button", { name: "Priority: None" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Priority: None" }));
+    await user.click(screen.getByRole("button", { name: "Priority: None" }));
+    expect(calls).toEqual(["change high", "close", "close", "close"]);
+  });
 });

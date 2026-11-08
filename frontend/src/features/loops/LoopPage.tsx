@@ -4,7 +4,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/useToast";
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
-import { CardDialog } from "@/features/cards/CardDialog";
+import { TicketModal } from "@/features/cards/TicketModal";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys, useBoard, useLists, useLoop } from "@/lib/queries";
@@ -258,21 +258,12 @@ export function LoopPage() {
       ) : null}
 
       {selectedCardId ? (
-        <CardDialog
+        <TicketModal
           boardId={boardId}
           loopId={loopId}
           cardId={selectedCardId}
-          lists={lists}
           onClose={closeCard}
           ticketHref={ticketHref}
-          readOnly={readOnly}
-          onConfirmHuman={async (version, note) => {
-            await api.confirmHumanTicket(boardId, loopId, selectedCardId, { version, note });
-            invalidateCards();
-            void queryClient.invalidateQueries({
-              queryKey: keys.card(boardId, loopId, selectedCardId),
-            });
-          }}
         />
       ) : null}
 

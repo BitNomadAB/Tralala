@@ -25,6 +25,10 @@ export function ticketCard(extra: Partial<CardDetail> = {}): CardDetail {
     priority: "none",
     due_at: null,
     completed_at: null,
+    assignee_actor_id: null,
+    assignee_type: null,
+    assignee_name: null,
+    assigned_at: null,
     created_at: NOW,
     updated_at: NOW,
     archived_at: null,
@@ -71,8 +75,40 @@ function stateOf(card: CardDetail, waitingFor: WaitingFor): TicketState | null {
   return "ready";
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The one card the handlers change, and every JSON body sent to them as "METHOD /path". */
+export interface CardState {
+  card: CardDetail;
+  bodies: { route: string; body: unknown }[];
+}
+
+/**
+ * One change of `state.card` as the server makes it: the body is recorded, a stale `version`
+ * answers `409 version_conflict`, `apply` turns the body into the changed fields (or a refusal),
+ * and the answer is the card with a new version and its state computed again.
+ */
+export async function changeCard(
+  state: CardState,
+  request: Request,
+  route: string,
+  apply: (body: Record<string, unknown>) => Partial<CardDetail> | Response,
+) {
+  const body: unknown = await request.json();
+  state.bodies.push({ route, body });
+  if (!isRecord(body)) return failure(422, "validation_error", "Expected an object");
+  if (body.version !== state.card.version) {
+    return failure(409, "version_conflict", "The card changed since it was read");
+  }
+  const changes = apply(body);
+  if (changes instanceof Response) return changes;
+  const next = { ...state.card, ...changes, version: state.card.version + 1 };
+  state.card = { ...next, state: stateOf(next, next.waiting_for) };
+  // A change answers the card without its checklists and comments, as the server does.
+  const { checklists, comments, ...card } = state.card;
+  return ok(card);
 }
 
 const WAITS: readonly WaitingFor[] = ["decision", "information", "access", "third_party"];
@@ -85,27 +121,12 @@ const WORKPLACES: readonly Workplace[] = ["codebase", "outside", "unknown"];
  * "METHOD /path" with the body.
  */
 export function ticketWorkHandlers(initial: CardDetail) {
-  const state = { card: initial, bodies: [] as { route: string; body: unknown }[] };
-
-  async function change(
+  const state: CardState = { card: initial, bodies: [] };
+  const change = (
     request: Request,
     route: string,
     apply: (body: Record<string, unknown>) => Partial<CardDetail> | Response,
-  ) {
-    const body: unknown = await request.json();
-    state.bodies.push({ route, body });
-    if (!isRecord(body)) return failure(422, "validation_error", "Expected an object");
-    if (body.version !== state.card.version) {
-      return failure(409, "version_conflict", "The card changed since it was read");
-    }
-    const changes = apply(body);
-    if (changes instanceof Response) return changes;
-    const next = { ...state.card, ...changes, version: state.card.version + 1 };
-    state.card = { ...next, state: stateOf(next, next.waiting_for) };
-    // A change answers the card without its checklists and comments, as the server does.
-    const { checklists, comments, ...card } = state.card;
-    return ok(card);
-  }
+  ) => changeCard(state, request, route, apply);
 
   const handlers = [
     http.get(apiPath(CARD_PATH), () => ok(state.card)),

@@ -41,6 +41,14 @@ export interface BoardList {
   card_count: number;
 }
 
+/** A person a Ticket may be given to (`GET /boards/{id}/actors`, `people`). */
+export interface BoardPerson {
+  id: string;
+  name: string;
+  type: "user";
+  role: string;
+}
+
 export interface Label {
   id: string;
   name: string;
