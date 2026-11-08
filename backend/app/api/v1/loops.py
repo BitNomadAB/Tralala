@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import JsonValue
 
 from ...schemas.briefs import BriefWrite
 from ...schemas.envelope import Envelope, OpenObject
@@ -34,6 +35,7 @@ from ...schemas.loops import (
     ScopeResetOut,
     ScopeResetRequest,
 )
+from ...services.agent_tools_loops import loop_summaries
 from ..deps import RequestContext, get_context, idempotency_key, ok
 
 router = APIRouter(tags=["loops"])
@@ -284,6 +286,19 @@ def get_readiness(
 ) -> dict[str, object]:
     ctx.actor.require("loops:read")
     return ok(request, ctx.services.loop.readiness(board_id, loop_id))
+
+
+@router.get("/boards/{board_id}/loop-summaries", response_model=Envelope[OpenObject])
+def get_loop_summaries(
+    board_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+    include_completed: Annotated[bool, Query()] = False,
+) -> dict[str, object]:
+    """Where each Loop of the board stands and who it waits for: ``loop_summaries``' rows, so the
+    dashboard and the board page read what a worker reads, in one request a board."""
+    arguments: dict[str, JsonValue] = {"board_id": board_id, "include_completed": include_completed}
+    return ok(request, loop_summaries(ctx.services, ctx.actor, arguments))
 
 
 @router.get(

@@ -7,6 +7,8 @@ export const keys = {
   board: (boardId: string) => ["board", boardId] as const,
   loops: (boardId: string, includeCompleted = false) =>
     ["loops", boardId, includeCompleted] as const,
+  /** Under `["loops", boardId]`, so every invalidation of a board's Loops refreshes it too. */
+  loopSummaries: (boardId: string) => ["loops", boardId, "summaries"] as const,
   loop: (boardId: string, loopId: string) => ["loop", boardId, loopId] as const,
   loopDocuments: (boardId: string, loopId: string) => ["loop-documents", boardId, loopId] as const,
   loopPlan: (boardId: string, loopId: string) => ["loop-plan", boardId, loopId] as const,
@@ -87,6 +89,14 @@ export function useLoops(boardId: string, includeCompleted = false) {
     queryKey: keys.loops(boardId, includeCompleted),
     queryFn: () => api.listLoops(boardId, { include_completed: includeCompleted }),
     enabled: Boolean(boardId),
+  });
+}
+
+export function useLoopSummaries(boardId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.loopSummaries(boardId),
+    queryFn: () => api.listLoopSummaries(boardId),
+    enabled: enabled && Boolean(boardId),
   });
 }
 

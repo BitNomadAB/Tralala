@@ -8,6 +8,7 @@ export type * from "./agent";
 export type * from "./attachment";
 export type * from "./brief";
 export type * from "./loop";
+export type * from "./summary";
 export type * from "./card";
 export type * from "./discussion";
 export type * from "./work";

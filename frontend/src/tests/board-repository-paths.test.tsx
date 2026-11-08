@@ -77,6 +77,9 @@ describe("the focus and exclude globs of a board's repositories", () => {
     server.use(
       http.get(apiPath("/boards/board-1"), () => ok(BOARD)),
       http.get(apiPath("/boards/board-1/loops"), () => ok([])),
+      http.get(apiPath("/boards/board-1/loop-summaries"), () =>
+        ok({ board_id: "board-1", loops: [], count: 0 }),
+      ),
       http.get(apiPath("/agents"), () => ok([])),
       http.get(apiPath("/repositories"), () => ok(REPOSITORIES)),
       http.patch(apiPath("/boards/board-1"), async ({ request }) => {
@@ -86,7 +89,9 @@ describe("the focus and exclude globs of a board's repositories", () => {
     );
     renderAt("/boards/board-1", "/boards/:boardId", <BoardLoopsPage />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /Edit/ }));
+    // Edit board sits in the board's quiet menu.
+    await user.click(await screen.findByRole("button", { name: "Board actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit board" }));
 
     expect(await screen.findByLabelText("Focus paths in app")).toHaveValue("docs/**\nsrc/*.py");
     expect(screen.getByLabelText("Exclude paths in app")).toHaveValue("");

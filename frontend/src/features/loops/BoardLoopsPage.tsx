@@ -1,107 +1,60 @@
-import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, History, Pencil, Plus } from "lucide-react";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
+import { useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Field, Input, Textarea } from "@/components/ui/input";
-import { useToast } from "@/components/ui/useToast";
-import { pathsDrafts, pathsPayload } from "@/features/boards/repositoryPaths";
-import { api, api as apiClient } from "@/lib/api";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Expander } from "@/components/ui/expander";
+import { Section } from "@/components/ui/section";
+import { DeleteBoardDialog } from "@/features/boards/DeleteBoardDialog";
+import { useBoardLifecycle } from "@/features/boards/useBoardLifecycle";
+import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
-import { keys, useAgents, useBoard, useLoops } from "@/lib/queries";
+import { useAgents, useBoard, useLoopSummaries, useLoops } from "@/lib/queries";
+import type { LoopSummary } from "@/lib/types";
 import { BoardContext } from "./BoardContext";
-import { EditBoardDialog, type BoardEditDraft } from "./EditBoardDialog";
+import { BoardHeader } from "./BoardHeader";
+import { BoardStatusNotice } from "./BoardStatusNotice";
+import { EditBoardDialog } from "./EditBoardDialog";
 import { LoopList } from "./LoopList";
+import { isFinished } from "./loopNextAction";
+import { NewLoopDialog } from "./NewLoopDialog";
+import { useBoardEditing } from "./useBoardEditing";
 
+/**
+ * A board's Loops: what each waits for and the person's next action first, as rows; completed and
+ * cancelled Loops folded away under "Completed (N)"; the board's agents and repositories under
+ * their own expander.
+ */
 export function BoardLoopsPage() {
   const { boardId = "" } = useParams();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const toast = useToast();
   const boardQuery = useBoard(boardId);
   const loopsQuery = useLoops(boardId, true);
+  const summariesQuery = useLoopSummaries(
+    boardId,
+    boardQuery.data?.status === "active" || boardQuery.data?.status === "archived",
+  );
   const agentsQuery = useAgents();
   const repositoriesQuery = useQuery({
     queryKey: ["repositories"],
-    queryFn: () => apiClient.listRepositories(),
+    queryFn: () => api.listRepositories(),
     staleTime: 60_000,
   });
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [goal, setGoal] = useState("");
-  const [showCompleted, setShowCompleted] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [editDraft, setEditDraft] = useState<BoardEditDraft>({
-    name: "",
-    description: "",
-    repositoryIds: [],
-    repositoryPaths: {},
-    agentIds: [],
-  });
-
-  const createLoop = useMutation({
-    mutationFn: () => api.createLoop(boardId, { name: name.trim(), goal }),
-    onSuccess: (loop) => {
-      setCreating(false);
-      setName("");
-      setGoal("");
-      void queryClient.invalidateQueries({ queryKey: ["loops", boardId] });
-      void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
-      toast.push({ title: "Loop created", variant: "success" });
-      void navigate(`/boards/${boardId}/loops/${loop.id}`);
-    },
-    onError: (error) => {
-      toast.push({
-        title: "Could not create the Loop",
-        description: describeError(error, undefined),
-        variant: "error",
-      });
+  const editing = useBoardEditing(boardId);
+  const lifecycle = useBoardLifecycle({
+    onDeleted: () => {
+      void navigate("/");
     },
   });
-
-  const retryMigration = useMutation({
-    mutationFn: () => api.retryMigration(boardId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
-      void queryClient.invalidateQueries({ queryKey: ["loops", boardId] });
-      toast.push({ title: "Migration retried", variant: "success" });
-    },
-    onError: (error) => {
-      toast.push({
-        title: "Migration still fails",
-        description: describeError(error, undefined),
-        variant: "error",
-      });
-    },
-  });
-
-  const saveBoard = useMutation({
-    mutationFn: () =>
-      api.updateBoard(boardId, {
-        name: editDraft.name.trim(),
-        description: editDraft.description,
-        repository_ids: editDraft.repositoryIds,
-        repository_paths: pathsPayload(editDraft.repositoryPaths, editDraft.repositoryIds),
-        agent_ids: editDraft.agentIds,
-      }),
-    onSuccess: () => {
-      setEditing(false);
-      void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
-      void queryClient.invalidateQueries({ queryKey: ["boards"] });
-      void queryClient.invalidateQueries({ queryKey: ["repositories"] });
-      void queryClient.invalidateQueries({ queryKey: ["agents"] });
-      toast.push({ title: "Board updated", variant: "success" });
-    },
-    onError: (error) => {
-      toast.push({
-        title: "Could not update the board",
-        description: describeError(error, undefined),
-        variant: "error",
-      });
-    },
-  });
+  const summaries = useMemo(
+    () =>
+      new Map<string, LoopSummary>(
+        (summariesQuery.data?.loops ?? []).map((summary) => [summary.id, summary]),
+      ),
+    [summariesQuery.data],
+  );
 
   if (boardQuery.isLoading) {
     return <p className="text-sm text-[var(--muted-foreground)]">Loading board…</p>;
@@ -115,171 +68,77 @@ export function BoardLoopsPage() {
   }
 
   const board = boardQuery.data;
+  const readOnly = board.status !== "active";
   const loops = loopsQuery.data ?? [];
-  const active = loops.filter((loop) => loop.stage !== "completed" && loop.stage !== "cancelled");
-  const finished = loops.filter((loop) => loop.stage === "completed" || loop.stage === "cancelled");
+  const active = loops.filter((loop) => !isFinished(loop.stage));
+  const finished = loops.filter((loop) => isFinished(loop.stage));
+  const empty = loopsQuery.isSuccess && loops.length === 0;
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate text-lg font-semibold">{board.name}</h1>
-            <Badge
-              tone={
-                board.status === "active"
-                  ? "success"
-                  : board.status === "archived"
-                    ? "neutral"
-                    : "danger"
-              }
-            >
-              {board.status}
-            </Badge>
-          </div>
-          <p className="text-xs text-[var(--muted-foreground)]">
-            {board.description || "No description"} · {active.length} active Loops ·{" "}
-            {finished.length} completed
-          </p>
-          <BoardContext
-            agentIds={board.agent_ids}
-            repositoryIds={board.repository_ids}
-            agents={agentsQuery.data ?? []}
-            repositories={repositoriesQuery.data ?? []}
-          />
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setEditDraft({
-                name: board.name,
-                description: board.description,
-                repositoryIds: board.repository_ids,
-                repositoryPaths: pathsDrafts(board.repository_paths),
-                agentIds: board.agent_ids,
-              });
-              setEditing(true);
-            }}
-          >
-            <Pencil size={14} /> Edit
-          </Button>
-          <Link
-            to={`/boards/${board.id}/history`}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
-          >
-            <History size={14} /> Board history
-          </Link>
-          <Button size="sm" onClick={() => setCreating(true)} disabled={board.status !== "active"}>
-            <Plus size={14} /> New Loop
-          </Button>
-        </div>
-      </div>
-
-      {board.status !== "active" && board.status !== "archived" ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs">
-          <p className="flex items-center gap-1.5 font-medium">
-            <AlertTriangle size={13} className="text-[var(--destructive)]" />
-            This board cannot be used while its status is {board.status}.
-          </p>
-          <p className="text-[var(--muted-foreground)]">
-            {board.status === "migration_failed"
-              ? "A schema upgrade stopped on this board. The Loop schema replaces the old lists and cards, so a database written before Loops cannot be converted in place; the server log names the board. Retrying only helps after the underlying problem is fixed."
-              : "The board is in maintenance or error state; retrying the migration is safe."}{" "}
-            The last backups and the export archive stay available.
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => retryMigration.mutate()}
-              disabled={retryMigration.isPending}
-            >
-              Retry migration
-            </Button>
-            <a className="underline" href={api.exportUrl(boardId)} download={`${board.name}.zip`}>
-              Download export archive
-            </a>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="flex flex-col gap-2">
-        <div>
-          <h2 className="text-sm font-medium">Current Loops</h2>
-          <p className="text-xs text-[var(--muted-foreground)]">
-            Each Loop is a feature or a change someone asked for in this project.
-          </p>
-        </div>
-        <LoopList loops={active} boardId={boardId} empty="This board has no active Loops yet." />
-      </div>
-
-      {finished.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium text-[var(--muted-foreground)]">Completed Loops</h2>
-            <Button size="sm" variant="ghost" onClick={() => setShowCompleted((value) => !value)}>
-              {showCompleted ? "Hide" : "Show"}
-            </Button>
-          </div>
-          {showCompleted ? (
-            <LoopList loops={finished} boardId={boardId} empty="Nothing completed yet." />
-          ) : null}
-        </div>
-      ) : null}
-
-      <EditBoardDialog
-        open={editing}
-        onOpenChange={setEditing}
-        draft={editDraft}
-        onDraftChange={setEditDraft}
-        saving={saveBoard.isPending}
-        onSave={() => saveBoard.mutate()}
+    <section className="flex flex-col gap-6">
+      <BoardHeader
+        board={board}
+        showNewLoop={!empty}
+        onNewLoop={() => setCreating(true)}
+        onEdit={() => editing.open(board)}
+        onLifecycle={(type) => lifecycle.run(type, board)}
+        onDelete={() => lifecycle.askDelete(board)}
       />
 
-      <Dialog open={creating} onOpenChange={setCreating}>
-        <DialogContent
-          title="New Loop"
-          description="A Loop owns its own Kanban and planning documents. It starts empty."
-        >
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (name.trim()) createLoop.mutate();
-            }}
-          >
-            <Field label="Name" htmlFor="loop-name">
-              <Input
-                id="loop-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-                autoFocus
-                maxLength={200}
-              />
-            </Field>
-            <Field label="Broad goal" htmlFor="loop-goal">
-              <Textarea
-                id="loop-goal"
-                rows={3}
-                value={goal}
-                onChange={(event) => setGoal(event.target.value)}
-                maxLength={20000}
-              />
-            </Field>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" type="button" onClick={() => setCreating(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!name.trim() || createLoop.isPending}>
-                {createLoop.isPending ? "Creating…" : "Create Loop"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <BoardStatusNotice board={board} />
+
+      <Section title="Current Loops" count={loopsQuery.isSuccess ? active.length : undefined}>
+        {loopsQuery.isLoading ? (
+          <p className="text-sm text-[var(--muted-foreground)]">Loading Loops…</p>
+        ) : loopsQuery.error ? (
+          <p role="alert" className="text-sm text-[var(--destructive)]">
+            {describeError(loopsQuery.error, "Could not load the Loops.")}
+          </p>
+        ) : empty ? (
+          <div className="card-surface flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+            <EmptyState message="No Loops yet. A Loop starts with its Info: what you want and why." />
+            <Button onClick={() => setCreating(true)} disabled={readOnly}>
+              <Plus size={15} /> New Loop
+            </Button>
+          </div>
+        ) : active.length === 0 ? (
+          <EmptyState className="card-surface px-4 py-3.5" message="No Loop is open right now." />
+        ) : (
+          <LoopList
+            label="Current Loops"
+            loops={active}
+            summaries={summaries}
+            boardId={boardId}
+            readOnly={readOnly}
+          />
+        )}
+      </Section>
+
+      {finished.length > 0 ? (
+        <Expander title={`Completed (${finished.length})`}>
+          <LoopList
+            label="Completed Loops"
+            loops={finished}
+            summaries={summaries}
+            boardId={boardId}
+            readOnly
+            framed={false}
+          />
+        </Expander>
+      ) : null}
+
+      <Expander title="Agents and repositories">
+        <BoardContext
+          agentIds={board.agent_ids}
+          repositoryIds={board.repository_ids}
+          agents={agentsQuery.data ?? []}
+          repositories={repositoriesQuery.data ?? []}
+        />
+      </Expander>
+
+      <EditBoardDialog {...editing.dialog} />
+      <DeleteBoardDialog {...lifecycle.deleteDialog} />
+      <NewLoopDialog boardId={boardId} open={creating} onOpenChange={setCreating} />
     </section>
   );
 }
