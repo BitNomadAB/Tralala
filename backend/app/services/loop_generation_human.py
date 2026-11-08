@@ -6,10 +6,13 @@ and answers a JSON object of the brief's schema (``schemas/briefs.py``, sent as 
 format). The server holds the answer to the rules every brief keeps
 (``loop_documents_human.check_brief``): it parses, names every finding (or every Phase and every
 Ticket a person must do), knows only the ids the technical revision holds, and its text holds no id,
-path or code. An answer that breaks a rule goes back to the model once, with every problem named
-field by field; when the second answer still breaks one, the run fails with ``brief_rejected`` and
-the view rendered from the structure stays. Each call and check is a step of the run's process
-tree, as in ``loop_generation_ask``.
+path or code; an analysis brief also keeps the sign (``loop_documents_human_limits``). An answer
+that breaks a rule goes back to the model once, through the repair round every generation shares
+(``loop_generation_ask.repair_round``), with every problem named one per line, the sign's first;
+when the second answer still breaks one, the run fails (``give_up``) with ``brief_invalid`` when the
+sign is broken, else ``brief_rejected``, and the view rendered from the structure stays. Each call
+and check is a step of the run's process tree, and each problem of the sign an
+``analysis_brief_repair`` log line.
 """
 
 from __future__ import annotations
@@ -23,7 +26,8 @@ from pydantic import JsonValue, ValidationError
 from ..db.generated.registry import AgentsRow
 from ..schemas.briefs import HumanBrief, RoadmapBrief
 from .loop_documents_human import check_brief
-from .loop_generation_ask import CompletionCall, call_failed
+from .loop_documents_human_limits import BriefRefusal, sign_findings
+from .loop_generation_ask import CompletionCall, RunIds, call_failed, give_up, repair_round
 from .loop_generation_prompts import (
     MAX_OUTPUT_CHARS,
     JsonObject,
@@ -31,15 +35,12 @@ from .loop_generation_prompts import (
     response_schema_for,
     strip_fences,
 )
-from .loop_generation_report import error_details
 from .loop_generation_runs import Outcome
 from .loop_generation_trace import RunTrace, note
 from .runtime_tools import Message
 
 # One repair round: a second broken brief is a model that cannot follow the rules, not a slip.
 MAX_BRIEF_REPAIRS = 1
-# The most problems one repair request or one failure names.
-MAX_PROBLEMS = 20
 # The technical revision each purpose writes a brief of.
 TECHNICAL_KIND = {"analysis_human": "analysis_ai", "roadmap_human": "roadmap_ai"}
 _WHAT = {"analysis_human": "technical analysis", "roadmap_human": "technical RoadMap"}
@@ -64,9 +65,11 @@ def _schema_problems(error: ValidationError) -> list[str]:
 
 def read_brief(
     purpose: str, text: str, technical: Mapping[str, JsonValue]
-) -> tuple[HumanBrief | RoadmapBrief | None, list[str]]:
-    """The brief the model answered and what is wrong with it: a schema error, or a rule it
-    breaks."""
+) -> tuple[HumanBrief | RoadmapBrief | None, BriefRefusal | None]:
+    """The brief the model answered, or what is wrong with it: the sign's problems first (an
+    analysis brief), then a schema error or a content rule it breaks."""
+    if len(text) > MAX_OUTPUT_CHARS:
+        return None, BriefRefusal((), ["the answer is longer than a document may be"])
     try:
         loaded: object = json.loads(strip_fences(text))
         validated: HumanBrief | RoadmapBrief = (
@@ -75,18 +78,14 @@ def read_brief(
             else RoadmapBrief.model_validate(loaded)
         )
     except json.JSONDecodeError:
-        return None, ["the answer is not a JSON object"]
+        return None, BriefRefusal((), ["the answer is not a JSON object"])
     except ValidationError as error:
-        return None, _schema_problems(error)
-    return validated, check_brief(validated, technical)["problems"]
-
-
-def repair_request(problems: list[str]) -> str:
-    return (
-        "Your brief was not accepted: "
-        + "; ".join(problems[:MAX_PROBLEMS])
-        + ". Correct each of these and answer with the whole corrected JSON object only."
-    )
+        return None, BriefRefusal((), _schema_problems(error))
+    sign = sign_findings(validated) if isinstance(validated, HumanBrief) else []
+    others = check_brief(validated, technical)["problems"]
+    if sign or others:
+        return None, BriefRefusal(sign, others)
+    return validated, None
 
 
 def write_for_people(
@@ -97,6 +96,7 @@ def write_for_people(
     call_completion: CompletionCall,
     settings: object,
     trace: RunTrace | None = None,
+    ids: RunIds | None = None,
 ) -> Outcome:
     """The brief for people, checked, or why there is none."""
     purpose = str(captured.get("purpose") or "analysis_human")
@@ -127,31 +127,14 @@ def write_for_people(
     brief: HumanBrief | RoadmapBrief | None = None
     for attempt in range(MAX_BRIEF_REPAIRS + 1):
         note(trace, "writing", f"The model answered ({len(text)} characters)")
-        if len(text) > MAX_OUTPUT_CHARS:
-            problems = ["the answer is longer than a document may be"]
-        else:
-            brief, problems = read_brief(purpose, text, technical)
-        if not problems:
+        brief, refusal = read_brief(purpose, text, technical)
+        if refusal is None:
             break
-        brief = None
         if attempt >= MAX_BRIEF_REPAIRS:
-            note(trace, "checking", f"The brief still breaks a rule: {problems[0]}", kind="error")
-            return Outcome(
-                error_code="brief_rejected",
-                error_message=(
-                    "The brief written for people breaks a rule; the view rendered from the "
-                    "structure stays"
-                ),
-                error_details=error_details({"problems": problems[:MAX_PROBLEMS]}),
-                retryable=True,
+            return give_up(
+                trace, refusal, ids=ids, attempt=attempt + 1, repairs=MAX_BRIEF_REPAIRS
             )
-        note(
-            trace,
-            "checking",
-            f"The brief breaks {len(problems)} rule(s) — asked the model to correct them",
-            kind="repair",
-        )
-        repair: Message = {"role": "user", "content": repair_request(problems)}
+        repair = repair_round(trace, refusal, ids=ids, attempt=attempt + 1)
         outcome = call_completion(
             settings,
             asdict(agent),
@@ -179,7 +162,6 @@ __all__ = [
     "MAX_BRIEF_REPAIRS",
     "TECHNICAL_KIND",
     "read_brief",
-    "repair_request",
     "technical_payload",
     "write_for_people",
 ]

@@ -66,6 +66,7 @@ from tests.unit.fakes.registry import (
     role_template_row,
 )
 from tests.unit.log_lines import events
+from tests.unit.signs import SIGN
 
 MOMENT = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
 STAMP = "2026-11-03T10:00:00Z"
@@ -1018,6 +1019,7 @@ def test_a_run_logs_its_start_and_its_end_once(
             "files_read": 0,
             "repairs": 0,
             "face_repairs": 0,
+            "brief_repairs": 0,
         },
     ]
 
@@ -1518,6 +1520,7 @@ def brief(
 ) -> dict[str, JsonValue]:
     """A brief of MATERIAL whose obstacle names ``names``."""
     return {
+        **SIGN,
         "obstacles": [
             {"level": "technical", "text": "Some e-mails never arrive.", "finding_ids": [*names]}
         ],
@@ -1618,7 +1621,10 @@ def test_a_brief_that_leaves_a_finding_out_is_sent_back_once_with_its_id() -> No
     assert repair[1] == {"role": "assistant", "content": HALF}
     assert "no item names F-03" in str(repair[2]["content"])
     assert w.provider.calls[1].response_schema is not None
-    assert ("repair", "The brief breaks 1 rule(s) — asked the model to correct them") in steps(w)
+    # The same repair round as every generation's: the first problem, then what was asked.
+    (repaired,) = [text for kind, text in steps(w) if kind == "repair"]
+    assert str(repaired).startswith("The answer broke a rule: finding_ids: no item names F-03")
+    assert str(repaired).endswith("asked the model to fix it")
     assert json.loads(w.run().output_json)["repaired"] is True
 
 

@@ -48,6 +48,7 @@ from tests.unit.fakes.board import (
     loop_row,
     qa_cycle_row,
 )
+from tests.unit.signs import SIGN
 
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
 STAMP = "2026-11-03T10:00:00Z"
@@ -843,6 +844,7 @@ def human_run(status: str, purpose: str = "analysis_human") -> LoopGenerationRun
 
 BRIEF = HumanBrief.model_validate(
     {
+        **SIGN,
         "pros": [{"text": "The sign-in can be extended.", "finding_ids": ["F-01"]}],
         "verdict": "yes",
         "verdict_reason": "Nothing stands in the way.",

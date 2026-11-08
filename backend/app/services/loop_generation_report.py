@@ -121,8 +121,10 @@ def _duration_ms(started_at: str | None, finished_at: str) -> int | None:
 
 def repairs_line(counts: TraceCounts) -> str:
     """``Repairs: 2 (face: 2)``: the run's repair rounds, and how many of them were about the face
-    for people."""
-    return f"Repairs: {counts['repairs']} (face: {counts['face_repairs']})"
+    for people; a run whose brief broke its sign adds those rounds (``Repairs: 1 (face: 0, brief:
+    1)``)."""
+    brief = f", brief: {counts['brief_repairs']}" if counts["brief_repairs"] else ""
+    return f"Repairs: {counts['repairs']} (face: {counts['face_repairs']}{brief})"
 
 
 def log_started(row: LoopGenerationRunsRow) -> None:
@@ -152,5 +154,6 @@ def log_finished(row: LoopGenerationRunsRow, ended: Ended, captured: JsonValue) 
             "files_read": counted["files_read"],
             "repairs": counted["repairs"],
             "face_repairs": counted["face_repairs"],
+            "brief_repairs": counted["brief_repairs"],
         },
     )

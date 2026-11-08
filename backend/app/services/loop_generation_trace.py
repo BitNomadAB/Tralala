@@ -56,11 +56,13 @@ class TraceStep(TypedDict):
     answer: NotRequired[dict[str, JsonValue]]
     # A repair round of a face for people that broke its template: how many problems it had.
     face: NotRequired[int]
+    # A repair round of an analysis brief that broke its sign: how many problems it had.
+    brief: NotRequired[int]
 
 
 class TraceCounts(TypedDict):
     """What the steps add up to: tool calls, distinct files read, searches, listings, repairs, and
-    the repairs that were about the face for people."""
+    the repairs that were about the face for people and about the analysis brief's sign."""
 
     tool_calls: int
     files_read: int
@@ -68,6 +70,7 @@ class TraceCounts(TypedDict):
     listings: int
     repairs: int
     face_repairs: int
+    brief_repairs: int
 
 
 class TraceWriter(Protocol):
@@ -116,9 +119,10 @@ class RunTrace:
         arguments: JsonValue = None,
         answer: Mapping[str, JsonValue] | None = None,
         face: int | None = None,
+        brief: int | None = None,
     ) -> bool:
         """Record one step and write the trace; False once the run has been cancelled. ``face``
-        is the number of face problems a repair round had."""
+        is the number of face problems a repair round had, ``brief`` the number of the sign's."""
         if len(self.steps) < MAX_STEPS:
             step: TraceStep = {
                 "stage": stage,
@@ -133,6 +137,8 @@ class RunTrace:
                 step["answer"] = dict(answer)
             if face is not None:
                 step["face"] = face
+            if brief is not None:
+                step["brief"] = brief
             self.steps.append(step)
         if self._write is not None and self._write(self.dumps()) == "cancelled":
             self.cancelled = True
@@ -161,6 +167,7 @@ def counts_of(steps: Sequence[JsonValue]) -> TraceCounts:
         "listings": 0,
         "repairs": 0,
         "face_repairs": 0,
+        "brief_repairs": 0,
     }
     for step in steps:
         if not isinstance(step, dict):
@@ -170,6 +177,8 @@ def counts_of(steps: Sequence[JsonValue]) -> TraceCounts:
             counted["repairs"] += 1
             face = step.get("face")
             counted["face_repairs"] += isinstance(face, int) and face > 0
+            brief = step.get("brief")
+            counted["brief_repairs"] += isinstance(brief, int) and brief > 0
         if kind != "tool":
             continue
         counted["tool_calls"] += 1

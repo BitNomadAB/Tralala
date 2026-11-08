@@ -142,12 +142,18 @@ LEVEL_TEXT = {
 }
 
 
+SIZE_TEXT = {"small": "Small", "medium": "Medium", "large": "Large"}
+
+
 def render_analysis_brief(brief: HumanBrief) -> str:
-    """The analysis brief for people: the verdict first, then what stands in the way, the
-    highlights for and against, the decisions and the recommendation. No id, path or traceability
-    block: the brief's ids carry that, and the technical analysis holds the detail."""
+    """The analysis brief for people: the verdict first (with its one line when the brief has one),
+    then what stands in the way, the highlights for and against, the decisions, how big the work
+    is (when the brief says) and the recommendation. No id, path or traceability block: the brief's
+    ids carry that, and the technical analysis holds the detail."""
     verdict = VERDICT_TEXT.get(brief.verdict, brief.verdict)
     lines = ["# Analysis", "", f"**Can it be done?** {verdict}. {brief.verdict_reason}", ""]
+    if brief.verdict_line:
+        lines += [f"**In short:** {brief.verdict_line}", ""]
     lines += [brief.summary, "", "## What stands in the way", ""]
     if brief.obstacles:
         lines += [
@@ -162,6 +168,9 @@ def render_analysis_brief(brief: HumanBrief) -> str:
     if brief.decisions:
         lines += ["", "## What you need to decide", ""]
         lines += [f"- {decision.question}" for decision in brief.decisions]
+    if brief.size is not None:
+        size = SIZE_TEXT.get(brief.size.kind, brief.size.kind)
+        lines += ["", "## How big", "", f"**{size}.** {brief.size.text}"]
     lines += ["", "## Recommendation", "", brief.recommendation]
     return "\n".join(lines).strip() + "\n"
 
@@ -193,6 +202,7 @@ def render_roadmap_technical(payload: CanonicalPlan) -> str:
 
 __all__ = [
     "LEVEL_TEXT",
+    "SIZE_TEXT",
     "VERDICT_TEXT",
     "content_hash",
     "render_analysis",

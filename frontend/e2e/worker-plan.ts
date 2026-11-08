@@ -51,12 +51,19 @@ export const ANALYSIS = {
 export const ANALYSIS_SUMMARY = "Sessions nobody uses end by themselves after half an hour.";
 export const OBSTACLE = "People signed in today stay signed in until their session runs out.";
 
+export const VERDICT_LINE = "Yes, once we decide what happens to the sessions open today.";
+export const DECISION = "Do we end the sessions that are open when the change ships?";
+export const SIZE = "One check is added where every page already reads the session.";
+
+/** The brief keeps the sign: one verdict line, at most three reasons, short questions, a size. */
 export const ANALYSIS_BRIEF = {
   obstacles: [{ level: "security", text: OBSTACLE, finding_ids: ["risk-1"] }],
   pros: [{ text: "The check that already runs can be extended.", finding_ids: ["reuse-1"] }],
   cons: [],
-  decisions: [],
+  decisions: [{ question: DECISION, finding_ids: ["risk-1"] }],
+  size: { kind: "small", text: SIZE },
   verdict: "yes_with_conditions",
+  verdict_line: VERDICT_LINE,
   verdict_reason: "It can be done once open sessions are dealt with.",
   summary: ANALYSIS_SUMMARY,
   recommendation: "Go ahead and end open sessions when the change ships.",

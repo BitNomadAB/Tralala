@@ -16,8 +16,16 @@ from pydantic import BaseModel, JsonValue
 
 from ..core.errors import ValidationFailure
 from ..db.generated.board import LoopPlanItemsRow
-from ..schemas.briefs import HumanBrief, RoadmapBrief
+from ..schemas.briefs import (
+    SIGN_MAX_CHARS,
+    SIGN_MAX_DECISIONS,
+    SIGN_MAX_ITEMS,
+    SIGN_MAX_VERDICT_WORDS,
+    HumanBrief,
+    RoadmapBrief,
+)
 from ..schemas.loops import AnalysisPayload, PlanPayload, QaInstructions
+from .loop_documents_human_limits import SIGN_QUESTION_EXAMPLE
 from .loop_plans_validation import validate_plan
 from .runtime import ResponseSchema
 from .ticket_face import (
@@ -239,6 +247,22 @@ BRIEF_RULES = (
 )
 
 
+# The analysis brief as a sign, stated once with one example question. The check
+# (``loop_documents_human_limits``) holds every answer to it, and a brief that breaks it is sent
+# back for repair with its messages. Only the analysis brief says it.
+BRIEF_SIGN_RULE = (
+    "The brief is a sign a person reads in a minute, whatever the material: the verdict and "
+    f"verdict_line, one line of at most {SIGN_MAX_VERDICT_WORDS} words saying what you conclude; "
+    f"at most {SIGN_MAX_ITEMS} obstacles, the reasons that matter most, and at most "
+    f"{SIGN_MAX_ITEMS} pros and {SIGN_MAX_ITEMS} cons; at most {SIGN_MAX_DECISIONS} decisions, "
+    "each question on one line that a person can answer; and size, how big the work is (small, "
+    "medium or large) with one sentence why. Every obstacle, point, question and the size's "
+    f"sentence holds at most {SIGN_MAX_CHARS} characters. Fewer, shorter items still name every "
+    "finding they rest on in finding_ids: one item may rest on several findings. "
+    f'A question, for example: "{SIGN_QUESTION_EXAMPLE}"'
+)
+
+
 def _snapshot_caps() -> str:
     return SNAPSHOT_CAPS
 
@@ -281,14 +305,15 @@ PURPOSE_PROMPTS = {
     "analysis_human": (
         "You write a short decision brief for the person who decides whether the work below "
         f"goes ahead, from the technical analysis. {BRIEF_RULES} Answer five questions: can it "
-        "be done (verdict, and verdict_reason in one sentence); what stands in the way, at any "
-        "level (business, technical, security, legal, people and time), listing only obstacles "
-        "that exist; the highlights for (pros) and against (cons); what a person must decide, "
-        "each as a question (decisions); and a recommendation in one paragraph, after a summary "
-        "of two or three sentences. In each item's finding_ids name the findings it rests on; "
-        "together the items must name every finding of category risk, blocker, legal, security, "
-        "question or decision, and only ids the technical analysis holds. Return only a JSON "
-        "object that conforms to the schema."
+        "be done (verdict, verdict_line, and verdict_reason in one sentence); what stands in the "
+        "way, at any level (business, technical, security, legal, people and time), listing only "
+        "obstacles that exist; the highlights for (pros) and against (cons); what a person must "
+        "decide, each as a question (decisions); and how big the work is (size); then a "
+        "recommendation in one paragraph, after a summary of two or three sentences. "
+        f"{BRIEF_SIGN_RULE} In each item's finding_ids name the findings it rests on; together "
+        "the items must name every finding of category risk, blocker, legal, security, question "
+        "or decision, and only ids the technical analysis holds. Return only a JSON object that "
+        "conforms to the schema."
     ),
     "roadmap_human": (
         "You write a short brief of the RoadMap below for the person who approves it. "

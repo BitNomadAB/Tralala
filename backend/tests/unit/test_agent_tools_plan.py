@@ -29,6 +29,7 @@ from app.services.agent_tools import (
     write_roadmap,
 )
 from app.services.loop_documents import LoopDocumentService
+from app.services.loop_documents_human_limits import SIGN_QUESTION_EXAMPLE
 from app.services.loop_plans import LoopPlanService
 from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
@@ -40,6 +41,7 @@ from tests.unit.fakes.board import (
     list_row,
     loop_row,
 )
+from tests.unit.signs import SIGN
 
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
 LOOP = "6d1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a4b"
@@ -390,6 +392,7 @@ def test_ids_that_are_uuids_pass_and_short_ones_map_the_same_way_every_time() ->
 # --- the brief for people ------------------------------------------------------------------------
 
 BRIEF: dict[str, JsonValue] = {
+    **SIGN,
     "obstacles": [
         {"level": "people_time", "text": "Some people may miss the e-mail.", "finding_ids": ["F-2"]}
     ],
@@ -446,6 +449,50 @@ def test_a_brief_that_misses_a_finding_is_refused_with_its_id() -> None:
     assert refused.value.code == "brief_rejected"
     assert field(refused.value.details, "missing_ids") == ["F-2"]
     assert w.repos.documents.current(LOOP, "analysis_ai") is None
+
+
+def test_a_brief_that_breaks_the_sign_is_refused_with_brief_invalid() -> None:
+    w = world()
+    obstacle = {"level": "technical", "text": "Some mail may not arrive.", "finding_ids": ["F-2"]}
+    four = {**BRIEF, "obstacles": [obstacle] * 4}
+    with pytest.raises(ValidationFailure) as refused:
+        write(w, "analysis", ANALYSIS, brief=json.dumps(four))
+    assert refused.value.code == "brief_invalid"
+    assert field(refused.value.details, "errors") == ["Brief, obstacles: 4 items, at most 3."]
+    assert field(refused.value.details, "rules") == [{"field": "obstacles", "rule": "too_many"}]
+    assert "Brief, obstacles: 4 items, at most 3." in refused.value.message
+    # The candidate is refused whole: no technical revision either.
+    assert w.repos.documents.current(LOOP, "analysis_ai") is None
+
+
+def test_write_brief_names_the_sign_first_and_then_the_other_rules() -> None:
+    w = world()
+    write(w, "analysis", ANALYSIS)
+    broken = {**BRIEF, "obstacles": [], "verdict_line": "", "size": None}
+    with pytest.raises(ValidationFailure) as refused:
+        write_brief(w, WORKER, brief_args("analysis", broken))
+    assert refused.value.code == "brief_invalid"
+    errors = field(refused.value.details, "errors")
+    assert isinstance(errors, list)
+    assert errors[:2] == [
+        "Brief, verdict_line: missing. Say the verdict in one line of at most 20 words.",
+        "Brief, size: missing. Say how big the work is: small, medium or large, and why in one "
+        "sentence.",
+    ]
+    assert "no item names F-2" in json.dumps(errors[2:])
+    assert field(refused.value.details, "error_count") == 3
+    assert "no item names F-2" in str(field(refused.value.details, "other_errors"))
+    # The brief that keeps the sign is written.
+    assert field(write_brief(w, WORKER, brief_args("analysis", BRIEF)), "brief", "written")
+
+
+def test_the_brief_argument_shows_the_sign_and_its_limits() -> None:
+    tools = tool_catalog()
+    schema = json.dumps(tools["write_analysis"].input_schema)
+    assert '"maxItems": 3' in schema and '"maxLength": 140' in schema
+    assert "verdict_line in at most 20 words" in schema
+    assert SIGN_QUESTION_EXAMPLE in schema
+    assert "brief_invalid" in tools["write_brief"].description
 
 
 def test_write_roadmap_with_a_brief_maps_its_short_ids_as_the_plans() -> None:
