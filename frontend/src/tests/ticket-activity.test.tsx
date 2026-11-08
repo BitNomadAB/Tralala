@@ -42,11 +42,13 @@ describe("Activity", () => {
   it("starts on Comments with the composer, its placeholder and its hint", async () => {
     await renderTicket();
     const tabs = screen.getByRole("tablist", { name: "Activity" });
-    expect(
-      within(tabs)
-        .getAllByRole("tab")
-        .map((tab) => tab.textContent),
-    ).toEqual(["Comments", "History", "Work"]);
+    await waitFor(() =>
+      expect(
+        within(tabs)
+          .getAllByRole("tab")
+          .map((tab) => tab.textContent),
+      ).toEqual(["Comments", "Discussions 0", "History", "Work"]),
+    );
     expect(within(tabs).getByRole("tab", { name: "Comments" })).toHaveAttribute(
       "aria-selected",
       "true",

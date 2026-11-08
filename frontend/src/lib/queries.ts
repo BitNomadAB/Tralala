@@ -37,6 +37,7 @@ export const keys = {
   attachments: (boardId: string, cardId: string) => ["attachments", boardId, cardId] as const,
   labels: (boardId: string) => ["labels", boardId] as const,
   boardPeople: (boardId: string) => ["board-people", boardId] as const,
+  askableAgents: (boardId: string) => ["board-agents", boardId] as const,
   activity: (boardId: string, entityId?: string) =>
     ["activity", boardId, entityId ?? "board"] as const,
   credentials: ["credentials"] as const,
@@ -194,6 +195,15 @@ export function useBoardPeople(boardId: string) {
     queryKey: keys.boardPeople(boardId),
     queryFn: () => api.listBoardPeople(boardId),
     enabled: Boolean(boardId),
+  });
+}
+
+/** The agents "Ask the agents" offers, read when `enabled` (the dialog is open). */
+export function useAskableAgents(boardId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.askableAgents(boardId),
+    queryFn: () => api.listAskableAgents(boardId),
+    enabled: Boolean(boardId) && enabled,
   });
 }
 

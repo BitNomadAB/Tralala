@@ -2,10 +2,12 @@ import { http } from "msw";
 import {
   PRIORITIES,
   type ActivityEntry,
+  type AskableAgent,
   type BoardList,
   type BoardPerson,
   type CardDetail,
   type CardNote,
+  type Discussion,
   type Label,
   type LoopReadiness,
   type Loop,
@@ -167,11 +169,19 @@ function patched(body: Record<string, unknown>): Partial<CardDetail> {
  * labels, the people, the history, mentions and files, and the card's `PATCH`, move, archive and
  * confirm, each checking the version as the server does, and the card's notes (`noteHandlers`).
  * `state.bodies` holds every write's body, `state.csrf` the CSRF header of every write. `options`
- * give the Loop's fields (a completed stage), the notes and the card's history.
+ * give the Loop's fields (a completed stage), the notes, the card's history, its discussions
+ * (`GET /discussions?card_id=` and each one's detail; none by default) and the agents the board
+ * may ask (none).
  */
 export function ticketViewHandlers(
   initial: CardDetail = ticketCard(),
-  options: { loop?: Partial<Loop>; notes?: CardNote[]; activity?: ActivityEntry[] } = {},
+  options: {
+    loop?: Partial<Loop>;
+    notes?: CardNote[];
+    activity?: ActivityEntry[];
+    discussions?: Discussion[];
+    agents?: AskableAgent[];
+  } = {},
 ) {
   const work = ticketWorkHandlers(initial);
   const notes = noteHandlers(options.notes);
@@ -196,7 +206,19 @@ export function ticketViewHandlers(
     http.get(apiPath(`${LOOP_PATH}/lists`), () => ok(COLUMNS)),
     http.get(apiPath(`${LOOP_PATH}/readiness`), () => ok(READINESS)),
     http.get(apiPath(`/boards/${BOARD_ID}/labels`), () => ok(LABELS)),
-    http.get(apiPath(`/boards/${BOARD_ID}/actors`), () => ok({ people: PEOPLE, agents: [] })),
+    http.get(apiPath(`/boards/${BOARD_ID}/actors`), () =>
+      ok({ people: PEOPLE, agents: options.agents ?? [] }),
+    ),
+    http.get(apiPath(`/boards/${BOARD_ID}/discussions`), ({ request }) => {
+      const cardId = new URL(request.url).searchParams.get("card_id");
+      const items = (options.discussions ?? []).filter((thread) => thread.card_id === cardId);
+      return ok({ items, total: items.length });
+    }),
+    // A thread the options do not hold falls through to the next handler (a discussion's own).
+    http.get(apiPath(`/boards/${BOARD_ID}/discussions/:discussionId`), ({ params }) => {
+      const found = (options.discussions ?? []).find((thread) => thread.id === params.discussionId);
+      return found ? ok(found) : undefined;
+    }),
     http.get(apiPath(`/boards/${BOARD_ID}/activity`), () => ok(options.activity ?? [])),
     http.get(apiPath(`/boards/${BOARD_ID}/attachments`), () => ok([])),
     http.get(apiPath(`${CARD_PATH}/mentions`), () => ok([])),
