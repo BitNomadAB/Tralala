@@ -23,6 +23,7 @@ from app.db.generated.board import LoopGenerationRunsRow
 from app.schemas.loops import GenerationRequest
 from app.services.loop_documents import LoopDocumentService
 from app.services.loop_generation import LoopGenerationService
+from app.services.loop_generation_ask import repair_step
 from app.services.loop_generation_prompts import DEFAULT_CONTEXT_CHARS, REPOSITORY_TOOLS
 from app.services.loop_generation_runs import serialize_run
 from app.services.loop_generation_tools import (
@@ -44,6 +45,7 @@ from tests.unit.fakes.board import (
     BoardState,
     FakeBoardChecks,
     FakeBoardUnitOfWork,
+    approval_row,
     document_row,
     list_row,
     loop_row,
@@ -56,10 +58,14 @@ from tests.unit.test_loop_generation_service import (
     LOOP,
     MOMENT,
     SETTINGS,
+    TICKET,
+    TOO_MANY_STEPS,
     Boards,
     Ids,
     QaRecorder,
     Roles,
+    long_steps_roadmap,
+    roadmap,
 )
 
 SHA = "a" * 40
@@ -318,6 +324,7 @@ def test_the_model_reads_what_it_needs_and_the_run_keeps_the_tree(
         "searches": 1,
         "listings": 1,
         "repairs": 0,
+        "face_repairs": 0,
     }
     assert serialize_run(w.run())["trace"] == parse_steps(w.run().trace_json)
     (finished,) = [e for e in events(caplog.records) if e["event"] == "generation_run_finished"]
@@ -440,7 +447,42 @@ def test_an_answer_that_breaks_a_rule_is_repaired_inside_the_conversation() -> N
     assert last.tool_choice == "auto"
     assert last.messages[-2] == {"role": "assistant", "content": "not json"}
     assert last.messages[-1]["content"].startswith("That response did not validate.")
-    assert "The model wrote a corrected answer after 1 tool call" in w.texts()[-3]
+    assert "The model wrote a corrected answer after 1 tool call" in w.texts()[-4]
+    # The run says how many repairs it needed, the face's apart.
+    assert w.texts()[-2] == "Repairs: 1 (face: 0)"
+
+
+def test_a_face_repair_inside_the_conversation_is_logged_with_the_run(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    broken = json.dumps(long_steps_roadmap())
+    w = make([calls(tool("list_files", {})), answer(broken), answer(json.dumps(roadmap()))])
+    w.state.documents += [
+        document_row("ai-1", LOOP, "analysis_ai", info="info-1"),
+        document_row("an-1", LOOP, "analysis", analysis_ai="ai-1"),
+    ]
+    reviewed = {"info": "info-1", "analysis_ai": "ai-1", "analysis": "an-1"}
+    w.state.approvals = [
+        approval_row("appr-1", LOOP, "analysis", revisions_json=json.dumps(reviewed))
+    ]
+    request = GenerationRequest.model_validate({"purpose": "roadmap", "agent_id": "reader"})
+    with caplog.at_level(logging.INFO, logger="tralala.loop_generation"):
+        w.service.start(ADA, BOARD_ID, LOOP, request)
+    assert w.run().status == "completed"
+    assert w.provider.seen[-1].messages[-1]["content"].startswith(f"{TOO_MANY_STEPS}\n")
+    (repair,) = [step for step in w.steps() if step["kind"] == "repair"]
+    assert (repair["text"], repair["face"]) == (repair_step(TOO_MANY_STEPS), 1)
+    assert "Repairs: 1 (face: 1)" in w.texts()
+    (logged,) = [e for e in events(caplog.records) if e["event"] == "roadmap_face_repair"]
+    assert logged == {
+        "event": "roadmap_face_repair",
+        "loop_id": LOOP,
+        "run_id": "id-1",
+        "attempt": 1,
+        "ticket_id": TICKET,
+        "field": "steps",
+        "rule": "too_many",
+    }
 
 
 def test_cancelling_the_run_stops_the_reading() -> None:

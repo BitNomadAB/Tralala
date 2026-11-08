@@ -46,6 +46,13 @@ FACE_FIELDS: tuple[str, ...] = ("why", "if_skipped", "pros", "cons", "steps")
 # A refusal lists at most this many messages; the count says how many there were.
 FACE_MAX_ERRORS = 20
 FACE_INVALID = "face_invalid"
+# The one good and the one bad step every writer is shown: the RoadMap prompt (``FACE_RULE`` in
+# ``loop_generation_prompts``) and ``write_roadmap``'s description in the worker catalogue. The
+# good one keeps the template; the bad one names a code symbol in a file, which a step never does.
+FACE_STEP_GOOD = (
+    "Under each open question, put an answer field and a Go on without my answer button."
+)
+FACE_STEP_BAD = "Add QuestionList to BriefView.tsx."
 
 # A run of sentence ends followed by whitespace or the end of the text.
 _SENTENCE_END = re.compile(r"[.!?]+(?=\s|$)")
@@ -315,25 +322,38 @@ def plan_face_findings(payload: PlanPayload) -> list[FaceProblem]:
 class FaceRefusal(ValidationFailure):
     """``422 face_invalid``: every message (at most ``FACE_MAX_ERRORS``) in the details' ``errors``
     and the structured problems in ``faces``; the first five make the message. ``problems`` keeps
-    them all, typed, for a repair request or a log."""
+    them all, typed, for a repair request or a log.
 
-    def __init__(self, problems: Sequence[FaceProblem]) -> None:
+    ``others`` are the other problems a generation found in the same answer (a plan rule, an
+    unknown label), each as its text: they follow the face's messages in ``lines`` and sit under
+    ``other_errors`` in the details, so one repair round names everything and the face comes
+    first."""
+
+    def __init__(self, problems: Sequence[FaceProblem], others: Sequence[str] = ()) -> None:
         self.problems = tuple(problems)
+        self.others = tuple(others)
         messages = [problem.message for problem in self.problems]
         shown = messages[:FACE_MAX_ERRORS]
+        details: dict[str, object] = {
+            "errors": shown,
+            "error_count": len(messages),
+            "faces": [dict(problem.entry()) for problem in self.problems[:FACE_MAX_ERRORS]],
+        }
+        if self.others:
+            details["other_errors"] = list(self.others)
         super().__init__(
             "The face for people does not keep its template: " + " ".join(shown[:5]),
             code=FACE_INVALID,
-            details={
-                "errors": shown,
-                "error_count": len(messages),
-                "faces": [dict(problem.entry()) for problem in self.problems[:FACE_MAX_ERRORS]],
-            },
+            details=details,
         )
 
+    def messages(self) -> list[str]:
+        """Every message the model is told to fix: the face's first, then the other problems."""
+        return [*(problem.message for problem in self.problems[:FACE_MAX_ERRORS]), *self.others]
+
     def lines(self) -> str:
-        """Every message, one per line: what a model is told to fix."""
-        return "\n".join(problem.message for problem in self.problems[:FACE_MAX_ERRORS])
+        """``messages``, one per line."""
+        return "\n".join(self.messages())
 
 
 def refuse_face(problems: Sequence[FaceProblem]) -> None:
@@ -415,8 +435,11 @@ __all__ = [
     "FACE_MAX_STEPS",
     "FACE_MAX_SUMMARY_WORDS",
     "FACE_MIN_STEPS",
+    "FACE_STEP_BAD",
+    "FACE_STEP_GOOD",
     "FaceProblem",
     "FaceProblemEntry",
+    "FaceRefusal",
     "FaceView",
     "TicketFace",
     "code_symbol",

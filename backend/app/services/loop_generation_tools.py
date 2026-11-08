@@ -32,12 +32,10 @@ from ..repositories.board import BoardUnitOfWork
 from .loop_generation_ask import (
     MAX_REPAIRS,
     CompletionCall,
+    RunIds,
     call_failed,
-    gave_up,
-    invalid_outcome,
-    problem_of,
-    repair_request,
-    repair_step,
+    give_up,
+    repair_round,
 )
 from .loop_generation_prompts import JsonObject, context_labels, parse_output, user_message
 from .loop_generation_runs import MIRROR_FIELDS, Outcome, write_input
@@ -237,6 +235,7 @@ def read_and_answer(
     settings: object,
     limits: ReadingLimits,
     trace: RunTrace,
+    ids: RunIds | None = None,
 ) -> Outcome:
     """Let the model read until it answers, then check the answer like a single call's."""
     files = workspace.list_files()
@@ -258,6 +257,7 @@ def read_and_answer(
         trace=trace,
         messages=[{"role": "user", "content": request}],
         labels=context_labels(captured),
+        ids=ids,
     )
     return reading.run()
 
@@ -277,6 +277,8 @@ class _Reading:
     messages: list[ChatMessage]
     labels: tuple[str, ...] | None = None
     """The board's label names the run was given; a RoadMap names no other."""
+    ids: RunIds | None = None
+    """The run, for the log lines of its repair rounds."""
     usage: dict[str, int] = field(default_factory=dict[str, int])
     model: str | None = None
     calls_made: int = 0
@@ -389,13 +391,13 @@ class _Reading:
         try:
             payload = parse_output(self.purpose, text, labels=self.labels)
         except (ValueError, ValidationError, ValidationFailure) as exc:
+            attempt = self.repairs + 1
             if self.repairs >= MAX_REPAIRS:
-                note(self.trace, "checking", gave_up(exc), "error")
-                return invalid_outcome(exc)
+                return give_up(self.trace, exc, ids=self.ids, attempt=attempt)
             self.repairs += 1
-            self.trace.add("checking", "repair", repair_step(problem_of(exc)))
+            repair = repair_round(self.trace, exc, ids=self.ids, attempt=attempt)
             self.messages.append(assistant_message(text, []))
-            self.messages.append({"role": "user", "content": repair_request(problem_of(exc))})
+            self.messages.append({"role": "user", "content": repair["content"]})
             return None
         self.trace.add("checking", "step", "The answer follows the schema and the rules")
         return Outcome(payload=payload, usage=dict(self.usage) or None, model=self.model)

@@ -6,13 +6,17 @@ reads it. An answer that does not validate goes back to the model with what was 
 ``MAX_REPAIRS`` times. Every call, answer and repair is a step of the run's process tree
 (``loop_generation_trace``), so a person sees how the answer came about. The model that reads the
 repositories through tools asks through ``loop_generation_tools`` and shares the repair rules here.
+
+A RoadMap whose face for people breaks its template is told every problem first, one per line, each
+naming the Ticket, the field and the rule (``ticket_face``), and every problem of every round is a
+``roadmap_face_repair`` log line, so a model that keeps failing the template is visible.
 """
 
 from __future__ import annotations
 
-import json
+import logging
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Protocol
 
 from pydantic import ValidationError
@@ -24,6 +28,7 @@ from .loop_generation_prompts import (
     context_labels,
     parse_output,
     response_schema_for,
+    rule_text,
     user_message,
 )
 from .loop_generation_report import error_details
@@ -33,7 +38,21 @@ from .runtime import Completion, ResponseSchema
 from .runtime_tools import Message, ToolChoice, ToolDefinition
 from .ticket_face import FACE_INVALID, FaceRefusal
 
+logger = logging.getLogger("tralala.loop_generation")
+
 MAX_REPAIRS = 2
+FACE_REPAIR = (
+    "That response did not validate: each line above names a Ticket, the field and the rule it "
+    "breaks. Fix every line and return the corrected JSON object only."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RunIds:
+    """The run an answer belongs to, for the log lines of its repair rounds."""
+
+    loop_id: str
+    run_id: str
 
 
 class CompletionCall(Protocol):
@@ -71,8 +90,7 @@ def problem_of(exc: Exception) -> str:
     if isinstance(exc, FaceRefusal):
         return exc.lines()
     if isinstance(exc, ValidationFailure):
-        details = f" {json.dumps(dict(exc.details), default=str)}" if exc.details else ""
-        return f"{exc.message}{details}"
+        return rule_text(exc)
     return str(exc)
 
 
@@ -109,9 +127,64 @@ def repair_request(problem: str) -> str:
     )
 
 
-def repair_step(problem: str) -> str:
-    """The repair round as the process tree shows it."""
-    return f"The answer broke a rule: {clip(problem, 300)} \u2014 asked the model to fix it"
+def repair_step(problem: str, more: int = 0) -> str:
+    """The repair round as the process tree shows it: the first problem, and how many follow."""
+    also = f" (and {more} more)" if more else ""
+    return f"The answer broke a rule: {clip(problem, 300)}{also} \u2014 asked the model to fix it"
+
+
+def repair_message(exc: Exception) -> str:
+    """The repair request for ``exc``: a face that breaks its template is told by its messages
+    first, one per line, then what to do; anything else as ``repair_request`` says it."""
+    if isinstance(exc, FaceRefusal):
+        return f"{exc.lines()}\n{FACE_REPAIR}"
+    return repair_request(problem_of(exc))
+
+
+def log_face_problems(exc: Exception, ids: RunIds | None, attempt: int) -> int:
+    """One ``roadmap_face_repair`` line per face problem of the answer ``attempt`` (1 for the first
+    answer, 2 for the answer to the first repair, and so on); answers how many there were."""
+    if not isinstance(exc, FaceRefusal):
+        return 0
+    for problem in exc.problems:
+        logger.info(
+            "roadmap_face_repair",
+            extra={
+                "loop_id": ids.loop_id if ids else None,
+                "run_id": ids.run_id if ids else None,
+                "attempt": attempt,
+                "ticket_id": problem.ticket_id,
+                "field": problem.field,
+                "rule": problem.rule,
+            },
+        )
+    return len(exc.problems)
+
+
+def repair_round(
+    trace: RunTrace | None, exc: Exception, *, ids: RunIds | None, attempt: int
+) -> Message:
+    """One repair round for answer ``attempt``: its face problems logged, a repair step whose text
+    is the first problem (with how many face problems the round had), and the request to send."""
+    faces = log_face_problems(exc, ids, attempt)
+    if trace is not None:
+        if isinstance(exc, FaceRefusal):
+            messages = exc.messages()
+            step = repair_step(messages[0], len(messages) - 1)
+        else:
+            step = repair_step(problem_of(exc))
+        trace.add("checking", "repair", step, face=faces or None)
+    return {"role": "user", "content": repair_message(exc)}
+
+
+def give_up(
+    trace: RunTrace | None, exc: Exception, *, ids: RunIds | None, attempt: int
+) -> Outcome:
+    """The last answer still broke a rule: its face problems logged, the error step, the run's
+    failure."""
+    log_face_problems(exc, ids, attempt)
+    note(trace, "checking", gave_up(exc), kind="error")
+    return invalid_outcome(exc)
 
 
 def generate(
@@ -124,6 +197,7 @@ def generate(
     settings: object,
     context_chars: int,
     trace: RunTrace | None = None,
+    ids: RunIds | None = None,
 ) -> Outcome:
     """One call with the snapshot in the message, then up to ``MAX_REPAIRS`` repair rounds."""
     messages: list[Message] = [
@@ -154,10 +228,8 @@ def generate(
             return Outcome(payload=payload, usage=usage, model=model_name)
         except (ValueError, ValidationError, ValidationFailure) as exc:
             if attempt >= MAX_REPAIRS:
-                note(trace, "checking", gave_up(exc), kind="error")
-                return invalid_outcome(exc)
-            note(trace, "checking", repair_step(problem_of(exc)), kind="repair")
-            repair: Message = {"role": "user", "content": repair_request(problem_of(exc))}
+                return give_up(trace, exc, ids=ids, attempt=attempt + 1)
+            repair = repair_round(trace, exc, ids=ids, attempt=attempt + 1)
             outcome = call_completion(
                 settings,
                 asdict(agent),

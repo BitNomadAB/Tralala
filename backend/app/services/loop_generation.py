@@ -50,12 +50,14 @@ from .loop_generation_execute import CLOSED_LOOP_CODES, RunContext, execute_run
 from .loop_generation_prompts import (
     DEFAULT_CONTEXT_CHARS,
     FENCE,
+    MAX_FACE_EXAMPLES,
     MAX_OUTPUT_CHARS,
     PURPOSE_PROMPTS,
     SCHEMAS,
     SNAPSHOT_CAPS,
     JsonObject,
     compose_system_prompt,
+    face_examples,
     parse_output,
     response_schema_for,
     user_message,
@@ -360,6 +362,10 @@ class LoopGenerationService:
                 "source_revisions": source_revisions,
                 "agent": {"id": agent.id, "name": agent.name, "model": agent.model},
             }
+            if request.purpose == "roadmap":
+                # What the owner approved last steers the style; the run keeps what it was shown.
+                approved = repos.plan_items.approved_faces(MAX_FACE_EXAMPLES)
+                captured["face_examples"] = face_examples(approved)
             role = self._role_prompt(agent)
             prompt = self._system_prompt(request.purpose, agent)
             if idempotency_key:

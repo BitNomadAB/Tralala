@@ -113,6 +113,13 @@ class LoopPlanItemRepository(Protocol):
         published from it: one entry per card, and one without a card when there is none."""
         ...
 
+    def approved_faces(self, limit: int) -> list[LoopPlanItemsRow]:
+        """At most ``limit`` items of any Loop of the board that carry a face (``face`` is not
+        empty) and whose stored text is that of an approved RoadMap: the item's plan was published
+        under an approval. Newest approval first, then in plan order (Phase number, Ticket
+        sequence, key). A RoadMap run shows them as examples of a face."""
+        ...
+
 
 class LoopDependencyRepository(Protocol):
     def for_loop(self, loop_id: str) -> list[LoopDependenciesRow]:
