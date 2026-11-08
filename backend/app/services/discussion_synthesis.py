@@ -2,8 +2,9 @@
 
 Tralala computes the synthesis; no model writes it. It repeats only what named participants said
 (who is for going ahead and who is against, with each one's recommendation; the conditions of a yes;
-the open questions; who has not answered), and it suggests a verdict by fixed rules. It is labelled
-decision support and its verdict a suggestion: the person decides (rule 11a).
+the open questions; who has not answered), and it suggests a verdict by fixed rules, with a reason
+of one sentence of at most twenty words that names nobody. It is labelled decision support and its
+verdict a suggestion: the person decides (rule 11a).
 """
 
 from __future__ import annotations
@@ -121,17 +122,30 @@ def _points(entries: list[tuple[str, str]]) -> list[Point]:
     return list(points.values())[:LIST_LIMIT]
 
 
-def _names(stances: list[Stance]) -> str:
-    names = [stance["participant"] for stance in stances]
-    if len(names) <= 1:
-        return "".join(names)
-    return ", ".join(names[:-1]) + " and " + names[-1]
+def _counted(go: int, stop: int, unclear: int, missing: int) -> str:
+    """How many stand where, in one clause: ``1 for going ahead, 1 against and 2 cannot tell``."""
+    parts: list[str] = []
+    if go:
+        parts.append(f"{go} for going ahead")
+    if stop:
+        parts.append(f"{stop} against")
+    if unclear:
+        parts.append(f"{unclear} cannot tell")
+    if missing:
+        parts.append(f"{missing} {'has' if missing == 1 else 'have'} not answered")
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
 def suggest(
     go: list[Stance], stop: list[Stance], unclear: list[Stance], missing: list[str]
 ) -> Suggestion:
-    """The verdict the answers point to, by fixed rules, with the reason; never a decision."""
+    """The verdict the answers point to, by fixed rules, with the reason; never a decision.
+
+    The reason is the sign's sentence: one sentence of at most ``RECOMMENDATION_WORDS`` words on
+    every branch. It counts who stands where and names nobody; who cannot tell and who is missing
+    are shown from ``unclear`` and ``missing``."""
     if not go and not stop and not unclear:
         return {"verdict": "unclear", "reason": "Nobody has answered in the standard form yet."}
     if go and not stop and not unclear and not missing:
@@ -144,17 +158,12 @@ def suggest(
         }
     if stop and not go and not unclear and not missing:
         return {"verdict": "no", "reason": "Every participant advises against going ahead."}
-    clauses: list[str] = []
-    if go and stop:
-        clauses.append(f"The participants differ: {len(go)} for going ahead, {len(stop)} against.")
-    if unclear:
-        clauses.append(f"{_names(unclear)} cannot tell yet; read the open questions.")
-    if missing:
-        clauses.append(f"No answer yet from {', '.join(missing)}.")
-    if not clauses:
-        side = "for going ahead" if go else "against"
-        clauses.append(f"Only part of the thread has answered; those who did are {side}.")
-    return {"verdict": "unclear", "reason": " ".join(clauses)}
+    split = bool(go and stop)
+    lead = "The participants differ" if split else "Not settled yet"
+    counted = _counted(len(go), len(stop), len(unclear), len(missing))
+    # A split already fills the sentence; the hint to the open questions fits only without one.
+    tail = "; read the open questions" if unclear and not split else ""
+    return {"verdict": "unclear", "reason": f"{lead}: {counted}{tail}."}
 
 
 def synthesize(

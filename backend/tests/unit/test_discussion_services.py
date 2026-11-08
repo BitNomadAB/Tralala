@@ -593,7 +593,7 @@ def test_each_round_stores_its_synthesis_and_the_thread_answers_the_newest() -> 
     w.runs.start(ADA, BOARD_ID, THREAD, rounds=2, background=False)
     first, second = w.state.rounds
     assert json.loads(first.synthesis_json)["suggestion"]["reason"] == (
-        "The participants differ: 1 for going ahead, 1 against."
+        "The participants differ: 1 for going ahead and 1 against."
     )
     assert json.loads(second.synthesis_json)["thread_round"] == 2
     detail = w.discussions.get(BOARD_ID, THREAD)
@@ -602,7 +602,7 @@ def test_each_round_stores_its_synthesis_and_the_thread_answers_the_newest() -> 
     assert synthesis["round_id"] == second.id
     assert synthesis["suggestion"] == {
         "verdict": "unclear",
-        "reason": "Beta cannot tell yet; read the open questions.",
+        "reason": "Not settled yet: 1 for going ahead and 1 cannot tell; read the open questions.",
     }
     stances = entries(detail["positions"])
     assert [(s["participant"], s["position"]) for s in stances] == [

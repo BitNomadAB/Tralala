@@ -28,7 +28,7 @@ from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.registry import RegistryUnitOfWork
 from . import runtime
 from .discussion_answers import GO, answer_instructions, answer_line, read_answer
-from .discussion_ask import AnswerCall, ask_participant
+from .discussion_ask import AnswerCall, AnswerFor, ask_participant
 from .discussion_ask import usage_tokens as usage_tokens  # mentions and the tests read it here
 from .events import (
     AGENT_COMPLETED,
@@ -266,6 +266,7 @@ class Orchestrator:
                 asdict(agent),
                 system_prompt=participant.system_prompt,
                 messages=messages,
+                about=AnswerFor(discussion_id, participant.participant_id, round_number),
             )
             duration_ms = int((self._monotonic() - call_started) * 1000)
             if not asked["ok"]:
