@@ -38,12 +38,12 @@ describe("the Ticket's rail", () => {
 
   it("gives the Ticket to a person and back to nobody", async () => {
     const { view, user } = await renderTicket();
-    await user.click(await screen.findByRole("button", { name: "Owner: Nobody" }));
+    await user.click(await screen.findByRole("button", { name: "Owner: None" }));
     await user.click(await screen.findByRole("option", { name: "Grace Hopper" }));
     const owner = await screen.findByRole("button", { name: "Owner: Grace Hopper" });
     await user.click(owner);
     await user.click(screen.getByRole("option", { name: "Nobody" }));
-    await screen.findByRole("button", { name: "Owner: Nobody" });
+    await screen.findByRole("button", { name: "Owner: None" });
     expect(writes(view)).toEqual([
       { route: `PATCH ${CARD_PATH}`, body: { version: 3, assignee_actor_id: "user-2" } },
       { route: `PATCH ${CARD_PATH}`, body: { version: 4, clear_assignee: true } },

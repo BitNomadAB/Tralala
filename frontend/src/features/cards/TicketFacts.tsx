@@ -56,7 +56,7 @@ export function TicketFacts({
     <Facts>
       <EditableFact
         label="Owner"
-        valueText={card.assignee_name ?? "Nobody"}
+        valueText={card.assignee_name ?? "None"}
         none={card.assignee_actor_id === null}
         readOnly={readOnly}
         editor={(done) => (
@@ -71,8 +71,12 @@ export function TicketFacts({
           />
         )}
       >
-        <Avatar name={card.assignee_name ?? "?"} size="sm" />
-        {card.assignee_name}
+        {card.assignee_name ? (
+          <>
+            <Avatar name={card.assignee_name} size="sm" />
+            {card.assignee_name}
+          </>
+        ) : null}
       </EditableFact>
 
       <Fact label="Phase" none={card.phase_number === null}>

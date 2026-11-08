@@ -64,13 +64,14 @@ export function dependencies(card: Card, readiness: LoopReadiness | undefined): 
   });
 }
 
-/** What follows the state word: "nothing holds it up", or what it waits for and why. */
+/**
+ * What follows the state word: "nothing holds it up", or what it waits for. A set wait names only
+ * its kind here; the wait block under the state line shows the reason, who set it and the way to
+ * clear it, so the reason is on screen once.
+ */
 export function stateReason(card: Card): string {
   const kind = WAITS.find((wait) => wait === card.waiting_for);
-  if (kind) {
-    const what = `waits for ${WAIT_LABELS[kind].toLowerCase()}`;
-    return card.waiting_reason ? `${what}: ${card.waiting_reason}` : what;
-  }
+  if (kind) return `waits for ${WAIT_LABELS[kind].toLowerCase()}`;
   if (!card.ready && card.blockers.length > 0) {
     const names = card.blockers.map((blocker) =>
       blocker.type === "phase"

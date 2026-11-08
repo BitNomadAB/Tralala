@@ -86,6 +86,18 @@ export const ROADMAP = {
           acceptance_criteria: ["A session idle for 31 minutes is refused"],
           workplace: "codebase",
           labels: ["Development"],
+          why: "An idle session stays valid for hours today. Anyone at the screen can go on in another person's name.",
+          if_skipped:
+            "Idle sessions keep working until they run out. The timeout exists only on paper.",
+          pros: [
+            "Idle sessions end by themselves.",
+            "The same guard that runs today does the work.",
+          ],
+          cons: ["A person who pauses for half an hour signs in again."],
+          steps: [
+            "End a session that has been idle for more than thirty minutes.",
+            "Tell the person on their next click that the session ended because it was idle.",
+          ],
         },
         {
           id: "t3",
@@ -95,6 +107,14 @@ export const ROADMAP = {
           waiting_for: "information",
           waiting_reason: WAITING_REASON,
           labels: ["UX"],
+          why: "The warning before a timeout looks different in every browser. Nobody has said which ones count.",
+          if_skipped: "The warning is built for one browser and breaks in the others.",
+          pros: ["Everyone builds against the same list."],
+          cons: ["The list has to be kept up to date."],
+          steps: [
+            "Agree the list of browsers the warning must support.",
+            "Write the list down in the Loop.",
+          ],
         },
       ],
     },
@@ -111,6 +131,14 @@ export const ROADMAP = {
           prerequisite_ticket_ids: ["t1"],
           workplace: "outside",
           labels: ["Communication"],
+          why: "People who are signed out without warning think something broke.",
+          if_skipped: "Support gets the questions the announcement would have answered.",
+          pros: ["One message reaches everyone before the change."],
+          cons: ["The message has to go out before the check is switched on."],
+          steps: [
+            "Write the announcement about the idle timeout.",
+            "Send it to everyone who signs in.",
+          ],
         },
       ],
     },

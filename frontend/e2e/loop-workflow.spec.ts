@@ -75,6 +75,16 @@ test.describe("loop planning and completion", () => {
                   title: "Add verification columns",
                   instructions: "Add the columns and a migration.",
                   acceptance_criteria: ["columns exist"],
+                  summary: "The database remembers whether a sign-in address was verified.",
+                  why: "Nothing records a verified address today. Without it every sign-in trusts the address.",
+                  if_skipped:
+                    "Unverified addresses keep signing in. The check has nowhere to store its result.",
+                  pros: ["One place holds the verification state."],
+                  cons: ["Existing accounts start as unverified."],
+                  steps: [
+                    "Add a verified mark and a verified date to every account.",
+                    "Show the mark on the account page.",
+                  ],
                 },
               ],
             },

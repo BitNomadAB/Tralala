@@ -39,7 +39,7 @@ describe("the Ticket over the Kanban", () => {
     const rail = within(modal).getByRole("complementary", { name: "Status and details" });
     expect(within(rail).getByRole("button", { name: "Column: Backlog" })).toBeInTheDocument();
     expect(rail).toHaveTextContent("Ready· nothing holds it up");
-    expect(within(rail).getByRole("button", { name: "Owner: Nobody" })).toBeInTheDocument();
+    expect(within(rail).getByRole("button", { name: "Owner: None" })).toBeInTheDocument();
     expect(rail).toHaveTextContent("Created");
     expect(rail).toHaveTextContent("from the RoadMap");
     expect(within(rail).getByText("More")).toBeInTheDocument();

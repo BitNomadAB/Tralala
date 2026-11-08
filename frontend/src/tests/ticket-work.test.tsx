@@ -75,7 +75,7 @@ describe("where a Ticket's work is done and what it waits for", () => {
   it("shows a wait with its kind, its reason, who set it and when", async () => {
     const { section } = await renderSection(ticketCard(DECISION));
     expect(within(section).getByText("Needs input")).toBeInTheDocument();
-    expect(section).toHaveTextContent("· waits for a decision: Which key store do we use?");
+    expect(section).toHaveTextContent("· waits for a decision");
     expect(section).toHaveTextContent("Waits for: A decision");
     expect(section).toHaveTextContent("Which key store do we use?");
     expect(section).toHaveTextContent(`Set by ${PERSON_ID}`);
