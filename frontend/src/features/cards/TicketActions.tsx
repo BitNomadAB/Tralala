@@ -9,8 +9,8 @@ export type PrimaryAction =
 
 /**
  * The actions row under the title: one primary decision (Start work, or Mark complete), then Mark
- * as waiting, Comment, Add file, and a quiet "more" with Copy link, Mark incomplete for a completed
- * Ticket, and Archive.
+ * as waiting, Comment, Add file, and a quiet "more" with Copy link, Ask the agents, Mark
+ * incomplete for a completed Ticket, and Archive. A read-only Ticket keeps Comment and Copy link.
  */
 export function TicketActions({
   primary,
@@ -22,6 +22,7 @@ export function TicketActions({
   onComment,
   onAddFile,
   onCopyLink,
+  onAsk,
   onReopen,
   onArchive,
 }: {
@@ -34,6 +35,7 @@ export function TicketActions({
   onComment: () => void;
   onAddFile: () => void;
   onCopyLink: () => void;
+  onAsk: () => void;
   onReopen: () => void;
   onArchive: () => void;
 }) {
@@ -76,6 +78,7 @@ export function TicketActions({
       <MoreMenu
         items={[
           { label: "Copy link", onSelect: onCopyLink },
+          ...(readOnly ? [] : [{ label: "Ask the agents", onSelect: onAsk }]),
           ...(completed && !readOnly ? [{ label: "Mark incomplete", onSelect: onReopen }] : []),
           ...(readOnly ? [] : [{ label: "Archive", onSelect: onArchive }]),
         ]}

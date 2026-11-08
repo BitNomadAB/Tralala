@@ -49,6 +49,13 @@ export interface BoardPerson {
   role: string;
 }
 
+/** An agent a person may ask on this board (`GET /boards/{id}/actors`, `agents`). */
+export interface AskableAgent {
+  id: string;
+  name: string;
+  role_template_name: string | null;
+}
+
 export interface Label {
   id: string;
   name: string;

@@ -31,6 +31,51 @@ export function Chip({
   );
 }
 
+/**
+ * A chip that is a checkbox: its label and a faint `detail` after it ("Alpha Product Owner").
+ * The box stays visible, so the choice reads without colour; a checked chip is outlined in the
+ * primary colour.
+ */
+export function CheckChip({
+  checked,
+  onChange,
+  label,
+  detail,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: ReactNode;
+  detail?: ReactNode;
+  disabled?: boolean | undefined;
+}) {
+  return (
+    <label
+      className={cn(
+        "inline-flex cursor-pointer items-center gap-2 rounded-full border px-2.5 py-1 text-[13px] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)] has-[:disabled]:cursor-default has-[:disabled]:opacity-50",
+        checked
+          ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]"
+          : "border-[var(--border)]",
+      )}
+    >
+      <input
+        type="checkbox"
+        className="size-3.5 accent-[var(--primary)] focus-visible:outline-none"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="font-medium text-[var(--foreground)]">{label}</span>
+      {detail === undefined ? null : (
+        <>
+          {/* The space keeps the accessible name "Alpha Product Owner", not "AlphaProduct Owner". */}{" "}
+          <span className="text-[var(--muted-foreground)]">{detail}</span>
+        </>
+      )}
+    </label>
+  );
+}
+
 /** `neutral` is a state that asks nothing of anyone (paused, cancelled, no answer yet). */
 export type MarkTone = "success" | "warning" | "danger" | "neutral";
 

@@ -8,7 +8,7 @@ import { AuthContext } from "@/features/auth/useAuth";
 import { TicketPage } from "@/features/cards/TicketPage";
 import { DiscussionPage } from "@/features/discussions/DiscussionPage";
 import { LoopPage } from "@/features/loops/LoopPage";
-import type { Discussion, DiscussionEvent } from "@/lib/types";
+import type { AskableAgent, Discussion, DiscussionEvent } from "@/lib/types";
 import { LocationProbe } from "./LocationProbe";
 import { ticketCard } from "./msw/cards";
 import { runHandlers } from "./msw/discussionRuns";
@@ -17,6 +17,7 @@ import { apiPath, ok } from "./msw/envelope";
 import { BOARD_ID, LOOP_ID, LOOP_PATH, planningDialogHandlers } from "./msw/loops";
 import { server } from "./msw/server";
 import { MEMBER } from "./msw/session";
+import { createHandler } from "./msw/ticketDiscussions";
 import { ticketViewHandlers } from "./msw/ticketView";
 
 export const LOOP_URL = `/boards/${BOARD_ID}/loops/${LOOP_ID}`;
@@ -29,17 +30,20 @@ export const PAGE_URL = `${TICKET_PAGE_URL}/discussions/${DISCUSSION_ID}`;
  * page inside the Ticket's dialog (`MODAL_URL`), or as a page of its Ticket (`PAGE_URL`), signed in
  * as the member with the CSRF cookie set. The Ticket, its page and the Loop page are answered too,
  * so Back to the Ticket and Close can be followed; `events` is what the event history replays.
- * Resolves once the question is on screen.
+ * `ticket.agents` are the agents the board may ask; creating a discussion answers `thread` too.
+ * Resolves once the question (or `ticket.heading`, when the URL opens the Ticket) is on screen.
  */
 export async function renderDiscussion(
   thread: Discussion = discussion(),
   url = MODAL_URL,
   events: DiscussionEvent[] = [],
+  ticket: { agents?: AskableAgent[]; heading?: string } = {},
 ) {
   const api = discussionHandlers(thread);
   api.state.events = events;
-  const ticket = ticketViewHandlers(ticketCard());
+  const view = ticketViewHandlers(ticketCard(), { agents: ticket.agents ?? [] });
   server.use(
+    createHandler(api.state),
     ...api.handlers,
     ...runHandlers(api.state),
     http.get(apiPath(`/boards/${BOARD_ID}/loop-summaries`), () =>
@@ -47,7 +51,7 @@ export async function renderDiscussion(
     ),
     http.get(apiPath(`${LOOP_PATH}/cards`), () => ok([])),
     http.get(apiPath(`${LOOP_PATH}/notes`), () => ok({ notes: [], count: 0 })),
-    ...ticket.handlers,
+    ...view.handlers,
     ...planningDialogHandlers().handlers,
   );
   document.cookie = "tralala_csrf=csrf-discussion";
@@ -85,6 +89,6 @@ export async function renderDiscussion(
       </AuthContext.Provider>
     </QueryClientProvider>,
   );
-  await screen.findByRole("heading", { name: thread.goal || QUESTION });
+  await screen.findByRole("heading", { name: ticket.heading ?? (thread.goal || QUESTION) });
   return { api, user };
 }

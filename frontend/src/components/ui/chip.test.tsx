@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it } from "vitest";
-import { Chip, StateChip, ToneMark } from "./chip";
+import { CheckChip, Chip, StateChip, ToneMark } from "./chip";
 
 describe("Chip", () => {
   it("shows its text with the trailing mark after it", () => {
@@ -58,5 +60,30 @@ describe("ToneMark", () => {
     expect(screen.getByText("Yes")).toBeInTheDocument();
     const dot = container.querySelector('[aria-hidden="true"]');
     expect(dot?.className).toContain(`bg-[var(${colour})]`);
+  });
+});
+
+function Choice({ initial }: { initial: boolean }) {
+  const [checked, setChecked] = useState(initial);
+  return <CheckChip checked={checked} onChange={setChecked} label="Alpha" detail="Product Owner" />;
+}
+
+describe("CheckChip", () => {
+  it("is a checkbox named by its label and detail, and toggles", async () => {
+    const user = userEvent.setup();
+    render(<Choice initial />);
+    const box = screen.getByRole("checkbox", { name: "Alpha Product Owner" });
+    expect(box).toBeChecked();
+    await user.click(screen.getByText("Alpha"));
+    expect(box).not.toBeChecked();
+  });
+
+  it("does not toggle while disabled", async () => {
+    const user = userEvent.setup();
+    render(<CheckChip checked={false} onChange={() => undefined} label="Beta" disabled />);
+    const box = screen.getByRole("checkbox", { name: "Beta" });
+    await user.click(box);
+    expect(box).toBeDisabled();
+    expect(box).not.toBeChecked();
   });
 });

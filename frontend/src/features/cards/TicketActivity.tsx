@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Section } from "@/components/ui/section";
 import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
@@ -7,8 +8,10 @@ import type { ActivityEntry, CardDetail } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { CardComments } from "./CardComments";
 import { CardHistory } from "./CardHistory";
+import { TicketDiscussions } from "./TicketDiscussions";
 import { completionComments } from "./ticketText";
 import type { useCardComments } from "./useCardComments";
+import type { TicketDiscussions as TicketDiscussionsState } from "./useTicketDiscussions";
 
 /**
  * "Work": what a coding session recorded on the Ticket: the summary it wrote, the completion
@@ -70,12 +73,15 @@ function TicketWork({
   );
 }
 
-export type ActivityTab = "comments" | "history" | "work";
+export type ActivityTab = "comments" | "discussions" | "history" | "work";
+
+const TABS: readonly ActivityTab[] = ["comments", "discussions", "history", "work"];
 
 /**
- * "Activity": the Ticket's comments (live, with the composer), its history as event rows, and the
- * work a coding session recorded, as tabs. The composer stays mounted while another tab shows, so
- * the head's Comment can focus it once the Comments tab is back.
+ * "Activity": the Ticket's comments (live, with the composer), its discussions with their count,
+ * its history as event rows, and the work a coding session recorded, as tabs; "Ask the agents"
+ * in the header (`onAsk`, absent on a read-only Ticket). The composer stays mounted while another
+ * tab shows, so the head's Comment can focus it once the Comments tab is back.
  */
 export function TicketActivity({
   card,
@@ -83,6 +89,9 @@ export function TicketActivity({
   comments,
   history,
   nameOf,
+  discussions,
+  discussionHref,
+  onAsk,
   tab,
   onTabChange,
   ticketHref,
@@ -92,6 +101,10 @@ export function TicketActivity({
   comments: ReturnType<typeof useCardComments>;
   history: readonly ActivityEntry[];
   nameOf: (actorId: string) => string | null;
+  discussions: TicketDiscussionsState;
+  /** Where a discussion's row leads: the Ticket's dialog or the discussion's page. */
+  discussionHref: (discussionId: string) => string;
+  onAsk: (() => void) | undefined;
   /** The tab shown; the view owns it, so its Comment action can switch back to Comments. */
   tab?: ActivityTab | undefined;
   onTabChange?: ((tab: ActivityTab) => void) | undefined;
@@ -100,15 +113,35 @@ export function TicketActivity({
   const [own, setOwn] = useState<ActivityTab>("comments");
   const shown = tab ?? own;
   const change = (next: string) => {
-    const value: ActivityTab = next === "history" || next === "work" ? next : "comments";
+    const value = TABS.find((name) => name === next) ?? "comments";
     setOwn(value);
     onTabChange?.(value);
   };
   return (
-    <Section title="Activity">
+    <Section
+      title="Activity"
+      trailing={
+        onAsk ? (
+          <Button variant="secondary" size="sm" onClick={onAsk}>
+            Ask the agents
+          </Button>
+        ) : null
+      }
+    >
       <Tabs value={shown} onChange={change}>
         <TabList label="Activity">
           <Tab value="comments">Comments</Tab>
+          <Tab value="discussions">
+            Discussions
+            {discussions.count === undefined ? null : (
+              <>
+                {/* The space keeps the accessible name "Discussions 2". */}{" "}
+                <span className="ml-1 tabular-nums text-[var(--foreground-faint)]">
+                  {discussions.count}
+                </span>
+              </>
+            )}
+          </Tab>
           <Tab value="history">History</Tab>
           <Tab value="work">Work</Tab>
         </TabList>
@@ -129,6 +162,9 @@ export function TicketActivity({
             commentField={comments.commentField}
             onSubmitComment={(content) => comments.addComment.mutate(content)}
           />
+        </TabPanel>
+        <TabPanel value="discussions">
+          <TicketDiscussions discussions={discussions} hrefFor={discussionHref} onAsk={onAsk} />
         </TabPanel>
         <TabPanel value="history">
           <CardHistory entries={history} nameOf={nameOf} />

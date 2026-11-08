@@ -1,4 +1,5 @@
 import type {
+  AskableAgent,
   Board,
   BoardPerson,
   HistoryDetail,
@@ -96,6 +97,12 @@ export const boardsApi = {
   async listBoardPeople(boardId: string): Promise<BoardPerson[]> {
     const actors = json(await request<{ people: BoardPerson[] }>(`/boards/${boardId}/actors`));
     return actors.people;
+  },
+
+  /** The agents a person may ask on this board: its selection, or every board profile. */
+  async listAskableAgents(boardId: string): Promise<AskableAgent[]> {
+    const actors = json(await request<{ agents: AskableAgent[] }>(`/boards/${boardId}/actors`));
+    return actors.agents;
   },
 
   async listLabels(boardId: string): Promise<Label[]> {

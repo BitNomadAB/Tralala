@@ -1,7 +1,10 @@
 import { useRef, useState, type ReactElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "@/components/ui/useToast";
 import { useAuth } from "@/features/auth/useAuth";
+import { AskAgentsDialog } from "@/features/discussions/AskAgentsDialog";
+import { ticketDiscussionPath } from "@/features/discussions/inboxRules";
 import { describeError } from "@/lib/describeError";
 import type { MarkdownOptions } from "@/lib/markdown";
 import type { CardDetail } from "@/lib/types";
@@ -18,6 +21,7 @@ import { useCardChecklists } from "./useCardChecklists";
 import { useCardComments } from "./useCardComments";
 import { useTicketActions } from "./useTicketActions";
 import { useTicketData } from "./useTicketData";
+import { useTicketDiscussions } from "./useTicketDiscussions";
 
 /**
  * One Ticket, the same tree over the Kanban (`TicketModal`) and on its own page (`TicketPage`):
@@ -110,7 +114,11 @@ export function TicketView({
   );
 }
 
-/** The view once the card has loaded: the head, the main column and the rail. */
+/**
+ * The view once the card has loaded: the head, the main column and the rail, and "Ask the agents"
+ * (from Activity's header or the actions' More), which opens the new discussion where the Ticket
+ * is shown: in the dialog over the Kanban, or as a page of the Ticket.
+ */
 function TicketLayout({
   boardId,
   loopId,
@@ -139,9 +147,19 @@ function TicketLayout({
   checklists: ReactNode;
 }) {
   const toast = useToast();
+  const navigate = useNavigate();
   const picker = useRef<HTMLInputElement | null>(null);
   const [waitOpen, setWaitOpen] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [activityTab, setActivityTab] = useState<ActivityTab>("comments");
+  const discussions = useTicketDiscussions(boardId, card.id, activityTab === "discussions");
+  const discussionHref = (discussionId: string) =>
+    ticketDiscussionPath(modal ? "modal" : "page", boardId, loopId, card.id, discussionId);
+  const onAsk = data.readOnly
+    ? undefined
+    : () => {
+        setAsking(true);
+      };
   const actions = useTicketActions({
     boardId,
     loopId,
@@ -210,6 +228,7 @@ function TicketLayout({
             }}
             onAddFile={() => picker.current?.click()}
             onCopyLink={copyLink}
+            onAsk={() => setAsking(true)}
             onReopen={() => void actions.setCompleted(false)}
             onArchive={actions.archive}
           />
@@ -233,6 +252,9 @@ function TicketLayout({
             live={data.live}
             comments={comments}
             history={data.history}
+            discussions={discussions}
+            discussionHref={discussionHref}
+            onAsk={onAsk}
             readiness={data.readiness}
             people={data.people}
             ticketHref={ticketHref}
@@ -260,6 +282,17 @@ function TicketLayout({
           />
         </div>
       </div>
+      <AskAgentsDialog
+        key={asking ? "open" : "closed"}
+        open={asking}
+        boardId={boardId}
+        cardId={card.id}
+        onClose={() => setAsking(false)}
+        onAsked={(discussionId) => {
+          setAsking(false);
+          void navigate(discussionHref(discussionId));
+        }}
+      />
     </div>
   );
 }

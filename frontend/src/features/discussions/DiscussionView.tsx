@@ -41,8 +41,8 @@ const VIEWS = [
   { value: "raw", label: "Raw text" },
 ] as const;
 
-/** Where the view is shown: over the Kanban, as a page of its Ticket, or on the Discussions page. */
-export type DiscussionHost = "modal" | "page" | "inline";
+/** Where the view is shown: over the Kanban in the Ticket's dialog, or as a page of its Ticket. */
+export type DiscussionHost = "modal" | "page";
 
 /**
  * One discussion, the Ticket view's shape: the head with the question, the sign and the

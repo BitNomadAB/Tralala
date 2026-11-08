@@ -12,6 +12,7 @@ import { TicketNotes } from "./TicketNotes";
 import { TicketRaw } from "./TicketRaw";
 import type { useCardComments } from "./useCardComments";
 import { useFaceEdit } from "./useFaceEdit";
+import type { TicketDiscussions } from "./useTicketDiscussions";
 
 type View = "you" | "raw";
 
@@ -39,6 +40,9 @@ export function TicketBody({
   live,
   comments,
   history,
+  discussions,
+  discussionHref,
+  onAsk,
   readiness,
   people,
   ticketHref,
@@ -58,6 +62,10 @@ export function TicketBody({
   live: boolean;
   comments: ReturnType<typeof useCardComments>;
   history: ActivityEntry[];
+  discussions: TicketDiscussions;
+  discussionHref: (discussionId: string) => string;
+  /** Opens "Ask the agents"; absent on a read-only Ticket. */
+  onAsk: (() => void) | undefined;
   readiness: LoopReadiness | undefined;
   people: readonly BoardPerson[];
   ticketHref?: MarkdownOptions["ticketHref"];
@@ -166,6 +174,9 @@ export function TicketBody({
         comments={comments}
         history={history}
         nameOf={(id) => names.get(id) ?? null}
+        discussions={discussions}
+        discussionHref={discussionHref}
+        onAsk={onAsk}
         tab={activityTab}
         onTabChange={onActivityTabChange}
         ticketHref={ticketHref}
