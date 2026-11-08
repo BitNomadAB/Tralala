@@ -217,6 +217,8 @@ class DiscussionOut(OutModel):
     last_activity_at: str
     participant_count: int = 0
     message_count: int = 0
+    # Who recorded the newest outcome (approve, veto or rework); null before any decision.
+    decided_by_name: str | None = None
     # Set on a message response: started, already_running, thread_closed or no_participants.
     auto_run: str | None = None
     participants: list[DiscussionParticipantOut] = Field(
@@ -237,17 +239,49 @@ class DiscussionListOut(OutModel):
     total: int
 
 
-class DiscussionBoardOut(OutModel):
-    """One entrance in the Discussions board list, ordered by the newest thread activity."""
+class DiscussionInboxCountsOut(OutModel):
+    """How the newest round's answers stand; before a round every participant is missing."""
 
+    go: int = 0
+    stop: int = 0
+    unclear: int = 0
+    missing: int = 0
+
+
+class DiscussionInboxRowOut(OutModel):
+    """One thread in the Discussions inbox, on any board the person may read.
+
+    ``waits_for``: ``your_decision`` (no run active and not decided), ``agents`` (a run is running
+    or paused) or ``nobody`` (approved, vetoed or rework requested). ``verdict`` is the newest
+    round's suggested verdict, null before a round.
+    """
+
+    discussion_id: str
     board_id: str
     board_name: str
+    loop_id: str | None = None
+    loop_key: str | None = None
+    loop_name: str | None = None
+    card_id: str | None = None
+    ticket_key: str | None = None
+    card_title: str | None = None
+    question: str
     status: str
-    discussion_count: int = 0
-    open_count: int = 0
-    last_activity_at: str | None = None
+    run_state: str = "idle"
+    verdict: str | None = None
+    counts: DiscussionInboxCountsOut
+    participant_count: int = 0
+    round_count: int = 0
+    max_rounds: int
+    asked_by_name: str
+    last_activity_at: str
+    decided_by_name: str | None = None
+    waits_for: str
 
 
-class DiscussionBoardListOut(OutModel):
-    items: list[DiscussionBoardOut]
+class DiscussionInboxOut(OutModel):
+    """At most 200 rows: those that wait for a decision, then those the agents are talking in,
+    then the decided ones, each newest activity first; ``total`` counts every row."""
+
+    items: list[DiscussionInboxRowOut]
     total: int

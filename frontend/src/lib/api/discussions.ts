@@ -1,14 +1,23 @@
-import type { Discussion, DiscussionBoard, DiscussionRun, DiscussionRunSummary } from "../types";
+import type { Discussion, DiscussionInbox, DiscussionRun, DiscussionRunSummary } from "../types";
 import { json, request } from "./client";
 
 /** Ticket-bound discussions and their runs. */
 export const discussionsApi = {
-  async listDiscussionBoards(): Promise<DiscussionBoard[]> {
-    return json(await request<{ items: DiscussionBoard[] }>("/discussions/overview")).items;
+  /** Every board's threads that are not cancelled, grouped by who they wait for. */
+  async discussionInbox(): Promise<DiscussionInbox> {
+    return json(await request<DiscussionInbox>("/discussions/inbox"));
   },
 
   async listDiscussions(boardId: string): Promise<Discussion[]> {
     return json(await request<{ items: Discussion[] }>(`/boards/${boardId}/discussions`)).items;
+  },
+
+  /** One Ticket's threads, newest activity first: the Ticket's Discussions tab. */
+  async listTicketDiscussions(boardId: string, cardId: string): Promise<Discussion[]> {
+    const query = new URLSearchParams({ card_id: cardId });
+    return json(
+      await request<{ items: Discussion[] }>(`/boards/${boardId}/discussions?${query.toString()}`),
+    ).items;
   },
 
   async getDiscussion(boardId: string, discussionId: string): Promise<Discussion> {

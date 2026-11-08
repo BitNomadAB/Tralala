@@ -1,105 +1,82 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
-import { api } from "@/lib/api";
-import { keys, useAgents } from "@/lib/queries";
-import { DiscussionList } from "./DiscussionList";
-import { DiscussionView } from "./DiscussionView";
-import { NewDiscussionDialog } from "./NewDiscussionDialog";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Section } from "@/components/ui/section";
+import { describeError } from "@/lib/describeError";
+import { useDiscussionInbox } from "@/lib/queries";
+import type { DiscussionInboxRow } from "@/lib/types";
+import { DiscussionRows, type DiscussionRowItem } from "./DiscussionRows";
+import { INBOX_GROUPS, inboxAside, inboxMark, inboxMeta, inboxPath } from "./discussionRules";
+
+type InboxItem = DiscussionRowItem & { row: DiscussionInboxRow };
+
+function item(row: DiscussionInboxRow): InboxItem {
+  return {
+    id: `${row.board_id}/${row.discussion_id}`,
+    mark: inboxMark(row),
+    question: row.question,
+    aside: inboxAside(row),
+    meta: inboxMeta(row),
+    row,
+  };
+}
 
 /**
- * The Discussions page: the boards with discussions, a board's threads, and the selected thread in
- * the same view a Ticket shows it in. The view follows the thread's events and refreshes the list.
+ * The Discussions page is an inbox across every board the person may read: what waits for their
+ * decision, where the agents are talking, and what was decided. A row opens the discussion as a
+ * page of its Ticket. The inbox refetches every 30 s while visible and when a discussion's events
+ * arrive; a discussion starts from a Ticket, never from here.
  */
 export function DiscussionsPage() {
-  const queryClient = useQueryClient();
-  const { data: agents = [] } = useAgents();
-  const [boardId, setBoardId] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const activeBoard = boardId;
-
-  const boardsQuery = useQuery({
-    queryKey: keys.discussionBoards,
-    queryFn: () => api.listDiscussionBoards(),
-    // Keep the ordering fresh while the board list is open; a selected board refreshes on demand.
-    refetchInterval: activeBoard ? false : 30_000,
-  });
-  const boards = boardsQuery.data ?? [];
-  const activeBoardEntry = boards.find((entry) => entry.board_id === activeBoard) ?? null;
-
-  const backToBoards = useCallback(() => {
-    // The overview is one query for every board; refresh it when the list becomes visible instead
-    // of on every thread event.
-    void queryClient.invalidateQueries({ queryKey: keys.discussionBoards });
-    setBoardId("");
-    setSelectedId(null);
-  }, [queryClient]);
-
-  const discussionsQuery = useQuery({
-    queryKey: keys.discussions(activeBoard),
-    queryFn: () => api.listDiscussions(activeBoard),
-    enabled: Boolean(activeBoard),
-  });
-  const discussions = discussionsQuery.data ?? [];
+  const inbox = useDiscussionInbox();
+  const rows = inbox.data?.items ?? [];
+  const total = inbox.data?.total ?? 0;
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div>
-          <h1 className="text-xl font-semibold">Discussions</h1>
-          <p className="text-xs text-[var(--muted-foreground)]">
-            Ticket-bound threads with human and AI participants. Discussion never executes changes.
-          </p>
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <NewDiscussionDialog
-            activeBoardId={activeBoard}
-            boards={boards}
-            agents={agents}
-            onCreated={(target, discussionId) => {
-              setBoardId(target);
-              setSelectedId(discussionId);
-            }}
-          />
-        </div>
+    <section className="mx-auto flex w-full max-w-[980px] flex-col gap-8">
+      <div>
+        <h1 className="m-0 text-2xl font-semibold tracking-tight">Discussions</h1>
+        <p className="mt-1.5 text-[15px] text-[var(--muted-foreground)]">
+          Where the agents advise. You decide. A discussion starts from a Ticket: open one and
+          choose Ask the agents.
+        </p>
       </div>
 
-      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(280px,360px)_1fr]">
-        <DiscussionList
-          activeBoardId={activeBoard}
-          activeBoardName={activeBoardEntry?.board_name}
-          boards={boards}
-          boardsLoading={boardsQuery.isLoading}
-          discussions={discussions}
-          discussionsLoading={discussionsQuery.isLoading}
-          selectedId={selectedId}
-          onSelectDiscussion={setSelectedId}
-          onOpenBoard={(target) => {
-            setBoardId(target);
-            setSelectedId(null);
-          }}
-          onBack={backToBoards}
+      {inbox.isLoading ? (
+        <p className="m-0 text-sm text-[var(--muted-foreground)]">Reading your discussions…</p>
+      ) : inbox.error ? (
+        <p role="alert" className="m-0 text-sm text-[var(--destructive)]">
+          {describeError(inbox.error, "Could not read the discussions.")}
+        </p>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          className="card-surface px-4 py-3.5"
+          message="No discussions yet."
+          detail="When you ask the agents about a Ticket, the discussion shows up here."
         />
-
-        <div className="card-surface flex min-h-[320px] min-w-0 flex-col">
-          {!activeBoard ? (
-            <p className="m-auto text-sm text-[var(--muted-foreground)]">
-              Select a board to see its most recently active discussions.
+      ) : (
+        <>
+          {INBOX_GROUPS.map((group) => {
+            const items = rows.filter((row) => row.waits_for === group.waitsFor).map(item);
+            return (
+              <Section key={group.waitsFor} title={group.title} count={items.length}>
+                {items.length === 0 ? (
+                  <EmptyState message={group.empty} />
+                ) : (
+                  <DiscussionRows
+                    rows={items}
+                    label={group.title}
+                    hrefFor={(entry) => inboxPath(entry.row)}
+                  />
+                )}
+              </Section>
+            );
+          })}
+          {total > rows.length ? (
+            <p className="m-0 text-xs text-[var(--foreground-faint)]">
+              {rows.length} of {total} discussions are listed.
             </p>
-          ) : !selectedId ? (
-            <p className="m-auto text-sm text-[var(--muted-foreground)]">
-              Select a discussion to read the thread.
-            </p>
-          ) : (
-            <DiscussionView
-              key={selectedId}
-              boardId={activeBoard}
-              discussionId={selectedId}
-              host="inline"
-            />
-          )}
-        </div>
-      </div>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }

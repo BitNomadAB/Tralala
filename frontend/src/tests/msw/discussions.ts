@@ -277,7 +277,7 @@ export function discussionHandlers(initial: Discussion = discussion()) {
       const body: unknown = await request.json();
       state.bodies.push({ route: "review", body, csrf: request.headers.get("X-CSRF-Token") });
       const status = isRecord(body) && body.decision === "approve" ? "approved" : "vetoed";
-      state.discussion = { ...state.discussion, status };
+      state.discussion = { ...state.discussion, status, decided_by_name: MEMBER.name };
       return ok(state.discussion);
     }),
     http.post(apiPath(`${DISCUSSION_PATH}/messages`), async ({ request }) => {

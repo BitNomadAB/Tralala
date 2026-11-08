@@ -190,7 +190,9 @@ describe("the discussion view", () => {
     );
     expect(await screen.findByText("Discussion approved")).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Status" })).toHaveTextContent("Approved"),
+      expect(screen.getByRole("region", { name: "Status" })).toHaveTextContent(
+        "Approved by Ada Member",
+      ),
     );
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.queryByRole("textbox", { name: "Reply" })).toBeNull();

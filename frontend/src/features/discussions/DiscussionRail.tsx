@@ -25,7 +25,7 @@ export function DiscussionRail({
   discussion: Discussion;
   onCopyLink: () => void;
 }) {
-  const state = stateOf(discussion);
+  const state = stateOf(discussion, { decidedBy: discussion.decided_by_name });
   const ticket = discussion.ticket_key ?? discussion.card_title ?? "Ticket";
   return (
     <aside aria-label="Status and facts" className="grid content-start gap-[22px]">
