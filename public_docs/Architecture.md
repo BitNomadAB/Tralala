@@ -332,8 +332,9 @@ Nothing infers a default Loop from a board.
   looks again every 15 s while the agents answer in one of them. **Ask the agents**
   (`AskAgentsDialog.tsx`) reads the board's askable agents from `GET /boards/{board_id}/actors`,
   creates a `roundtable` thread with the chosen `participant_ids` and the default round cap, starts
-  one round (`POST .../start` with `rounds: 1`, which runs inline and answers once the round is
-  done) and then opens the new discussion.
+  one round (`POST .../start` with `rounds: 1` and `background: true`, so the route answers at
+  once and the round runs in the back; without the flag a single round runs inline, which is what
+  a worker's `ask_agents` relies on) and opens the new discussion while the agents answer.
 - **In the Ticket's dialog**: on the Loop page `?discussion=<id>` beside `?card=<id>` shows the
   discussion in the Ticket's dialog over the Kanban (`useTicketDialog.ts`). Back to the Ticket
   drops `discussion` and keeps `card`; closing drops both. A row of the tab opens there.

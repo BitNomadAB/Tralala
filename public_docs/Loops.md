@@ -281,9 +281,9 @@ Ticket.
 
 **Ask the agents** sits in the head of a Ticket's **Activity** and under its **More actions**. The
 dialog asks one thing and one choice: the **Question**, and the **Agents** that can answer on the
-board, each with its role, all chosen to begin with (at most 12). **Ask** opens the discussion and
-the chosen agents answer one round; the dialog waits for that round and then shows the discussion
-with their answers. If the round cannot start, the discussion opens anyway and says "The agents
+board, each with its role, all chosen to begin with (at most 12). **Ask** opens the discussion at
+once with "Agents are answering · round 1 of 3" while the chosen agents answer their first round
+in the background; the sign and the rows fill in as they answer. If the round cannot start, the discussion opens anyway and says "The agents
 could not start answering". On a board where no agent can answer the dialog says "No agent can
 answer on this board. Add one in Settings → Agents and select it on the board.", offers **Open
 Settings** and keeps Ask off. A Ticket of a completed, cancelled or archived Loop offers no Ask the

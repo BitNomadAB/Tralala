@@ -13,7 +13,7 @@ import pytest
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure
 from app.db.generated.board import DiscussionParticipantsRow, DiscussionRunsRow
-from app.schemas.discussions import DiscussionCreate, DiscussionMessageCreate
+from app.schemas.discussions import DiscussionCreate, DiscussionMessageCreate, DiscussionRunStart
 from app.services.agents import AgentService, RoleSnapshot
 from app.services.discussion_ask import AnswerCall
 from app.services.discussions import (
@@ -378,6 +378,23 @@ def test_a_single_round_runs_inline_and_finishes_the_run() -> None:
     assert summary["rounds_completed"] == 1
     (run,) = w.state.runs.values()
     assert (run.status, run.stop_reason) == ("completed", "rounds_completed")
+    assert w.state.discussions[THREAD].run_state == "idle"
+    assert [r.round_number for r in w.state.rounds] == [1]
+
+
+def test_a_person_s_ask_defers_its_single_round_so_the_view_opens_at_once() -> None:
+    """The Ask dialog sends ``background: true`` on ``/start``: the route turns it into
+    ``background=True`` and the service answers before the round has run, so the view opens on
+    "Agents are answering". Without the flag a single round stays inline, as a worker expects."""
+    assert DiscussionRunStart().background is False
+    assert DiscussionRunStart(background=True).background is True
+    w = world("alpha")
+    w.agents.scripts = {"alpha": [answer("Fine.", "no")]}
+    summary = w.runs.start(ADA, BOARD_ID, THREAD, rounds=1, background=True)
+    # The deferred path: the answer says pending; the executor (synchronous in this world) then
+    # runs the one round exactly as the inline path would.
+    assert summary["pending"] is True
+    assert summary["rounds_completed"] == 1
     assert w.state.discussions[THREAD].run_state == "idle"
     assert [r.round_number for r in w.state.rounds] == [1]
 

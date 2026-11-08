@@ -19,12 +19,18 @@ class DiscussionCreate(StrictModel):
 
 
 class DiscussionRunStart(StrictModel):
-    """Run one round by default; ``autonomous`` keeps the loop going until the thread decides."""
+    """Run one round by default; ``autonomous`` keeps the loop going until the thread decides.
+
+    A single round runs inline and answers with its result, which is what a worker asking over
+    ``/mcp`` wants; ``background`` runs it in the back and answers at once, which is what a
+    person pressing Ask wants: the view opens and says the agents are answering.
+    """
 
     rounds: int | None = Field(default=None, ge=1, le=4)
     autonomous: bool = False
     token_budget: int | None = Field(default=None, ge=0, le=5_000_000)
     time_budget_seconds: int | None = Field(default=None, ge=0, le=3600)
+    background: bool = False
 
 
 class DiscussionMessageCreate(StrictModel):

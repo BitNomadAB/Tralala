@@ -6,7 +6,7 @@ import { describeError } from "@/lib/describeError";
 import { controlledText, type RunAction, type TalkRequest } from "./discussionRules";
 
 /** One round, as "Ask again" starts it, or the rounds "Let them talk it out" asks for. */
-type StartRequest = { rounds: 1 } | TalkRequest;
+type StartRequest = { rounds: 1; background: true } | TalkRequest;
 
 /**
  * The runs of one discussion as a person starts and steers them: one round after a reply, "Let
@@ -55,7 +55,7 @@ export function useDiscussionRuns(boardId: string, discussionId: string, refresh
     setTalkOpen,
     /** One round, for a reply the server does not answer by itself. */
     askRound: () => {
-      start.mutate({ rounds: 1 });
+      start.mutate({ rounds: 1, background: true });
     },
     talk: (request: TalkRequest) => {
       start.mutate(request);

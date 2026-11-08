@@ -55,6 +55,8 @@ export const discussionsApi = {
     payload: {
       rounds?: number | undefined;
       autonomous?: boolean;
+      /** Run the round in the background so the view opens at once; a single round is inline otherwise. */
+      background?: boolean;
       token_budget?: number | undefined;
       time_budget_seconds?: number | undefined;
     } = {},

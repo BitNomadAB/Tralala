@@ -94,6 +94,8 @@ def start_discussion(
             autonomous=options.autonomous,
             token_budget=options.token_budget,
             time_budget_seconds=options.time_budget_seconds,
+            # None keeps the service's rule (one interactive round inline); True defers it.
+            background=True if options.background else None,
         ),
     )
 

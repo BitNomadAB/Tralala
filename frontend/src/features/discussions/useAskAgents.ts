@@ -27,7 +27,7 @@ export function useAskAgents(boardId: string, cardId: string, onAsked: (id: stri
         askRequest(cardId, question, participantIds),
       );
       try {
-        await api.startDiscussion(boardId, created.id, { rounds: 1 });
+        await api.startDiscussion(boardId, created.id, { rounds: 1, background: true });
       } catch (error) {
         toast.push({
           title: ASK_NOT_STARTED,

@@ -223,7 +223,7 @@ describe("the discussion view", () => {
     await waitFor(() =>
       expect(api.state.bodies).toEqual([
         { route: "messages", body: { content: "And if it is wrong?" }, csrf: "csrf-discussion" },
-        { route: "start", body: { rounds: 1 }, csrf: "csrf-discussion" },
+        { route: "start", body: { rounds: 1, background: true }, csrf: "csrf-discussion" },
       ]),
     );
   });

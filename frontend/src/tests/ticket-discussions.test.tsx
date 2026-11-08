@@ -152,7 +152,7 @@ describe("Ask the agents", () => {
           participant_ids: ["agent-Alpha", "agent-Charlie"],
         },
       },
-      { route: "start", body: { rounds: 1 } },
+      { route: "start", body: { rounds: 1, background: true } },
     ]);
     expect(api.state.bodies.every((write) => write.csrf === "csrf-discussion")).toBe(true);
   });
