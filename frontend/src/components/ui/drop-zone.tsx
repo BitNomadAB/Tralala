@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, type ReactNode, type RefObject } from "react";
 import { cn } from "@/lib/utils";
 import { useFileDrop } from "./useFileDrop";
 
@@ -16,6 +16,7 @@ export function DropZone({
   disabled = false,
   pickerLabel = "Choose files",
   onFiles,
+  inputRef,
   className,
 }: {
   /** The line it shows ("Drop a file here, or use Add file."). */
@@ -31,9 +32,12 @@ export function DropZone({
   /** The accessible name of the hidden file input. */
   pickerLabel?: string | undefined;
   onFiles: (files: File[]) => void;
+  /** The hidden file input, when a button elsewhere ("Add file") opens the same picker. */
+  inputRef?: RefObject<HTMLInputElement | null> | undefined;
   className?: string | undefined;
 }) {
-  const input = useRef<HTMLInputElement>(null);
+  const own = useRef<HTMLInputElement>(null);
+  const input = inputRef ?? own;
   const { dragging, handlers } = useFileDrop({ onFiles, disabled });
 
   return (

@@ -71,7 +71,9 @@ function renderAt(path: string, routePath: string, element: ReactNode) {
   );
 }
 
-describe("the focus and exclude globs of a board's repositories", () => {
+// The first test types a few dozen keys one by one, which on a loaded machine (coverage, the
+// parallel suite) can take longer than the default five seconds.
+describe("the focus and exclude globs of a board's repositories", { timeout: 15_000 }, () => {
   it("shows a selected repository's stored globs in Edit board and saves what was typed", async () => {
     const sent: unknown[] = [];
     server.use(

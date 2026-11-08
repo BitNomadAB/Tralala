@@ -1,11 +1,22 @@
 import { useEffect, useState } from "react";
 
-const EVENT_TYPES = ["agent_started", "agent_completed", "agent_failed"] as const;
+/**
+ * The card events that change what the view shows: an agent's mention work, and a person's note
+ * (`NOTE_EVENT_TYPES` in `backend/app/services/card_notes.py`).
+ */
+export const CARD_EVENT_TYPES = [
+  "agent_started",
+  "agent_completed",
+  "agent_failed",
+  "note_added",
+  "note_edited",
+  "note_deleted",
+] as const;
 
 const COALESCE_MS = 120;
 
 /**
- * Subscribe to one ticket's server-sent events (agent mention work).
+ * Subscribe to one ticket's server-sent events (agent mention work, a person's notes).
  *
  * Events only invalidate the queries; the queries refetch the authoritative state. The browser
  * reconnects on its own and sends `Last-Event-ID`, so the server replays anything missed.
@@ -40,10 +51,10 @@ export function useCardEvents(
     source.onerror = () => {
       setLive(false);
     };
-    for (const type of EVENT_TYPES) source.addEventListener(type, notify);
+    for (const type of CARD_EVENT_TYPES) source.addEventListener(type, notify);
     return () => {
       if (timer !== undefined) window.clearTimeout(timer);
-      for (const type of EVENT_TYPES) source.removeEventListener(type, notify);
+      for (const type of CARD_EVENT_TYPES) source.removeEventListener(type, notify);
       source.close();
       setLive(false);
     };

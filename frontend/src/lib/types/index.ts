@@ -11,4 +11,5 @@ export type * from "./loop";
 export type * from "./summary";
 export type * from "./card";
 export type * from "./discussion";
+export type * from "./notes";
 export type * from "./work";

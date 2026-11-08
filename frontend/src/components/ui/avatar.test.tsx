@@ -22,6 +22,11 @@ describe("Avatar", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
+  it("is 26px beside a person's note", () => {
+    render(<Avatar name="Mike" size="xs" />);
+    expect(screen.getByText("M")).toHaveClass("size-[26px]");
+  });
+
   it("is an image named by its label when one is passed", () => {
     render(<Avatar name="Mike Hansen" label="Owner: Mike Hansen" />);
     const mark = screen.getByRole("img", { name: "Owner: Mike Hansen" });

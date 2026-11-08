@@ -2,6 +2,25 @@ import type { Label, Priority } from "./board";
 import type { LoopBlocker } from "./loop";
 import type { TicketState, WaitingFor, Workplace } from "./work";
 
+/**
+ * The face for people: what a person reads of a Ticket by default. The server holds every writer
+ * to its template (`services/ticket_face.py`); `faceLimits.ts` mirrors the limits for the counters.
+ */
+export interface TicketFace {
+  /** At most 20 words: what the Ticket means (the card's own `summary`). */
+  summary: string;
+  /** At most three sentences: why it is needed. */
+  why: string;
+  /** At most three sentences: what happens if we skip it. */
+  if_skipped: string;
+  /** At most three points for. */
+  pros: string[];
+  /** At most three points against. */
+  cons: string[];
+  /** One to five concrete steps. */
+  steps: string[];
+}
+
 export interface Card {
   id: string;
   board_id: string;
@@ -14,6 +33,8 @@ export interface Card {
   summary_source: "" | "plan" | "person" | "agent";
   /** The title or description changed after the summary was written. */
   summary_stale: boolean;
+  /** The face for people; null for a Ticket written without one. */
+  face: TicketFace | null;
   position: number;
   priority: Priority;
   due_at: string | null;

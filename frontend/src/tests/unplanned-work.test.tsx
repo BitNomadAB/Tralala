@@ -65,6 +65,7 @@ function card(extra: Partial<Card>): Card {
     summary: "",
     summary_source: "",
     summary_stale: false,
+    face: null,
     position: 1024,
     priority: "none",
     due_at: null,

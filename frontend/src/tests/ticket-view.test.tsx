@@ -23,8 +23,10 @@ describe("the Ticket over the Kanban", () => {
     const modal = dialog();
     const heading = within(modal).getByRole("heading", { level: 2, name: TITLE });
     expect(heading).toHaveClass("text-balance");
-    // The lead under the title is the summary (the main column still repeats it until UX-006).
+    // The lead under the title is the summary; For you does not repeat it.
     expect(heading.nextElementSibling).toHaveTextContent("Old keys stop working after a day.");
+    const forYou = within(modal).getByRole("tabpanel", { name: "For you" });
+    expect(within(forYou).queryByText("Old keys stop working after a day.")).toBeNull();
     const copyKey = within(modal).getByRole("button", { name: `Copy key ${KEY}` });
     expect(copyKey.parentElement).toHaveClass("font-mono");
     expect(copyKey.parentElement).toHaveTextContent(KEY);
@@ -33,9 +35,11 @@ describe("the Ticket over the Kanban", () => {
     for (const name of ["Open as page", "Close dialog", "Start work", "Mark as waiting"]) {
       expect(within(modal).getByRole("button", { name })).toBeInTheDocument();
     }
-    for (const name of ["Comment", "Add file", "More actions"]) {
+    for (const name of ["Comment", "More actions"]) {
       expect(within(modal).getByRole("button", { name })).toBeInTheDocument();
     }
+    // Add file in the actions row, and again on the Files section.
+    expect(within(modal).getAllByRole("button", { name: "Add file" })).toHaveLength(2);
     const rail = within(modal).getByRole("complementary", { name: "Status and details" });
     expect(within(rail).getByRole("button", { name: "Column: Backlog" })).toBeInTheDocument();
     expect(rail).toHaveTextContent("Ready· nothing holds it up");
@@ -161,8 +165,11 @@ describe("the Ticket over the Kanban", () => {
     picker.addEventListener("click", () => {
       opened += 1;
     });
-    await user.click(screen.getByRole("button", { name: "Add file" }));
-    expect(opened).toBe(1);
+    // The head's Add file and the Files section's open the same picker.
+    for (const addFile of screen.getAllByRole("button", { name: "Add file" })) {
+      await user.click(addFile);
+    }
+    expect(opened).toBe(2);
     await user.click(screen.getByRole("button", { name: "Mark as waiting" }));
     expect(screen.getByLabelText("It waits for")).toHaveFocus();
   });
