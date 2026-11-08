@@ -39,6 +39,29 @@ export async function mcpCall(
   return result.structuredContent ?? {};
 }
 
+/** The error a refused tool call answers with: its code, its message and its details. */
+export interface ToolRefusal {
+  code: string;
+  message: string;
+  details: Record<string, unknown>;
+}
+
+/** Calls one tool that must be refused and returns the refusal; an answer fails the step. */
+export async function mcpRefusal(
+  page: Page,
+  token: string,
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<ToolRefusal> {
+  const result = (await rpc(page, token, "tools/call", { name, arguments: args })) as {
+    isError: boolean;
+    content: { text: string }[];
+  };
+  const text = result.content[0]?.text ?? "";
+  expect(result.isError, `${name} was not refused: ${text}`).toBe(true);
+  return (JSON.parse(text) as { error: ToolRefusal }).error;
+}
+
 /** A list in a tool's answer, as rows of the given shape. */
 export function rowsOf<Row>(answer: ToolAnswer, field: string): Row[] {
   const value = answer[field];
