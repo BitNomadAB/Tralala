@@ -1,16 +1,11 @@
-import type { ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useId, useState, type ReactNode } from "react";
+import { Segmented, SegmentedPanel } from "@/components/ui/segmented";
 import type { HumanBrief, RoadmapBrief } from "@/lib/types";
-import {
-  findingTitles,
-  LEVEL_TEXT,
-  orderedSteps,
-  phaseSources,
-  planTitles,
-  sourcesOf,
-  VERDICT_TEXT,
-  VERDICT_TONE,
-} from "./briefs";
+import { AnalysisRaw } from "./AnalysisRaw";
+import { AnalysisSign } from "./AnalysisSign";
+import type { BriefApproval } from "./briefApproval";
+import { BriefApprove } from "./BriefApprove";
+import { findingTitles, orderedSteps, phaseSources, planTitles, sourcesOf } from "./briefs";
 
 /** Where an item of the brief comes from: the findings, Phases or Tickets it rests on, by title. */
 function Sources({ titles }: { titles: string[] }) {
@@ -50,71 +45,48 @@ function Points({ children }: { children: ReactNode }) {
   return <ul className="flex list-disc flex-col gap-1 pl-4">{children}</ul>;
 }
 
-/** The analysis brief for the person who decides: the verdict first, then the reasons. */
-export function AnalysisBriefView({ brief, technical }: { brief: HumanBrief; technical: unknown }) {
-  const titles = findingTitles(technical);
+type View = "you" | "raw";
+
+const VIEWS = [
+  { value: "you", label: "For you" },
+  { value: "raw", label: "Raw text" },
+] as const;
+
+/**
+ * The analysis brief for the person who decides: For you is the sign (`AnalysisSign`), Raw text the
+ * findings and the technical analysis as they were written. With `approval` the brief ends with
+ * "Approve analysis" and the revision it approves, under either view. The choice of view lasts
+ * while the brief is shown.
+ */
+export function AnalysisBriefView({
+  brief,
+  technical,
+  approval,
+}: {
+  brief: HumanBrief;
+  technical: unknown;
+  approval?: BriefApproval | undefined;
+}) {
+  const idBase = useId();
+  const [view, setView] = useState<View>("you");
   return (
-    <div className="flex flex-col gap-3 text-sm">
-      <p>
-        <span className="font-semibold">Can it be done? </span>
-        <Badge tone={VERDICT_TONE[brief.verdict]}>{VERDICT_TEXT[brief.verdict]}</Badge>{" "}
-        {brief.verdict_reason}
-      </p>
-      <p>{brief.summary}</p>
-      <Section title="What stands in the way">
-        {brief.obstacles.length > 0 ? (
-          <Points>
-            {brief.obstacles.map((obstacle, index) => (
-              <Item
-                key={index}
-                label={LEVEL_TEXT[obstacle.level]}
-                text={obstacle.text}
-                sources={sourcesOf(obstacle.finding_ids, titles)}
-              />
-            ))}
-          </Points>
-        ) : (
-          <p className="text-[var(--muted-foreground)]">
-            Nothing was found that stands in the way.
-          </p>
-        )}
-      </Section>
-      {(
-        [
-          ["For", brief.pros],
-          ["Against", brief.cons],
-        ] as const
-      ).map(([title, points]) =>
-        points.length > 0 ? (
-          <Section key={title} title={title}>
-            <Points>
-              {points.map((point, index) => (
-                <Item
-                  key={index}
-                  text={point.text}
-                  sources={sourcesOf(point.finding_ids, titles)}
-                />
-              ))}
-            </Points>
-          </Section>
-        ) : null,
-      )}
-      {brief.decisions.length > 0 ? (
-        <Section title="What you need to decide">
-          <Points>
-            {brief.decisions.map((decision, index) => (
-              <Item
-                key={index}
-                text={decision.question}
-                sources={sourcesOf(decision.finding_ids, titles)}
-              />
-            ))}
-          </Points>
-        </Section>
-      ) : null}
-      <Section title="Recommendation">
-        <p>{brief.recommendation}</p>
-      </Section>
+    <div className="grid gap-4 text-sm">
+      <div className="flex justify-end">
+        <Segmented
+          label="Brief view"
+          value={view}
+          options={VIEWS}
+          onChange={setView}
+          idBase={idBase}
+        />
+      </div>
+      <SegmentedPanel idBase={idBase} value="you" active={view}>
+        <AnalysisSign brief={brief} titles={findingTitles(technical)} />
+      </SegmentedPanel>
+      <SegmentedPanel idBase={idBase} value="raw" active={view}>
+        <AnalysisRaw technical={technical} />
+      </SegmentedPanel>
+      {approval ? <BriefApprove approval={approval} /> : null}
     </div>
   );
 }

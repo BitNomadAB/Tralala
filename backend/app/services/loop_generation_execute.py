@@ -270,6 +270,7 @@ class _Run:
                 call_completion=self.context.call_completion,
                 settings=self.context.settings,
                 trace=self.trace,
+                ids=RunIds(self.loop_id, self.run_id),
             )
             return captured, result
         if workspace is not None:

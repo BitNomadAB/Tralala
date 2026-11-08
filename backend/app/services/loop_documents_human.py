@@ -14,10 +14,14 @@ held to the same rules before it is stored:
   ``order`` exactly once and every Ticket a person must do in ``your_part``;
 - **known ids**: an id the technical revision does not hold is refused;
 - **plain text**: the visible text holds no finding id, no other id, no file path and no code; the
-  ids carry the traceability, the text is for people.
+  ids carry the traceability, the text is for people;
+- **the sign** (an analysis brief only, ``loop_documents_human_limits``): the verdict in one line,
+  at most three reasons, each question on one line, how big the work is.
 
-A refusal is ``422 brief_rejected`` with every problem named, field by field. Everything here is
-pure except ``store_brief``, which writes the revision inside the caller's unit of work.
+A brief that breaks the sign is refused with ``422 brief_invalid``, naming the sign's problems and
+then the others; one that keeps the sign and breaks another rule with ``422 brief_rejected``, every
+problem named, field by field. Everything here is pure except ``store_brief``, which writes the
+revision inside the caller's unit of work.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from ..db.generated.board import LoopDocumentsRow, LoopsRow
 from ..repositories.board import BoardRepositories
 from ..schemas.briefs import HumanBrief, RoadmapBrief
 from ..schemas.loops import AnalysisPayload
+from .loop_documents_human_limits import refuse_sign, sign_findings
 from .loop_documents_render import render_analysis_brief, render_roadmap_brief
 from .loop_documents_revisions import invalidate_downstream, log_loop_activity, write_revision
 from .plain_text import text_problems
@@ -80,6 +85,7 @@ class _Findings:
 
 
 def _analysis_texts(brief: HumanBrief) -> Iterator[tuple[str, str]]:
+    yield "verdict_line", brief.verdict_line
     yield "verdict_reason", brief.verdict_reason
     yield "summary", brief.summary
     for index, obstacle in enumerate(brief.obstacles):
@@ -90,6 +96,8 @@ def _analysis_texts(brief: HumanBrief) -> Iterator[tuple[str, str]]:
         yield f"cons[{index}].text", point.text
     for index, decision in enumerate(brief.decisions):
         yield f"decisions[{index}].question", decision.question
+    if brief.size is not None:
+        yield "size.text", brief.size.text
     yield "recommendation", brief.recommendation
 
 
@@ -316,8 +324,9 @@ def store_brief(
 ) -> LoopDocumentsRow:
     """The brief as the scope's current human revision, written from the current technical one:
     the brief is its payload and its rendering the content. A brief that breaks a rule is refused
-    with every problem named; a new brief invalidates what was approved of the scope and after it,
-    as any new revision of the human view does."""
+    with every problem named (an analysis brief that breaks the sign as ``brief_invalid``); a new
+    brief invalidates what was approved of the scope and after it, as any new revision of the
+    human view does."""
     kind = "analysis" if isinstance(brief, HumanBrief) else "roadmap"
     technical = _technical(repos, loop.id, kind)
     if expected_revision_id is not None and expected_revision_id != technical.id:
@@ -331,7 +340,10 @@ def store_brief(
             },
         )
     payload = _payload(technical)
-    refuse_problems(check_brief(brief, payload))
+    check = check_brief(brief, payload)
+    if isinstance(brief, HumanBrief):
+        refuse_sign(sign_findings(brief), check["problems"])
+    refuse_problems(check)
     sources: dict[str, str | None] = {"roadmap_ai": technical.id}
     if kind == "analysis":
         info = repos.documents.current(loop.id, "info")

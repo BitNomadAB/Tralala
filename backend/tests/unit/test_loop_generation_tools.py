@@ -325,6 +325,7 @@ def test_the_model_reads_what_it_needs_and_the_run_keeps_the_tree(
         "listings": 1,
         "repairs": 0,
         "face_repairs": 0,
+        "brief_repairs": 0,
     }
     assert serialize_run(w.run())["trace"] == parse_steps(w.run().trace_json)
     (finished,) = [e for e in events(caplog.records) if e["event"] == "generation_run_finished"]

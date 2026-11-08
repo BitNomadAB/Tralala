@@ -6,7 +6,8 @@ A connected worker may hold its organisation's own sources, policies and decisio
 agent does not, so it may write the brief itself: with ``brief`` the candidate's human view is that
 brief and no board agent is asked; ``write_brief`` rewrites the brief of the current technical
 revision. Either way the brief is held to the rules every brief keeps
-(``loop_documents_human``), and over an approval a token is refused (the gate below).
+(``loop_documents_human``; an analysis brief that breaks its sign answers ``422 brief_invalid``,
+one message per field and rule), and over an approval a token is refused (the gate below).
 
 A worker writes its own analysis and plan, and they go through the one route Tralala already has
 for a candidate, ``LoopDocumentService.submit_candidate``: the same schemas (``AnalysisPayload``,
@@ -46,6 +47,7 @@ from .agent_tools_schema import (
     object_schema,
     string_argument,
 )
+from .loop_documents_human_limits import SIGN_QUESTION_EXAMPLE
 from .loops import DOCUMENT_KINDS
 from .ticket_face import FACE_INVALID, FACE_STEP_BAD, FACE_STEP_GOOD
 
@@ -406,7 +408,12 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
         HumanBrief,
         "Optional: your brief for the person who decides (the human view), naming in "
         "finding_ids every risk, blocker, legal, security, question and decision finding; "
-        "plain text without ids, paths or code. Without it a board agent writes one",
+        "plain text without ids, paths or code. It is a sign: verdict_line in at most 20 words, "
+        "at most 3 obstacles, 3 pros and 3 cons, at most 5 decisions with each question on one "
+        "line, and size (small, medium or large, with one sentence); every item at most 140 "
+        f'characters. A question, for example: "{SIGN_QUESTION_EXAMPLE}" A brief that breaks the '
+        "sign is refused with brief_invalid, one message per field and rule. Without it a board "
+        "agent writes one",
     )
     roadmap_brief, roadmap_definitions = model_argument(
         RoadmapBrief,
@@ -483,7 +490,9 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
             "Write the brief for people (the human view) of the Loop's current analysis or "
             "RoadMap, for example from your organisation's own sources: can it be done, what "
             "stands in the way, for and against, what a person must decide. The schema is "
-            "write_analysis's or write_roadmap's brief argument. Over an approved analysis or "
+            "write_analysis's or write_roadmap's brief argument; an analysis brief keeps its "
+            "sign (see write_analysis) or is refused with brief_invalid, one message per field "
+            "and rule. Over an approved analysis or "
             "RoadMap a person requests changes or resets it first; a brief approves nothing."
         ),
         scopes=("loops:generate",),

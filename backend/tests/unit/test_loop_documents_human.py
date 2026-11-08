@@ -21,6 +21,7 @@ from app.services.loop_documents_human import (
     text_problems,
 )
 from app.services.loop_documents_render import render_analysis, render_traceability
+from tests.unit.signs import SIGN
 
 ANALYSIS = AnalysisPayload.model_validate(
     {
@@ -63,6 +64,7 @@ ANALYSIS = AnalysisPayload.model_validate(
 
 def brief(**fields: JsonValue) -> HumanBrief:
     base: dict[str, JsonValue] = {
+        **SIGN,
         "obstacles": [
             {"level": "technical", "text": "Some e-mails bounce.", "finding_ids": ["F-2"]},
             {"level": "legal", "text": "We keep personal data.", "finding_ids": ["F-10"]},

@@ -9,7 +9,10 @@ repositories through tools asks through ``loop_generation_tools`` and shares the
 
 A RoadMap whose face for people breaks its template is told every problem first, one per line, each
 naming the Ticket, the field and the rule (``ticket_face``), and every problem of every round is a
-``roadmap_face_repair`` log line, so a model that keeps failing the template is visible.
+``roadmap_face_repair`` log line, so a model that keeps failing the template is visible. A brief
+for people (``loop_generation_human``) is repaired through the same rounds: a brief that breaks a
+rule (``BriefRefusal``) is told its messages, one per line, and every problem of the analysis
+brief's sign is an ``analysis_brief_repair`` line.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from pydantic import ValidationError
 
 from ..core.errors import ValidationFailure
 from ..db.generated.registry import AgentsRow
+from .loop_documents_human_limits import BriefRefusal
 from .loop_generation_prompts import (
     JsonObject,
     context_labels,
@@ -44,6 +48,13 @@ MAX_REPAIRS = 2
 FACE_REPAIR = (
     "That response did not validate: each line above names a Ticket, the field and the rule it "
     "breaks. Fix every line and return the corrected JSON object only."
+)
+BRIEF_REPAIR = (
+    "Your brief was not accepted: each line above names a field of the brief and the rule it "
+    "breaks. Correct every line and answer with the whole corrected JSON object only."
+)
+BRIEF_FAILED = (
+    "The brief written for people breaks a rule; the view rendered from the structure stays"
 )
 
 
@@ -86,8 +97,8 @@ def problem_of(exc: Exception) -> str:
     """What a repair message and a failed run say about an answer that did not validate: a rule's
     message with its details (the Phase and the reference that is missing), or the parser's text.
     A face that breaks its template is told by its messages, one per line, each naming the Ticket,
-    the field and the rule."""
-    if isinstance(exc, FaceRefusal):
+    the field and the rule; a brief by its messages, one per line."""
+    if isinstance(exc, FaceRefusal | BriefRefusal):
         return exc.lines()
     if isinstance(exc, ValidationFailure):
         return rule_text(exc)
@@ -96,7 +107,16 @@ def problem_of(exc: Exception) -> str:
 
 def invalid_outcome(exc: Exception) -> Outcome:
     """The failed run's outcome: ``face_invalid`` with the face's first messages for a face that
-    still breaks its template, ``invalid_output`` for anything else."""
+    still breaks its template; for a brief its code (``brief_invalid`` or ``brief_rejected``) with
+    every message, retryable, since the rendered view stays; ``invalid_output`` for anything
+    else."""
+    if isinstance(exc, BriefRefusal):
+        return Outcome(
+            error_code=exc.code,
+            error_message=BRIEF_FAILED,
+            error_details=error_details({"problems": exc.messages()}),
+            retryable=True,
+        )
     if isinstance(exc, FaceRefusal):
         return Outcome(
             error_code=FACE_INVALID,
@@ -134,11 +154,34 @@ def repair_step(problem: str, more: int = 0) -> str:
 
 
 def repair_message(exc: Exception) -> str:
-    """The repair request for ``exc``: a face that breaks its template is told by its messages
-    first, one per line, then what to do; anything else as ``repair_request`` says it."""
+    """The repair request for ``exc``: a face that breaks its template, or a brief that breaks a
+    rule, is told by its messages first, one per line, then what to do; anything else as
+    ``repair_request`` says it."""
     if isinstance(exc, FaceRefusal):
         return f"{exc.lines()}\n{FACE_REPAIR}"
+    if isinstance(exc, BriefRefusal):
+        return f"{exc.lines()}\n{BRIEF_REPAIR}"
     return repair_request(problem_of(exc))
+
+
+def log_brief_problems(exc: Exception, ids: RunIds | None, attempt: int) -> int:
+    """One ``analysis_brief_repair`` line per problem of the analysis brief's sign in the answer
+    ``attempt``, with the fields of ``roadmap_face_repair`` but the Ticket (a brief has none);
+    answers how many there were."""
+    if not isinstance(exc, BriefRefusal):
+        return 0
+    for problem in exc.problems:
+        logger.info(
+            "analysis_brief_repair",
+            extra={
+                "loop_id": ids.loop_id if ids else None,
+                "run_id": ids.run_id if ids else None,
+                "attempt": attempt,
+                "field": problem.field,
+                "rule": problem.rule,
+            },
+        )
+    return len(exc.problems)
 
 
 def log_face_problems(exc: Exception, ids: RunIds | None, attempt: int) -> int:
@@ -164,26 +207,34 @@ def log_face_problems(exc: Exception, ids: RunIds | None, attempt: int) -> int:
 def repair_round(
     trace: RunTrace | None, exc: Exception, *, ids: RunIds | None, attempt: int
 ) -> Message:
-    """One repair round for answer ``attempt``: its face problems logged, a repair step whose text
-    is the first problem (with how many face problems the round had), and the request to send."""
+    """One repair round for answer ``attempt``: its face or sign problems logged, a repair step
+    whose text is the first problem (with how many face or sign problems the round had), and the
+    request to send."""
     faces = log_face_problems(exc, ids, attempt)
+    signs = log_brief_problems(exc, ids, attempt)
     if trace is not None:
-        if isinstance(exc, FaceRefusal):
+        if isinstance(exc, FaceRefusal | BriefRefusal):
             messages = exc.messages()
             step = repair_step(messages[0], len(messages) - 1)
         else:
             step = repair_step(problem_of(exc))
-        trace.add("checking", "repair", step, face=faces or None)
+        trace.add("checking", "repair", step, face=faces or None, brief=signs or None)
     return {"role": "user", "content": repair_message(exc)}
 
 
 def give_up(
-    trace: RunTrace | None, exc: Exception, *, ids: RunIds | None, attempt: int
+    trace: RunTrace | None,
+    exc: Exception,
+    *,
+    ids: RunIds | None,
+    attempt: int,
+    repairs: int = MAX_REPAIRS,
 ) -> Outcome:
-    """The last answer still broke a rule: its face problems logged, the error step, the run's
-    failure."""
+    """The last answer still broke a rule after ``repairs`` rounds: its face or sign problems
+    logged, the error step, the run's failure."""
     log_face_problems(exc, ids, attempt)
-    note(trace, "checking", gave_up(exc), kind="error")
+    log_brief_problems(exc, ids, attempt)
+    note(trace, "checking", gave_up(exc, repairs), kind="error")
     return invalid_outcome(exc)
 
 
@@ -248,9 +299,10 @@ def generate(
     )
 
 
-def gave_up(exc: Exception) -> str:
+def gave_up(exc: Exception, repairs: int = MAX_REPAIRS) -> str:
     problem = clip(problem_of(exc), 300)
-    return f"The answer still broke a rule after {MAX_REPAIRS} repairs: {problem}"
+    rounds = "1 repair" if repairs == 1 else f"{repairs} repairs"
+    return f"The answer still broke a rule after {rounds}: {problem}"
 
 
 def _document(purpose: str) -> str:

@@ -15,6 +15,7 @@ export function ScopeReview({
   resetPending,
   onReset,
   canReview,
+  approveInBrief = false,
   approved,
   reviewPending,
   onDecision,
@@ -33,6 +34,8 @@ export function ScopeReview({
   resetPending: boolean;
   onReset: () => void;
   canReview: boolean;
+  /** The brief above carries the approve button (an analysis brief), so it is not repeated here. */
+  approveInBrief?: boolean | undefined;
   approved: boolean;
   reviewPending: boolean;
   onDecision: (decision: "approved" | "changes_requested") => void;
@@ -96,12 +99,14 @@ export function ScopeReview({
           >
             Request changes
           </Button>
-          <Button
-            disabled={readOnly || !canReview || reviewPending || approved}
-            onClick={() => onDecision("approved")}
-          >
-            {approved ? "Approved" : label}
-          </Button>
+          {approveInBrief ? null : (
+            <Button
+              disabled={readOnly || !canReview || reviewPending || approved}
+              onClick={() => onDecision("approved")}
+            >
+              {approved ? "Approved" : label}
+            </Button>
+          )}
           {quietReset && canReset && !confirmReset ? (
             <Menu
               label={`${scopeLabel} actions`}

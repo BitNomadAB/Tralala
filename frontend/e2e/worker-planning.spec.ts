@@ -107,11 +107,23 @@ test.describe("the planning journey over /mcp", () => {
       await expect(
         analysis.getByRole("button", { name: "For people", exact: true }),
       ).toHaveAttribute("aria-pressed", "true");
-      await expect(analysis.getByText(plan.ANALYSIS_SUMMARY)).toBeVisible();
-      await expect(analysis.getByText(plan.OBSTACLE)).toBeVisible();
+      // The brief is a sign: the verdict line, the reasons, the question, the size.
+      const sign = analysis.getByRole("tabpanel", { name: "For you" });
+      await expect(sign.getByText(plan.VERDICT_LINE)).toBeVisible();
+      await expect(sign.getByText(plan.OBSTACLE)).toBeVisible();
+      await expect(sign.getByText(plan.DECISION)).toBeVisible();
+      await expect(sign.getByText(plan.FINDING_RISK)).toHaveAttribute("title", "risk-1");
+      await expect(sign.getByText(plan.SIZE)).toBeVisible();
+      await expect(sign.getByText(plan.TECHNICAL_DETAIL)).toHaveCount(0);
+      await analysis.getByRole("tab", { name: "Raw text" }).click();
+      const raw = analysis.getByRole("tabpanel", { name: "Raw text" });
+      await expect(raw.getByText(plan.TECHNICAL_DETAIL)).toBeVisible();
+      await analysis.getByRole("tab", { name: "For you" }).click();
+      await expect(analysis.getByText(/^Approves revision 1 of this analysis/)).toBeVisible();
+      await analysis.getByRole("button", { name: "Approve analysis" }).click();
+      await expect(analysis.getByRole("button", { name: "Approved" })).toBeVisible();
       await analysis.getByRole("button", { name: "For AI", exact: true }).click();
       await expect(analysis.getByText(plan.TECHNICAL_DETAIL)).toBeVisible();
-      await analysis.getByRole("button", { name: "Approve analysis" }).click();
       await expect(analysis.getByRole("button", { name: "Approved" })).toBeVisible();
       await showTab(page, "Kanban");
     });
@@ -274,7 +286,7 @@ test.describe("the planning journey over /mcp", () => {
       expect(await blockingViolations(page, testInfo, "axe-ticket-dialog")).toEqual([]);
       await closeDialog(page);
       const analysis = await openDocument(page, "Analysis");
-      await expect(analysis.getByText(plan.ANALYSIS_SUMMARY)).toBeVisible();
+      await expect(analysis.getByText(plan.VERDICT_LINE)).toBeVisible();
       expect(await blockingViolations(page, testInfo, "axe-analysis-brief")).toEqual([]);
       const roadmap = await openDocument(page, "RoadMap");
       await expect(roadmap.getByText(plan.ORDER_STEP)).toBeVisible();

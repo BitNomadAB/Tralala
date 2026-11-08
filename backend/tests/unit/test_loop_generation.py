@@ -208,15 +208,17 @@ SCHEMA_ORDER = {
         "sources",
         "repository_revision",
     ],
-    # The brief: what stands in the way and the highlights before the verdict, the summary and the
-    # recommendation last.
+    # The brief: what stands in the way, the highlights and the size before the verdict, the
+    # summary and the recommendation last.
     "analysis_human": [
         "schema_version",
         "obstacles",
         "pros",
         "cons",
         "decisions",
+        "size",
         "verdict",
+        "verdict_line",
         "verdict_reason",
         "summary",
         "recommendation",

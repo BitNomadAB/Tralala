@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { generationAgents } from "@/lib/boardAgents";
 import { keys, useAgents, useBoard, useLoopAgents, useLoopDocuments } from "@/lib/queries";
 import type { DocumentKind, Loop } from "@/lib/types";
+import { showsAnalysisBrief } from "./briefApproval";
 import { GenerationRunAside, GenerationRunPanel, LastRunStatus } from "./GenerationRunPanel";
 import { InfoEditor } from "./InfoEditor";
 import { InfoSaveGuard } from "./InfoSaveGuard";
@@ -107,6 +108,9 @@ export function LoopDocumentsPanel({
     });
   const scope: PlanScope = tab === "analysis" ? "analysis" : "roadmap";
   const scopeLabel = tab === "analysis" ? "analysis" : "RoadMap";
+  // An analysis brief carries "Approve analysis" at its end; the review below then leaves it out.
+  const briefApproves =
+    tab === "analysis" && !technical && !!documents && showsAnalysisBrief(documents.analysis);
   const { generating, visibleRun, activeRunId } = generation;
   const dismissRun = generating ? undefined : generation.dismissFailure;
   const generateDisabled = readOnly || generation.generate.isPending || generating;
@@ -198,8 +202,26 @@ export function LoopDocumentsPanel({
             const document = documents?.[kind];
             if (!document) return null;
             const technical = kind === "analysis" ? documents.analysis_ai.current_payload : null;
+            const approval =
+              kind === "analysis" && briefApproves
+                ? {
+                    revisionNumber: document.current_revision_number,
+                    technicalRevisionNumber: documents.analysis_ai.current_revision_number,
+                    approved: approvedForScope,
+                    disabled: readOnly || !canReviewScope || planReview.review.isPending,
+                    onApprove: () => {
+                      planReview.review.mutate({ scope, decision: "approved" });
+                    },
+                  }
+                : undefined;
             return (
-              <PlanDocumentPanel key={kind} kind={kind} document={document} technical={technical} />
+              <PlanDocumentPanel
+                key={kind}
+                kind={kind}
+                document={document}
+                technical={technical}
+                approval={approval}
+              />
             );
           })}
 
@@ -240,6 +262,7 @@ export function LoopDocumentsPanel({
               resetPending={planReview.resetScope.isPending}
               onReset={() => planReview.resetScope.mutate(scope)}
               canReview={canReviewScope}
+              approveInBrief={briefApproves}
               approved={approvedForScope}
               reviewPending={planReview.review.isPending}
               onDecision={(decision) => planReview.review.mutate({ scope, decision })}

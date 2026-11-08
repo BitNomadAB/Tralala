@@ -11,6 +11,13 @@ holds an id, a file path or code (``services/loop_documents_human``). Field orde
 model writes in, evidence before judgement (the comment on ``SCHEMAS`` in
 ``services/loop_generation_prompts``): the obstacles and the highlights come before the verdict,
 and the summary and the recommendation last. The rendered view puts the verdict first.
+
+The analysis brief is a sign (``services/loop_documents_human_limits``): the verdict in one line,
+at most three reasons, each question on one line, how big the work is. Its limits are tighter than
+what this model parses, on purpose: a brief stored before the sign existed (more obstacles, longer
+text, no ``verdict_line`` or ``size``) is still read, and the server refuses a new one that breaks
+the sign when it is handed in (``422 brief_invalid``). The JSON schema a writer is shown carries
+the sign's limits (``json_schema_extra``), so a model and a worker see what is accepted.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ from __future__ import annotations
 from typing import Annotated, Literal, get_args
 
 from pydantic import Field, StringConstraints
+from pydantic.config import JsonDict
 
 from .common import Id, StrictModel
 
@@ -27,6 +35,15 @@ Verdict = Literal["yes", "yes_with_conditions", "no", "unclear"]
 VERDICTS: tuple[str, ...] = get_args(Verdict)
 ObstacleLevel = Literal["business", "technical", "security", "legal", "people_time"]
 OBSTACLE_LEVELS: tuple[str, ...] = get_args(ObstacleLevel)
+SizeKind = Literal["small", "medium", "large"]
+SIZE_KINDS: tuple[str, ...] = get_args(SizeKind)
+
+# What the sign accepts of a new analysis brief, as the schema a writer is shown says it; the check
+# in ``services/loop_documents_human_limits`` holds a hand-in to the same numbers.
+SIGN_MAX_ITEMS = 3
+SIGN_MAX_DECISIONS = 5
+SIGN_MAX_CHARS = 140
+SIGN_MAX_VERDICT_WORDS = 20
 
 
 # Visible text: stripped, never empty, at most so many characters.
@@ -36,22 +53,36 @@ Text600 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, 
 Text800 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=800)]
 FindingRef = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
 FindingRefs = Annotated[list[FindingRef], Field(max_length=20)]
+# Text a brief written before the sign may lack: stripped, possibly empty.
+OptionalText300 = Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)]
+_SIGN_TEXT: JsonDict = {"maxLength": SIGN_MAX_CHARS}
 
 
 class BriefObstacle(StrictModel):
     level: ObstacleLevel
-    text: Text300
+    text: Text300 = Field(json_schema_extra=_SIGN_TEXT)
     finding_ids: FindingRefs = Field(default_factory=list[str])
 
 
 class BriefPoint(StrictModel):
-    text: Text200
+    text: Text200 = Field(json_schema_extra=_SIGN_TEXT)
     finding_ids: FindingRefs = Field(default_factory=list[str])
 
 
 class BriefDecision(StrictModel):
-    question: Text200
+    question: Text200 = Field(
+        description="One line: the question a person answers", json_schema_extra=_SIGN_TEXT
+    )
     finding_ids: FindingRefs = Field(default_factory=list[str])
+
+
+class BriefSize(StrictModel):
+    """How big the work is: a kind a person can compare, and one sentence why."""
+
+    kind: SizeKind
+    text: Text300 = Field(
+        description="One sentence: what makes it that size", json_schema_extra=_SIGN_TEXT
+    )
 
 
 class HumanBrief(StrictModel):
@@ -62,16 +93,33 @@ class HumanBrief(StrictModel):
     obstacles: list[BriefObstacle] = Field(
         default_factory=list[BriefObstacle],
         max_length=8,
-        description="What stands in the way, at any level; only obstacles that exist",
+        description="Why: what stands in the way, at any level; only obstacles that exist",
+        json_schema_extra={"maxItems": SIGN_MAX_ITEMS},
     )
-    pros: list[BriefPoint] = Field(default_factory=list[BriefPoint], max_length=5)
-    cons: list[BriefPoint] = Field(default_factory=list[BriefPoint], max_length=5)
+    pros: list[BriefPoint] = Field(
+        default_factory=list[BriefPoint],
+        max_length=5,
+        json_schema_extra={"maxItems": SIGN_MAX_ITEMS},
+    )
+    cons: list[BriefPoint] = Field(
+        default_factory=list[BriefPoint],
+        max_length=5,
+        json_schema_extra={"maxItems": SIGN_MAX_ITEMS},
+    )
     decisions: list[BriefDecision] = Field(
         default_factory=list[BriefDecision],
         max_length=8,
-        description="What a person must decide, each as a question",
+        description="What a person must decide, each as a question on one line",
+        json_schema_extra={"maxItems": SIGN_MAX_DECISIONS},
     )
+    # None only in a brief written before the sign; a new one says it (the check refuses none).
+    size: BriefSize | None = Field(default=None, description="How big the work is")
     verdict: Verdict = Field(description="Can it be done")
+    verdict_line: OptionalText300 = Field(
+        default="",
+        description=f"The verdict in one line of at most {SIGN_MAX_VERDICT_WORDS} words",
+        json_schema_extra={"minLength": 1},
+    )
     verdict_reason: Text300 = Field(description="One sentence why")
     summary: Text600 = Field(description="The highlights in two or three sentences")
     recommendation: Text800 = Field(description="One paragraph")
@@ -126,6 +174,11 @@ class BriefWrite(StrictModel):
 __all__ = [
     "BRIEF_KINDS",
     "OBSTACLE_LEVELS",
+    "SIGN_MAX_CHARS",
+    "SIGN_MAX_DECISIONS",
+    "SIGN_MAX_ITEMS",
+    "SIGN_MAX_VERDICT_WORDS",
+    "SIZE_KINDS",
     "VERDICTS",
     "BriefDecision",
     "BriefKind",
@@ -134,10 +187,12 @@ __all__ = [
     "BriefPhaseStep",
     "BriefPoint",
     "BriefRisk",
+    "BriefSize",
     "BriefWrite",
     "FindingRef",
     "HumanBrief",
     "ObstacleLevel",
     "RoadmapBrief",
+    "SizeKind",
     "Verdict",
 ]

@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { renderMarkdown } from "@/lib/markdown";
 import type { DocumentKind, LoopDocument } from "@/lib/types";
+import { showsAnalysisBrief, type BriefApproval } from "./briefApproval";
 import { isHumanBrief, isRoadmapBrief } from "./briefs";
 import { AnalysisBriefView, RoadmapBriefView } from "./BriefView";
 import {
@@ -13,10 +14,18 @@ import {
 } from "./loopUi";
 
 /** The current text: the brief's sections for a brief, Markdown for everything else. */
-function CurrentText({ document, technical }: { document: LoopDocument; technical: unknown }) {
+function CurrentText({
+  document,
+  technical,
+  approval,
+}: {
+  document: LoopDocument;
+  technical: unknown;
+  approval?: BriefApproval | undefined;
+}) {
   const payload: unknown = document.current_payload;
-  if (isBrief(document) && document.kind === "analysis" && isHumanBrief(payload)) {
-    return <AnalysisBriefView brief={payload} technical={technical} />;
+  if (showsAnalysisBrief(document) && isHumanBrief(payload)) {
+    return <AnalysisBriefView brief={payload} technical={technical} approval={approval} />;
   }
   if (isBrief(document) && document.kind === "roadmap" && isRoadmapBrief(payload)) {
     return <RoadmapBriefView brief={payload} technical={technical} />;
@@ -30,6 +39,7 @@ export function PlanDocumentPanel({
   document,
   technical,
   body,
+  approval,
 }: {
   kind: DocumentKind;
   document: LoopDocument;
@@ -37,6 +47,8 @@ export function PlanDocumentPanel({
   technical?: unknown;
   /** The current text as a view of its own (the RoadMap review), instead of the scrolling box. */
   body?: ReactNode;
+  /** The approval an analysis brief carries at its end (`BriefApprove`). */
+  approval?: BriefApproval | undefined;
 }) {
   // Both approvals can supersede the same document, and one sentence says it once.
   const reasons = [...new Set(document.stale_reasons)];
@@ -83,8 +95,14 @@ export function PlanDocumentPanel({
       {document.current_content && body !== undefined ? (
         body
       ) : document.current_content ? (
-        <div className="prose-sm max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
-          <CurrentText document={document} technical={technical} />
+        <div
+          className={
+            showsAnalysisBrief(document)
+              ? "rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-sm"
+              : "prose-sm max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin"
+          }
+        >
+          <CurrentText document={document} technical={technical} approval={approval} />
         </div>
       ) : (
         <p className="rounded-lg border border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted-foreground)]">
