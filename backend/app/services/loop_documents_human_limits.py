@@ -5,7 +5,7 @@ material: the verdict in one line of at most ``SIGN_MAX_VERDICT_WORDS`` words (`
 at most ``SIGN_MAX_ITEMS`` reasons (``obstacles``) and as many points for and against, at most
 ``SIGN_MAX_DECISIONS`` questions to the person, each on one line, and how big the work is
 (``size``: small, medium or large and one sentence). Every visible item holds at most
-``SIGN_MAX_CHARS`` characters. The counts are the face's (``ticket_face.word_count`` and
+``SIGN_MAX_CHARS`` characters. The counts are the face's (``plain_text.word_count`` and
 ``sentence_count``), so a brief and a Ticket count words and sentences alike.
 
 The rest of the brief's rules (every material finding named by some item, only known ids, plain
@@ -34,7 +34,7 @@ from ..schemas.briefs import (
     SIGN_MAX_VERDICT_WORDS,
     HumanBrief,
 )
-from .ticket_face import sentence_count, word_count
+from .plain_text import sentence_count, word_count
 
 BRIEF_INVALID = "brief_invalid"
 # A content refusal (coverage, ids, wording) keeps the code it had before the sign.

@@ -1,34 +1,40 @@
-"""The discussion answer standard: reading an untrusted answer, asking with one repair, and the
-decision support computed from the latest answers. Pure functions and a scripted provider."""
+"""The discussion answer standard: reading an untrusted answer, the sign's limits and plain-text
+rules with one good and one bad example per rule, and the decision support computed from the
+latest answers. Pure functions; asking and repairing are ``test_discussion_ask``'s."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from dataclasses import dataclass, field
 
 import pytest
 
 from app.db.generated.board import DiscussionMessagesRow, DiscussionParticipantsRow
 from app.services.discussion_answers import (
+    ITEM_CHARS,
+    ITEMS,
+    MAX_FINDINGS,
+    REASONING_CHARS,
+    RECOMMENDATION_CHARS,
+    RECOMMENDATION_WORDS,
     AnswerShapeError,
     DiscussionAnswer,
     answer_instructions,
     answer_line,
     answer_schema,
+    finding,
     parse_answer,
     prose_answer,
     read_answer,
 )
-from app.services.discussion_ask import ask_participant, usage_tokens
 from app.services.discussion_synthesis import (
+    Stance,
     latest_answers,
     positions,
     read_synthesis,
+    suggest,
     synthesize,
 )
-from app.services.runtime import Completion, ResponseSchema
-from app.services.runtime_tools import Message
+from app.services.plain_text import sentence_count, word_count
 
 NOW = "2026-11-07T10:00:00Z"
 
@@ -46,7 +52,18 @@ def standard(**fields: object) -> dict[str, object]:
     return payload
 
 
+def findings_of(payload: dict[str, object]) -> list[str]:
+    with pytest.raises(AnswerShapeError) as broken:
+        parse_answer(json.dumps(payload))
+    return [item.message for item in broken.value.findings]
+
+
 # --- reading an answer -------------------------------------------------------------------------
+
+
+def test_the_limits_are_the_signs() -> None:
+    assert (RECOMMENDATION_WORDS, RECOMMENDATION_CHARS) == (20, 200)
+    assert (ITEMS, ITEM_CHARS, REASONING_CHARS) == (3, 140, 8000)
 
 
 def test_a_whole_json_answer_is_read_with_its_reasoning_as_the_prose() -> None:
@@ -94,32 +111,159 @@ def test_a_yes_with_conditions_reads_as_yes_with_conditions() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("payload", "problem"),
-    [
-        (standard(position="agree"), "`position` must be one of"),
-        (standard(position="yes_with_conditions"), "needs at least one item in `conditions`"),
-        (standard(position="unclear"), "needs at least one item in `open_questions`"),
-        (standard(recommendation=" "), "`recommendation` must not be empty"),
-        (standard(recommendation="x" * 301), "at most 300"),
-        (standard(pros=["a", "b", "c", "d", "e", "f"]), "`pros` has 6 items; at most 5"),
-        (standard(cons=["x" * 201]), "an item of `cons` has 201 characters"),
-        (standard(cons="one"), "`cons` must be a list of strings"),
-        (standard(confidence="sure"), "`confidence` must be one of high, medium, low"),
-    ],
+# A sign that keeps every limit: twenty words in one sentence, three items of 140 characters.
+GOOD_SIGN = standard(
+    recommendation=" ".join(["word"] * 19) + " end.",
+    pros=["a" * ITEM_CHARS, "Users asked for it.", "It is small."],
+    cons=["One more flag to remove.", "", "Support must learn it."],
+    conditions=["A rollback exists."],
+    open_questions=["Who owns the export after launch?"],
+    reasoning="See `BannerView` in src/app/Banner.tsx:12 and "
+    "1f0e2d3c-0000-4000-8000-000000000000.\n" + "x" * (REASONING_CHARS - 100),
 )
-def test_an_answer_that_breaks_the_standard_names_the_rule(
-    payload: dict[str, object], problem: str
+
+
+def test_a_sign_at_every_limit_passes_and_the_reasoning_holds_anything() -> None:
+    answer, prose = parse_answer(json.dumps(GOOD_SIGN))
+    assert word_count(answer["recommendation"]) == RECOMMENDATION_WORDS
+    assert answer["cons"] == ["One more flag to remove.", "Support must learn it."]
+    assert answer["position"] == "yes_with_conditions"
+    assert prose.startswith("See `BannerView` in src/app/Banner.tsx:12")
+
+
+# One bad example per rule, with the one line it gets.
+BAD_ANSWERS: list[tuple[str, dict[str, object], str]] = [
+    (
+        "words",
+        standard(recommendation=" ".join(["word"] * 27)),
+        "recommendation: 27 words; at most 20",
+    ),
+    (
+        "sentences",
+        standard(recommendation="Ship it. Then watch it."),
+        "recommendation: 2 sentences; at most 1",
+    ),
+    (
+        "chars",
+        standard(recommendation=" ".join(["x" * 20] * 10)),
+        "recommendation: 209 characters; at most 200",
+    ),
+    (
+        "missing",
+        standard(recommendation=" "),
+        "recommendation: missing; say in one sentence of at most 20 words what the person "
+        "should do",
+    ),
+    ("too_many", standard(pros=["a", "b", "c", "d", "e"]), "pros: 5 items; at most 3"),
+    ("item_chars", standard(cons=["x" * 141]), "cons[0]: 141 characters; at most 140"),
+    (
+        "file_path",
+        standard(conditions=["A rollback exists.", "Keep Banner.tsx as it is."]),
+        "conditions[1]: looks like a file path (Banner.tsx)",
+    ),
+    (
+        "folder_path",
+        standard(pros=["It changes src/app/Banner.tsx only."]),
+        "pros[0]: looks like a file path (src/app/Banner.tsx)",
+    ),
+    (
+        "code_span",
+        standard(cons=["The `banner` flag stays."]),
+        "cons[0]: contains code (`banner`)",
+    ),
+    ("code_fence", standard(pros=["Put it in a ``` block."]), "pros[0]: contains a code fence"),
+    (
+        "code_symbol",
+        standard(recommendation="Rename loop_questions before the release."),
+        "recommendation: looks like a code symbol (loop_questions)",
+    ),
+    (
+        "id",
+        standard(cons=["Ticket 1f0e2d3c-0000-4000-8000-000000000000 is open."]),
+        "cons[0]: contains an id (1f0e2d3c-0000-4000-8000-000000000000)",
+    ),
+    (
+        "finding_id",
+        standard(position="unclear", open_questions=["Is F-12 still true?"]),
+        "open_questions[0]: contains a finding id (F-12)",
+    ),
+    (
+        "conditions",
+        standard(position="yes_with_conditions"),
+        "conditions: missing; yes_with_conditions needs at least one",
+    ),
+    (
+        "open_questions",
+        standard(position="unclear"),
+        "open_questions: missing; unclear needs at least one",
+    ),
+    (
+        "position",
+        standard(position="agree"),
+        "position: must be one of yes, yes_with_conditions, no, unclear",
+    ),
+    (
+        "confidence",
+        standard(confidence="sure"),
+        "confidence: must be one of high, medium, low",
+    ),
+    ("list_type", standard(cons="one"), "cons: must be a list of strings"),
+    ("item_type", standard(cons=["one", 2]), "cons: must be a list of strings"),
+    ("text_type", standard(recommendation=["Ship."]), "recommendation: must be a string"),
+    (
+        "reasoning",
+        standard(reasoning="x" * (REASONING_CHARS + 1)),
+        "reasoning: 8001 characters; at most 8000",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("rule", "payload", "message"), BAD_ANSWERS, ids=[r[0] for r in BAD_ANSWERS]
+)
+def test_an_answer_that_breaks_one_rule_gets_its_one_line(
+    rule: str, payload: dict[str, object], message: str
 ) -> None:
+    del rule
+    assert findings_of(payload) == [message]
+
+
+def test_every_finding_is_collected_before_the_answer_is_refused() -> None:
+    payload = standard(
+        recommendation=" ".join(["word"] * 26) + ". More.",
+        pros=["a", "b", "c", "d"],
+        conditions=["Keep Banner.tsx as it is."],
+        confidence="sure",
+    )
     with pytest.raises(AnswerShapeError) as broken:
         parse_answer(json.dumps(payload))
-    assert problem in str(broken.value)
+    assert str(broken.value) == (
+        "recommendation: 27 words; at most 20\n"
+        "recommendation: 2 sentences; at most 1\n"
+        "pros: 4 items; at most 3\n"
+        "conditions[0]: looks like a file path (Banner.tsx)\n"
+        "confidence: must be one of high, medium, low"
+    )
+    assert broken.value.entries() == [
+        {"field": "recommendation", "rule": "words"},
+        {"field": "recommendation", "rule": "sentences"},
+        {"field": "pros", "rule": "too_many"},
+        {"field": "conditions[0]", "rule": "file_path"},
+        {"field": "confidence", "rule": "choice"},
+    ]
+
+
+def test_the_lines_of_a_refusal_stop_at_the_bound_and_say_how_many_more() -> None:
+    error = AnswerShapeError([finding(f"pros[{n}]", "chars", "long") for n in range(25)])
+    lines = error.lines().splitlines()
+    assert len(lines) == MAX_FINDINGS + 1
+    assert lines[-1] == "(and 5 more)"
 
 
 def test_an_answer_without_an_object_is_refused() -> None:
-    with pytest.raises(AnswerShapeError, match="no JSON object"):
+    with pytest.raises(AnswerShapeError, match=r"^answer: holds no JSON object$"):
         parse_answer("I agree with Beta.\nVerdict: AGREE")
-    with pytest.raises(AnswerShapeError, match="at most 60000"):
+    with pytest.raises(AnswerShapeError, match=r"^answer: 60001 characters; at most 60000$"):
         parse_answer("x" * 60_001)
 
 
@@ -132,6 +276,22 @@ def test_a_stored_answer_reads_back_and_anything_else_reads_as_none() -> None:
         **prose_answer(""),
         "problem": None,
     }
+
+
+def test_an_answer_stored_under_the_old_limits_reads_as_it_was_written() -> None:
+    old: DiscussionAnswer = {
+        "version": 1,
+        "format": "structured",
+        "position": "yes",
+        "recommendation": "x" * 290 + " see Banner.tsx.",
+        "pros": ["one", "two", "three", "four", "five"],
+        "cons": ["y" * 200],
+        "conditions": [],
+        "open_questions": [],
+        "confidence": "high",
+        "problem": None,
+    }
+    assert read_answer(json.dumps(old)) == old
 
 
 def test_the_transcript_line_names_the_position_and_recommendation() -> None:
@@ -154,97 +314,29 @@ def test_the_prompt_and_the_schema_name_the_same_closed_sets() -> None:
     assert "A person decides" in instructions
 
 
-# --- asking with one repair --------------------------------------------------------------------
+def test_the_schema_carries_the_limits() -> None:
+    properties = answer_schema()["schema"]["properties"]
+    assert isinstance(properties, dict)
+    assert properties["recommendation"] == {"type": "string", "maxLength": 200}
+    for name in ("pros", "cons", "conditions", "open_questions"):
+        assert properties[name] == {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 140},
+            "maxItems": 3,
+        }
+    assert properties["reasoning"] == {"type": "string", "maxLength": 8000}
 
 
-def said(text: str, tokens: int = 10) -> Completion:
-    return {
-        "ok": True,
-        "error": None,
-        "text": text,
-        "tool_calls": [],
-        "model": "m",
-        "usage": {"total_tokens": tokens},
-    }
-
-
-def failed(error: str) -> Completion:
-    return {"ok": False, "error": error, "text": "", "tool_calls": []}
-
-
-@dataclass
-class Provider:
-    answers: list[Completion]
-    asked: list[Sequence[Message]] = field(default_factory=list[Sequence[Message]])
-
-    def __call__(
-        self,
-        settings: object,
-        agent_row: dict[str, object],
-        *,
-        system_prompt: str,
-        messages: Sequence[Message],
-        response_schema: ResponseSchema | None,
-    ) -> Completion:
-        del settings, agent_row, system_prompt
-        assert response_schema is not None and response_schema["name"] == "discussion_answer"
-        self.asked.append(messages)
-        return self.answers.pop(0)
-
-
-QUESTION: list[Message] = [{"role": "user", "content": "Ship it?"}]
-
-
-def test_a_valid_answer_costs_one_call() -> None:
-    provider = Provider([said(json.dumps(standard()), tokens=7)])
-    asked = ask_participant(provider, object(), {"id": "a"}, system_prompt="s", messages=QUESTION)
-    assert (asked["answer"]["format"], asked["tokens"], asked["repairs"]) == ("structured", 7, 0)
-    assert len(provider.asked) == 1
-
-
-def test_an_answer_that_needs_repair_is_asked_once_more_with_the_problem() -> None:
-    provider = Provider([said("Verdict: AGREE", tokens=5), said(json.dumps(standard()), tokens=6)])
-    asked = ask_participant(provider, object(), {"id": "a"}, system_prompt="s", messages=QUESTION)
-    assert (asked["answer"]["format"], asked["tokens"], asked["repairs"]) == ("repaired", 11, 1)
-    assert asked["content"] == "The **change** is small."
-    repair = provider.asked[1]
-    assert [message["role"] for message in repair] == ["user", "assistant", "user"]
-    assert repair[1]["content"] == "Verdict: AGREE"
-    assert "did not validate" in repair[2]["content"]
-    assert "the answer holds no JSON object" in repair[2]["content"]
-
-
-def test_an_answer_that_stays_invalid_is_kept_as_prose_and_unclear() -> None:
-    provider = Provider([said("I think yes.", tokens=5), said('{"position": "agree"}', tokens=6)])
-    asked = ask_participant(provider, object(), {"id": "a"}, system_prompt="s", messages=QUESTION)
-    assert asked["ok"] is True
-    assert asked["content"] == "I think yes."
-    assert asked["answer"]["format"] == "prose"
-    assert asked["answer"]["position"] == "unclear"
-    assert (
-        asked["answer"]["problem"]
-        == "`position` must be one of yes, yes_with_conditions, no, unclear"
+def test_the_prompt_says_the_limits_and_who_reads_which_part() -> None:
+    instructions = answer_instructions()
+    assert "one sentence of at most 20 words" in instructions
+    assert "at most 3 items of at most 140 characters" in instructions
+    assert "The recommendation and the lists are what the person reads" in instructions
+    assert "no file name, code or id" in instructions
+    assert "The reasoning is read by the other agents and shown to the person as raw text" in (
+        instructions
     )
-    assert (asked["tokens"], asked["repairs"]) == (11, 1)
-
-
-def test_a_failed_repair_call_keeps_the_first_answer_as_prose() -> None:
-    provider = Provider([said("I think yes."), failed("timeout")])
-    asked = ask_participant(provider, object(), {"id": "a"}, system_prompt="s", messages=QUESTION)
-    assert (asked["ok"], asked["content"]) == (True, "I think yes.")
-    assert asked["answer"]["problem"] == "the repair call failed: timeout"
-
-
-def test_a_failed_first_call_is_a_failure_not_an_answer() -> None:
-    asked = ask_participant(
-        Provider([failed("unreachable")]), object(), {}, system_prompt="s", messages=QUESTION
-    )
-    assert (asked["ok"], asked["error"], asked["tokens"]) == (False, "unreachable", 0)
-
-
-def test_usage_reads_the_total_or_adds_the_parts() -> None:
-    assert usage_tokens({"usage": {"input_tokens": 2, "output_tokens": 3}}) == 5
-    assert usage_tokens({"usage": []}) == 0
+    assert "as long and technical as it needs to be" in instructions
 
 
 # --- the synthesis ------------------------------------------------------------------------------
@@ -345,9 +437,7 @@ def test_a_split_an_unclear_and_a_missing_answer_suggest_unclear_and_say_why() -
     )
     assert made["suggestion"] == {
         "verdict": "unclear",
-        "reason": (
-            "The participants differ: 1 for going ahead, 1 against. No answer yet from Gamma."
-        ),
+        "reason": "The participants differ: 1 for going ahead, 1 against and 1 has not answered.",
     }
     assert made["missing"] == ["Gamma"]
     assert made["counts"] == {
@@ -364,9 +454,79 @@ def test_a_split_an_unclear_and_a_missing_answer_suggest_unclear_and_say_why() -
     )
     assert made["suggestion"] == {
         "verdict": "unclear",
-        "reason": "Beta and Gamma cannot tell yet; read the open questions.",
+        "reason": "Not settled yet: 1 for going ahead and 2 cannot tell; read the open questions.",
     }
     assert made["open_questions"] == [{"text": "Who owns the export?", "participants": ["Gamma"]}]
+
+
+def stance(name: str, position: str) -> Stance:
+    return {
+        "participant_id": name.lower(),
+        "participant": name,
+        "position": position,
+        "recommendation": "Go.",
+        "confidence": "high",
+        "format": "structured",
+        "message_id": f"m-{name.lower()}",
+        "round_number": 1,
+    }
+
+
+def many(count: int, position: str) -> list[Stance]:
+    return [stance(f"Agent{n}", position) for n in range(count)]
+
+
+# Every branch of the suggestion, the one with go, stop, unclear and missing at once included,
+# with long names and two-digit counts, so a branch that names someone or chains clauses shows.
+BRANCHES: list[tuple[str, list[Stance], list[Stance], list[Stance], list[str]]] = [
+    ("nobody", [], [], [], ["A Very Long Participant Name"] * 12),
+    ("yes", many(12, "yes"), [], [], []),
+    ("yes_with_conditions", many(12, "yes_with_conditions"), [], [], []),
+    ("no", [], many(12, "no"), [], []),
+    ("split", many(11, "yes"), many(12, "no"), [], []),
+    ("split_missing", many(11, "yes"), many(12, "no"), [], ["Missing One"] * 13),
+    ("split_unclear", many(11, "yes"), many(12, "no"), many(14, "unclear"), []),
+    (
+        "go_stop_unclear_missing",
+        many(11, "yes"),
+        many(12, "no"),
+        many(14, "unclear"),
+        ["A Very Long Participant Name"] * 15,
+    ),
+    ("go_unclear_missing", many(11, "yes"), [], many(14, "unclear"), ["Late"] * 15),
+    ("stop_unclear_missing", [], many(12, "no"), many(14, "unclear"), ["Late"] * 15),
+    ("go_missing", many(11, "yes"), [], [], ["Late"]),
+    ("stop_missing", [], many(12, "no"), [], ["Late"] * 2),
+    ("unclear_only", [], [], many(14, "unclear"), []),
+]
+
+
+@pytest.mark.parametrize(
+    ("branch", "go", "stop", "unclear", "missing"), BRANCHES, ids=[b[0] for b in BRANCHES]
+)
+def test_every_suggestion_is_one_sentence_of_at_most_twenty_words_naming_nobody(
+    branch: str, go: list[Stance], stop: list[Stance], unclear: list[Stance], missing: list[str]
+) -> None:
+    del branch
+    reason = suggest(go, stop, unclear, missing)["reason"]
+    assert word_count(reason) <= RECOMMENDATION_WORDS, reason
+    assert sentence_count(reason) == 1, reason
+    names = {item["participant"] for item in (*go, *stop, *unclear)} | set(missing)
+    assert not any(name in reason for name in names), reason
+
+
+def test_the_unclear_suggestion_counts_every_side_in_one_sentence() -> None:
+    suggestion = suggest(many(1, "yes"), many(1, "no"), many(1, "unclear"), ["Gamma", "Delta"])
+    assert suggestion == {
+        "verdict": "unclear",
+        "reason": (
+            "The participants differ: 1 for going ahead, 1 against, 1 cannot tell and 2 have not "
+            "answered."
+        ),
+    }
+    assert suggest(many(2, "yes"), [], [], ["Gamma"])["reason"] == (
+        "Not settled yet: 2 for going ahead and 1 has not answered."
+    )
 
 
 def test_nobody_answering_and_answers_before_the_standard_read_as_missing() -> None:

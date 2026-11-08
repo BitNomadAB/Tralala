@@ -7,16 +7,29 @@ conditions of a yes, the questions it could not settle, and its confidence. The 
 (``reasoning``, or the text around the object) stays the message's ``content``; the structure is
 stored beside it as ``answer_json``. An answer that never follows the shape is kept as prose with
 the position ``unclear`` (``prose_answer``), never dropped.
+
+The recommendation and the four lists are the answer's sign: what a person reads at a glance. They
+are held to the face's discipline, counted and matched, never judged by a model: one sentence of
+at most ``RECOMMENDATION_WORDS`` words, at most ``ITEMS`` items of at most ``ITEM_CHARS``
+characters per list, and the plain-text rules (``plain_text.plain_rules``: no file path or file
+name, code span or fence, code symbol, UUID or other id). The reasoning is the agents' side: long,
+technical and unchecked but for its length. Every finding names the field, the rule and the text
+(``AnswerFinding``), for example ``conditions[1]: looks like a file path (Banner.tsx)``; a list
+item is named by its 0-based index. An answer stored under older, looser limits is read as it is
+(``read_answer``).
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TypedDict, TypeIs
 
 from pydantic import JsonValue
 
+from .plain_text import plain_rules, sentence_count, word_count
 from .runtime import ResponseSchema
 
 VERSION = 1
@@ -27,11 +40,16 @@ CONFIDENCE = ("high", "medium", "low")
 FORMATS = ("structured", "repaired", "prose")
 LISTS = ("pros", "cons", "conditions", "open_questions")
 
-RECOMMENDATION_CHARS = 300
-ITEM_CHARS = 200
-ITEMS = 5
+RECOMMENDATION_WORDS = 20
+RECOMMENDATION_SENTENCES = 1
+# The schema's character cap on the recommendation: room for twenty words, not a rule of its own.
+RECOMMENDATION_CHARS = 200
+ITEMS = 3
+ITEM_CHARS = 140
 REASONING_CHARS = 8000
 PROBLEM_CHARS = 300
+# A repair request lists at most this many findings; the count says how many more there were.
+MAX_FINDINGS = 20
 # An answer longer than this is not searched for its object: a runaway answer stays prose.
 SEARCH_CHARS = 60_000
 SEARCH_OBJECTS = 50
@@ -54,8 +72,54 @@ class DiscussionAnswer(TypedDict):
     problem: str | None
 
 
+class AnswerFindingEntry(TypedDict):
+    """A finding as a log line carries it: the field and the rule, never the text."""
+
+    field: str
+    rule: str
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerFinding:
+    """One thing an answer got wrong: the field (``pros[2]`` for an item, ``answer`` for the whole
+    text), the rule (``type``, ``choice``, ``missing``, ``words``, ``sentences``, ``chars``,
+    ``too_many``, ``no_object``, or a plain-text rule: ``code_fence``, ``code_span``,
+    ``file_path``, ``id``, ``finding_id``, ``code_symbol``) and the line a writer reads."""
+
+    field: str
+    rule: str
+    message: str
+
+    def entry(self) -> AnswerFindingEntry:
+        return {"field": self.field, "rule": self.rule}
+
+
+def finding(field: str, rule: str, text: str) -> AnswerFinding:
+    """The finding whose line is ``field: text``."""
+    return AnswerFinding(field, rule, f"{field}: {text}")
+
+
 class AnswerShapeError(ValueError):
-    """The answer does not follow the standard; the message says what to fix."""
+    """The answer does not follow the standard; every finding, one line each, says what to fix."""
+
+    def __init__(self, findings: Sequence[AnswerFinding]) -> None:
+        self.findings = tuple(findings)
+        super().__init__("\n".join(item.message for item in self.findings))
+
+    def lines(self) -> str:
+        """The findings' lines: at most ``MAX_FINDINGS``, then how many more there were."""
+        shown = [item.message for item in self.findings[:MAX_FINDINGS]]
+        more = len(self.findings) - len(shown)
+        return "\n".join([*shown, f"(and {more} more)"] if more else shown)
+
+    def entries(self) -> list[AnswerFindingEntry]:
+        """Every finding as a log line carries it."""
+        return [item.entry() for item in self.findings]
+
+
+def shape_error(field: str, rule: str, text: str) -> AnswerShapeError:
+    """An ``AnswerShapeError`` of one finding."""
+    return AnswerShapeError([finding(field, rule, text)])
 
 
 def _is_object(value: JsonValue) -> TypeIs[dict[str, JsonValue]]:
@@ -63,13 +127,13 @@ def _is_object(value: JsonValue) -> TypeIs[dict[str, JsonValue]]:
 
 
 def answer_instructions() -> str:
-    """The last section of a round's prompt: how to answer."""
+    """The last section of a round's prompt: how to answer, and who reads which part."""
     return (
         "Answer with one JSON object and nothing else:\n"
         "{\n"
         '  "position": "yes" | "yes_with_conditions" | "no" | "unclear",\n'
-        f'  "recommendation": "one sentence: what the person should do (at most '
-        f'{RECOMMENDATION_CHARS} characters)",\n'
+        '  "recommendation": "what the person should do, in one sentence of at most '
+        f'{RECOMMENDATION_WORDS} words",\n'
         '  "pros": ["for going ahead"],\n'
         '  "cons": ["against, and the risks"],\n'
         '  "conditions": ["what must hold; at least one when yes_with_conditions"],\n'
@@ -79,9 +143,12 @@ def answer_instructions() -> str:
         'are answering"\n'
         "}\n"
         "`position` answers whether the person should go ahead with what the discussion goal "
-        f"proposes. Each list holds at most {ITEMS} short items of at most {ITEM_CHARS} "
-        "characters; leave a list empty rather than repeat yourself. A person decides; you "
-        "advise."
+        f"proposes. Each list holds at most {ITEMS} items of at most {ITEM_CHARS} characters; "
+        "leave a list empty rather than repeat yourself. The recommendation and the lists are "
+        "what the person reads: plain words, with no file name, code or id in them. The "
+        "reasoning is read by the other agents and shown to the person as raw text, so it may be "
+        f"as long and technical as it needs to be, up to {REASONING_CHARS} characters. A person "
+        "decides; you advise."
     )
 
 
@@ -141,77 +208,130 @@ def _candidates(text: str) -> list[tuple[dict[str, JsonValue], str]]:
     return found
 
 
-def _text_field(payload: dict[str, JsonValue], key: str, limit: int, *, required: bool) -> str:
-    value = payload.get(key)
-    if value is None and not required:
-        return ""
-    if not isinstance(value, str):
-        raise AnswerShapeError(f"`{key}` must be a string")
-    value = value.strip()
-    if required and not value:
-        raise AnswerShapeError(f"`{key}` must not be empty")
-    if len(value) > limit:
-        raise AnswerShapeError(f"`{key}` has {len(value)} characters; at most {limit}")
-    return value
+class _Reader:
+    """Reads an object field by field and collects every finding instead of stopping at one."""
 
+    def __init__(self, payload: dict[str, JsonValue]) -> None:
+        self.payload = payload
+        self.findings: list[AnswerFinding] = []
 
-def _list_field(payload: dict[str, JsonValue], key: str) -> list[str]:
-    value = payload.get(key)
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise AnswerShapeError(f"`{key}` must be a list of strings")
-    items: list[str] = []
-    for entry in value:
-        if not isinstance(entry, str):
-            raise AnswerShapeError(f"`{key}` must be a list of strings")
-        if entry.strip():
-            items.append(entry.strip())
-    if len(items) > ITEMS:
-        raise AnswerShapeError(f"`{key}` has {len(items)} items; at most {ITEMS}")
-    for entry in items:
-        if len(entry) > ITEM_CHARS:
-            raise AnswerShapeError(
-                f"an item of `{key}` has {len(entry)} characters; at most {ITEM_CHARS}"
+    def add(self, field: str, rule: str, text: str) -> None:
+        self.findings.append(finding(field, rule, text))
+
+    def plain(self, field: str, text: str) -> None:
+        for rule, phrase in plain_rules(text):
+            self.add(field, rule, phrase)
+
+    def choice(self, key: str, allowed: tuple[str, ...]) -> str:
+        value = self.payload.get(key)
+        folded = value.strip().lower() if isinstance(value, str) else ""
+        if folded not in allowed:
+            self.add(key, "choice", f"must be one of {', '.join(allowed)}")
+        return folded
+
+    def string(self, key: str) -> str | None:
+        """The stripped string under ``key``: ``""`` when it is absent, ``None`` (and a finding)
+        when it is not a string."""
+        value = self.payload.get(key)
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            self.add(key, "type", "must be a string")
+            return None
+        return value.strip()
+
+    def recommendation(self) -> str:
+        text = self.string("recommendation")
+        if text is None:
+            return ""
+        if not text:
+            self.add(
+                "recommendation",
+                "missing",
+                f"missing; say in one sentence of at most {RECOMMENDATION_WORDS} words what the "
+                "person should do",
             )
-    return items
+            return ""
+        words = word_count(text)
+        if words > RECOMMENDATION_WORDS:
+            self.add("recommendation", "words", f"{words} words; at most {RECOMMENDATION_WORDS}")
+        elif len(text) > RECOMMENDATION_CHARS:
+            # Twenty very long words: the schema's cap, said in the words a writer can act on.
+            self.add(
+                "recommendation", "chars", f"{len(text)} characters; at most {RECOMMENDATION_CHARS}"
+            )
+        sentences = sentence_count(text)
+        if sentences > RECOMMENDATION_SENTENCES:
+            self.add(
+                "recommendation",
+                "sentences",
+                f"{sentences} sentences; at most {RECOMMENDATION_SENTENCES}",
+            )
+        self.plain("recommendation", text)
+        return text
 
+    def reasoning(self) -> str:
+        """The reasoning, checked for its length only: it is the agents' side."""
+        text = self.string("reasoning") or ""
+        if len(text) > REASONING_CHARS:
+            self.add("reasoning", "chars", f"{len(text)} characters; at most {REASONING_CHARS}")
+        return text
 
-def _choice(payload: dict[str, JsonValue], key: str, allowed: tuple[str, ...]) -> str:
-    value = payload.get(key)
-    folded = value.strip().lower() if isinstance(value, str) else ""
-    if folded not in allowed:
-        raise AnswerShapeError(f"`{key}` must be one of {', '.join(allowed)}")
-    return folded
+    def items(self, key: str) -> list[str]:
+        value = self.payload.get(key)
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            self.add(key, "type", "must be a list of strings")
+            return []
+        # An empty item is dropped, not refused; an item keeps the index its writer gave it.
+        listed: list[tuple[int, str]] = []
+        for index, entry in enumerate(value):
+            if not isinstance(entry, str):
+                self.add(key, "type", "must be a list of strings")
+                return []
+            if entry.strip():
+                listed.append((index, entry.strip()))
+        if len(listed) > ITEMS:
+            self.add(key, "too_many", f"{len(listed)} items; at most {ITEMS}")
+        for index, entry in listed:
+            path = f"{key}[{index}]"
+            if len(entry) > ITEM_CHARS:
+                self.add(path, "chars", f"{len(entry)} characters; at most {ITEM_CHARS}")
+            self.plain(path, entry)
+        return [entry for _, entry in listed]
 
 
 def read_object(payload: dict[str, JsonValue]) -> tuple[DiscussionAnswer, str]:
-    """The answer an object states, and its ``reasoning``; ``AnswerShapeError`` when it breaks the
-    standard. Keys outside the standard are ignored."""
-    position = _choice(payload, "position", POSITIONS)
-    lists = {key: _list_field(payload, key) for key in LISTS}
+    """The answer an object states, and its ``reasoning``; ``AnswerShapeError`` with every finding,
+    field by field, when it breaks the standard. Keys outside the standard are ignored."""
+    reader = _Reader(payload)
+    position = reader.choice("position", POSITIONS)
+    recommendation = reader.recommendation()
+    lists = {key: reader.items(key) for key in LISTS}
+    confidence = reader.choice("confidence", CONFIDENCE)
+    reasoning = reader.reasoning()
     if position == "yes" and lists["conditions"]:
         # A yes that names its conditions says yes with conditions; no repair is spent on that.
         position = "yes_with_conditions"
     if position == "yes_with_conditions" and not lists["conditions"]:
-        raise AnswerShapeError("`yes_with_conditions` needs at least one item in `conditions`")
+        reader.add("conditions", "missing", "missing; yes_with_conditions needs at least one")
     if position == "unclear" and not lists["open_questions"]:
-        raise AnswerShapeError("`unclear` needs at least one item in `open_questions`")
+        reader.add("open_questions", "missing", "missing; unclear needs at least one")
+    if reader.findings:
+        raise AnswerShapeError(reader.findings)
     answer: DiscussionAnswer = {
         "version": VERSION,
         "format": "structured",
         "position": position,
-        "recommendation": _text_field(
-            payload, "recommendation", RECOMMENDATION_CHARS, required=True
-        ),
+        "recommendation": recommendation,
         "pros": lists["pros"],
         "cons": lists["cons"],
         "conditions": lists["conditions"],
         "open_questions": lists["open_questions"],
-        "confidence": _choice(payload, "confidence", CONFIDENCE),
+        "confidence": confidence,
         "problem": None,
     }
-    reasoning = _text_field(payload, "reasoning", REASONING_CHARS, required=False)
     return answer, reasoning
 
 
@@ -219,13 +339,13 @@ def parse_answer(text: str) -> tuple[DiscussionAnswer, str]:
     """The structured answer in a provider's text and the prose to store as ``content``.
 
     The prose is ``reasoning``, else the text around the object, else the recommendation, so a
-    message is never empty. ``AnswerShapeError`` names the first rule the best candidate broke.
+    message is never empty. ``AnswerShapeError`` carries every finding of the best candidate.
     """
     if len(text) > SEARCH_CHARS:
-        raise AnswerShapeError(f"the answer has {len(text)} characters; at most {SEARCH_CHARS}")
+        raise shape_error("answer", "chars", f"{len(text)} characters; at most {SEARCH_CHARS}")
     candidates = _candidates(text)
     if not candidates:
-        raise AnswerShapeError("the answer holds no JSON object")
+        raise shape_error("answer", "no_object", "holds no JSON object")
     first: AnswerShapeError | None = None
     for payload, rest in candidates:
         try:
@@ -234,7 +354,7 @@ def parse_answer(text: str) -> tuple[DiscussionAnswer, str]:
             first = first or problem
             continue
         return answer, reasoning or rest or answer["recommendation"]
-    raise first or AnswerShapeError("the answer holds no JSON object")
+    raise first or shape_error("answer", "no_object", "holds no JSON object")
 
 
 def prose_answer(problem: str) -> DiscussionAnswer:
@@ -263,7 +383,8 @@ def _optional(value: JsonValue) -> str | None:
 
 def read_answer(stored: str) -> DiscussionAnswer | None:
     """A message's stored answer; ``None`` for a person's message or an answer before the
-    standard (``{}``), and for anything unreadable."""
+    standard (``{}``), and for anything unreadable. No limit is applied: an answer stored under
+    older limits (five items, a long recommendation) reads as it was written."""
     try:
         payload: JsonValue = json.loads(stored or "{}")
     except ValueError:

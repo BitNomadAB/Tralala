@@ -90,7 +90,7 @@ def test_read_discussion_answers_the_synthesis_positions_and_the_structure(
     synthesis = field(result, "synthesis")
     assert field(synthesis, "suggestion") == {
         "verdict": "unclear",
-        "reason": "Beta cannot tell yet; read the open questions.",
+        "reason": "Not settled yet: 1 for going ahead and 1 cannot tell; read the open questions.",
     }
     assert [(p["agent"], p["position"]) for p in rows(result, "positions")] == [
         ("Alpha", "yes"),

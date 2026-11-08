@@ -5,8 +5,8 @@ needed, what happens if we skip it, up to three points for and three against, an
 concrete steps. Whoever writes it (a RoadMap handed in by a worker or written by a generation, a
 worker's unplanned Ticket, a person's edit) is held to the same template here, deterministically:
 word and sentence counts, list lengths, and the plain-text rules of the brief
-(``plain_text.text_problems``: no code fence, code span, file path, UUID or finding id)
-plus a code-symbol rule, since a face says what changes for the person, never where in the code.
+(``plain_text.plain_rules``: no code fence, code span, file path or file name, UUID or finding
+id, and no code symbol), since a face says what changes for the person, never where in the code.
 Nothing here judges text with a model.
 
 Every problem names the Ticket, the field and the rule (``FaceProblem``), and its message is the
@@ -22,8 +22,7 @@ written before the face existed has. Everything here is pure.
 from __future__ import annotations
 
 import json
-import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -31,16 +30,15 @@ from pydantic import JsonValue
 
 from ..core.errors import ValidationFailure
 from ..schemas.loops import PlanPayload
-from .plain_text import text_problems
+from .plain_text import ALLOWED_WORDS, code_symbol, plain_rules, sentence_count, word_count
 
 FACE_MAX_SUMMARY_WORDS = 20
 FACE_MAX_SENTENCES = 3
 FACE_MAX_POINTS = 3
 FACE_MIN_STEPS = 1
 FACE_MAX_STEPS = 5
-# Words that look like a code symbol and are not one. ``RoadMap`` is the product's own word for a
-# plan; extend the tuple, with the reason, when another product word needs it.
-FACE_ALLOWED_WORDS: tuple[str, ...] = ("RoadMap",)
+# Words that look like a code symbol and are not one: the plain-text rules' (``plain_text``).
+FACE_ALLOWED_WORDS: tuple[str, ...] = ALLOWED_WORDS
 # The face's fields besides the summary, in the order a writer writes them.
 FACE_FIELDS: tuple[str, ...] = ("why", "if_skipped", "pros", "cons", "steps")
 # A refusal lists at most this many messages; the count says how many there were.
@@ -54,28 +52,6 @@ FACE_STEP_GOOD = (
 )
 FACE_STEP_BAD = "Add QuestionList to BriefView.tsx."
 
-# A run of sentence ends followed by whitespace or the end of the text.
-_SENTENCE_END = re.compile(r"[.!?]+(?=\s|$)")
-# A file name without a folder (``BriefView.tsx``); a path with a folder is ``text_problems``'.
-_FILE_NAME = re.compile(
-    r"(?<![\w/\\.-])[\w-]+\.(?:py|pyi|ts|tsx|js|jsx|mjs|cjs|json|md|css|scss|html|yml|yaml|toml"
-    r"|sql|sqlite|txt|sh|ps1|cfg|ini|lock|go|rs|java|kt|cs|cpp|rb|php|vue|svelte|xml|env)\b",
-    re.I,
-)
-_SNAKE = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]")
-_CAMEL = re.compile(r"[a-z][A-Z]")
-_OPERATORS = ("()", "::", "->", "=>", "${")
-_CURLY = "\u2018\u2019\u201c\u201d"
-_EDGE = "\"'`.,;:!?()[]{}<>" + _CURLY
-_QUOTES = "\"'.,;!?" + _CURLY
-# What ``text_problems`` says, as the rule a problem breaks and the words a face's message uses.
-_TEXT_RULES: tuple[tuple[str, str, str], ...] = (
-    ("contains a code fence", "code_fence", "contains a code fence"),
-    ("contains code", "code_span", "contains code"),
-    ("contains a file path", "file_path", "looks like a file path"),
-    ("contains an id", "id", "contains an id"),
-    ("contains a finding id", "finding_id", "contains a finding id"),
-)
 _WHERE_IN_CODE = " Say what changes for the person, not where in the code."
 _MISSING = {
     "summary": f"Say in at most {FACE_MAX_SUMMARY_WORDS} words what the Ticket means.",
@@ -131,80 +107,6 @@ class FaceProblem:
         return {"ticket_id": self.ticket_id, "field": self.field, "rule": self.rule}
 
 
-# --- counting ------------------------------------------------------------------------------------
-
-
-def word_count(text: str) -> int:
-    """The whitespace-separated tokens of ``text``."""
-    return len(text.split())
-
-
-def sentence_count(text: str) -> int:
-    """The sentences of ``text``: each run of ``.``, ``!`` or ``?`` followed by whitespace or the
-    end ends one, and text after the last end is one more. An abbreviation ends a sentence too
-    (``e.g. this`` is two), which the generous limit allows for; ``3.5`` ends none. An empty text
-    has none."""
-    stripped = text.strip()
-    if not stripped:
-        return 0
-    ends = list(_SENTENCE_END.finditer(stripped))
-    tail = stripped[ends[-1].end() :] if ends else stripped
-    return len(ends) + (1 if tail.strip() else 0)
-
-
-# --- the rules -----------------------------------------------------------------------------------
-
-
-def _tokens(text: str) -> Iterator[str]:
-    for raw in text.split():
-        token = raw.strip(_EDGE)
-        for possessive in ("'s", "\u2019s"):
-            token = token.removesuffix(possessive)
-        if token:
-            yield token
-
-
-def code_symbol(text: str) -> str | None:
-    """The first token of ``text`` that looks like a code symbol: ``snake_case``, a lowercase letter
-    followed by an uppercase one (``loopQuestions``), or ``()``, ``::``, ``->``, ``=>`` or ``${``.
-    A word in ``FACE_ALLOWED_WORDS``, a link, a file name and code already in backticks are left to
-    their own rules."""
-    for raw in text.split():
-        operator = next((mark for mark in _OPERATORS if mark in raw), None)
-        if operator is not None and "`" not in raw:
-            return raw.strip(_QUOTES) or operator
-    for token in _tokens(text):
-        if (
-            token in FACE_ALLOWED_WORDS
-            or token.removesuffix("s") in FACE_ALLOWED_WORDS
-            or "`" in token
-            or token.lower().startswith(("http://", "https://"))
-            or _FILE_NAME.search(token)
-        ):
-            continue
-        if _SNAKE.search(token) or _CAMEL.search(token):
-            return token
-    return None
-
-
-def _text_rules(text: str) -> Iterator[tuple[str, str]]:
-    """``(rule, phrase)`` for every plain-text rule ``text`` breaks."""
-    path_found = False
-    for problem in text_problems(text, []):
-        for prefix, rule, phrase in _TEXT_RULES:
-            if problem.startswith(prefix):
-                shown = problem.partition("(")[2].rpartition(")")[0]
-                path_found = path_found or rule == "file_path"
-                yield rule, f"{phrase} ({shown})" if shown else phrase
-                break
-    name = None if path_found else _FILE_NAME.search(text)
-    if name is not None:
-        yield "file_path", f"looks like a file path ({name.group(0)})"
-    symbol = code_symbol(text)
-    if symbol is not None:
-        yield "code_symbol", f"looks like a code symbol ({symbol})"
-
-
 class _Found:
     def __init__(self, ticket_id: str) -> None:
         self.ticket_id = ticket_id
@@ -215,7 +117,7 @@ class _Found:
         self.problems.append(FaceProblem(self.ticket_id, field, rule, message))
 
     def plain(self, field: str, text: str, *, step: bool = False) -> None:
-        for rule, phrase in _text_rules(text):
+        for rule, phrase in plain_rules(text):
             advice = _WHERE_IN_CODE if step and rule in ("file_path", "code_symbol") else ""
             self.add(field, rule, f"{phrase}.{advice}")
 
