@@ -23,7 +23,7 @@ A repository is read through one of two providers, chosen when it is added:
 
 | Scenario | What you need | Provider | What Tralala reads | How to see what a run used | How to narrow it |
 | --- | --- | --- | --- | --- | --- |
-| Public GitHub repository | The URL | GitHub | The branch head through the GitHub API, no token | The document dialog's "based on" line and the run's steps; `source_revisions.repositories` and `trace` on the run | The *Branch* field; the board link's focus and exclude globs; link it only to the boards it concerns; untick *Enabled for analysis* |
+| Public GitHub repository | The URL | GitHub | The branch head through the GitHub API, no token | The Plan tab's "based on" line and the run's steps; `source_revisions.repositories` and `trace` on the run | The *Branch* field; the board link's focus and exclude globs; link it only to the boards it concerns; untick *Enabled for analysis* |
 | Private GitHub repository | The URL and a fine-grained token for that repository with *Contents: read* | GitHub | The same, with the token | The same | The same |
 | Any HTTPS Git host | The HTTPS URL, the host in `TRALALA_REPOSITORY_HOSTS`, and a read-only token if the host wants one | Git over HTTPS | The main branch, fetched into the mirror before every run | The same, plus when the mirror was fetched and whether it was stale | The same |
 
@@ -86,7 +86,7 @@ the API call that does the same (`/api/v1`, an administrator's session or a toke
    selection; an empty list unlinks every repository. A board may link several repositories and a
    repository may serve several boards.
 6. **Run an analysis.** The first run clones the mirror; every later run fetches the newest commit
-   first. The document dialog then says what the run read: "based on app @ 1a2b3c4d, 42 files,
+   first. The Loop's Plan tab then says what the run read: "based on app @ 1a2b3c4d, 42 files,
    96 KB", and the run's steps say how it read it.
 
 ## How a run reads the code
@@ -192,7 +192,7 @@ follow.
 
 ### Reading the steps
 
-The document dialog's run panel shows the steps while the run works and keeps them afterwards: a
+The Plan tab's run panel shows the steps while the run works and keeps them afterwards: a
 growing list of steps in plain words, grouped by stage. The stages come in this order, each one when
 the run reaches it:
 
