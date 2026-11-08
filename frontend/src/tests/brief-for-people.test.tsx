@@ -185,7 +185,8 @@ describe("the brief for people", () => {
     ]);
     expect(await screen.findByText("Writing for people...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Rewrite for people/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Approve RoadMap" })).toBeDisabled();
+    // The approval counts the Tickets it publishes ("Approve RoadMap · 1 Ticket").
+    expect(screen.getByRole("button", { name: /^Approve RoadMap/ })).toBeDisabled();
   });
 
   it("names the reasons in the order a person meets them", () => {

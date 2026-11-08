@@ -5,8 +5,8 @@ import type { GenerationCandidates } from "@/lib/boardAgents";
 import type { PlanScope, PlanTab } from "./loopUi";
 
 /**
- * The Info / Analysis / RoadMap tabs, with the switch between the brief for people and the technical
- * version for AI, and the generation controls.
+ * The Info / Analysis / RoadMap tabs, with the switch between the analysis brief for people and the
+ * technical version for AI, and the generation controls.
  */
 export function LoopPlanTabs({
   tab,
@@ -53,7 +53,8 @@ export function LoopPlanTabs({
           {entry === "info" ? "Info" : entry === "analysis" ? "Analysis" : "RoadMap"}
         </Button>
       ))}
-      {tab !== "info" ? (
+      {/* The RoadMap's review has its own For you | Raw text switch. */}
+      {tab === "analysis" ? (
         <div role="group" aria-label="Version" className="flex gap-1">
           {(
             [

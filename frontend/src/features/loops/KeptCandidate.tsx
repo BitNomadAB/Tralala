@@ -1,8 +1,11 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Expander } from "@/components/ui/expander";
 import { candidateMarkdown, staleCandidate } from "@/lib/keptCandidate";
 import { renderMarkdown } from "@/lib/markdown";
 import type { GenerationRun } from "@/lib/types";
+import { RoadmapPhases } from "./RoadmapPhases";
+import { reviewPlan } from "./roadmapPlan";
 
 /**
  * The answer of the scope's last run when it arrived after the documents it read had changed.
@@ -10,6 +13,7 @@ import type { GenerationRun } from "@/lib/types";
  * The server keeps that answer on the run instead of promoting it, and until now no screen showed it:
  * the person saw a failed run and nothing of the minutes it had cost. It is rendered the way the
  * technical view renders a generated draft, labelled as not promoted, with a new run one click away.
+ * A kept RoadMap shows its Phases and Tickets as the review does, with the JSON behind Raw text.
  */
 export function KeptCandidate({
   run,
@@ -24,6 +28,12 @@ export function KeptCandidate({
 }) {
   const candidate = staleCandidate(run);
   if (!candidate) return null;
+  const phases = reviewPlan(candidate);
+  const raw = (
+    <div className="prose-sm max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
+      {renderMarkdown(candidateMarkdown(candidate))}
+    </div>
+  );
   return (
     <section
       aria-label={`Kept ${scopeLabel} result`}
@@ -38,9 +48,14 @@ export function KeptCandidate({
         for inspection and not used. It was written from the documents as they were when the run
         started.
       </p>
-      <div className="prose-sm max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
-        {renderMarkdown(candidateMarkdown(candidate))}
-      </div>
+      {phases ? (
+        <>
+          <RoadmapPhases phases={phases} />
+          <Expander title="Raw text">{raw}</Expander>
+        </>
+      ) : (
+        raw
+      )}
       <div className="flex justify-end">
         <Button size="sm" variant="outline" disabled={regenerateDisabled} onClick={onRegenerate}>
           Regenerate from the current Info

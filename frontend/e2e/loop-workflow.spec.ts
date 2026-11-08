@@ -102,8 +102,10 @@ test.describe("loop planning and completion", () => {
 
     await page.reload();
     const roadmapDialog = await openPlanDocument(page, "RoadMap");
-    await expect(roadmapDialog.getByText(/Database update/)).toBeVisible();
-    await roadmapDialog.getByRole("button", { name: "Approve RoadMap" }).click();
+    // The review shows each Phase as a section with a row per Ticket, and the approval counts them.
+    const phase = roadmapDialog.getByRole("region", { name: /Database update/ });
+    await expect(phase.getByText("Add verification columns")).toBeVisible();
+    await roadmapDialog.getByRole("button", { name: /^Approve RoadMap/ }).click();
     await expect(roadmapDialog.getByText(/revision 1/).first()).toBeVisible();
     await showTab(page, "Kanban");
 

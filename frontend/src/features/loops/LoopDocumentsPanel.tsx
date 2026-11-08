@@ -10,6 +10,8 @@ import { KeptCandidate } from "./KeptCandidate";
 import { LoopPlanTabs } from "./LoopPlanTabs";
 import { FOR_PEOPLE_PURPOSE, rewriteBlockedReason, type PlanScope, type PlanTab } from "./loopUi";
 import { PlanDocumentPanel } from "./PlanDocumentPanel";
+import { approvalLine, approveRoadmapLabel, reviewPlan, ticketCount } from "./roadmapPlan";
+import { RoadmapReview } from "./RoadmapReview";
 import { ScopeReview } from "./ScopeReview";
 import { useGenerationRun } from "./useGenerationRun";
 import { usePlanReview } from "./usePlanReview";
@@ -73,11 +75,13 @@ export function LoopDocumentsPanel({
     onStarted: () => setConfirmWithdraw(false),
   });
 
+  // The RoadMap is reviewed through RoadmapReview, which has its own For you | Raw text.
   const visible = useMemo(() => {
     if (tab === "info") return ["info"] as DocumentKind[];
     if (tab === "analysis") return [technical ? "analysis_ai" : "analysis"] as DocumentKind[];
-    return [technical ? "roadmap_ai" : "roadmap"] as DocumentKind[];
+    return [] as DocumentKind[];
   }, [tab, technical]);
+  const roadmapTickets = ticketCount(reviewPlan(documents?.roadmap_ai.current_payload));
 
   const scopeDocuments =
     tab === "analysis" ? ["analysis_ai", "analysis"] : ["roadmap_ai", "roadmap"];
@@ -138,7 +142,7 @@ export function LoopDocumentsPanel({
         <LoopPlanTabs
           tab={tab}
           onTabChange={onTabChange}
-          technical={technical}
+          technical={tab === "analysis" && technical}
           onToggleTechnical={() => setTechnical((value) => !value)}
           agentId={agentId}
           onAgentChange={setAgentId}
@@ -189,15 +193,11 @@ export function LoopDocumentsPanel({
         ) : null}
 
         <div className="mt-3 flex flex-col gap-4">
+          {tab === "roadmap" && documents ? <RoadmapReview documents={documents} /> : null}
           {visible.map((kind) => {
             const document = documents?.[kind];
             if (!document) return null;
-            const technical =
-              kind === "analysis"
-                ? documents.analysis_ai.current_payload
-                : kind === "roadmap"
-                  ? documents.roadmap_ai.current_payload
-                  : null;
+            const technical = kind === "analysis" ? documents.analysis_ai.current_payload : null;
             return (
               <PlanDocumentPanel key={kind} kind={kind} document={document} technical={technical} />
             );
@@ -243,6 +243,13 @@ export function LoopDocumentsPanel({
               approved={approvedForScope}
               reviewPending={planReview.review.isPending}
               onDecision={(decision) => planReview.review.mutate({ scope, decision })}
+              {...(tab === "roadmap"
+                ? {
+                    approveLabel: approveRoadmapLabel(roadmapTickets),
+                    approveNote: approvalLine(documents?.roadmap, roadmapTickets),
+                    quietReset: true,
+                  }
+                : {})}
             />
           )}
         </div>

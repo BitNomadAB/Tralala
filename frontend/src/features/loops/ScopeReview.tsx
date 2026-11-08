@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { Menu } from "@/components/ui/menu";
 
 /** Feedback, reset and the human decision on the open Analysis or RoadMap. */
 export function ScopeReview({
@@ -17,6 +18,9 @@ export function ScopeReview({
   approved,
   reviewPending,
   onDecision,
+  approveLabel,
+  approveNote,
+  quietReset = false,
 }: {
   scopeLabel: string;
   isHuman: boolean;
@@ -32,7 +36,14 @@ export function ScopeReview({
   approved: boolean;
   reviewPending: boolean;
   onDecision: (decision: "approved" | "changes_requested") => void;
+  /** The approve button's words when they say more than "Approve RoadMap" ("· 3 Tickets"). */
+  approveLabel?: string | undefined;
+  /** The line under the decision: the revision it binds to and what approving does. */
+  approveNote?: string | null | undefined;
+  /** Reset sits in a quiet menu instead of a button of its own (the RoadMap review). */
+  quietReset?: boolean | undefined;
 }) {
+  const label = approveLabel ?? `Approve ${scopeLabel}`;
   return (
     <div className="flex flex-col gap-2 border-t border-[var(--border)] pt-3">
       {!isHuman ? (
@@ -65,7 +76,7 @@ export function ScopeReview({
                   Cancel
                 </Button>
               </>
-            ) : (
+            ) : quietReset ? null : (
               <Button
                 size="sm"
                 variant="danger"
@@ -77,7 +88,7 @@ export function ScopeReview({
             )
           ) : null}
         </div>
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="outline"
             disabled={readOnly || !isHuman || reviewPending}
@@ -89,10 +100,26 @@ export function ScopeReview({
             disabled={readOnly || !canReview || reviewPending || approved}
             onClick={() => onDecision("approved")}
           >
-            {approved ? "Approved" : `Approve ${scopeLabel}`}
+            {approved ? "Approved" : label}
           </Button>
+          {quietReset && canReset && !confirmReset ? (
+            <Menu
+              label={`${scopeLabel} actions`}
+              items={[
+                {
+                  label: `Reset ${scopeLabel}`,
+                  danger: true,
+                  disabled: resetPending,
+                  onSelect: () => onConfirmResetChange(true),
+                },
+              ]}
+            />
+          ) : null}
         </div>
       </div>
+      {approveNote && !approved ? (
+        <p className="m-0 text-right text-xs text-[var(--muted-foreground)]">{approveNote}</p>
+      ) : null}
     </div>
   );
 }

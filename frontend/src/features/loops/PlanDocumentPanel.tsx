@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { renderMarkdown } from "@/lib/markdown";
 import type { DocumentKind, LoopDocument } from "@/lib/types";
@@ -29,11 +29,14 @@ export function PlanDocumentPanel({
   kind,
   document,
   technical,
+  body,
 }: {
   kind: DocumentKind;
   document: LoopDocument;
   /** The technical revision's payload, which a brief's "Where does this come from?" reads. */
   technical?: unknown;
+  /** The current text as a view of its own (the RoadMap review), instead of the scrolling box. */
+  body?: ReactNode;
 }) {
   // Both approvals can supersede the same document, and one sentence says it once.
   const reasons = [...new Set(document.stale_reasons)];
@@ -77,7 +80,9 @@ export function PlanDocumentPanel({
           ))}
         </p>
       ) : null}
-      {document.current_content ? (
+      {document.current_content && body !== undefined ? (
+        body
+      ) : document.current_content ? (
         <div className="prose-sm max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
           <CurrentText document={document} technical={technical} />
         </div>

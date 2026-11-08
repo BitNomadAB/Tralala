@@ -126,7 +126,7 @@ test.describe("the planning journey over /mcp", () => {
       Object.assign(ids, (written.id_map as { tickets: Record<string, string> }).tickets);
       const roadmap = await openDocument(page, "RoadMap");
       await expect(roadmap.getByText(plan.ORDER_STEP)).toBeVisible();
-      await roadmap.getByRole("button", { name: "Approve RoadMap" }).click();
+      await roadmap.getByRole("button", { name: /^Approve RoadMap/ }).click();
       await expect(roadmap.getByRole("button", { name: "Approved" })).toBeVisible();
       await showTab(page, "Kanban");
 
