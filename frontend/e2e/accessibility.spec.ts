@@ -1,5 +1,6 @@
 import { expect, test } from "playwright/test";
 import { blockingViolations } from "./axe";
+import { activityTab, askOnly, CLOSED_ENDPOINT, createAgent } from "./discussion";
 import {
   addCard,
   boardWithLoop,
@@ -66,6 +67,33 @@ test.describe("accessibility", () => {
     expect(await blockingViolations(page, testInfo)).toEqual([]);
     await dialog.getByRole("tab", { name: "Raw text" }).click();
     expect(await blockingViolations(page, testInfo, "axe-ticket-raw")).toEqual([]);
+  });
+
+  test("a discussion over the Kanban and the inbox have no serious or critical axe violations", async ({
+    page,
+  }, testInfo) => {
+    await login(page);
+    const { boardId, loopId } = await boardWithLoop(page, uniqueName("Accessible board"));
+    await addCard(page, "Todo", "An accessible question");
+    const agentName = uniqueName("Accessible Agent");
+    await createAgent(page, agentName, CLOSED_ENDPOINT);
+    await page.goto(`/boards/${boardId}/loops/${loopId}`);
+    const ticket = await openCard(page, "Todo", "An accessible question");
+    await activityTab(ticket, /^Discussions/);
+    await ticket.getByRole("button", { name: "Ask the agents" }).first().click();
+    const question = `Is this readable? ${uniqueName("Q")}`;
+    await askOnly(page, agentName, question);
+    const thread = page.getByRole("dialog", { name: question });
+    await expect(
+      thread.getByText(`No answer from ${agentName}: the agent could not be reached.`),
+    ).toBeVisible({ timeout: 30_000 });
+
+    expect(await blockingViolations(page, testInfo, "axe-discussion-modal")).toEqual([]);
+    await page.goto("/discussions");
+    await expect(
+      page.getByRole("list", { name: "Waits for your decision" }).getByText(question),
+    ).toBeVisible();
+    expect(await blockingViolations(page, testInfo, "axe-discussion-inbox")).toEqual([]);
   });
 
   test("Settings has no serious or critical axe violations", async ({ page }, testInfo) => {
