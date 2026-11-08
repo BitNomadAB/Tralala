@@ -163,16 +163,11 @@ Three rules that keep this honest:
 
 ### Where to talk instead of writing
 
-Every Ticket has a **discussion**: ask the agents a question, get rounds of answers with positions,
-pause or stop a run, then decide. It is capped at four rounds, with a token and time budget per run,
-so a question cannot quietly spend the afternoon. Use it when you want an opinion *before* writing
-the Info or the plan; use `@Agent` in a comment when you want one answer next to the work.
-
-After each round the thread shows **Decision support** — Tralala's summary of the answers: a
-**Suggestion** with its reason, who is **For going ahead**, **Against** or **Cannot tell yet**, the
-**Conditions to accept if you go ahead** and the **Open questions**. It is a suggestion, not a
-decision: **Your decision** is the row of buttons under it (**Approve**, **Request rework**,
-**Veto**).
+Every Ticket can have **discussions**: ask the agents a question about it, read where they stand,
+let them answer again, then decide ([Ask the agents](#ask-the-agents) below). A discussion is
+capped at four rounds, with a token and time budget per run, so a question cannot quietly spend the
+afternoon. Use one when you want the agents' opinion before you settle the plan; use `@Agent` in a
+comment when you want one answer next to the work.
 
 ### Plan with your coding agent
 
@@ -229,12 +224,37 @@ state (*Ready*, *Needs input* or *Blocked*, with what holds it up), and **Detail
 **Work is done** (*In the code base*, *Outside the code base*, *Not decided*), Depends on,
 Priority, Due, Labels and Created; click a value to change it. Further down are **Files** (drop
 files on the section or use **Add file**: a specification, a log, a sample, a screenshot; the agent
-reads the text ones) and **Activity** with **Comments**, **History** and **Work**. **Edit** beside
+reads the text ones) and **Activity** with **Comments**, **Discussions**, **History** and **Work**.
+**Edit** beside
 *What will be done* changes the steps and the reasons; Tralala holds them to the same short
 template a RoadMap is held to ([A Ticket's face for people](Loops.md#a-tickets-face-for-people)).
 
 A Ticket of a completed Loop still takes comments, so a later Loop can say that it replaced the
 work; such a comment is marked "written after the Loop was completed".
+
+### Ask the agents
+
+When you want a second opinion on a Ticket, ask the board's agents. **Ask the agents** sits in the
+head of the Ticket's **Activity** and under **More actions**.
+
+1. Write the **Question** and keep or untick the **Agents** (each with its role). **Ask**: the
+   agents answer one round, and the discussion opens inside the Ticket. A board where no agent can
+   answer sends you to **Settings** to add one.
+2. Read the **sign** first: Tralala's verdict (**Yes**, **Yes, with conditions**, **No** or
+   **Unclear**) and one sentence on how the answers stand. It is a suggestion, never a decision.
+3. **Who stands where** has one row per agent with its position and one recommendation; **Details**
+   opens its points for and against, its conditions and its open questions. Below them,
+   **Conditions to accept if you go ahead**, **Open questions** and **Rounds**. What the agents
+   wrote at length is in **Raw text**.
+4. Want more? Write in **Your reply** and press **Ask again** for one more round, or **Let them talk
+   it out** to let the agents answer each other for a few rounds; **Stop** ends a run.
+5. Decide: **Approve**, **Request rework** or **Veto**. The decision is recorded on the discussion
+   and changes nothing on the Ticket; what follows is yours to do.
+
+The Ticket's **Discussions** tab lists its discussions and what each waits for. **Discussions** in
+the main navigation gathers every board's discussions: what waits for your decision, where the
+agents are talking, and what was decided; the dashboard's **Waits for you** lists the ones that
+wait for you. More in [Ask the agents](Loops.md#ask-the-agents).
 
 ## 6. Day two: the habits that matter
 

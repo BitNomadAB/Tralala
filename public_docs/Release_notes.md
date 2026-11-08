@@ -124,6 +124,24 @@ Worth knowing when you look at the dashboard:
   (`TRALALA_DISCUSSION_TOKEN_BUDGET`, `TRALALA_DISCUSSION_TIME_BUDGET_SECONDS`). There is no
   per-token rate limit. See
   [Security_defaults.md](Security_defaults.md#accepted-risks-on-purpose).
+- **A discussion lives in its Ticket.** **Ask the agents** in a Ticket's Activity (or its More
+  actions) asks the question and runs one round, and the Ticket's new **Discussions** tab lists its
+  discussions. A discussion opens in the Ticket's dialog or as a page of the Ticket and leads with
+  its sign: Tralala's verdict in one word and one sentence, then one row per agent with its
+  position and one recommendation. The reasoning, the transcript and the runs are **Raw text**.
+  **Ask again**, **Let them talk it out** and **Stop** replace the old run controls. See
+  [Ask the agents](Loops.md#ask-the-agents).
+- **An agent's answer is held to a person's limits.** A recommendation is one sentence of at most
+  20 words, each list at most three points of at most 140 characters, with no file name, code or
+  id; an answer that breaks them is sent back once and otherwise kept as prose with the position
+  `unclear`. Answers stored earlier are read as they are. The server logs a repair as
+  `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **The Discussions page is an inbox.** It lists every board's discussions under **Waits for your
+  decision**, **Agents are talking** and **Decided**, and the dashboard's **Waits for you** lists
+  the discussions that wait for a decision. A discussion starts from a Ticket only, so the page no
+  longer opens one. `GET /discussions/overview` is gone; a client reads `GET /discussions/inbox`
+  instead, and `GET /boards/{board_id}/discussions` takes `card_id`. See
+  [API.md](API.md#discussions).
 - **Every backend log line has the same frame.** Each line is a JSON object with `ts`, `level`,
   `event`, `logger` and `request_id`, then the event's fields, and every line written while a request
   is served carries that request's id — not only the `http_request` line. A logged exception keeps

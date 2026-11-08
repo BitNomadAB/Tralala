@@ -257,13 +257,30 @@ the "one backend process per data directory" rule intact.
 - Every answer follows one standard (`services/discussion_answers.py`): a position (`yes`,
   `yes_with_conditions`, `no`, `unclear`), a one-sentence recommendation, reasons for and against,
   conditions, open questions and a confidence, stored in `discussion_messages.answer_json` beside the
-  prose in `content`. `services/discussion_ask.py` asks with the schema where the provider takes one
-  and repairs a malformed answer once; an answer that never follows the standard keeps its prose and
-  the position `unclear`.
+  prose in `content`.
+- The recommendation and the four lists are the answer's sign, what a person reads by default, so
+  they get the Ticket face's discipline: the recommendation is one sentence of at most 20 words
+  (`RECOMMENDATION_WORDS`, with a 200-character schema cap), each list holds at most 3 items
+  (`ITEMS`) of at most 140 characters (`ITEM_CHARS`), and every one of them passes the plain-text
+  rules of `services/plain_text.py` (`plain_rules`: no file path or file name, code span or fence,
+  code symbol, UUID or other id). The reasoning is the agents' side: up to 8 000 characters, with no
+  rule on its content. The limits are counted and matched, never judged by a model, and
+  `answer_instructions()` tells the agent who reads which part. `read_object` collects every
+  finding as one line that names the field, the rule and the text
+  (`conditions[1]: looks like a file path (Banner.tsx)`, a list item by its 0-based index).
+- `services/discussion_ask.py` asks with the schema (`answer_schema()`, carrying `maxItems` and
+  `maxLength`) where the provider takes one, and repairs a broken answer once (`MAX_REPAIRS`): the
+  repair message quotes every finding, one per line, and repeats the limits. Each repair logs
+  `discussion_answer_repair` on `tralala.discussions` with the discussion, the participant, the
+  round and the findings as field and rule (never the text); an answer that still breaks the
+  standard logs `discussion_answer_prose`, keeps its first prose and the position `unclear`, with
+  the findings as its `problem`. An answer stored under the older, looser limits is read as it is.
 - After every round `services/discussion_synthesis.py` computes the decision support from each
   participant's latest answer and stores it in `discussion_rounds.synthesis_json`: who is for going
   ahead, who is against and who cannot tell, the conditions, the open questions and a suggested
-  verdict by fixed rules. No model writes it, and it is never a decision.
+  verdict by fixed rules. Its reason (`suggest`) is one sentence of at most 20 words that counts
+  each side and names nobody; the view names who cannot tell and who is missing from `unclear` and
+  `missing`. No model writes it, and it is never a decision.
 - Budgets are enforced before a round starts (accumulated time) and after every answer (tokens), so
   a runaway loop stops instead of spending the whole budget in one round. A run always has both: when
   the caller sends none, it takes `TRALALA_DISCUSSION_TOKEN_BUDGET` (default 200 000) and
@@ -305,17 +322,34 @@ one publish path covers both streams.
 
 ## Discussion navigation
 
-The Discussions page is an inbox (`GET /discussions/inbox`): one statement per board database
-reads its threads with their Ticket, Loop, newest round and newest decision, and the service
-groups them by who they wait for (a decision, the agents, nobody), newest activity first in each
-group. The dashboard's "Waits for you" lists the threads that wait for a decision after the Loops.
-Both refresh every 30 s while visible, and a discussion's events invalidate them.
-
 A thread belongs to one Ticket and therefore to one Loop, so every thread records `loop_id`,
-`loop_key`, `loop_name` and `ticket_key`. The thread view shows that Loop and links to
-`/boards/{board_id}/loops/{loop_id}?card={card_id}`, which the Loop page opens with the Ticket
-view already showing over the Kanban; closing it drops the `card` parameter. Nothing infers a default
-Loop from a board.
+`loop_key`, `loop_name` and `ticket_key`, and a discussion is only ever reached through its Ticket.
+Nothing infers a default Loop from a board.
+
+- **The Ticket's Discussions tab** (`features/cards/TicketDiscussions.tsx`) reads
+  `GET /boards/{board_id}/discussions?card_id=` as the Ticket opens, so its count is right at once.
+  The list carries no synthesis, so while the tab shows it also reads each thread's detail, and
+  looks again every 15 s while the agents answer in one of them. **Ask the agents**
+  (`AskAgentsDialog.tsx`) reads the board's askable agents from `GET /boards/{board_id}/actors`,
+  creates a `roundtable` thread with the chosen `participant_ids` and the default round cap, starts
+  one round (`POST .../start` with `rounds: 1`, which runs inline and answers once the round is
+  done) and then opens the new discussion.
+- **In the Ticket's dialog**: on the Loop page `?discussion=<id>` beside `?card=<id>` shows the
+  discussion in the Ticket's dialog over the Kanban (`useTicketDialog.ts`). Back to the Ticket
+  drops `discussion` and keeps `card`; closing drops both. A row of the tab opens there.
+- **As a page of the Ticket**: the lazy route
+  `/boards/{board_id}/loops/{loop_id}/tickets/{card_id}/discussions/{discussion_id}` shows the same
+  view (`DiscussionView`, host `page`) with the breadcrumb Board / Loop / Ticket / question. Open as
+  page, Copy link, the inbox's rows and the tab on the Ticket's page lead there. The rail's Ticket
+  fact links `/boards/{board_id}/loops/{loop_id}?card={card_id}`.
+- **The inbox**: the Discussions page (`GET /discussions/inbox`, `DiscussionService.inbox`) reads
+  every registry board's threads that are not cancelled, one statement per board database
+  (`DiscussionThreadRepository.inbox`: the thread with its Ticket, Loop, newest round and newest
+  decision), and the pure rules of `services/discussion_inbox.py` group them by who they wait for
+  (`your_decision`, `agents`, `nobody`), newest activity first in each group, at most 200 rows. A
+  board whose database cannot be opened is left out. The dashboard's "Waits for you" lists the
+  `your_decision` rows after the Loops. Both refresh every 30 s while visible, and a discussion's
+  events invalidate them. The inbox opens nothing new: a discussion starts from a Ticket.
 
 ## Ticket mentions
 

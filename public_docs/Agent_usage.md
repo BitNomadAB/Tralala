@@ -124,21 +124,33 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | `run_roadmap` | `loops:generate` | ask for the RoadMap candidate once the analysis is approved |
 | `write_roadmap` | `loops:generate` | hand in your own RoadMap, every Ticket with its face for people; short Phase and Ticket ids become stable UUIDs |
 | `write_brief` | `loops:generate` | write the brief for people of the current analysis or RoadMap |
-| `ask_agents` | `discussions:write` | open a discussion on a Ticket and run one round |
-| `read_discussion` | `discussions:read` | read a thread: its synthesis and each agent's position |
-| `reply_discussion` | `discussions:write` | add to a thread and let the agents answer |
+| `ask_agents` | `discussions:write` | ask the board's agents about a Ticket and run one round; your person sees it in the Ticket's Discussions tab |
+| `read_discussion` | `discussions:read` | read a thread: its synthesis and each agent's position, the reasoning with `include_prose` |
+| `reply_discussion` | `discussions:write` | add to a thread and let the agents answer in a new round |
 
 Tools are filtered by the key's scopes, so a key without `loops:generate` does not see
 `run_analysis` at all. Calling a tool the key may not use is refused rather than downgraded.
 
 The three discussion tools answer a thread as data. Each agent answers in one shape: a `position`
 (`yes`, `yes_with_conditions`, `no` or `unclear`), a one-sentence `recommendation`, `pros`, `cons`,
-`conditions`, `open_questions` and a `confidence`. `positions` lists each agent's current one, and
-`synthesis` is Tralala's decision support for the newest round: who is for going ahead, who is
-against and who cannot tell, the conditions, the open questions and a suggested verdict. The
-suggestion is never a decision: a person approves, asks for rework or vetoes in Tralala. A message
-carries its structured `answer` without the prose; pass `include_prose: true` to read the prose too.
-An answer that never followed the shape keeps its prose and the position `unclear`.
+`conditions`, `open_questions`, a `confidence` and its `reasoning`. `positions` lists each agent's
+current one, and `synthesis` is Tralala's decision support for the newest round: who is for going
+ahead, who is against and who cannot tell, the conditions, the open questions and a suggested
+verdict with one sentence of reason.
+
+What you read as data is what your person reads as the sign, in the Ticket's **Discussions** tab
+and on the **Discussions** page: the verdict word and its sentence, each agent's position with its
+one recommendation, and its points for, against, conditions and open questions on request. Those
+parts are held to a person's limits: a recommendation is one sentence of at most 20 words, each
+list holds at most three points of at most 140 characters, and none of them holds a file name,
+code or an id. The reasoning is the agents' side, read by the other agents and shown to the person
+only as **Raw text**, so it may be long and technical. A message carries its structured `answer`
+without the prose; pass `include_prose: true` to read the reasoning too. An answer that broke the
+limits went back to its agent once; one that never followed the shape keeps its prose and the
+position `unclear`.
+
+The suggestion is never a decision: the person approves, asks for rework or vetoes in Tralala, and
+no key can (`403 human_action_required`). A decision never changes the Ticket either.
 
 ## 4. A session that works
 
