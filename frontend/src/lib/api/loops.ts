@@ -1,4 +1,4 @@
-import type { Loop, LoopNote, LoopNotePage } from "../types";
+import type { Loop, LoopNote, LoopNotePage, LoopSummaries } from "../types";
 import { json, request, type QueryValue } from "./client";
 
 /** Loops and their lifecycle. */
@@ -13,6 +13,11 @@ export const loopsApi = {
         .map(([key, value]) => [key, String(value)]),
     );
     return json(await request<Loop[]>(`/boards/${boardId}/loops?${query.toString()}`));
+  },
+
+  /** Where each open Loop stands and who it waits for: one request a board. */
+  async listLoopSummaries(boardId: string): Promise<LoopSummaries> {
+    return json(await request<LoopSummaries>(`/boards/${boardId}/loop-summaries`));
   },
 
   async createLoop(

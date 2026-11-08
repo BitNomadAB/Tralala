@@ -1,0 +1,183 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { delay, http, type HttpHandler } from "msw";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { describe, expect, it } from "vitest";
+import { ToastProvider } from "@/components/ui/toast";
+import { AuthContext } from "@/features/auth/useAuth";
+import { DashboardPage } from "@/features/boards/DashboardPage";
+import type { Board, LoopSummary } from "@/lib/types";
+import { board, dashboardHandlers, summary } from "./msw/boards";
+import { apiPath, failure, ok } from "./msw/envelope";
+import { server } from "./msw/server";
+import { MEMBER } from "./msw/session";
+
+const AUTH = {
+  actor: MEMBER,
+  loading: false,
+  login: () => Promise.resolve(MEMBER),
+  logout: () => Promise.resolve(),
+  refresh: () => Promise.resolve(MEMBER),
+  signOutLocally: () => undefined,
+};
+
+/** Where a button took the person: the path and the query. */
+function Location() {
+  const location = useLocation();
+  return <p data-testid="location">{location.pathname + location.search}</p>;
+}
+
+/** Renders the dashboard; `overrides` answer before the default handlers. */
+function renderDashboard(
+  boards: Board[],
+  summaries: Record<string, LoopSummary[]> = {},
+  overrides: HttpHandler[] = [],
+) {
+  const { state, handlers } = dashboardHandlers(boards, summaries);
+  server.use(...handlers);
+  server.use(...overrides);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <AuthContext.Provider value={AUTH}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/"]}>
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="*" element={<Location />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </AuthContext.Provider>
+    </QueryClientProvider>,
+  );
+  return { state, user: userEvent.setup() };
+}
+
+const PLATFORM = board("board-1", "Platform", { description: "The shared services" });
+const WEBSITE = board("board-2", "Website");
+
+/** A Loop whose analysis waits for a person's approval. */
+const REVIEW = summary("loop-1", "Session expiry", {
+  stage: "analysis_review",
+  waiting_on: "person",
+  documents: {
+    info: "approved r1",
+    analysis_ai: "ready_for_review r1",
+    analysis: "ready_for_review r1",
+    roadmap_ai: "empty",
+    roadmap: "empty",
+  },
+});
+
+/** A Loop in delivery with Tickets ready for anyone: nothing waits for a decision. */
+const DELIVERY = summary("loop-2", "Checkout", {
+  stage: "in_progress",
+  waiting_on: "anyone",
+  tickets: { ready: 2, total: 4, completed: 2 },
+});
+
+describe("the dashboard", () => {
+  it("lists what waits for the person first, then the boards with their Loops in words", async () => {
+    const { state, user } = renderDashboard([PLATFORM, WEBSITE], {
+      "board-1": [REVIEW, DELIVERY],
+      "board-2": [],
+    });
+
+    const waits = await screen.findByRole("list", { name: "Waits for you" });
+    const rows = within(waits).getAllByRole("listitem");
+    expect(rows).toHaveLength(1);
+    const row = within(rows[0] ?? waits);
+    expect(row.getByText("Platform")).toBeInTheDocument();
+    expect(row.getByText("Session expiry")).toBeInTheDocument();
+    expect(row.getByText("Waits for you to approve the analysis")).toBeInTheDocument();
+
+    const tiles = screen.getByRole("list", { name: "Boards" });
+    const platform = within(tiles).getByRole("button", { name: "Platform" });
+    const tile = within(platform.closest("li") ?? tiles);
+    expect(tile.getByText("The shared services")).toBeInTheDocument();
+    expect(tile.getByText("2 Loops in progress · 1 waits for you")).toBeInTheDocument();
+    expect(within(tiles).getByText("No Loops in progress")).toBeInTheDocument();
+
+    // One request for the boards (the tiles and the waiting list share it), one a board.
+    expect(state.requests.filter((request) => request === "GET /boards")).toHaveLength(1);
+    expect(state.requests.filter((request) => request.endsWith("/loop-summaries")).sort()).toEqual([
+      "GET /boards/board-1/loop-summaries",
+      "GET /boards/board-2/loop-summaries",
+    ]);
+
+    // The button opens the Loop page on the tab where the decision is made.
+    await user.click(row.getByRole("button", { name: "Approve analysis: Session expiry" }));
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/boards/board-1/loops/loop-1?tab=plan",
+    );
+  });
+
+  it("says nothing waits when no Loop needs a decision, and marks a read-only board", async () => {
+    const archived = board("board-3", "Old site", { status: "archived" });
+    renderDashboard([WEBSITE, archived], {
+      "board-2": [DELIVERY],
+      // An archived board decides nothing, so its review is not listed.
+      "board-3": [REVIEW],
+    });
+
+    expect(await screen.findByText("Nothing waits for you.")).toBeInTheDocument();
+    const tiles = screen.getByRole("list", { name: "Boards" });
+    const old = within(
+      within(tiles).getByRole("button", { name: "Old site" }).closest("li") ?? tiles,
+    );
+    expect(old.getByText("Read only")).toBeInTheDocument();
+    expect(await old.findByText("1 Loop in progress")).toBeInTheDocument();
+    expect(within(tiles).getAllByText("Read only")).toHaveLength(1);
+  });
+
+  it("renders the tiles before a slow board has answered, and names a board that failed", async () => {
+    renderDashboard([PLATFORM, WEBSITE], {}, [
+      http.get(apiPath("/boards/board-1/loop-summaries"), () =>
+        failure(500, "internal_error", "Something failed"),
+      ),
+      // Never answers: the tile shows that it is still reading.
+      http.get(apiPath("/boards/board-2/loop-summaries"), async () => {
+        await delay("infinite");
+        return ok({});
+      }),
+    ]);
+
+    const tiles = await screen.findByRole("list", { name: "Boards" });
+    expect(within(tiles).getByRole("button", { name: "Website" })).toBeVisible();
+    expect(await within(tiles).findByText("Reading Loops…")).toBeInTheDocument();
+    expect(await within(tiles).findByText("Loops could not be read")).toBeInTheDocument();
+    expect(screen.getByText("Looking through your boards…")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/1 board could not be read/)).toBeInTheDocument();
+    });
+  });
+
+  it("says a new installation has no boards yet, and offers New board", async () => {
+    const { user } = renderDashboard([], {}, [
+      http.get(apiPath("/templates"), () => ok({ items: [] })),
+      http.get(apiPath("/agents"), () => ok([])),
+      http.get(apiPath("/repositories"), () => ok([])),
+    ]);
+
+    expect(await screen.findByText("No boards yet.")).toBeInTheDocument();
+    expect(screen.getByText("Nothing waits for you.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New board" }));
+    expect(await screen.findByRole("dialog", { name: "New board" })).toBeInTheDocument();
+  });
+
+  it("keeps the lifecycle actions in the tile's quiet menu", async () => {
+    const { user } = renderDashboard([PLATFORM], { "board-1": [] });
+
+    await user.click(await screen.findByRole("button", { name: "More actions for Platform" }));
+    const menu = screen.getByRole("menu", { name: "More actions for Platform" });
+    expect(within(menu).getByRole("menuitem", { name: "Archive board" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: /Delete board/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+});

@@ -274,6 +274,7 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops` | `include_completed`, `include_archived`, `stage` filters |
 | POST | `/boards/{board_id}/loops` | Creates the Loop with its own columns and five empty documents; accepts `Idempotency-Key` |
 | GET/PATCH | `/boards/{board_id}/loops/{loop_id}` | `PATCH` requires the Loop `version` |
+| GET | `/boards/{board_id}/loop-summaries` | One row a Loop, as `loop_summaries` gives it: stage, the next step, who it waits for (`person`, `agent`, `anyone`, `nobody`), Tickets by state and column, each document's state; open Loops unless `include_completed=true`. The dashboard and the board page read it, one request a board |
 | POST | `/boards/{board_id}/loops/{loop_id}/cancel` | Human-only; records `cancelled_at` |
 | POST | `/boards/{board_id}/loops/{loop_id}/archive` | Hides the Loop from active views |
 | GET | `/boards/{board_id}/loops/{loop_id}/documents` | Current and approved revisions per kind |
