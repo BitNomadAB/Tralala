@@ -13,18 +13,18 @@ import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useToast } from "@/components/ui/useToast";
-import { CardTile } from "@/features/board/CardTile";
-import { dragData } from "@/features/board/dragData";
-import { ListColumn } from "@/features/board/ListColumn";
 import { ApiError, api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { BoardList, Card } from "@/lib/types";
+import { dragData } from "./dragData";
+import { KanbanColumn } from "./KanbanColumn";
 import { LIST_LIMIT } from "./loopUi";
+import { TicketCard } from "./TicketCard";
 
 /**
  * The Loop's columns with drag and drop: a card moves between columns optimistically, a column moves
- * by position. `children` is the slot after the last column.
+ * by position. `children` is the slot after the last column ("Add column").
  */
 export function LoopKanban({
   boardId,
@@ -32,6 +32,7 @@ export function LoopKanban({
   lists,
   cardsByList,
   matchingIds,
+  readOnly,
   onOpenCard,
   onListsChanged,
   onCardsChanged,
@@ -42,6 +43,7 @@ export function LoopKanban({
   lists: BoardList[];
   cardsByList: Record<string, Card[]>;
   matchingIds: Set<string> | null;
+  readOnly: boolean;
   onOpenCard: (cardId: string) => void;
   onListsChanged: () => void;
   onCardsChanged: () => void;
@@ -196,9 +198,10 @@ export function LoopKanban({
               : allCards;
             return (
               <div key={list.id} className="h-full">
-                <ListColumn
+                <KanbanColumn
                   list={list}
                   cards={cards}
+                  readOnly={readOnly}
                   onOpenCard={(card) => onOpenCard(card.id)}
                   onCreateCard={async (title) => {
                     await createCardMutation.mutateAsync({ listId: list.id, title });
@@ -213,7 +216,7 @@ export function LoopKanban({
           {children}
         </div>
         <DragOverlay dropAnimation={null}>
-          {activeCard ? <CardTile card={activeCard} overlay /> : null}
+          {activeCard ? <TicketCard card={activeCard} overlay /> : null}
         </DragOverlay>
       </DndContext>
     </div>

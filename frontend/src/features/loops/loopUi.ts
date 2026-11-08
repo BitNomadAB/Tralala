@@ -1,18 +1,4 @@
-import type { BadgeTone } from "@/components/ui/badge";
-import type { DocumentKind, LoopDocument, LoopStage, UnplannedTicket } from "@/lib/types";
-
-export const STAGE_TONES: Record<LoopStage, BadgeTone> = {
-  draft: "neutral",
-  analysis_review: "brand",
-  planning: "brand",
-  roadmap_review: "brand",
-  ready: "success",
-  in_progress: "brand",
-  replanning: "warning",
-  awaiting_qa: "warning",
-  completed: "success",
-  cancelled: "neutral",
-};
+import type { DocumentKind, LoopDocument, UnplannedTicket } from "@/lib/types";
 
 export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
   info: "Info",
@@ -45,7 +31,7 @@ export function staleReasonText(code: string): string {
   return STALE_REASON_TEXT[code] ?? code;
 }
 
-/** The planning documents dialog's tabs; the last two are the scopes an agent generates. */
+/** The Plan tab's documents (`?doc=`); the last two are the scopes an agent generates. */
 export type PlanTab = "info" | "analysis" | "roadmap";
 export type PlanScope = Exclude<PlanTab, "info">;
 /** What a run panel describes: a scope's run, or the brief for people of a scope. */

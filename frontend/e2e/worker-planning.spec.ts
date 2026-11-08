@@ -1,7 +1,16 @@
 import { expect, test, type Locator, type Page } from "playwright/test";
 import { blockingViolations } from "./axe";
 import { mcpCall, mcpToolNames, rowsOf } from "./mcp";
-import { boardIdFromUrl, closeDialog, createBoard, issueToken, login, uniqueName } from "./support";
+import {
+  boardIdFromUrl,
+  closeDialog,
+  createBoard,
+  issueToken,
+  login,
+  openPlanDocument,
+  showTab,
+  uniqueName,
+} from "./support";
 import * as plan from "./worker-plan";
 
 /**
@@ -29,11 +38,10 @@ async function openTicket(page: Page, title: string): Promise<Locator> {
   return dialog;
 }
 
-/** Opens one of the Loop's planning documents from a freshly loaded Loop page. */
+/** Opens one of the Loop's planning documents on the Plan tab of a freshly loaded Loop page. */
 async function openDocument(page: Page, name: "Info" | "Analysis" | "RoadMap"): Promise<Locator> {
   await page.reload();
-  await page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
-  return page.getByRole("dialog", { name: /planning documents/ });
+  return openPlanDocument(page, name);
 }
 
 test.describe("the planning journey over /mcp", () => {
@@ -84,7 +92,7 @@ test.describe("the planning journey over /mcp", () => {
       await call("write_info", { board_id: boardId, loop_id: loopId, content: plan.INFO });
       const info = await openDocument(page, "Info");
       await expect(info.getByLabel("Write or revise Info")).toHaveValue(plan.INFO);
-      await closeDialog(page);
+      await showTab(page, "Kanban");
     });
 
     await test.step("write_analysis with a brief; the person reads both views and approves", async () => {
@@ -105,7 +113,7 @@ test.describe("the planning journey over /mcp", () => {
       await expect(analysis.getByText(plan.TECHNICAL_DETAIL)).toBeVisible();
       await analysis.getByRole("button", { name: "Approve analysis" }).click();
       await expect(analysis.getByRole("button", { name: "Approved" })).toBeVisible();
-      await closeDialog(page);
+      await showTab(page, "Kanban");
     });
 
     await test.step("write_roadmap; the person approves; the Kanban shows the Tickets", async () => {
@@ -120,14 +128,13 @@ test.describe("the planning journey over /mcp", () => {
       await expect(roadmap.getByText(plan.ORDER_STEP)).toBeVisible();
       await roadmap.getByRole("button", { name: "Approve RoadMap" }).click();
       await expect(roadmap.getByRole("button", { name: "Approved" })).toBeVisible();
-      await closeDialog(page);
+      await showTab(page, "Kanban");
 
       await page.reload();
       const keyed = new RegExp(`${loopKey}-[A-Z0-9]{2}\\d{2,}-\\d{3}`);
       for (const title of [plan.READY, plan.AFTER, plan.WAITING]) {
         await expect(tile(page, title)).toContainText(keyed);
       }
-      await expect(tile(page, plan.READY)).toContainText("Development");
       await expect(tile(page, plan.READY).getByText(/^(Blocked|Needs input)$/)).toHaveCount(0);
       await expect(tile(page, plan.AFTER).getByText("Blocked", { exact: true })).toBeVisible();
       await expect(
@@ -146,6 +153,8 @@ test.describe("the planning journey over /mcp", () => {
       const ready = await openTicket(page, plan.READY);
       await expect(ready.getByText(/^Phase 1 · /)).toBeVisible();
       await expect(ready.getByText("Ready", { exact: true })).toBeVisible();
+      // The card carries no labels; the Ticket's Labels fact does.
+      await expect(ready).toContainText("Development");
       await closeDialog(page);
     });
 
@@ -220,10 +229,9 @@ test.describe("the planning journey over /mcp", () => {
 
       await call("write_note", { board_id: boardId, loop_id: loopId, content: plan.NOTE });
       await page.reload();
-      await page.getByRole("button", { name: "Notes", exact: true }).click();
-      const notes = page.getByRole("dialog", { name: `${loopKey} notes` });
+      const notes = await showTab(page, "Notes");
       await expect(notes.getByRole("list", { name: "Notes" })).toContainText(plan.NOTE);
-      await closeDialog(page);
+      await showTab(page, "Kanban");
     });
 
     await test.step("a file the person attaches is read through read_attachment", async () => {
@@ -268,15 +276,13 @@ test.describe("the planning journey over /mcp", () => {
       const analysis = await openDocument(page, "Analysis");
       await expect(analysis.getByText(plan.ANALYSIS_SUMMARY)).toBeVisible();
       expect(await blockingViolations(page, testInfo, "axe-analysis-brief")).toEqual([]);
-      await closeDialog(page);
       const roadmap = await openDocument(page, "RoadMap");
       await expect(roadmap.getByText(plan.ORDER_STEP)).toBeVisible();
       expect(await blockingViolations(page, testInfo, "axe-roadmap-brief")).toEqual([]);
-      await closeDialog(page);
-      await page.getByRole("button", { name: "Notes", exact: true }).click();
-      await expect(page.getByRole("list", { name: "Notes" })).toContainText(plan.NOTE);
+      const notes = await showTab(page, "Notes");
+      await expect(notes.getByRole("list", { name: "Notes" })).toContainText(plan.NOTE);
       expect(await blockingViolations(page, testInfo, "axe-notes")).toEqual([]);
-      await closeDialog(page);
+      await showTab(page, "Kanban");
     });
   });
 });

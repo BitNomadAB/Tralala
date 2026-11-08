@@ -64,7 +64,7 @@ test.describe("boards and cards", () => {
     await expect(dialog.getByRole("button", { name: "Priority: High" })).toBeVisible();
 
     await closeDialog(page);
-    await expect(cardTile(page, "Todo", `${cardTitle} (final)`)).toContainText("high");
+    await expect(cardTile(page, "Todo", `${cardTitle} (final)`)).toContainText("High");
   });
 
   test("filters the board with server-side search", async ({ page }) => {

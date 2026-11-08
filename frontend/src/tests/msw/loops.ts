@@ -83,9 +83,9 @@ export function generationRun(
 }
 
 /**
- * What the planning dialog reads when it opens: the board, the agents, the Loop's documents and
+ * What the Plan tab's documents read when they open: the board, the agents, the Loop's documents and
  * agent choices, and the generation runs `state.runs` holds. `state.requests` is every request the
- * dialog sent, as "METHOD /path".
+ * panel sent, as "METHOD /path".
  */
 export function planningDialogHandlers(runs: GenerationRun[] = []) {
   const state = { runs, requests: [] as string[] };

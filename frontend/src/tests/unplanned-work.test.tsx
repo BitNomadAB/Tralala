@@ -3,9 +3,9 @@ import { render, screen } from "@testing-library/react";
 import { http } from "msw";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
-import { CardTile } from "@/features/board/CardTile";
-import { LoopPlanDialog } from "@/features/loops/LoopPlanDialog";
 import { openUnplanned } from "@/features/loops/loopUi";
+import { PlanReadiness } from "@/features/loops/PlanReadiness";
+import { TicketCard } from "@/features/loops/TicketCard";
 import { UnplannedWarning } from "@/features/loops/Unplanned";
 import type { Card, LoopReadiness, UnplannedTicket } from "@/lib/types";
 import { apiPath, ok } from "./msw/envelope";
@@ -109,14 +109,12 @@ function card(extra: Partial<Card>): Card {
 }
 
 describe("work outside the plan", () => {
-  it("is listed in the plan dialog, without the archived ones", async () => {
+  it("is listed on the Plan tab, without the archived ones", async () => {
     answerReadiness(OUTSIDE);
     withQueries(
-      <LoopPlanDialog
+      <PlanReadiness
         boardId={BOARD_ID}
         loop={{ ...LOOP, stage: "in_progress" }}
-        open
-        onClose={() => undefined}
         onChanged={() => undefined}
       />,
     );
@@ -138,10 +136,10 @@ describe("work outside the plan", () => {
   });
 
   it("carries an Unplanned badge on the Kanban, a plain manual card none", () => {
-    const { unmount } = render(<CardTile card={card({ ticket_key: "SES-1-UNP-001" })} overlay />);
+    const { unmount } = render(<TicketCard card={card({ ticket_key: "SES-1-UNP-001" })} overlay />);
     expect(screen.getByText("Unplanned")).toBeInTheDocument();
     unmount();
-    render(<CardTile card={card({})} overlay />);
+    render(<TicketCard card={card({})} overlay />);
     expect(screen.queryByText("Unplanned")).not.toBeInTheDocument();
   });
 });

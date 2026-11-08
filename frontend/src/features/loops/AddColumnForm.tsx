@@ -19,7 +19,7 @@ export function AddColumnForm({
   onCreate: (name: string) => void;
 }) {
   return (
-    <div className="w-[260px] shrink-0">
+    <div className="w-[240px] shrink-0">
       {adding ? (
         <form
           className="card-surface flex flex-col gap-2 p-3"
@@ -55,12 +55,12 @@ export function AddColumnForm({
         </form>
       ) : (
         <Button
-          variant="secondary"
+          variant="quiet"
           className="w-full justify-start"
           onClick={() => onAddingChange(true)}
           disabled={readOnly}
         >
-          <Plus size={14} /> Add column
+          <Plus size={14} aria-hidden="true" /> Add column
         </Button>
       )}
     </div>

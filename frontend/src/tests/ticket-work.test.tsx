@@ -3,8 +3,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
-import { CardTile } from "@/features/board/CardTile";
 import { TicketState } from "@/features/cards/TicketState";
+import { TicketCard } from "@/features/loops/TicketCard";
 import { api } from "@/lib/api";
 import { keys } from "@/lib/queries";
 import type { CardDetail } from "@/lib/types";
@@ -154,19 +154,19 @@ describe("where a Ticket's work is done and what it waits for", () => {
 
 describe("the Kanban card's marker", () => {
   it("shows Needs input, Blocked, and nothing for a ready Ticket", () => {
-    const { unmount } = render(<CardTile card={ticketCard(DECISION)} overlay />);
+    const { unmount } = render(<TicketCard card={ticketCard(DECISION)} overlay />);
     expect(screen.getByText("Needs input")).toBeInTheDocument();
     expect(screen.queryByText("Blocked")).toBeNull();
     unmount();
 
     const blocked = render(
-      <CardTile card={ticketCard({ ready: false, state: "blocked" })} overlay />,
+      <TicketCard card={ticketCard({ ready: false, state: "blocked" })} overlay />,
     );
     expect(screen.getByText("Blocked")).toBeInTheDocument();
     expect(screen.queryByText("Needs input")).toBeNull();
     blocked.unmount();
 
-    render(<CardTile card={ticketCard()} overlay />);
+    render(<TicketCard card={ticketCard()} overlay />);
     expect(screen.queryByText("Needs input")).toBeNull();
     expect(screen.queryByText("Blocked")).toBeNull();
   });

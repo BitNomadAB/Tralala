@@ -1,6 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { generationAgents } from "@/lib/boardAgents";
 import { keys, useAgents, useBoard, useLoopAgents, useLoopDocuments } from "@/lib/queries";
 import type { DocumentKind, Loop } from "@/lib/types";
@@ -15,24 +14,28 @@ import { ScopeReview } from "./ScopeReview";
 import { useGenerationRun } from "./useGenerationRun";
 import { usePlanReview } from "./usePlanReview";
 
-export function LoopDocumentDialog({
+/**
+ * The Loop's planning documents on the Plan tab: Info, Analysis and RoadMap with their generation
+ * controls, the run's progress, the kept candidate and the person's review. `tab` is the open
+ * document, which the page keeps in the URL (`?doc=`).
+ */
+export function LoopDocumentsPanel({
   boardId,
   loop,
-  initialTab,
+  tab,
+  onTabChange,
   isHuman,
   readOnly,
-  onClose,
   onChanged,
 }: {
   boardId: string;
   loop: Loop;
-  initialTab: PlanTab;
+  tab: PlanTab;
+  onTabChange: (tab: PlanTab) => void;
   isHuman: boolean;
   readOnly: boolean;
-  onClose: () => void;
   onChanged: () => void;
 }) {
-  const [tab, setTab] = useState<PlanTab>(initialTab);
   const [technical, setTechnical] = useState(false);
   const [agentId, setAgentId] = useState("");
   const queryClient = useQueryClient();
@@ -108,6 +111,14 @@ export function LoopDocumentDialog({
   // so a later run cannot bring back a question nobody asked again.
   const [confirmInfoSave, setConfirmInfoSave] = useState(false);
   if (confirmInfoSave && activeRunId === null) setConfirmInfoSave(false);
+  // A pending reset or save confirmation belongs to the document it was asked on, however the
+  // document changed (its tab, or the header's next step).
+  const [askedOn, setAskedOn] = useState(tab);
+  if (askedOn !== tab) {
+    setAskedOn(tab);
+    setConfirmWithdraw(false);
+    setConfirmInfoSave(false);
+  }
   const saveInfoNow = () => {
     setConfirmInfoSave(false);
     planReview.saveInfo.mutate();
@@ -122,22 +133,11 @@ export function LoopDocumentDialog({
   };
 
   return (
-    <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
-      <DialogContent
-        title={`${loop.key} planning documents`}
-        description="Info is written by a person. Analysis and RoadMap pair a technical view with a plain-language one."
-        className="w-[min(960px,96vw)]"
-      >
+    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_15rem]">
+      <div className="min-w-0">
         <LoopPlanTabs
           tab={tab}
-          onTabChange={(entry) => {
-            // A pending reset or save confirmation belongs to the tab it was asked on.
-            if (entry !== tab) {
-              setConfirmWithdraw(false);
-              setConfirmInfoSave(false);
-            }
-            setTab(entry);
-          }}
+          onTabChange={onTabChange}
           technical={technical}
           onToggleTechnical={() => setTechnical((value) => !value)}
           agentId={agentId}
@@ -168,7 +168,7 @@ export function LoopDocumentDialog({
             when that is done.
           </p>
         ) : null}
-        {/* Once, under the button that started the run; from 2xl the aside below shows it instead. */}
+        {/* Once, under the button that started the run; from 2xl the aside beside it shows it instead. */}
         {visibleRun ? (
           <GenerationRunPanel scope={scope} run={visibleRun} onDismiss={dismissRun} />
         ) : null}
@@ -246,10 +246,10 @@ export function LoopDocumentDialog({
             />
           )}
         </div>
-      </DialogContent>
+      </div>
       {visibleRun ? (
         <GenerationRunAside scope={scope} run={visibleRun} onDismiss={dismissRun} />
       ) : null}
-    </Dialog>
+    </div>
   );
 }

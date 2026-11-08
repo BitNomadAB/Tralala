@@ -49,21 +49,38 @@ const STATES: Record<TicketState, { word: string; dot: string }> = {
 /**
  * Where a Ticket stands, in words with a coloured dot: Ready, Needs input or Blocked. The dot only
  * repeats the word, so it is hidden from a screen reader; `reason` follows muted ("nothing holds
- * it up").
+ * it up"). `compact` is the bordered pill a Kanban card carries in its bottom row.
  */
 export function StateChip({
   state,
   reason,
+  compact = false,
+  title,
   className,
 }: {
   state: TicketState;
   reason?: ReactNode;
+  compact?: boolean | undefined;
+  /** The longer reason for a pointer ("Waiting for SES-1-PH01-001"). */
+  title?: string | undefined;
   className?: string | undefined;
 }) {
   const shown = STATES[state];
   return (
-    <span className={cn("inline-flex items-center gap-2 text-sm", className)}>
-      <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", shown.dot)} />
+    <span
+      title={title}
+      className={cn(
+        "inline-flex items-center",
+        compact
+          ? "gap-1.5 rounded-full border border-[var(--border)] px-1.5 py-px text-xs"
+          : "gap-2 text-sm",
+        className,
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn("shrink-0 rounded-full", compact ? "size-1.5" : "size-2", shown.dot)}
+      />
       <b className="font-semibold text-[var(--foreground)]">{shown.word}</b>
       {reason === undefined ? null : (
         <span className="text-[var(--muted-foreground)]">· {reason}</span>

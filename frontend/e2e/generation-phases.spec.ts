@@ -10,7 +10,7 @@ import {
   stopStandInModel,
   TOOL_MODEL,
 } from "./stand-in-model";
-import { boardWithLoop, csrfToken, login, uniqueName } from "./support";
+import { boardWithLoop, csrfToken, login, openPlanDocument, showTab, uniqueName } from "./support";
 
 /**
  * The progress panel is the run's process tree, written step by step, so the only honest way to test
@@ -58,17 +58,15 @@ test.describe("generation progress", () => {
     expect(agent.status()).toBe(201);
     const agentId = (await agent.json()).data.id as string;
 
-    await page.getByRole("button", { name: /^Info/ }).click();
-    const dialog = page.getByRole("dialog", { name: /planning documents/ });
+    const dialog = await openPlanDocument(page, "Info");
     await dialog
       .getByLabel("Write or revise Info")
       .fill("Sessions must expire after 30 minutes of inactivity.");
     await dialog.getByRole("button", { name: "Save as new revision" }).click();
-    await page.getByRole("button", { name: "Close dialog" }).click();
+    await showTab(page, "Kanban");
 
     await page.reload();
-    await page.getByRole("button", { name: "Analysis" }).click();
-    const analysis = page.getByRole("dialog", { name: /planning documents/ });
+    const analysis = await openPlanDocument(page, "Analysis");
     // Other specs leave agents behind and the default is "first by name", so pin this run's agent.
     await analysis.getByLabel("Generation agent").selectOption(agentId);
     const generate = analysis.getByRole("button", { name: /Generate analysis/ });
@@ -124,15 +122,13 @@ test.describe("generation progress", () => {
     expect(agent.status()).toBe(201);
     const agentId = (await agent.json()).data.id as string;
 
-    await page.getByRole("button", { name: /^Info/ }).click();
-    const dialog = page.getByRole("dialog", { name: /planning documents/ });
+    const dialog = await openPlanDocument(page, "Info");
     await dialog.getByLabel("Write or revise Info").fill("Sessions must expire.");
     await dialog.getByRole("button", { name: "Save as new revision" }).click();
-    await page.getByRole("button", { name: "Close dialog" }).click();
+    await showTab(page, "Kanban");
 
     await page.reload();
-    await page.getByRole("button", { name: "Analysis" }).click();
-    const analysis = page.getByRole("dialog", { name: /planning documents/ });
+    const analysis = await openPlanDocument(page, "Analysis");
     await analysis.getByLabel("Generation agent").selectOption(agentId);
     await analysis.getByRole("button", { name: /Generate analysis/ }).click();
 
@@ -182,14 +178,12 @@ test.describe("generation progress", () => {
     await expect(row.getByText("reads repositories with tools")).toBeVisible();
 
     await page.goBack();
-    await page.getByRole("button", { name: /^Info/ }).click();
-    const dialog = page.getByRole("dialog", { name: /planning documents/ });
+    const dialog = await openPlanDocument(page, "Info");
     await dialog.getByLabel("Write or revise Info").fill("Sessions must expire.");
     await dialog.getByRole("button", { name: "Save as new revision" }).click();
-    await page.getByRole("button", { name: "Close dialog" }).click();
+    await showTab(page, "Kanban");
     await page.reload();
-    await page.getByRole("button", { name: "Analysis" }).click();
-    const analysis = page.getByRole("dialog", { name: /planning documents/ });
+    const analysis = await openPlanDocument(page, "Analysis");
     await analysis.getByLabel("Generation agent").selectOption(agentId);
     await analysis.getByRole("button", { name: /Generate analysis/ }).click();
 
@@ -228,16 +222,14 @@ test.describe("generation progress", () => {
     const agentId = (await agent.json()).data.id as string;
 
     // With no run in flight, a save is a plain save.
-    await page.getByRole("button", { name: /^Info/ }).click();
-    const first = page.getByRole("dialog", { name: /planning documents/ });
+    const first = await openPlanDocument(page, "Info");
     await first.getByLabel("Write or revise Info").fill("Sessions must expire after 30 minutes.");
     await first.getByRole("button", { name: "Save as new revision" }).click();
     await expect(first.getByText("revision 1", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Close dialog" }).click();
+    await showTab(page, "Kanban");
 
     await page.reload();
-    await page.getByRole("button", { name: "Analysis" }).click();
-    const dialog = page.getByRole("dialog", { name: /planning documents/ });
+    const dialog = await openPlanDocument(page, "Analysis");
     await dialog.getByLabel("Generation agent").selectOption(agentId);
     const generate = () => dialog.getByRole("button", { name: /Generate analysis/ }).click();
     const editInfoDuringRun = async (text: string) => {

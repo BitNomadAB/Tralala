@@ -1,23 +1,30 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/button";
+import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/useToast";
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
 import { TicketModal } from "@/features/cards/TicketModal";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
-import { keys, useBoard, useLists, useLoop } from "@/lib/queries";
-import type { Card } from "@/lib/types";
+import { keys, useBoard, useLists, useLoop, useLoopSummaries } from "@/lib/queries";
+import { cn } from "@/lib/utils";
 import { useLoopTools } from "@/webmcp/useWebMcp";
 import { AddColumnForm } from "./AddColumnForm";
+import { KanbanFilters } from "./KanbanFilters";
 import { LoopHeader } from "./LoopHeader";
 import { LoopKanban } from "./LoopKanban";
-import { LoopToolbar, type TicketFilters } from "./LoopToolbar";
-import { LIST_LIMIT } from "./loopUi";
-import { SaveTemplateDialog } from "./SaveTemplateDialog";
-import { ticketHrefResolver } from "./ticketLinks";
+import { LoopNotesPanel } from "./LoopNotesPanel";
+import { LoopNotices } from "./LoopNotices";
+import { LoopPlanTab } from "./LoopPlanTab";
+import { LoopToolbar } from "./LoopToolbar";
+import { NO_FILTERS, useLoopCards, type TicketFilters } from "./useLoopCards";
+import { parseTab, useLoopView } from "./useLoopView";
 
+/**
+ * The Loop page: the header with the person's next decision, then the tabs Kanban, Plan and Notes
+ * (`?tab=`, the Kanban when absent). `?card=` opens a Ticket over whichever tab is shown.
+ */
 export function LoopPage() {
   const { boardId = "", loopId = "" } = useParams();
   const queryClient = useQueryClient();
@@ -25,73 +32,40 @@ export function LoopPage() {
   const boardQuery = useBoard(boardId);
   const loopQuery = useLoop(boardId, loopId);
   const listsQuery = useLists(boardId, loopId);
+  const summaries = useLoopSummaries(boardId);
+  const view = useLoopView(loopQuery.data?.stage ?? "draft");
   // A discussion or search result deep-links the Ticket it points at.
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedCardId, setSelectedCardId] = useState<string | null>(searchParams.get("card"));
-  const [retrying, setRetrying] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [addingList, setAddingList] = useState(false);
   const [listName, setListName] = useState("");
-  const [templateOpen, setTemplateOpen] = useState(false);
-  const [templateName, setTemplateName] = useState("");
-  const [templateDescription, setTemplateDescription] = useState("");
-  const [filters, setFilters] = useState<TicketFilters>({
-    q: "",
-    priority: "",
-    overdue: false,
-  });
+  const [filters, setFilters] = useState<TicketFilters>(NO_FILTERS);
+  // A tab's content is mounted the first time it is shown and kept, so a run the Plan tab follows
+  // or a draft of Info survives a look at the Kanban.
+  const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set([view.tab]));
+  if (!seen.has(view.tab)) setSeen(new Set([...seen, view.tab]));
 
   const lists = useMemo(() => listsQuery.data ?? [], [listsQuery.data]);
+  const { cardsByList, ticketHref, matchingIds } = useLoopCards({
+    boardId,
+    loopId,
+    lists,
+    filters,
+  });
 
   const openCard = useCallback((id: string) => setSelectedCardId(id), []);
   const closeCard = useCallback(() => {
     setSelectedCardId(null);
-    if (searchParams.has("card")) {
-      const next = new URLSearchParams(searchParams);
-      next.delete("card");
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
-
-  const cardQueries = useQueries({
-    queries: lists.map((list) => ({
-      queryKey: keys.listCards(boardId, loopId, list.id, LIST_LIMIT),
-      queryFn: () => api.listCards(boardId, loopId, { list_id: list.id, limit: LIST_LIMIT }),
-      enabled: Boolean(boardId && loopId),
-    })),
-  });
-
-  const cardsByList = useMemo(() => {
-    const map: Record<string, Card[]> = {};
-    lists.forEach((list, index) => {
-      map[list.id] = cardQueries[index]?.data ?? [];
-    });
-    return map;
-  }, [lists, cardQueries]);
-
-  // A Ticket key in a description links to that Ticket when this Loop has it; others stay text.
-  const ticketHref = useMemo(
-    () => ticketHrefResolver(boardId, loopId, Object.values(cardsByList).flat()),
-    [boardId, loopId, cardsByList],
-  );
-
-  const filtersActive = Boolean(filters.q.trim() || filters.priority || filters.overdue);
-  const searchQuery = useQuery({
-    queryKey: keys.search(boardId, loopId, { ...filters }),
-    queryFn: () =>
-      api.searchCards(boardId, loopId, {
-        q: filters.q.trim() || undefined,
-        priority: filters.priority || undefined,
-        overdue: filters.overdue || undefined,
-        limit: 200,
-      }),
-    enabled: Boolean(boardId && loopId) && filtersActive,
-  });
-
-  const matchingIds = useMemo(() => {
-    if (!filtersActive) return null;
-    return new Set((searchQuery.data?.items ?? []).map((card) => card.id));
-  }, [filtersActive, searchQuery.data]);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("card");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   const invalidateLists = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: keys.lists(boardId, loopId) });
@@ -102,36 +76,21 @@ export function LoopPage() {
     void queryClient.invalidateQueries({ queryKey: keys.loopCardsPrefix(boardId, loopId) });
     void queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) });
     void queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
+    void queryClient.invalidateQueries({ queryKey: keys.loopSummaries(boardId) });
     void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
   }, [queryClient, boardId, loopId]);
+
+  const onLoopChanged = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loopId) });
+    void queryClient.invalidateQueries({ queryKey: keys.loopPlan(boardId, loopId) });
+    invalidateCards();
+  }, [queryClient, boardId, loopId, invalidateCards]);
 
   const createListMutation = useMutation({
     mutationFn: (name: string) => api.createList(boardId, loopId, name),
     onSuccess: invalidateLists,
     onError: () => {
       toast.push({ title: "Could not create column", variant: "error" });
-    },
-  });
-
-  const saveTemplateMutation = useMutation({
-    mutationFn: () =>
-      api.saveBoardAsTemplate(boardId, loopId, {
-        name: templateName.trim(),
-        description: templateDescription,
-      }),
-    onSuccess: () => {
-      setTemplateOpen(false);
-      setTemplateName("");
-      setTemplateDescription("");
-      void queryClient.invalidateQueries({ queryKey: ["templates"] });
-      toast.push({ title: "Template saved", variant: "success" });
-    },
-    onError: (error) => {
-      toast.push({
-        title: "Could not save template",
-        description: describeError(error, undefined),
-        variant: "error",
-      });
     },
   });
 
@@ -164,94 +123,81 @@ export function LoopPage() {
     loop.stage === "completed" ||
     loop.stage === "cancelled" ||
     loop.archived_at !== null;
-
-  async function retryMigration() {
-    setRetrying(true);
-    try {
-      const report = await api.retryMigration(board.id);
-      toast.push({ title: `Migration ${report.status}`, variant: "success" });
-      void queryClient.invalidateQueries();
-    } catch (error) {
-      toast.push({
-        title: "Migration failed",
-        description: describeError(error, "See the server log."),
-        variant: "error",
-      });
-    } finally {
-      setRetrying(false);
-    }
-  }
+  const kanban = view.tab === "kanban";
 
   return (
-    <section className="flex h-[calc(100vh-7rem)] flex-col gap-3">
-      <LoopToolbar
-        board={board}
-        filters={filters}
-        onFiltersChange={setFilters}
-        onToggleActivity={() => setShowActivity((value) => !value)}
-        readOnly={readOnly}
-        onSaveTemplate={() => {
-          setTemplateName(`${loop.name} template`);
-          setTemplateDescription(board.description);
-          setTemplateOpen(true);
-        }}
-      />
+    <section
+      className={cn(
+        "flex flex-col gap-3",
+        kanban ? "h-[calc(100vh-7rem)]" : "min-h-[calc(100vh-7rem)]",
+      )}
+    >
+      <LoopToolbar board={board} />
 
       <LoopHeader
-        boardId={boardId}
+        board={board}
         loop={loop}
-        boardStatus={board.status}
-        onChanged={() => {
-          void queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
-          void queryClient.invalidateQueries({ queryKey: keys.loopDocuments(boardId, loopId) });
-          void queryClient.invalidateQueries({ queryKey: keys.loopPlan(boardId, loopId) });
-          void queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) });
-          invalidateCards();
-        }}
+        summary={summaries.data?.loops.find((entry) => entry.id === loop.id)}
+        view={view}
+        readOnly={readOnly}
+        columnCount={lists.length}
+        onChanged={onLoopChanged}
+        onToggleActivity={() => setShowActivity((value) => !value)}
       />
 
-      {board.status === "migration_failed" ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--warning)] p-2 text-xs text-[var(--warning)]">
-          <span>This board needs an explicit development reset before it can be used.</span>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={retrying}
-            onClick={() => {
-              void retryMigration();
-            }}
-          >
-            {retrying ? "Migrating…" : "Retry migration"}
-          </Button>
-        </div>
-      ) : null}
+      <LoopNotices board={board} loop={loop} readOnly={readOnly} />
 
-      {readOnly ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--warning)] p-2 text-xs text-[var(--warning)]">
-          Read-only: this Loop is {loop.stage}
-          {loop.stage === "completed" ? " and its history snapshot is immutable." : "."}
-        </div>
-      ) : null}
-
-      <LoopKanban
-        boardId={boardId}
-        loopId={loopId}
-        lists={lists}
-        cardsByList={cardsByList}
-        matchingIds={matchingIds}
-        onOpenCard={openCard}
-        onListsChanged={invalidateLists}
-        onCardsChanged={invalidateCards}
+      <Tabs
+        value={view.tab}
+        onChange={(tab) => view.show(parseTab(tab))}
+        className="flex min-h-0 flex-1 flex-col"
       >
-        <AddColumnForm
-          adding={addingList}
-          onAddingChange={setAddingList}
-          name={listName}
-          onNameChange={setListName}
-          readOnly={readOnly}
-          onCreate={(name) => createListMutation.mutate(name)}
-        />
-      </LoopKanban>
+        <TabList label="Loop views" className="mb-1">
+          <Tab value="kanban">Kanban</Tab>
+          <Tab value="plan">Plan</Tab>
+          <Tab value="notes">Notes</Tab>
+        </TabList>
+        <TabPanel value="kanban" className="flex min-h-0 flex-1 flex-col gap-3">
+          <KanbanFilters filters={filters} onFiltersChange={setFilters} />
+          <LoopKanban
+            boardId={boardId}
+            loopId={loopId}
+            lists={lists}
+            cardsByList={cardsByList}
+            matchingIds={matchingIds}
+            readOnly={readOnly}
+            onOpenCard={openCard}
+            onListsChanged={invalidateLists}
+            onCardsChanged={invalidateCards}
+          >
+            <AddColumnForm
+              adding={addingList}
+              onAddingChange={setAddingList}
+              name={listName}
+              onNameChange={setListName}
+              readOnly={readOnly}
+              onCreate={(name) => createListMutation.mutate(name)}
+            />
+          </LoopKanban>
+        </TabPanel>
+        <TabPanel value="plan" className="pt-2">
+          {seen.has("plan") ? (
+            <LoopPlanTab
+              boardId={boardId}
+              loop={loop}
+              doc={view.doc}
+              onDocChange={(doc) => view.show("plan", doc)}
+              readOnly={readOnly}
+              onChanged={onLoopChanged}
+            />
+          ) : null}
+        </TabPanel>
+        <TabPanel value="notes" className="pt-2">
+          {seen.has("notes") ? (
+            <LoopNotesPanel boardId={boardId} loop={loop} readOnly={readOnly} />
+          ) : null}
+        </TabPanel>
+      </Tabs>
 
       {showActivity ? (
         <ActivityPanel boardId={boardId} onClose={() => setShowActivity(false)} />
@@ -266,18 +212,6 @@ export function LoopPage() {
           ticketHref={ticketHref}
         />
       ) : null}
-
-      <SaveTemplateDialog
-        open={templateOpen}
-        onOpenChange={setTemplateOpen}
-        name={templateName}
-        onNameChange={setTemplateName}
-        description={templateDescription}
-        onDescriptionChange={setTemplateDescription}
-        columnCount={lists.length}
-        saving={saveTemplateMutation.isPending}
-        onSave={() => saveTemplateMutation.mutate()}
-      />
     </section>
   );
 }
