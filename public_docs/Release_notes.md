@@ -136,6 +136,11 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **The Plan tab holds the planning documents alone.** The list of Phases and their Tickets under
+  the RoadMap's review repeated the Kanban, and after **Regenerate RoadMap** it showed the plan in
+  force beneath the new one. A human Ticket is confirmed in the Ticket itself, the Loop's header
+  names the Tickets that hold a Phase up, and a Ticket outside the plan keeps its **Unplanned**
+  badge on the Kanban.
 - **Regenerate RoadMap.** A RoadMap can be written again from its review with the feedback field as
   the run's instructions, also after it was approved. A new revision after an approval waits for a
   new review (it used to count as stale, and nothing could approve it without a reset first). When

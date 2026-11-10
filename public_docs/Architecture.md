@@ -45,7 +45,7 @@ App (Tralala shell, Board overview)
     Loop (one feature or coherent change initiative)
       Loop page: the next decision and the Loop actions menu, then the tabs Kanban, Plan, Notes
       Kanban: Loop-owned columns containing Tickets, each opening the Ticket view
-      Plan: Info, Analysis, RoadMap with their reviews, and the Phases' readiness
+      Plan: Info, Analysis and RoadMap with their reviews
       Numbered delivery Phases, shown in the RoadMap and on Tickets
 ```
 

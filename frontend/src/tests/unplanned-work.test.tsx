@@ -4,12 +4,11 @@ import { http } from "msw";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { openUnplanned } from "@/features/loops/loopUi";
-import { PlanReadiness } from "@/features/loops/PlanReadiness";
 import { TicketCard } from "@/features/loops/TicketCard";
 import { UnplannedWarning } from "@/features/loops/Unplanned";
 import type { Card, LoopReadiness, UnplannedTicket } from "@/lib/types";
 import { apiPath, ok } from "./msw/envelope";
-import { BOARD_ID, LOOP, LOOP_ID, LOOP_PATH, NOW } from "./msw/loops";
+import { BOARD_ID, LOOP_ID, LOOP_PATH, NOW } from "./msw/loops";
 import { server } from "./msw/server";
 
 function unplanned(
@@ -109,22 +108,6 @@ function card(extra: Partial<Card>): Card {
 }
 
 describe("work outside the plan", () => {
-  it("is listed on the Plan tab, without the archived ones", async () => {
-    answerReadiness(OUTSIDE);
-    withQueries(
-      <PlanReadiness
-        boardId={BOARD_ID}
-        loop={{ ...LOOP, stage: "in_progress" }}
-        onChanged={() => undefined}
-      />,
-    );
-    const section = await screen.findByRole("region", { name: "Outside the plan" });
-    expect(section).toHaveTextContent("SES-1-UNP-001");
-    expect(section).toHaveTextContent("Fix the date");
-    expect(section).not.toHaveTextContent("Dropped idea");
-    expect(section).toHaveTextContent("never block");
-  });
-
   it("warns at completion about what is still open, and only then", async () => {
     expect(openUnplanned(OUTSIDE).map((ticket) => ticket.key)).toEqual(["SES-1-UNP-001"]);
     answerReadiness(OUTSIDE);

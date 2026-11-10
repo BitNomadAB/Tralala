@@ -170,7 +170,7 @@ describe("the Loop page's tabs", () => {
     expect(screen.getByRole("region", { name: "List Backlog" })).toBeInTheDocument();
   });
 
-  it("land on the Plan tab from a link, with the documents and the readiness", async () => {
+  it("land on the Plan tab from a link, with the planning documents alone", async () => {
     await renderLoopPage("?tab=plan", "in_progress", {});
     expect(screen.getByRole("tab", { name: "Plan" })).toHaveAttribute("aria-selected", "true");
     const documents = screen.getByRole("region", { name: "Planning documents" });
@@ -181,8 +181,9 @@ describe("the Loop page's tabs", () => {
     expect(
       await within(documents).findByRole("button", { name: /Generate RoadMap/ }),
     ).toBeInTheDocument();
-    const readiness = screen.getByRole("region", { name: "Phases and readiness" });
-    expect(await within(readiness).findByText(PHASE_NAME)).toBeInTheDocument();
+    // The plan's Tickets are on the Kanban; the Plan tab does not list them again.
+    expect(screen.queryByRole("region", { name: "Phases and readiness" })).not.toBeInTheDocument();
+    expect(screen.queryByText(PHASE_NAME)).not.toBeInTheDocument();
   });
 
   it("open a Ticket over the Plan tab and close it back to the Plan tab", async () => {

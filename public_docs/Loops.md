@@ -32,7 +32,8 @@ opens the same view:
   **Rename column** and **Archive column** sit in its quiet menu, and **Add card** and **Add
   column** are quiet controls at the end.
 - **Plan**: **Planning documents** (**Info**, **Analysis**, **RoadMap**; `?doc=` names the one
-  shown, by default the one the stage is about) and **Phases and readiness**.
+  shown, by default the one the stage is about). The plan's Tickets are on the **Kanban**; the
+  Loop's header names the human Tickets that hold a Phase up, and a Ticket shows what it waits for.
 - **Notes**: the Loop's log of notes ([Notes](#notes)).
 
 `?card=<card_id>` opens a Ticket over any tab ([The Ticket view](#the-ticket-view)).
@@ -149,7 +150,7 @@ waits for it.
 
 Once the plan executes (`ready`, `in_progress`, `awaiting_qa`), a person or a worker may still add
 a Ticket *outside the plan*: it is keyed `<LoopKey>-UNP-<nnn>`, carries an **Unplanned** badge, is
-listed under **Outside the plan** in the RoadMap tab and in readiness (`unplanned`), and never blocks
+listed in readiness (`unplanned`), and never blocks
 a Phase or the Loop's completion; accepting the implementation names the ones still open. A Loop
 whose plan is not executing refuses a new Ticket with
 `409 plan_change_required`; a Loop without a plan yet takes one without a key.

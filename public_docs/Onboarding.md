@@ -265,7 +265,7 @@ wait for you. More in [Ask the agents](Loops.md#ask-the-agents).
   backlog of unrelated Tickets in a Loop you already approved.
 - **Write the Info as if someone else will read it.** The analysis and the RoadMap are only as good
   as that paragraph.
-- **Watch readiness, not the column name.** **Phases and readiness** on the Loop's **Plan** tab and
+- **Watch readiness, not the column name.** The Loop's header, each Ticket's state and
   `GET /boards/{id}/loops/{loop_id}/readiness` explain every blocker.
 - **Let your worker comment as it goes.** A Ticket with the findings in it is worth more than one
   that looks finished.
