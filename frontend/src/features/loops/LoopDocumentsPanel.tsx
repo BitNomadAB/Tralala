@@ -270,7 +270,6 @@ export function LoopDocumentsPanel({
                 ? {
                     approveLabel: approveRoadmapLabel(roadmapTickets),
                     approveNote: approvalLine(documents?.roadmap, roadmapTickets),
-                    quietReset: true,
                   }
                 : {})}
             />

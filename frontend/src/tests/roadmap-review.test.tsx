@@ -217,12 +217,11 @@ describe("the RoadMap review", () => {
     });
   });
 
-  it("keeps the reset behind the quiet menu, confirmed as before", async () => {
+  it("offers the reset as a button of its own, as the analysis does, confirmed first", async () => {
     const { state, user } = open();
     await screen.findByRole("button", { name: "Approve RoadMap · 3 Tickets" });
-    expect(screen.queryByRole("button", { name: "Reset RoadMap" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "RoadMap actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Reset RoadMap" }));
+    expect(screen.queryByRole("button", { name: "RoadMap actions" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reset RoadMap" }));
     expect(screen.getByText(/Resetting clears the RoadMap/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reset and clear" }));
     await waitFor(() =>

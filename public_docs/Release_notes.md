@@ -136,6 +136,8 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **Reset RoadMap is a button again.** It sits beside the RoadMap's review as **Reset analysis**
+  does beside the analysis's, instead of in a menu next to the approve button that nobody found.
 - **The RoadMap for people is its goal and the number of Tickets.** The brief above the Phases no
   longer retells the order of work, the person's part and what could block the plan, which the
   Phases and their Tickets under it already show. The board agent or a worker writes one line of at

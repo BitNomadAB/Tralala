@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { Menu } from "@/components/ui/menu";
 
 /** Feedback, reset and the human decision on the open Analysis or RoadMap. */
 export function ScopeReview({
@@ -21,7 +20,6 @@ export function ScopeReview({
   onDecision,
   approveLabel,
   approveNote,
-  quietReset = false,
 }: {
   scopeLabel: string;
   isHuman: boolean;
@@ -43,8 +41,6 @@ export function ScopeReview({
   approveLabel?: string | undefined;
   /** The line under the decision: the revision it binds to and what approving does. */
   approveNote?: string | null | undefined;
-  /** Reset sits in a quiet menu instead of a button of its own (the RoadMap review). */
-  quietReset?: boolean | undefined;
 }) {
   const label = approveLabel ?? `Approve ${scopeLabel}`;
   return (
@@ -79,7 +75,7 @@ export function ScopeReview({
                   Cancel
                 </Button>
               </>
-            ) : quietReset ? null : (
+            ) : (
               <Button
                 size="sm"
                 variant="danger"
@@ -107,19 +103,6 @@ export function ScopeReview({
               {approved ? "Approved" : label}
             </Button>
           )}
-          {quietReset && canReset && !confirmReset ? (
-            <Menu
-              label={`${scopeLabel} actions`}
-              items={[
-                {
-                  label: `Reset ${scopeLabel}`,
-                  danger: true,
-                  disabled: resetPending,
-                  onSelect: () => onConfirmResetChange(true),
-                },
-              ]}
-            />
-          ) : null}
         </div>
       </div>
       {approveNote && !approved ? (

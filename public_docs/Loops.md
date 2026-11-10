@@ -148,9 +148,8 @@ Changing an input invalidates what depended on it: a new Info revision makes the
 both RoadMap views stale, the Loop moves to `replanning`, and execution transitions are rejected
 with `409 plan_change_required` until a replacement plan is approved.
 
-Withdrawing an approval is the heavier action: **Reset analysis** is the red button beside the
-analysis's review, and **Reset RoadMap** sits in the quiet **RoadMap actions** menu beside the
-RoadMap's approve button. Both are available for a draft as well as for an approved document. A
+Withdrawing an approval is the heavier action: **Reset analysis** and **Reset RoadMap** are the
+red buttons beside each review, on the left of its decision. Both are available for a draft as well as for an approved document. A
 reset is not a rejection: a rejection keeps the text and asks for changes, while a reset clears it.
 Any approval behind the text is superseded and kept as history, the scope's documents are replaced
 by an empty draft, and every approval that depended on them is cleared — so a reset analysis has
