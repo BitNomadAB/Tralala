@@ -92,7 +92,9 @@ def _literal_address(host: str) -> Address | None:
 # address is the backend container itself, or https was used against an endpoint without TLS.
 CONTAINER_HINT = (
     "From the Tralala container, 127.0.0.1 is the container. Use host.docker.internal for a model "
-    "on the same machine, or the machine's LAN address for another one."
+    "on the same machine, or the machine's LAN address for another one; the model server must "
+    "then listen on all interfaces (0.0.0.0) or on the Docker bridge address, not only on "
+    "127.0.0.1."
 )
 PLAIN_HTTP_HINT = (
     "The endpoint answered without TLS: it speaks plain HTTP, so use http:// instead of https://."

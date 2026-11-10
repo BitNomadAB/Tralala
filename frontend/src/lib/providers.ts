@@ -22,7 +22,7 @@ export interface ProviderPreset {
  * local preset points at the host by the name Docker gives it.
  */
 export const CONTAINER_HINT =
-  "From the Tralala container, 127.0.0.1 is the container. Use host.docker.internal for a model on the same machine, or the machine's LAN address for another one; run from source, use 127.0.0.1.";
+  "From the Tralala container, 127.0.0.1 is the container. Use host.docker.internal for a model on the same machine, or the machine's LAN address for another one; the model server must then listen on all interfaces (0.0.0.0) or on the Docker bridge address, not only on 127.0.0.1. Run from source, use 127.0.0.1.";
 
 /**
  * Known OpenAI-compatible providers. A preset prefills the endpoint and says what the provider
