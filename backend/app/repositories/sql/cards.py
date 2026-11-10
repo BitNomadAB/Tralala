@@ -107,6 +107,21 @@ _MANUAL = text(
     f"SELECT {sql.column_list(CARDS_COLUMNS)} FROM cards"  # noqa: S608 - from CARDS_COLUMNS
     " WHERE loop_id = :id AND kind = 'manual' ORDER BY created_at, id"
 )
+_PLANNED = text(
+    f"SELECT {sql.column_list(CARDS_COLUMNS)} FROM cards"  # noqa: S608 - from CARDS_COLUMNS
+    " WHERE loop_id = :id AND plan_item_id IS NOT NULL ORDER BY created_at, id"
+)
+_ADDITIONS = text(
+    "SELECT c.id AS card_id,"
+    " (SELECT COUNT(*) FROM comments WHERE card_id = c.id)"
+    " + (SELECT COUNT(*) FROM checklists WHERE card_id = c.id)"
+    " + (SELECT COUNT(*) FROM attachments WHERE card_id = c.id)"
+    " + (SELECT COUNT(*) FROM card_notes WHERE card_id = c.id)"
+    " + (SELECT COUNT(*) FROM discussion_threads WHERE card_id = c.id) AS total"
+    " FROM cards c WHERE c.id IN :card_ids"
+).bindparams(bindparam("card_ids", expanding=True))
+# The rows that name the card go with it (ON DELETE CASCADE); a QA cycle's card is set to NULL.
+_DELETE = text("DELETE FROM cards WHERE id = :id")
 _COMPLETED_TICKETS = text(
     "SELECT COUNT(*) AS total FROM cards WHERE loop_id = :id AND kind IN ('ticket','qa')"
     " AND completed_at IS NOT NULL"
@@ -353,6 +368,21 @@ class SqlCardRepository:
     def manual(self, loop_id: str) -> list[CardsRow]:
         result = self._connection.execute(_MANUAL, {"id": loop_id})
         return [CardsRow.from_mapping(row) for row in result.mappings()]
+
+    def planned(self, loop_id: str) -> list[CardsRow]:
+        result = self._connection.execute(_PLANNED, {"id": loop_id})
+        return [CardsRow.from_mapping(row) for row in result.mappings()]
+
+    def additions(self, card_ids: Sequence[str]) -> dict[str, int]:
+        found = dict.fromkeys(card_ids, 0)
+        if card_ids:
+            result = self._connection.execute(_ADDITIONS, {"card_ids": list(card_ids)})
+            for row in result.mappings():
+                found[values.text(row, "card_id")] = values.integer(row, "total")
+        return found
+
+    def delete(self, card_id: str) -> None:
+        self._connection.execute(_DELETE, {"id": card_id})
 
     def completed_tickets(self, loop_id: str) -> int:
         row = self._connection.execute(_COMPLETED_TICKETS, {"id": loop_id}).mappings().one()

@@ -270,6 +270,14 @@ export function LoopDocumentsPanel({
                 ? {
                     approveLabel: approveRoadmapLabel(roadmapTickets),
                     approveNote: approvalLine(documents?.roadmap, roadmapTickets),
+                    // The feedback goes to the run that writes the RoadMap again.
+                    onRegenerate: () =>
+                      generation.generate.mutate(
+                        { purpose: "roadmap", instructions: planReview.feedback.trim() },
+                        { onSuccess: () => planReview.setFeedback("") },
+                      ),
+                    regenerateDisabled:
+                      generateDisabled || documents?.analysis.state !== "approved",
                   }
                 : {})}
             />

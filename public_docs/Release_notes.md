@@ -136,6 +136,11 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **Regenerate RoadMap.** A RoadMap can be written again from its review with the feedback field as
+  the run's instructions, also after it was approved. A new revision after an approval waits for a
+  new review (it used to count as stale, and nothing could approve it without a reset first). When
+  the new plan is published, the earlier plan's Tickets that nobody touched are removed from the
+  Kanban; those somebody worked on stay, and the Loop's activity lists both.
 - **A Loop's plan is the one in force.** A RoadMap written again from scratch left the Phases and
   Tickets of the earlier draft in the Loop, so the dashboard's **Waits for you**, the Loop's Phases and
   a worker's `loop_summaries` and `read_loop` counted both (39 Tickets where the Kanban held 20, two

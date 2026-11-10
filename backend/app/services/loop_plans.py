@@ -17,7 +17,7 @@ names, so every caller imports them from here.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime
 from typing import NotRequired, TypedDict
 from uuid import uuid4
@@ -272,7 +272,9 @@ class LoopPlanService(PlanViews):
         *,
         approval_id: str | None,
     ) -> Publication:
-        """Materialise every planned Ticket in one transaction. All or nothing."""
+        """Materialise every planned Ticket in one transaction. All or nothing. A card an earlier
+        plan published that this one leaves out is removed when nobody has touched it
+        (``untouched``), and kept, with what was done on it, otherwise."""
         plan = repos.plans.get(plan_id)
         if plan is None:
             raise NotFound("Plan not found")
@@ -316,16 +318,16 @@ class LoopPlanService(PlanViews):
                 if labels:
                     repos.cards.set_labels(ticket["id"], labels)
                 created.append({"id": ticket["id"], "key": ticket["key"]})
+        planned = {ticket["id"] for phase in stored["phases"] for ticket in phase["tickets"]}
+        removed, kept = _replace_earlier_cards(repos, loop.id, planned)
         repos.plans.activate(loop.id, plan_id, approval_id=approval_id, now=now)
         repos.loops.set_current_plan(loop.id, plan_id, now=now)
-        self._log(
-            repos,
-            actor,
-            "loop.plan_published",
-            loop.id,
-            {"plan_id": plan_id, "tickets": len(created)},
-        )
-        return {"plan_id": plan_id, "tickets": created}
+        changes: dict[str, object] = {"plan_id": plan_id, "tickets": len(created)}
+        if removed or kept:
+            changes["removed"] = [entry["key"] for entry in removed]
+            changes["kept"] = [entry["key"] for entry in kept]
+        self._log(repos, actor, "loop.plan_published", loop.id, changes)
+        return {"plan_id": plan_id, "tickets": created, "removed": removed, "kept": kept}
 
     # --- views -----------------------------------------------------------------------------------
 
@@ -405,6 +407,39 @@ class LoopPlanService(PlanViews):
                 timestamp=self._now(),
             )
         )
+
+
+def untouched(card: CardsRow, additions: int) -> bool:
+    """Whether nobody has worked on a published card: it was never changed (version 1), nobody
+    has it, it is not completed, confirmed or archived, and nothing was added to it (a comment, a
+    checklist, an attachment, a note or a discussion)."""
+    return (
+        card.version == 1
+        and card.assignee_actor_id is None
+        and card.completed_at is None
+        and card.human_confirmed_at is None
+        and card.archived_at is None
+        and additions == 0
+    )
+
+
+def _replace_earlier_cards(
+    repos: BoardRepositories, loop_id: str, planned: Collection[str]
+) -> tuple[list[PublishedTicket], list[PublishedTicket]]:
+    """The cards an earlier plan of the Loop published that ``planned`` leaves out: the
+    untouched ones are deleted and the others stay. Answers both, in creation order."""
+    earlier = [card for card in repos.cards.planned(loop_id) if card.plan_item_id not in planned]
+    additions = repos.cards.additions([card.id for card in earlier])
+    removed: list[PublishedTicket] = []
+    kept: list[PublishedTicket] = []
+    for card in earlier:
+        entry: PublishedTicket = {"id": card.id, "key": card.ticket_key or card.id}
+        if untouched(card, additions.get(card.id, 0)):
+            repos.cards.delete(card.id)
+            removed.append(entry)
+        else:
+            kept.append(entry)
+    return removed, kept
 
 
 def _canonical_payload(
@@ -582,5 +617,6 @@ __all__ = [
     "items_by_phase",
     "phase_views",
     "plan_hash",
+    "untouched",
     "validate_plan",
 ]

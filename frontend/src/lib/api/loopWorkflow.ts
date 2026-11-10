@@ -119,16 +119,22 @@ export const loopWorkflowApi = {
     return json(await request<LoopReadiness>(`/boards/${boardId}/loops/${loopId}/readiness`));
   },
 
+  /** A run for `purpose`; `instructions` is what a person adds to it (a RoadMap written again). */
   async startGeneration(
     boardId: string,
     loopId: string,
     purpose: GenerationPurpose,
     agentId?: string,
+    instructions?: string,
   ): Promise<GenerationRun> {
     return json(
       await request<GenerationRun>(`/boards/${boardId}/loops/${loopId}/generation-runs`, {
         method: "POST",
-        body: agentId ? { purpose, agent_id: agentId } : { purpose },
+        body: {
+          purpose,
+          ...(agentId ? { agent_id: agentId } : {}),
+          ...(instructions ? { instructions } : {}),
+        },
       }),
     );
   },

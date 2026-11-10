@@ -7,6 +7,10 @@ import { keys } from "@/lib/queries";
 import type { GenerationPurpose, GenerationRun } from "@/lib/types";
 import type { PlanTab } from "./loopUi";
 
+/** A purpose to run, or one with what the person adds to it (a RoadMap written again). */
+export type GenerationAsk =
+  GenerationPurpose | { purpose: GenerationPurpose; instructions: string };
+
 const inFlight = (run: Pick<GenerationRun, "status">) =>
   run.status === "queued" || run.status === "running";
 
@@ -34,8 +38,11 @@ export function useGenerationRun({
   const [failure, setFailure] = useState<GenerationRun | null>(null);
 
   const generate = useMutation({
-    mutationFn: (purpose: GenerationPurpose) =>
-      api.startGeneration(boardId, loopId, purpose, agentId || undefined),
+    mutationFn: (ask: GenerationAsk) => {
+      const { purpose, instructions } =
+        typeof ask === "string" ? { purpose: ask, instructions: "" } : ask;
+      return api.startGeneration(boardId, loopId, purpose, agentId || undefined, instructions);
+    },
     onSuccess: (run) => {
       setRunId(run.id);
       setFailure(null);

@@ -217,6 +217,27 @@ describe("the RoadMap review", () => {
     });
   });
 
+  it("writes the RoadMap again with the feedback, which the run is given", async () => {
+    const { user } = open();
+    const started: unknown[] = [];
+    const run = generationRun("queued", null, { purpose: "roadmap" });
+    server.use(
+      http.post(apiPath(`${LOOP_PATH}/generation-runs`), async ({ request }) => {
+        started.push(await request.json());
+        return ok(run);
+      }),
+      http.get(apiPath(`${LOOP_PATH}/generation-runs/run-1`), () => ok(run)),
+    );
+    await screen.findByRole("button", { name: "Approve RoadMap · 3 Tickets" });
+    expect(screen.getByText(/its Tickets nobody has touched are removed/)).toBeInTheDocument();
+    const feedback = "One person does the work; there is no legal team.";
+    await user.type(screen.getByLabelText("Feedback (optional)"), feedback);
+    await user.click(screen.getByRole("button", { name: "Regenerate RoadMap" }));
+    await waitFor(() => expect(started).toEqual([{ purpose: "roadmap", instructions: feedback }]));
+    // The feedback went to the run; the field is empty for the next decision.
+    await waitFor(() => expect(screen.getByLabelText("Feedback (optional)")).toHaveValue(""));
+  });
+
   it("offers the reset as a button of its own, as the analysis does, confirmed first", async () => {
     const { state, user } = open();
     await screen.findByRole("button", { name: "Approve RoadMap · 3 Tickets" });

@@ -1516,6 +1516,56 @@ class FakeCardRepository:
             key=lambda card: (card.created_at, card.id),
         )
 
+    def planned(self, loop_id: str) -> list[CardsRow]:
+        return sorted(
+            (
+                card
+                for card in self._state.cards.values()
+                if card.loop_id == loop_id and card.plan_item_id is not None
+            ),
+            key=lambda card: (card.created_at, card.id),
+        )
+
+    def additions(self, card_ids: Sequence[str]) -> dict[str, int]:
+        state = self._state
+        found: dict[str, int] = {}
+        for card_id in card_ids:
+            found[card_id] = (
+                sum(1 for row in state.comments.values() if row.card_id == card_id)
+                + sum(1 for row in state.checklists.values() if row.card_id == card_id)
+                + sum(1 for row in state.attachments.values() if row.card_id == card_id)
+                + sum(1 for row in state.card_notes if row.card_id == card_id)
+                + sum(1 for row in state.discussions.values() if row.card_id == card_id)
+            )
+        return found
+
+    def delete(self, card_id: str) -> None:
+        # ON DELETE CASCADE for the rows that name the card; SET NULL for a QA cycle's card.
+        state = self._state
+        state.cards.pop(card_id, None)
+        state.card_labels = [row for row in state.card_labels if row.card_id != card_id]
+        checklists = {row.id for row in state.checklists.values() if row.card_id == card_id}
+        state.checklists = {
+            key: row for key, row in state.checklists.items() if row.id not in checklists
+        }
+        state.checklist_items = {
+            key: row
+            for key, row in state.checklist_items.items()
+            if row.checklist_id not in checklists
+        }
+        state.comments = {k: row for k, row in state.comments.items() if row.card_id != card_id}
+        state.attachments = {
+            key: row for key, row in state.attachments.items() if row.card_id != card_id
+        }
+        state.card_notes = [row for row in state.card_notes if row.card_id != card_id]
+        state.discussions = {
+            key: row for key, row in state.discussions.items() if row.card_id != card_id
+        }
+        state.qa_cycles = {
+            key: row.__replace__(card_id=None) if row.card_id == card_id else row
+            for key, row in state.qa_cycles.items()
+        }
+
     def completed_tickets(self, loop_id: str) -> int:
         return sum(
             1

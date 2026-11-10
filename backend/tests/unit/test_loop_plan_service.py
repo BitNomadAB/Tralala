@@ -32,6 +32,7 @@ from app.services.loop_plans import (
     items_by_phase,
     phase_views,
     plan_hash,
+    untouched,
     validate_plan,
 )
 from app.services.loops_views import board_loop_facts, loop_facts
@@ -46,6 +47,7 @@ from tests.unit.fakes.board import (
     FakeBoardRepositories,
     FakeBoardUnitOfWork,
     card_row,
+    discussion_row,
     list_row,
     loop_row,
     phase_row,
@@ -792,6 +794,9 @@ def test_publishing_materialises_every_ticket_in_the_first_column_after_its_card
             {"id": T2, "key": "L-1-PH01-002"},
             {"id": T3, "key": "L-1-PH02-001"},
         ],
+        # The archived manual card is no plan's: nothing is removed or kept.
+        "removed": [],
+        "kept": [],
     }
     first = state.cards[T1]
     assert first == card_row(T1, "a-list", LOOP, plan_item_id=T1).__replace__(
@@ -885,6 +890,46 @@ def test_republishing_an_active_plan_keeps_its_first_activation() -> None:
         CREATED,
         "approval-2",
     )
+
+
+def test_a_card_is_untouched_until_somebody_changes_it_or_adds_to_it() -> None:
+    card = card_row(T1, f"{LOOP}-todo", LOOP)
+    assert untouched(card, 0)
+    assert not untouched(card, 1)
+    assert not untouched(card.__replace__(version=2), 0)
+    assert not untouched(card.__replace__(assignee_actor_id="actor-2"), 0)
+    assert not untouched(card.__replace__(completed_at=STAMP), 0)
+    assert not untouched(card.__replace__(human_confirmed_at=STAMP), 0)
+    assert not untouched(card.__replace__(archived_at=STAMP), 0)
+
+
+def test_a_new_plan_removes_the_earlier_plans_untouched_tickets_and_keeps_the_others() -> None:
+    w = published()
+    state = w.state
+    # T4, T1, T2 and T3 are on the Kanban. Somebody moved T1 and started a discussion on T2.
+    state.cards[T1] = state.cards[T1].__replace__(version=2)
+    state.discussions["d-1"] = discussion_row("d-1", card_id=T2)
+    keys = {card_id: state.cards[card_id].ticket_key or "" for card_id in (T1, T2, T3, T4)}
+    # The RoadMap is written again from scratch: new identities, and T3 kept as it was.
+    p4, t6 = uid(4), uid(16)
+    second = register(
+        w,
+        payload(phase(p4, 1, ticket(t6)), phase(P2, 2, ticket(T3, "Refuse"))),
+    )
+    publication = w.plans.publish(
+        w.repos, state.loops[LOOP], second, HUMAN, approval_id="approval-2"
+    )
+    # T4 was untouched and is gone; T1 and T2 were worked on and stay; T3 is the new plan's.
+    assert [entry["id"] for entry in publication["removed"]] == [T4]
+    assert sorted(entry["id"] for entry in publication["kept"]) == sorted([T1, T2])
+    assert T4 not in state.cards and {T1, T2, T3, t6} <= set(state.cards)
+    assert all(label.card_id != T4 for label in state.card_labels)
+    assert state.discussions["d-1"].card_id == T2
+    entry = json.loads(state.activity[-1].changes_json)
+    assert entry["removed"] == [keys[T4]]
+    assert sorted(entry["kept"]) == sorted([keys[T1], keys[T2]])
+    # The plan item stays stored, so its key is never used again.
+    assert T4 in state.plan_items
 
 
 def test_publishing_logs_the_plan_and_the_number_of_tickets() -> None:

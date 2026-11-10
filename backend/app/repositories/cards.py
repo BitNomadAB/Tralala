@@ -176,6 +176,21 @@ class CardRepository(Protocol):
         creation time and id."""
         ...
 
+    def planned(self, loop_id: str) -> list[CardsRow]:
+        """The Loop's cards published from a plan (a plan item behind them), archived ones
+        included, by creation time and id."""
+        ...
+
+    def additions(self, card_ids: Sequence[str]) -> dict[str, int]:
+        """How much was added to each card after it was created: its comments, checklists,
+        attachments, notes and discussions together; every requested id is a key."""
+        ...
+
+    def delete(self, card_id: str) -> None:
+        """The card, with every row that hangs on it (its labels, comments, checklists,
+        attachments, notes and discussions); a QA cycle that named it keeps the cycle."""
+        ...
+
     def completed_tickets(self, loop_id: str) -> int:
         """Completed Ticket and QA cards of the Loop, archived ones included."""
         ...

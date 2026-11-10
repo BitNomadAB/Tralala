@@ -87,8 +87,13 @@ class PublishedTicket(TypedDict):
 
 
 class Publication(TypedDict):
+    """What publishing did: the plan's Tickets, and the cards of an earlier plan it leaves out,
+    removed when nobody had touched them and kept otherwise."""
+
     plan_id: str
     tickets: list[PublishedTicket]
+    removed: list[PublishedTicket]
+    kept: list[PublishedTicket]
 
 
 def canonical_ticket(

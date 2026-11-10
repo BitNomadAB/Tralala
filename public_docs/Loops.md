@@ -130,6 +130,16 @@ decision is **Approve RoadMap · 3 Tickets**, with the count of what it publishe
 "Revision 2 of 7 Nov 2026. Approving publishes its 3 Tickets to the Kanban." under it, beside
 **Request changes**.
 
+**Regenerate RoadMap**, beside them, writes the RoadMap again from the approved analysis, with the
+text in the feedback field as the run's instructions ("One person does the work; there is no legal
+team."), also after the RoadMap was approved and its Tickets published. The approved plan stays in
+force until the new RoadMap is approved; until then its revision shows *Needs a new review*. When
+the new plan is published, every Ticket of the earlier plan that it leaves out and nobody has
+touched (never moved or edited, nobody assigned, not completed, and no comment, checklist,
+attachment, note or discussion on it) is removed from the Kanban. A Ticket somebody worked on stays,
+and the Loop's activity names which were removed and which were kept. Ticket keys are never used
+twice, so the new plan's keys go on from the old ones.
+
 A document carries a label: *Written by* its author, or *Rendered from the structure*. A revision
 written before briefs existed still shows as Markdown, labelled *Earlier format*. **Rewrite for
 people** starts the board agent's run again for
