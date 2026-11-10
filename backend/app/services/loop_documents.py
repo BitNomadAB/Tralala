@@ -29,7 +29,7 @@ from ..core.dates import iso_utc
 from ..core.errors import Forbidden, ValidationFailure, VersionConflict
 from ..db.generated.board import LoopDocumentsRow, LoopsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
-from ..schemas.briefs import BriefWrite, HumanBrief, RoadmapBrief
+from ..schemas.briefs import BriefWrite, HumanBrief, HumanBriefWriter, RoadmapBrief
 from ..schemas.loops import (
     AnalysisPayload,
     ApprovalRequest,
@@ -180,7 +180,7 @@ class LoopDocumentService:
             "analysis": AnalysisPayload.model_json_schema(),
             "roadmap": PlanPayload.model_json_schema(),
             "qa": QaInstructions.model_json_schema(),
-            "analysis_brief": HumanBrief.model_json_schema(),
+            "analysis_brief": HumanBriefWriter.model_json_schema(),
             "roadmap_brief": RoadmapBrief.model_json_schema(),
         }
         return context

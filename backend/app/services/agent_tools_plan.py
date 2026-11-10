@@ -37,7 +37,7 @@ from pydantic import BaseModel, JsonValue, ValidationError
 
 from ..core.context import ActorContext
 from ..core.errors import ValidationFailure
-from ..schemas.briefs import BRIEF_KINDS, BriefWrite, HumanBrief, RoadmapBrief
+from ..schemas.briefs import BRIEF_KINDS, BriefWrite, HumanBrief, HumanBriefWriter, RoadmapBrief
 from ..schemas.loops import AnalysisPayload, CandidateSubmission, PlanPayload
 from .agent_tools_read import ToolArguments, ToolResult, _require, _text
 from .agent_tools_schema import (
@@ -405,7 +405,7 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
         "a Ticket a person must do has required_actor human, a reason and instructions",
     )
     human_brief, human_definitions = model_argument(
-        HumanBrief,
+        HumanBriefWriter,
         "Optional: your brief for the person who decides (the human view), naming in "
         "finding_ids every risk, blocker, legal, security, question and decision finding; "
         "plain text without ids, paths or code. It is a sign: verdict_line in at most 20 words, "

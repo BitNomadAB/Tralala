@@ -21,7 +21,7 @@ from app.core.errors import Conflict, Forbidden, NotFound, ServiceUnavailable, V
 from app.db.generated.board import LoopDocumentsRow, LoopGenerationRunsRow, LoopsRow
 from app.db.generated.registry import BoardsRow
 from app.repositories.board import BoardRepositories
-from app.schemas.briefs import HumanBrief, RoadmapBrief
+from app.schemas.briefs import HumanBrief, HumanBriefWriter, RoadmapBrief
 from app.schemas.loops import (
     AnalysisPayload,
     CandidateSubmission,
@@ -1591,13 +1591,15 @@ def test_the_brief_is_written_for_people_and_stored_as_the_human_view() -> None:
     (call,) = w.provider.calls
     assert call.response_schema == {
         "name": "analysis_human",
-        "schema": HumanBrief.model_json_schema(),
+        "schema": HumanBriefWriter.model_json_schema(),
     }
     assert call.system_prompt.startswith(f"You are alpha.\n\n{PURPOSE_PROMPTS['analysis_human']}")
     assert "JSON schema:" in call.system_prompt
     message = call.messages[0]["content"]
     assert "Users must confirm." in message
     assert '"id": "F-03"' in message
+    # The findings to name close the request: the risk and the question, never the reuse finding.
+    assert message.splitlines()[-1].endswith("(one item may name several): F-02, F-03")
     assert "Context (JSON)" not in message
     assert call.running == {"id-1": "writing_for_people"}
     assert ("step", "The brief covers what it must and its text is for people") in steps(w)

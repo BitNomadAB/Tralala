@@ -590,6 +590,10 @@ def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None
         "unclear",
     ]
     assert "BriefObstacle" in keys(field(analysis, "$defs"))
+    # A worker is shown the sign's size and verdict line as required, as the generation is.
+    required = field(analysis, "properties", "brief", "required")
+    assert isinstance(required, list)
+    assert "size" in required and "verdict_line" in required
     assert field(listed["write_brief"], "required") == ["board_id", "loop_id", "kind", "brief"]
     assert keys(field(plan, "properties", "plan", "properties")) == [
         "schema_version",

@@ -99,7 +99,9 @@ and decisions, gives it as `brief` with `write_analysis` or `write_roadmap`, or 
 `write_brief`; then no board agent is asked. Otherwise each new `analysis_ai` or `roadmap_ai` is
 first rendered from its structure (provenance `rendered`), and the Loop's analysis or RoadMap agent
 writes the brief in a run of its own (purpose `analysis_human` or `roadmap_human`): it gets the Info
-and the technical revision, no repository, and answers the brief's JSON schema. A brief that breaks
+and the technical revision, no repository, and answers the brief's JSON schema, which shows the size
+and the verdict line as required. An analysis brief's request ends with the ids of the findings its
+items must name, so the model checks a list instead of working it out. A brief that breaks
 a rule is sent back once with the problems named; if it still breaks one, the run fails with
 `brief_invalid` (the sign) or `brief_rejected` and the rendered view stays. A board without an enabled agent keeps the rendered
 view. The scope cannot be approved while that run is queued or running

@@ -21,10 +21,11 @@ from ..schemas.briefs import (
     SIGN_MAX_DECISIONS,
     SIGN_MAX_ITEMS,
     SIGN_MAX_VERDICT_WORDS,
-    HumanBrief,
+    HumanBriefWriter,
     RoadmapBrief,
 )
 from ..schemas.loops import AnalysisPayload, PlanPayload, QaInstructions
+from .loop_documents_human import BRIEF_FINDING_CATEGORIES
 from .loop_documents_human_limits import SIGN_QUESTION_EXAMPLE
 from .loop_plans_validation import validate_plan
 from .runtime import ResponseSchema
@@ -70,7 +71,7 @@ FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 # looks (tests/unit/test_loop_generation.py pins the order).
 SCHEMAS: dict[str, type[BaseModel]] = {
     "analysis": AnalysisPayload,
-    "analysis_human": HumanBrief,
+    "analysis_human": HumanBriefWriter,
     "roadmap": PlanPayload,
     "roadmap_human": RoadmapBrief,
     "qa": QaInstructions,
@@ -366,25 +367,46 @@ def _document(context: Mapping[str, JsonValue], kind: str) -> Mapping[str, JsonV
     return document if isinstance(document, dict) else {}
 
 
+def findings_to_name(technical: JsonValue) -> list[str]:
+    """The ids of the technical analysis's findings an analysis brief's items must name together
+    (a material category or a decision), in the analysis's order; the check
+    (``loop_documents_human.brief_coverage_missing``) holds a brief to the same list."""
+    findings = technical.get("findings") if isinstance(technical, dict) else None
+    ids: list[str] = []
+    for finding in findings if isinstance(findings, list) else []:
+        if not isinstance(finding, dict):
+            continue
+        identifier, category = finding.get("id"), finding.get("category")
+        if isinstance(identifier, str) and category in BRIEF_FINDING_CATEGORIES:
+            ids.append(identifier)
+    return ids
+
+
 def human_view_message(captured: Mapping[str, JsonValue]) -> str:
     """The request of an ``analysis_human`` or ``roadmap_human`` run: the Info and the technical
     revision the brief explains, nothing else (no repository, no earlier view, no other
-    document)."""
+    document). An analysis brief's request ends with the findings its items must name, so the
+    model checks a list instead of working it out from the categories."""
     source = captured.get("context")
     context: Mapping[str, JsonValue] = source if isinstance(source, dict) else {}
     info = _document(context, "info")
     roadmap = captured.get("purpose") == "roadmap_human"
     technical = _document(context, "roadmap_ai" if roadmap else "analysis_ai")
-    return "\n".join(
-        [
-            f"Loop: {context.get('loop_name')} ({context.get('loop_key')})",
-            f"Board: {captured.get('board_name') or '(unknown board)'}",
-            "Info (what the person asked for), as Markdown:",
-            str(info.get("content") or "(no Info)"),
-            "Technical RoadMap (JSON):" if roadmap else "Technical analysis (JSON):",
-            json.dumps(technical.get("payload"), ensure_ascii=False),
-        ]
-    )
+    lines = [
+        f"Loop: {context.get('loop_name')} ({context.get('loop_key')})",
+        f"Board: {captured.get('board_name') or '(unknown board)'}",
+        "Info (what the person asked for), as Markdown:",
+        str(info.get("content") or "(no Info)"),
+        "Technical RoadMap (JSON):" if roadmap else "Technical analysis (JSON):",
+        json.dumps(technical.get("payload"), ensure_ascii=False),
+    ]
+    to_name = [] if roadmap else findings_to_name(technical.get("payload"))
+    if to_name:
+        lines.append(
+            "Findings your items must name, each in the finding_ids of at least one obstacle, "
+            "point or decision (one item may name several): " + ", ".join(to_name)
+        )
+    return "\n".join(lines)
 
 
 def context_size(context: Mapping[str, JsonValue]) -> int:

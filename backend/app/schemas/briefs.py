@@ -24,8 +24,8 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, get_args
 
-from pydantic import Field, StringConstraints
-from pydantic.config import JsonDict
+from pydantic import ConfigDict, Field, StringConstraints
+from pydantic.config import JsonDict, JsonValue
 
 from .common import Id, StrictModel
 
@@ -123,6 +123,37 @@ class HumanBrief(StrictModel):
     verdict_reason: Text300 = Field(description="One sentence why")
     summary: Text600 = Field(description="The highlights in two or three sentences")
     recommendation: Text800 = Field(description="One paragraph")
+
+
+# What a new analysis brief must hold beyond the parsed model's required fields: the sign's size
+# and verdict line. HumanBrief keeps them optional, so a brief stored before the sign still reads.
+WRITER_REQUIRED = ("verdict_line", "size")
+
+
+def _writer_schema(schema: JsonDict) -> None:
+    """The schema a writer is shown: ``WRITER_REQUIRED`` required, and the size an object, never
+    null. A model follows the schema it is given; a field it sees as optional it may leave out, and
+    the sign check then refuses the brief however often it is asked to repair it."""
+    required = schema.get("required")
+    names: list[JsonValue] = list(required) if isinstance(required, list) else []
+    names.extend(name for name in WRITER_REQUIRED if name not in names)
+    schema["required"] = names
+    properties = schema.get("properties")
+    size = properties.get("size") if isinstance(properties, dict) else None
+    options = size.get("anyOf") if isinstance(size, dict) else None
+    if isinstance(properties, dict) and isinstance(size, dict) and isinstance(options, list):
+        # The reference pydantic wrote, without the null beside it: its own ref is resolved later.
+        (ref,) = [option for option in options if option != {"type": "null"}]
+        if isinstance(ref, dict):
+            properties["size"] = {**ref, "description": size.get("description")}
+
+
+class HumanBriefWriter(HumanBrief):
+    """The analysis brief as a writer is shown it (the generation's schema, a worker's
+    ``write_brief``): the same fields, with the sign's size and verdict line required. A hand-in
+    is still read as ``HumanBrief`` and held to the sign by its check."""
+
+    model_config = ConfigDict(json_schema_extra=_writer_schema)
 
 
 class BriefPhaseStep(StrictModel):

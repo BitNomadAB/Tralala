@@ -17,9 +17,16 @@ import logging
 import pytest
 from pydantic import JsonValue
 
+from app.schemas.briefs import HumanBrief
 from app.services.loop_documents_human_limits import SIGN_QUESTION_EXAMPLE
 from app.services.loop_generation_ask import BRIEF_REPAIR
-from app.services.loop_generation_prompts import BRIEF_SIGN_RULE, PURPOSE_PROMPTS
+from app.services.loop_generation_prompts import (
+    BRIEF_SIGN_RULE,
+    PURPOSE_PROMPTS,
+    findings_to_name,
+    human_view_message,
+    response_schema_for,
+)
 from app.services.loop_generation_report import repairs_line
 from app.services.loop_generation_trace import counts_of, parse_steps
 from tests.unit.log_lines import events
@@ -124,3 +131,55 @@ def test_the_report_counts_the_brief_repairs_apart_only_when_there_were_some() -
     assert (counts["repairs"], counts["face_repairs"], counts["brief_repairs"]) == (2, 0, 1)
     assert repairs_line(counts) == "Repairs: 2 (face: 0, brief: 1)"
     assert repairs_line(counts_of(steps[1:])) == "Repairs: 1 (face: 0)"
+
+
+# --- what the writer is shown --------------------------------------------------------------------
+
+
+def test_the_schema_a_writer_is_shown_requires_the_size_and_the_verdict_line() -> None:
+    shown = response_schema_for("analysis_human")["schema"]
+    required = shown["required"]
+    assert isinstance(required, list)
+    assert "size" in required and "verdict_line" in required and "verdict" in required
+    properties = shown["properties"]
+    assert isinstance(properties, dict)
+    # An object, never null: a model fills in what the schema says it must.
+    assert properties["size"] == {"$ref": "#/$defs/BriefSize", "description": "How big the work is"}
+    definitions = shown["$defs"]
+    assert isinstance(definitions, dict) and "BriefSize" in definitions
+    # The stored model keeps them optional, so a brief written before the sign still reads.
+    stored = HumanBrief.model_json_schema()
+    assert "size" not in stored["required"] and "verdict_line" not in stored["required"]
+    assert HumanBrief.model_validate({**brief(), "size": None}).size is None
+
+
+def test_the_findings_to_name_are_the_material_and_decision_ones_in_order() -> None:
+    technical: JsonValue = {
+        "findings": [
+            {"id": "F-01", "category": "reuse"},
+            {"id": "F-02", "category": "decision"},
+            {"id": "F-03", "category": "risk"},
+            {"id": "F-04", "category": "assumption"},
+            {"id": "F-05", "category": "security"},
+            {"category": "blocker"},
+            "not a finding",
+        ]
+    }
+    assert findings_to_name(technical) == ["F-02", "F-03", "F-05"]
+    assert findings_to_name(None) == []
+    assert findings_to_name({"findings": "none"}) == []
+
+
+def test_only_an_analysis_brief_request_lists_the_findings_to_name() -> None:
+    payload: JsonValue = {"findings": [{"id": "F-09", "category": "decision"}]}
+
+    def request(purpose: str, kind: str) -> str:
+        documents: JsonValue = {kind: {"payload": payload}}
+        context: JsonValue = {"loop_name": "L", "loop_key": "L1", "documents": documents}
+        return human_view_message({"purpose": purpose, "board_name": "B", "context": context})
+
+    assert request("analysis_human", "analysis_ai").splitlines()[-1] == (
+        "Findings your items must name, each in the finding_ids of at least one obstacle, point "
+        "or decision (one item may name several): F-09"
+    )
+    assert "Findings your items must name" not in request("roadmap_human", "roadmap_ai")

@@ -136,6 +136,11 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **The analysis brief is asked for more plainly.** The schema the writer is shown, a board agent's
+  and a worker's `write_brief` alike, now requires the size and the verdict line, which the sign
+  always demanded, and the board agent's request ends with the findings its items must name. A model
+  that followed the schema left the size out and the brief failed with `brief_invalid`. Briefs stored
+  earlier are read as they are.
 - **New Loop asks for a name only.** The goal is written into the Loop's **Info**, which the
   analysis reads and which its plain-language brief explains, so the dialog no longer asks for it a
   first time. **Edit Loop** still edits a goal, and a worker's `create_loop` still sets one.

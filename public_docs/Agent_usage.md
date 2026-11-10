@@ -250,7 +250,7 @@ it.
 
 The person who decides reads a brief, not the technical analysis. You may write it yourself, for
 example from your organisation's own sources and decisions: `brief` on `write_analysis` (schema
-under `schemas.analysis_brief`) or `write_roadmap` (`schemas.roadmap_brief`, with the same short ids
+under `schemas.analysis_brief`, where `size` and `verdict_line` are required) or `write_roadmap` (`schemas.roadmap_brief`, with the same short ids
 as the plan), or `write_brief(kind, brief)` for the current technical revision. Put the ids in
 `finding_ids`, `phase_ids` and `ticket_ids`; together the items of an analysis brief name every risk,
 blocker, legal, security, question and decision finding, a RoadMap brief lists every Phase once and
