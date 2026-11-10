@@ -28,6 +28,17 @@ export function summarisable(board: Board): boolean {
 }
 
 /**
+ * The boards as the dashboard groups them: the ones in use, and the archived ones, which are
+ * read-only and sit under a heading of their own. Each group keeps the order it was given.
+ */
+export function groupBoards(boards: readonly Board[]): { inUse: Board[]; readOnly: Board[] } {
+  return {
+    inUse: boards.filter((board) => board.status !== "archived"),
+    readOnly: boards.filter((board) => board.status === "archived"),
+  };
+}
+
+/**
  * The Loop summaries of every board given, one request a board and all of them in parallel; a
  * board listed twice (a tile and the waiting list) is asked once. The map fills in as each answer
  * arrives, so a tile renders before the slowest board has answered.

@@ -8,31 +8,30 @@ test.describe("board lifecycle", () => {
     await boardWithLoop(page, boardName);
 
     await page.getByRole("link", { name: "Boards" }).click();
-    const tiles = page.getByRole("list", { name: "Boards" });
+    // Exact: Playwright matches a name by substring, and "Read only boards" contains "Boards".
+    const tiles = page.getByRole("list", { name: "Boards", exact: true });
+    const readOnly = page.getByRole("list", { name: "Read only boards" });
     const row = tiles.getByRole("listitem").filter({ hasText: boardName });
-    const actions = row.getByRole("button", { name: `More actions for ${boardName}` });
+    const archived = readOnly.getByRole("listitem").filter({ hasText: boardName });
+    const actions = page.getByRole("button", { name: `More actions for ${boardName}` });
     // An active board shows no chip; its lifecycle actions sit in the tile's quiet menu.
     await expect(row.getByText("Read only", { exact: true })).toHaveCount(0);
     await actions.click();
     await expect(page.getByRole("menuitem", { name: /^Delete board/ })).toBeDisabled();
 
+    // An archived board leaves the boards in use and sits under "Read only", with its chip.
     await page.getByRole("menuitem", { name: "Archive board" }).click();
-    await expect(row.getByText("Read only", { exact: true })).toBeVisible();
+    await expect(archived.getByText("Read only", { exact: true })).toBeVisible();
+    await expect(row).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /^Read only \d+$/ })).toBeVisible();
     await actions.click();
     await expect(page.getByRole("menuitem", { name: /^Delete board/ })).toBeEnabled();
-    await page.keyboard.press("Escape");
 
-    await page.getByLabel("Filter by status").selectOption("archived");
-    await expect(tiles.getByRole("listitem").filter({ hasText: boardName })).toBeVisible();
-
-    await actions.click();
+    // Restoring it brings it back among the boards in use, without the chip.
     await page.getByRole("menuitem", { name: "Restore board" }).click();
-    await expect(row).toHaveCount(0);
-
-    await page.getByLabel("Filter by status").selectOption("");
-    const restored = tiles.getByRole("listitem").filter({ hasText: boardName });
-    await expect(restored).toBeVisible();
-    await expect(restored.getByText("Read only", { exact: true })).toHaveCount(0);
+    await expect(archived).toHaveCount(0);
+    await expect(row).toBeVisible();
+    await expect(row.getByText("Read only", { exact: true })).toHaveCount(0);
   });
 
   test("exposes an export archive and an integrity report through the API", async ({ page }) => {

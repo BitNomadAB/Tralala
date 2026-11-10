@@ -103,6 +103,8 @@ describe("the dashboard", () => {
     expect(tile.getByText("The shared services")).toBeInTheDocument();
     expect(tile.getByText("2 Loops in progress · 1 waits for you")).toBeInTheDocument();
     expect(within(tiles).getByText("No Loops in progress")).toBeInTheDocument();
+    // No board is archived, so there is no read-only group.
+    expect(screen.queryByRole("heading", { name: /^Read only/ })).toBeNull();
 
     // One request for the boards (the tiles and the waiting list share it), one a board.
     expect(state.requests.filter((request) => request === "GET /boards")).toHaveLength(1);
@@ -162,9 +164,10 @@ describe("the dashboard", () => {
     expect(screen.queryByText("Waits for your decision on a discussion")).toBeNull();
   });
 
-  it("says nothing waits when no Loop needs a decision, and marks a read-only board", async () => {
+  it("lists an archived board under Read only, apart from the boards in use", async () => {
     const archived = board("board-3", "Old site", { status: "archived" });
-    renderDashboard([WEBSITE, archived], {
+    // The archived board is the most recent, yet it does not sit among the boards in use.
+    renderDashboard([archived, WEBSITE], {
       "board-2": [DELIVERY],
       // An archived board decides nothing, so its review is not listed.
       "board-3": [REVIEW],
@@ -172,12 +175,40 @@ describe("the dashboard", () => {
 
     expect(await screen.findByText("Nothing waits for you.")).toBeInTheDocument();
     const tiles = screen.getByRole("list", { name: "Boards" });
+    expect(within(tiles).getByRole("button", { name: "Website" })).toBeInTheDocument();
+    expect(within(tiles).queryByRole("button", { name: "Old site" })).toBeNull();
+    expect(within(tiles).queryByText("Read only")).toBeNull();
+
+    expect(screen.getByRole("heading", { name: "Read only 1" })).toBeInTheDocument();
+    const readOnly = screen.getByRole("list", { name: "Read only boards" });
     const old = within(
-      within(tiles).getByRole("button", { name: "Old site" }).closest("li") ?? tiles,
+      within(readOnly).getByRole("button", { name: "Old site" }).closest("li") ?? readOnly,
     );
     expect(old.getByText("Read only")).toBeInTheDocument();
     expect(await old.findByText("1 Loop in progress")).toBeInTheDocument();
-    expect(within(tiles).getAllByText("Read only")).toHaveLength(1);
+    // The status filter chooses among the boards in use; the archived ones have their own group.
+    const filter = screen.getByRole("combobox", { name: "Filter by status" });
+    expect(within(filter).queryByRole("option", { name: "Archived" })).toBeNull();
+  });
+
+  it("says no board is active when every board is archived", async () => {
+    const { user } = renderDashboard([board("board-3", "Old site", { status: "archived" })], {
+      "board-3": [],
+    });
+
+    expect(await screen.findByText("No active boards.")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Boards" })).toBeNull();
+    const readOnly = screen.getByRole("list", { name: "Read only boards" });
+    expect(within(readOnly).getByRole("button", { name: "Old site" })).toBeInTheDocument();
+
+    // The archived board keeps its way back and its way out.
+    await user.click(screen.getByRole("button", { name: "More actions for Old site" }));
+    const menu = screen.getByRole("menu", { name: "More actions for Old site" });
+    expect(within(menu).getByRole("menuitem", { name: "Restore board" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: /Delete board/ })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   it("renders the tiles before a slow board has answered, and names a board that failed", async () => {

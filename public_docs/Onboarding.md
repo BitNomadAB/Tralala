@@ -136,7 +136,9 @@ A **Board** is a project; a **Loop** is one feature or coherent change inside it
 (**New board**), then a Loop inside it (**New Loop** — a name and a broad goal are enough).
 
 The dashboard lists what **Waits for you** first: every Loop whose next step is your decision, with
-a button that opens it. A Loop page has three tabs: **Kanban** (its columns and Tickets), **Plan**
+a button that opens it. Under it come **Your boards**, and an archived board sits apart under
+**Read only**: it can be opened and read, restored or deleted from its menu, and nothing on it
+waits for you. A Loop page has three tabs: **Kanban** (its columns and Tickets), **Plan**
 (the Info, the analysis and the RoadMap, and the Phases with what holds them up) and **Notes**. The
 one button beside the Loop's name is your next decision; everything else is under **Loop actions**.
 

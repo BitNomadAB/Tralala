@@ -6,14 +6,15 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/input";
 import { Menu } from "@/components/ui/menu";
-import { SectionHeader } from "@/components/ui/section";
+import { Section, SectionHeader } from "@/components/ui/section";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { useBoards, useDiscussionInbox } from "@/lib/queries";
+import type { Board } from "@/lib/types";
 import { useDashboardTools } from "@/webmcp/useWebMcp";
-import { useBoardSummaries, waitingRows } from "./boardSummaries";
-import { BoardTile } from "./BoardTile";
+import { BoardGrid } from "./BoardGrid";
+import { groupBoards, useBoardSummaries, waitingRows } from "./boardSummaries";
 import { DeleteBoardDialog } from "./DeleteBoardDialog";
 import { NewBoardDialog } from "./NewBoardDialog";
 import { useBoardLifecycle } from "./useBoardLifecycle";
@@ -43,6 +44,7 @@ export function DashboardPage() {
   // query as the tiles', so the dashboard asks for its boards once.
   const everyBoard = useBoards(ALL_BOARDS);
   const boards = data?.items ?? [];
+  const { inUse, readOnly } = groupBoards(boards);
   const allBoards = everyBoard.data?.items ?? [];
   const summaries = useBoardSummaries([...allBoards, ...boards]);
   const rows = waitingRows(allBoards, summaries);
@@ -52,6 +54,15 @@ export function DashboardPage() {
     const entry = summaries.get(board.id);
     return board.status === "active" && entry ? [entry] : [];
   });
+
+  const tiles = {
+    summaries,
+    onOpen: (board: Board) => {
+      void navigate(`/boards/${board.id}`);
+    },
+    onLifecycle: lifecycle.run,
+    onDelete: lifecycle.askDelete,
+  };
 
   const importMutation = useMutation({
     mutationFn: (file: File) => api.importBoard(file),
@@ -133,7 +144,6 @@ export function DashboardPage() {
           >
             <option value="">All statuses</option>
             <option value="active">Active</option>
-            <option value="archived">Archived</option>
             <option value="error">Needs attention</option>
             <option value="migration_failed">Migration failed</option>
           </Select>
@@ -161,23 +171,22 @@ export function DashboardPage() {
             message={query || status ? "No board matches." : "No boards yet."}
             detail={query || status ? undefined : "A board holds the Loops of one project."}
           />
+        ) : inUse.length === 0 ? (
+          // Every board that matches is archived: they are listed under "Read only" below.
+          <EmptyState
+            className="card-surface px-4 py-3.5"
+            message={query ? "No active board matches." : "No active boards."}
+          />
         ) : (
-          <ul aria-label="Boards" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {boards.map((board) => (
-              <BoardTile
-                key={board.id}
-                board={board}
-                summaries={summaries.get(board.id)}
-                onOpen={() => {
-                  void navigate(`/boards/${board.id}`);
-                }}
-                onLifecycle={(type) => lifecycle.run(type, board)}
-                onDelete={() => lifecycle.askDelete(board)}
-              />
-            ))}
-          </ul>
+          <BoardGrid label="Boards" boards={inUse} {...tiles} />
         )}
       </section>
+
+      {readOnly.length > 0 ? (
+        <Section title="Read only" count={readOnly.length} level={2}>
+          <BoardGrid label="Read only boards" boards={readOnly} {...tiles} />
+        </Section>
+      ) : null}
 
       <NewBoardDialog open={creating} onOpenChange={setCreating} />
       <DeleteBoardDialog {...lifecycle.deleteDialog} />
