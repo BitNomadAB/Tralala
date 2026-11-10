@@ -3,6 +3,12 @@
 The plan revision is authoritative; ``loop_phases``, ``loop_plan_items`` and ``loop_dependencies``
 are its validated projections, keyed by the identities the plan carries across revisions.
 
+Every draft projects its rows when it is registered, and they stay: a key is never used twice, and
+a draft that is never published keeps its rows too. What is read as the Loop's plan (its Phases,
+its planned Tickets and their counts) is therefore the active plan's: the rows it registered, and
+the ones it names that a later draft took over (a draft that shares an identity takes its row). A
+Loop without an active plan has none.
+
 ``loop_id=None`` means every Loop of the board: the overview reads all Loops in one statement
 instead of one per Loop.
 """
@@ -50,11 +56,12 @@ class LoopPlanRepository(Protocol):
         ...
 
     def phase_counts(self, loop_id: str | None) -> dict[str, int]:
-        """Phases per Loop id; a Loop without one is absent."""
+        """The active plan's Phases per Loop id; a Loop without one is absent."""
         ...
 
     def ticket_totals(self, loop_id: str | None) -> dict[str, PlanTotals]:
-        """Planned items per Loop id, each joined to its cards; a Loop without one is absent."""
+        """The active plan's items per Loop id, each joined to its cards; a Loop without one is
+        absent."""
         ...
 
     def next_revision(self, loop_id: str) -> int:
@@ -80,8 +87,8 @@ class LoopPhaseRepository(Protocol):
         """The Loop's Phase; a Phase of another Loop is None."""
         ...
 
-    def for_loop(self, loop_id: str) -> list[LoopPhasesRow]:
-        """Every Phase a plan of the Loop registered, by number."""
+    def of_active_plan(self, loop_id: str) -> list[LoopPhasesRow]:
+        """The Phases of the Loop's active plan, by number; none without one."""
         ...
 
     def add(self, row: LoopPhasesRow) -> None: ...
@@ -108,9 +115,10 @@ class LoopPlanItemRepository(Protocol):
         and creation time stay."""
         ...
 
-    def with_cards(self, loop_id: str) -> list[PlannedItem]:
-        """The Loop's items by Phase number, Ticket sequence and key, each joined to the cards
-        published from it: one entry per card, and one without a card when there is none."""
+    def active_with_cards(self, loop_id: str) -> list[PlannedItem]:
+        """The items of the Loop's active plan by Phase number, Ticket sequence and key, each
+        joined to the cards published from it: one entry per card, and one without a card when
+        there is none."""
         ...
 
     def approved_faces(self, limit: int) -> list[LoopPlanItemsRow]:

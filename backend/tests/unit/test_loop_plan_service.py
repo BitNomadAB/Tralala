@@ -34,6 +34,7 @@ from app.services.loop_plans import (
     plan_hash,
     validate_plan,
 )
+from app.services.loops_views import board_loop_facts, loop_facts
 from app.services.plan_views import PlanViews, Readiness
 from app.services.ticket_face import face_view
 from app.services.ticket_summaries import summary_basis
@@ -1161,17 +1162,45 @@ def test_downstream_phases_are_every_phase_whose_entry_waits_on_the_ticket() -> 
     assert downstream == {T1: [2, 3], T4: [], T2: [], T3: []}
 
 
-def test_the_views_read_the_newest_drafts_projection_while_the_old_plan_is_active() -> None:
+def test_the_views_show_the_active_plan_with_what_a_later_draft_took_over() -> None:
     w = published()
     state = w.state
     register(w, payload(phase(P1, 1, ticket(T1, "Renamed")), phase(P2, 2, ticket(T5))))
     view = w.plans.plan_view(w.repos, state.loops[LOOP])
     assert view["revision_number"] == 1
-    # Every Phase any draft registered is shown; the edges are the newest draft's (none).
+    # The active plan's Phases, with the text the draft gave the rows it took over; the edges are
+    # the newest draft's (none).
     assert [entry["id"] for entry in view["phases"]] == [P1, P2, P3]
     assert all(entry["prerequisite_phase_ids"] == [] for entry in view["phases"])
     titles = [entry["title"] for entry in view["phases"][0]["tickets"]]
     assert titles == ["Gate", "Renamed", "Wording"]
+    # A Ticket only the draft has is not the active plan's.
+    assert [entry["id"] for entry in view["phases"][1]["tickets"]] == [T3]
+
+
+def test_a_draft_written_from_scratch_stays_out_of_the_plan_until_it_is_published() -> None:
+    w = published()
+    state = w.state
+    p4, p5, t6, t7 = uid(4), uid(5), uid(16), uid(17)
+    # A RoadMap written again with new identities: its rows are projected, two Phases numbered 1
+    # and 2 beside the active plan's, as on a live board where the views counted both.
+    draft = register(w, payload(phase(p4, 1, ticket(t6)), phase(p5, 2, ticket(t7))))
+    assert state.phases[p4].plan_id == draft
+    view = w.plans.plan_view(w.repos, state.loops[LOOP])
+    assert [entry["id"] for entry in view["phases"]] == [P1, P2, P3]
+    items = [item["id"] for item in readiness_of(w)["items"]]
+    assert t6 not in items and t7 not in items
+    facts = loop_facts(w.repos, LOOP).plan
+    assert facts is not None and (facts["phase_count"], facts["ticket_total"]) == (3, 4)
+    # Published, it is the plan: the first plan's rows stay stored and are no longer read as it.
+    publish(w, draft, approval="approval-2")
+    view = w.plans.plan_view(w.repos, state.loops[LOOP])
+    assert [entry["id"] for entry in view["phases"]] == [p4, p5]
+    assert [item["id"] for item in readiness_of(w)["items"]] == [t6, t7]
+    board_facts = board_loop_facts(w.repos)[LOOP].plan
+    assert board_facts is not None
+    assert (board_facts["phase_count"], board_facts["ticket_total"]) == (2, 2)
+    assert state.phases[P1].plan_id != draft and P1 in state.phases
 
 
 def test_a_reference_to_a_row_that_is_gone_still_blocks() -> None:

@@ -32,24 +32,43 @@ _ALL_ACTIVE = text(
     f"SELECT {_PLANS} FROM loop_plans"  # noqa: S608 - from LOOP_PLANS_COLUMNS
     " WHERE status = 'active' AND loop_id IN (SELECT id FROM loops)"
 )
+# A row is the active plan's when that plan registered it or names it (a later draft takes over an
+# identity it shares); the rows of every other plan, a draft never published included, stay out.
 _PHASE_COUNTS = text(
-    "SELECT loop_id, COUNT(*) AS total FROM loop_phases WHERE loop_id = :id GROUP BY loop_id"
+    "SELECT ph.loop_id AS loop_id, COUNT(*) AS total FROM loop_phases ph"
+    " JOIN loop_plans p ON p.loop_id = ph.loop_id AND p.status = 'active'"
+    " WHERE ph.loop_id = :id AND (ph.plan_id = p.id OR ph.id IN"
+    " (SELECT json_extract(j.value, '$.id') FROM json_each(p.payload_json, '$.phases') AS j))"
+    " GROUP BY ph.loop_id"
 )
 _ALL_PHASE_COUNTS = text(
-    "SELECT loop_id, COUNT(*) AS total FROM loop_phases"
-    " WHERE loop_id IN (SELECT id FROM loops) GROUP BY loop_id"
+    "SELECT ph.loop_id AS loop_id, COUNT(*) AS total FROM loop_phases ph"
+    " JOIN loop_plans p ON p.loop_id = ph.loop_id AND p.status = 'active'"
+    " WHERE ph.loop_id IN (SELECT id FROM loops) AND (ph.plan_id = p.id OR ph.id IN"
+    " (SELECT json_extract(j.value, '$.id') FROM json_each(p.payload_json, '$.phases') AS j))"
+    " GROUP BY ph.loop_id"
 )
 _TICKET_TOTALS = text(
     "SELECT i.loop_id AS loop_id, COUNT(*) AS total,"
     " COALESCE(SUM(CASE WHEN c.completed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS completed"
-    " FROM loop_plan_items i LEFT JOIN cards c ON c.plan_item_id = i.id"
-    " WHERE i.loop_id = :id GROUP BY i.loop_id"
+    " FROM loop_plan_items i"
+    " JOIN loop_plans p ON p.loop_id = i.loop_id AND p.status = 'active'"
+    " LEFT JOIN cards c ON c.plan_item_id = i.id"
+    " WHERE i.loop_id = :id AND (i.plan_id = p.id OR i.id IN"
+    " (SELECT json_extract(t.value, '$.id') FROM json_each(p.payload_json, '$.phases') AS j,"
+    " json_each(j.value, '$.tickets') AS t))"
+    " GROUP BY i.loop_id"
 )
 _ALL_TICKET_TOTALS = text(
     "SELECT i.loop_id AS loop_id, COUNT(*) AS total,"
     " COALESCE(SUM(CASE WHEN c.completed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS completed"
-    " FROM loop_plan_items i LEFT JOIN cards c ON c.plan_item_id = i.id"
-    " WHERE i.loop_id IN (SELECT id FROM loops) GROUP BY i.loop_id"
+    " FROM loop_plan_items i"
+    " JOIN loop_plans p ON p.loop_id = i.loop_id AND p.status = 'active'"
+    " LEFT JOIN cards c ON c.plan_item_id = i.id"
+    " WHERE i.loop_id IN (SELECT id FROM loops) AND (i.plan_id = p.id OR i.id IN"
+    " (SELECT json_extract(t.value, '$.id') FROM json_each(p.payload_json, '$.phases') AS j,"
+    " json_each(j.value, '$.tickets') AS t))"
+    " GROUP BY i.loop_id"
 )
 _NEXT_REVISION = text(
     "SELECT COALESCE(MAX(revision_number), 0) + 1 AS next FROM loop_plans WHERE loop_id = :id"
@@ -78,7 +97,13 @@ _ACTIVATE = text(
 
 _PHASE = f"SELECT {sql.column_list(LOOP_PHASES_COLUMNS)} FROM loop_phases"  # noqa: S608 - from LOOP_PHASES_COLUMNS
 _GET_PHASE = text(f"{_PHASE} WHERE loop_id = :loop_id AND id = :id")
-_PHASES_FOR_LOOP = text(f"{_PHASE} WHERE loop_id = :id ORDER BY number")
+_ACTIVE_PHASES = text(
+    f"SELECT {sql.column_list(LOOP_PHASES_COLUMNS, 'ph')} FROM loop_phases ph"  # noqa: S608 - from LOOP_PHASES_COLUMNS
+    " JOIN loop_plans p ON p.loop_id = ph.loop_id AND p.status = 'active'"
+    " WHERE ph.loop_id = :id AND (ph.plan_id = p.id OR ph.id IN"
+    " (SELECT json_extract(j.value, '$.id') FROM json_each(p.payload_json, '$.phases') AS j))"
+    " ORDER BY ph.number"
+)
 _ADD_PHASE = text(
     "INSERT INTO loop_phases (id, loop_id, plan_id, number, name, objective,"
     " entry_conditions_json, exit_conditions_json, is_qa_phase, created_at)"
@@ -120,12 +145,16 @@ _UPDATE_ITEM = text(
     " summary = :summary, workplace = :workplace, waiting_for = :waiting_for,"
     " waiting_reason = :waiting_reason, face = :face WHERE id = :id"
 )
-_ITEMS_WITH_CARDS = text(
+_ACTIVE_ITEMS_WITH_CARDS = text(
     f"SELECT {sql.column_list(LOOP_PLAN_ITEMS_COLUMNS, 'i')},"  # noqa: S608 - from LOOP_PLAN_ITEMS_COLUMNS
     " c.id AS card_id, c.completed_at AS card_completed_at,"
     " c.waiting_for AS card_waiting_for, c.workplace AS card_workplace FROM loop_plan_items i"
+    " JOIN loop_plans p ON p.loop_id = i.loop_id AND p.status = 'active'"
     " LEFT JOIN cards c ON c.plan_item_id = i.id"
-    " WHERE i.loop_id = :id ORDER BY i.phase_number, i.ticket_sequence, i.key"
+    " WHERE i.loop_id = :id AND (i.plan_id = p.id OR i.id IN"
+    " (SELECT json_extract(t.value, '$.id') FROM json_each(p.payload_json, '$.phases') AS j,"
+    " json_each(j.value, '$.tickets') AS t))"
+    " ORDER BY i.phase_number, i.ticket_sequence, i.key"
 )
 # An item's text is that of the plan it names; a later draft takes the item over, so an item of
 # an approved plan still holds the text that was approved.
@@ -254,8 +283,8 @@ class SqlLoopPhaseRepository:
         row = self._connection.execute(_GET_PHASE, parameters).mappings().first()
         return None if row is None else LoopPhasesRow.from_mapping(row)
 
-    def for_loop(self, loop_id: str) -> list[LoopPhasesRow]:
-        result = self._connection.execute(_PHASES_FOR_LOOP, {"id": loop_id})
+    def of_active_plan(self, loop_id: str) -> list[LoopPhasesRow]:
+        result = self._connection.execute(_ACTIVE_PHASES, {"id": loop_id})
         return [LoopPhasesRow.from_mapping(row) for row in result.mappings()]
 
     def add(self, row: LoopPhasesRow) -> None:
@@ -313,8 +342,8 @@ class SqlLoopPlanItemRepository:
     def update(self, row: LoopPlanItemsRow) -> None:
         self._connection.execute(_UPDATE_ITEM, _item_values(row))
 
-    def with_cards(self, loop_id: str) -> list[PlannedItem]:
-        result = self._connection.execute(_ITEMS_WITH_CARDS, {"id": loop_id})
+    def active_with_cards(self, loop_id: str) -> list[PlannedItem]:
+        result = self._connection.execute(_ACTIVE_ITEMS_WITH_CARDS, {"id": loop_id})
         return [
             PlannedItem(
                 item=LoopPlanItemsRow.from_mapping(row),

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from collections.abc import Callable, Collection, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+
+from pydantic import JsonValue
 
 from app.core.errors import BoardUnreadable, Conflict, NotFound, ServiceUnavailable
 from app.db.generated.board import (
@@ -793,6 +796,66 @@ def _loops_of(state: BoardState, loop_id: str | None) -> set[str]:
     return set(state.loops) if loop_id is None else {loop_id}
 
 
+@dataclass(frozen=True, slots=True)
+class _ActivePlan:
+    """A Loop's active plan: its id and the Phase and Ticket ids its payload names."""
+
+    id: str
+    phase_ids: frozenset[str]
+    ticket_ids: frozenset[str]
+
+    def holds(self, plan_id: str, row_id: str, named: frozenset[str]) -> bool:
+        """The SQL's ``plan_id = p.id OR id IN (... json_each(p.payload_json ...))``."""
+        return plan_id == self.id or row_id in named
+
+
+def _ids(values: JsonValue) -> list[dict[str, JsonValue]]:
+    """The objects of a JSON list; anything else holds none."""
+    if not isinstance(values, list):
+        return []
+    return [value for value in values if isinstance(value, dict)]
+
+
+def _active_plan(state: BoardState, loop_id: str) -> _ActivePlan | None:
+    """The Loop's active plan, or None; its payload is read as the SQL's json_each reads it."""
+    plan = next(
+        (row for row in state.plans.values() if row.loop_id == loop_id and row.status == "active"),
+        None,
+    )
+    if plan is None:
+        return None
+    payload: JsonValue = json.loads(plan.payload_json)
+    phases = _ids(payload.get("phases") if isinstance(payload, dict) else None)
+    tickets = [ticket for phase in phases for ticket in _ids(phase.get("tickets"))]
+    return _ActivePlan(
+        id=plan.id,
+        phase_ids=frozenset(str(phase.get("id")) for phase in phases),
+        ticket_ids=frozenset(str(ticket.get("id")) for ticket in tickets),
+    )
+
+
+def _active_phases(state: BoardState, loop_id: str) -> list[LoopPhasesRow]:
+    active = _active_plan(state, loop_id)
+    if active is None:
+        return []
+    return [
+        phase
+        for phase in state.phases.values()
+        if phase.loop_id == loop_id and active.holds(phase.plan_id, phase.id, active.phase_ids)
+    ]
+
+
+def _active_items(state: BoardState, loop_id: str) -> list[LoopPlanItemsRow]:
+    active = _active_plan(state, loop_id)
+    if active is None:
+        return []
+    return [
+        item
+        for item in state.plan_items.values()
+        if item.loop_id == loop_id and active.holds(item.plan_id, item.id, active.ticket_ids)
+    ]
+
+
 class FakeLoopDocumentRepository:
     def __init__(self, state: BoardState) -> None:
         self._state = state
@@ -943,15 +1006,13 @@ class FakeLoopPlanRepository:
 
     def phase_counts(self, loop_id: str | None) -> dict[str, int]:
         loops = _loops_of(self._state, loop_id)
-        phases = self._state.phases.values()
-        return dict(Counter(phase.loop_id for phase in phases if phase.loop_id in loops))
+        phases = [phase for loop in loops for phase in _active_phases(self._state, loop)]
+        return dict(Counter(phase.loop_id for phase in phases))
 
     def ticket_totals(self, loop_id: str | None) -> dict[str, PlanTotals]:
         loops = _loops_of(self._state, loop_id)
         totals: dict[str, PlanTotals] = {}
-        for item in self._state.plan_items.values():
-            if item.loop_id not in loops:
-                continue
+        for item in [item for loop in loops for item in _active_items(self._state, loop)]:
             # LEFT JOIN cards: one row per card behind the item, or one row without a card.
             cards = [card for card in self._state.cards.values() if card.plan_item_id == item.id]
             done = sum(1 for card in cards if card.completed_at is not None)
@@ -1014,10 +1075,9 @@ class FakeLoopPhaseRepository:
         phase = self._state.phases.get(phase_id)
         return phase if phase is not None and phase.loop_id == loop_id else None
 
-    def for_loop(self, loop_id: str) -> list[LoopPhasesRow]:
-        # ORDER BY number over the (loop_id, number) index: ties keep insertion (rowid) order.
-        found = [phase for phase in self._state.phases.values() if phase.loop_id == loop_id]
-        return sorted(found, key=lambda phase: phase.number)
+    def of_active_plan(self, loop_id: str) -> list[LoopPhasesRow]:
+        # ORDER BY number: ties keep insertion (rowid) order.
+        return sorted(_active_phases(self._state, loop_id), key=lambda phase: phase.number)
 
     def _check_number(self, row: LoopPhasesRow) -> None:
         for phase in self._state.phases.values():
@@ -1126,9 +1186,9 @@ class FakeLoopPlanItemRepository:
         found.sort(key=lambda pair: (pair[0].created_at, pair[0].id), reverse=True)
         return [item for _, item in found[:limit]]
 
-    def with_cards(self, loop_id: str) -> list[PlannedItem]:
+    def active_with_cards(self, loop_id: str) -> list[PlannedItem]:
         items = sorted(
-            (item for item in self._state.plan_items.values() if item.loop_id == loop_id),
+            _active_items(self._state, loop_id),
             key=lambda item: (item.phase_number, item.ticket_sequence, item.key),
         )
         found: list[PlannedItem] = []

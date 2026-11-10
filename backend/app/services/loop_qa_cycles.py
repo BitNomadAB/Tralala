@@ -68,7 +68,7 @@ def _qa_phase(
     new_id: Callable[[], str],
     timestamp: Callable[[], str],
 ) -> LoopPhasesRow:
-    phases = repos.phases.for_loop(loop_id)
+    phases = repos.phases.of_active_plan(loop_id)
     existing = next((phase for phase in phases if phase.is_qa_phase == 1), None)
     if existing is not None:
         return existing

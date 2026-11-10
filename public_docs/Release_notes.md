@@ -136,6 +136,11 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **A Loop's plan is the one in force.** A RoadMap written again from scratch left the Phases and
+  Tickets of the earlier draft in the Loop, so the dashboard's **Waits for you**, the Loop's Phases and
+  a worker's `loop_summaries` and `read_loop` counted both (39 Tickets where the Kanban held 20, two
+  Phases numbered 1). They now read the active plan alone. The earlier rows stay stored and a Ticket
+  key is never used twice, so the new plan's keys go on from the old ones.
 - **Reset RoadMap is a button again.** It sits beside the RoadMap's review as **Reset analysis**
   does beside the analysis's, instead of in a menu next to the approve button that nobody found.
 - **The RoadMap for people is its goal and the number of Tickets.** The brief above the Phases no

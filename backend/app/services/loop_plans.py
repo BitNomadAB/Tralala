@@ -559,8 +559,8 @@ def _planned_card(
 
 def _phases(repos: BoardRepositories, loop_id: str) -> list[PhaseView]:
     return phase_views(
-        repos.phases.for_loop(loop_id),
-        items_by_phase(repos.plan_items.with_cards(loop_id)),
+        repos.phases.of_active_plan(loop_id),
+        items_by_phase(repos.plan_items.active_with_cards(loop_id)),
         dependencies(repos.dependencies.for_loop(loop_id)),
     )
 
