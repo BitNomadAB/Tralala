@@ -52,7 +52,7 @@ in the Ticket, not on the card.
 | `analysis_ai` | Tralala's analysis agent (`run_analysis`), or your worker through the same candidate route (`write_analysis`, `POST …/candidates`) | Structured technical findings with stable ids, evidence sources, assumptions and options. |
 | `analysis` | A connected worker, the Loop's analysis agent, or rendered by the server | A decision brief for the person who decides: can it be done, what stands in the way, for and against, what to decide, a recommendation. Written from `analysis_ai`; no ids, paths or code. |
 | `roadmap_ai` | Tralala's RoadMap agent (`run_roadmap`), or your worker through the same candidate route (`write_roadmap`) | Validated structured plan: numbered Phases, planned Tickets, dependencies and human gates. |
-| `roadmap` | A connected worker, the Loop's RoadMap agent, or rendered by the server | A brief of the plan: what happens in each Phase and when it is done, your own part, what could block it. Written from `roadmap_ai`. |
+| `roadmap` | A connected worker, the Loop's RoadMap agent, or rendered by the server | The plan's goal in one line, what is true when it is done; the review shows the Phases and Tickets under it and counts them. Written from `roadmap_ai`. |
 
 Every revision is immutable. The current revision and the approved revision are separate pointers,
 and an approval is a recorded human decision bound to exact revision ids and content hashes. A
@@ -77,17 +77,18 @@ person who decides. The analysis brief is a sign, read in the order a decision i
 
 Every item holds at most 140 characters. The brief also keeps a sentence why (`verdict_reason`),
 the highlights and a recommendation, which the sign does not show. A question reads like "Do we
-keep the addresses of people who never confirm, and if so, for how long?". The RoadMap brief says
-what happens in each Phase and when it is done, the reader's own part (every Ticket a person must
-do) and what could block the plan. The brief is the revision's payload, and its Markdown rendering
-is the revision's text.
+keep the addresses of people who never confirm, and if so, for how long?". The RoadMap brief is
+its goal alone (`goal`): what is true when the plan is done, in one line of at most 20 words. The
+review shows the Phases and their Tickets under it and the number of Tickets beside it, so the brief
+repeats none of them; a RoadMap brief written before the goal shows only its summary. The brief is
+the revision's payload, and its Markdown rendering is the revision's text.
 
-Each item of a brief names the findings it rests on (`finding_ids`), or the Phases and Tickets
-(`phase_ids`, `ticket_ids`); those ids carry the traceability and are never shown in the text.
-Every brief is checked before it is stored: together its items name every finding of category risk,
-blocker, legal, security, question or decision (a RoadMap brief: every Phase exactly once, every
-Ticket a person must do), it names no id the technical revision lacks, and its text holds no
-finding id (`F01`, `[F01]`), other id, file path or code. A new analysis brief is held to the sign
+Each item of an analysis brief names the findings it rests on (`finding_ids`); those ids carry the
+traceability and are never shown in the text. Every brief is checked before it is stored: together
+the items of an analysis brief name every finding of category risk, blocker, legal, security,
+question or decision and no id the technical analysis lacks, a RoadMap brief's goal is one line of
+at most 20 words, and the text of either holds no finding id (`F01`, `[F01]`), other id, file path
+or code. A new analysis brief is held to the sign
 first: one that breaks a limit is refused with `422 brief_invalid`, one message per field and rule
 ("Brief, obstacles: 4 items, at most 3."), and the content problems of the same brief follow them,
 so one round fixes everything. A brief that keeps the sign but breaks coverage, an id or the
@@ -119,8 +120,8 @@ analysis as JSON. The brief ends with **Approve analysis** and the line naming w
 sits under it with an optional feedback field.
 
 **RoadMap** is reviewed the way a Ticket is read, so its switch is **For you | Raw text** instead
-of For people and For AI. For you is **In short** (the brief; the plan's own summary when nobody
-wrote one) and one section per Phase (*Phase 2 · Sign-in*, its Ticket count and its objective) with
+of For people and For AI. For you is **In short** (the brief's goal and the number of Tickets; the
+plan's own summary when nobody wrote a brief) and one section per Phase (*Phase 2 · Sign-in*, its Ticket count and its objective) with
 a row per Ticket: the title, its summary, the key, *Needs a person*, where the work is done and
 what it waits for. A row opens to the Ticket's face (the steps, **Why it is needed**, **If we skip
 it**, **Pro and con**), read only; a Ticket written without a face shows its objective, with its
@@ -129,10 +130,9 @@ decision is **Approve RoadMap · 3 Tickets**, with the count of what it publishe
 "Revision 2 of 7 Nov 2026. Approving publishes its 3 Tickets to the Kanban." under it, beside
 **Request changes**.
 
-A RoadMap brief's items each have a *Where does this come from?* disclosure listing the Phases and
-Tickets by title from the technical revision, and a document carries a label: *Written by* its
-author, or *Rendered from the structure*. A revision written before briefs existed still shows as
-Markdown, labelled *Earlier format*. **Rewrite for people** starts the board agent's run again for
+A document carries a label: *Written by* its author, or *Rendered from the structure*. A revision
+written before briefs existed still shows as Markdown, labelled *Earlier format*. **Rewrite for
+people** starts the board agent's run again for
 the current technical revision; when it cannot, it says why (*Approved: request changes or reset to
 rewrite*, *Writing for people...* while a run is on). While one runs, the tab says so and approval
 waits for it.

@@ -44,14 +44,14 @@ export const ANALYSIS_AI = {
 const P1 = "11111111-1111-4111-8111-111111111111";
 const P2 = "11111111-1111-4111-8111-111111111112";
 const T2 = "22222222-2222-4222-8222-222222222222";
-export const ROADMAP_BRIEF: RoadmapBrief = {
+export const ROADMAP_GOAL = "People confirm their address by e-mail.";
+export const ROADMAP_BRIEF: RoadmapBrief = { schema_version: 2, goal: ROADMAP_GOAL };
+/** A RoadMap brief written before the goal (schema version 1): it is shown by its summary. */
+export const EARLIER_ROADMAP_BRIEF = {
   schema_version: 1,
-  order: [
-    { phase_id: P2, what_happens: "The policy is signed.", done_when: "It is signed." },
-    { phase_id: P1, what_happens: "The e-mail goes out.", done_when: "It arrives." },
-  ],
+  order: [{ phase_id: P1, what_happens: "The e-mail goes out.", done_when: "It arrives." }],
   your_part: [{ text: "Sign the retention policy.", phase_ids: [P2], ticket_ids: [T2] }],
-  could_block: [{ text: "The mail provider may be late.", phase_ids: [P1] }],
+  could_block: [],
   summary: "Two Phases: the e-mail, then the policy.",
 };
 const ROADMAP_AI = {

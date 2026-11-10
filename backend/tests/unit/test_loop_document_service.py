@@ -852,16 +852,7 @@ BRIEF = HumanBrief.model_validate(
         "recommendation": "Go ahead.",
     }
 )
-ROADMAP_BRIEF = RoadmapBrief.model_validate(
-    {
-        "order": [
-            {"phase_id": P1, "what_happens": "The data is prepared.", "done_when": "Ready."},
-            {"phase_id": P2, "what_happens": "People confirm.", "done_when": "Signed off."},
-        ],
-        "your_part": [{"text": "Sign the legal text.", "phase_ids": [P2], "ticket_ids": [T2]}],
-        "summary": "Two Phases, the second waits for the first.",
-    }
-)
+ROADMAP_BRIEF = RoadmapBrief.model_validate({"goal": "People confirm their address by e-mail."})
 
 
 def brief_for(kind: str, **fields: object) -> BriefWrite:
@@ -950,7 +941,7 @@ def test_a_candidates_brief_that_breaks_a_rule_stores_nothing() -> None:
         )
 
 
-def test_a_roadmap_candidate_with_its_brief_covers_every_phase_and_the_persons_part() -> None:
+def test_a_roadmap_candidate_with_its_brief_stores_the_goal_and_the_number_of_tickets() -> None:
     w = world()
     approved_analysis(w)
     submission = CandidateSubmission(kind="roadmap", plan=PLAN, roadmap_brief=ROADMAP_BRIEF)
@@ -959,18 +950,20 @@ def test_a_roadmap_candidate_with_its_brief_covers_every_phase_and_the_persons_p
     assert human is not None
     (plan,) = w.state.plans.values()
     assert json.loads(human.provenance_json) == {"plan_id": plan.id, "written": True}
-    assert "### Phase 2 — Sign-in" in human.content
+    assert human.content.startswith("# RoadMap\n\nPeople confirm their address by e-mail.\n\n")
+    assert human.content.endswith(" Tickets\n") and "Phase" not in human.content
     assert plan.roadmap_revision_id == human.id
-    partial = ROADMAP_BRIEF.model_copy(update={"your_part": []})
+    long = ROADMAP_BRIEF.model_copy(update={"goal": " ".join(["word"] * 21)})
     with pytest.raises(ValidationFailure) as refused:
         w.service.submit_candidate(
             AGENT,
             BOARD_ID,
             LOOP,
-            CandidateSubmission(kind="roadmap", plan=PLAN, roadmap_brief=partial),
+            CandidateSubmission(kind="roadmap", plan=PLAN, roadmap_brief=long),
         )
+    assert refused.value.code == "brief_rejected"
     assert refused.value.details is not None
-    assert refused.value.details["missing_ids"] == [T2]
+    assert refused.value.details["fields"] == ["goal"]
 
 
 def test_write_brief_rewrites_the_brief_of_the_current_technical_revision() -> None:

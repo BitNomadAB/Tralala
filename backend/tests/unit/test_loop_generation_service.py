@@ -1747,10 +1747,7 @@ def test_a_view_already_being_written_is_not_started_twice() -> None:
     assert list(w.state.generation_runs) == ["busy"]
 
 
-ROADMAP_BRIEF: dict[str, JsonValue] = {
-    "order": [{"phase_id": PHASE, "what_happens": "The data is prepared.", "done_when": "Ready."}],
-    "summary": "One Phase prepares the data.",
-}
+ROADMAP_BRIEF: dict[str, JsonValue] = {"goal": "The data is ready for people to use."}
 
 
 def test_a_generated_roadmap_gets_its_brief_from_the_loops_roadmap_agent() -> None:
@@ -1774,15 +1771,13 @@ def test_a_generated_roadmap_gets_its_brief_from_the_loops_roadmap_agent() -> No
     }
     assert "Technical RoadMap (JSON):" in w.provider.calls[1].messages[0]["content"]
     human = human_view(w, "roadmap")
-    assert human.content.startswith("# RoadMap\n\nOne Phase prepares the data.")
-    assert "### Phase 1 — Database" in human.content
+    assert human.content == "# RoadMap\n\nThe data is ready for people to use.\n\n1 Ticket\n"
     assert json.loads(human.provenance_json)["written"] is True
     assert human.source_roadmap_ai_revision_id == human_view(w, "roadmap_ai").id
 
 
-def test_a_roadmap_brief_that_leaves_a_phase_out_is_rejected() -> None:
-    stray = {"phase_id": UNKNOWN_PHASE, "what_happens": "x", "done_when": "y"}
-    wrong = answer(json.dumps({**ROADMAP_BRIEF, "order": [stray]}))
+def test_a_roadmap_brief_whose_goal_is_too_long_is_rejected() -> None:
+    wrong = answer(json.dumps({"goal": " ".join(["word"] * 21)}))
     w = make(answers=[answer(json.dumps(roadmap())), wrong, wrong])
     wire(w)
     approve_analysis(w)
@@ -1790,5 +1785,5 @@ def test_a_roadmap_brief_that_leaves_a_phase_out_is_rejected() -> None:
     brief_run = list(w.state.generation_runs.values())[1]
     assert (brief_run.status, brief_run.error_code) == ("failed", "brief_rejected")
     problems = json.loads(brief_run.output_json)["error_details"]["problems"]
-    assert f"order: leaves out the Phase(s) {PHASE}" in problems
+    assert "goal: 21 words, at most 20" in problems
     assert json.loads(human_view(w, "roadmap").provenance_json).get("rendered") is True

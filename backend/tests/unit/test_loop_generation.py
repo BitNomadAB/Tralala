@@ -224,7 +224,7 @@ SCHEMA_ORDER = {
         "recommendation",
     ],
     "roadmap": ["schema_version", "summary", "phases"],
-    "roadmap_human": ["schema_version", "order", "your_part", "could_block", "summary"],
+    "roadmap_human": ["schema_version", "goal"],
     "qa": ["schema_version", "summary", "known_risks", "scenarios"],
 }
 

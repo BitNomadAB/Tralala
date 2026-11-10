@@ -136,6 +136,11 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **The RoadMap for people is its goal and the number of Tickets.** The brief above the Phases no
+  longer retells the order of work, the person's part and what could block the plan, which the
+  Phases and their Tickets under it already show. The board agent or a worker writes one line of at
+  most 20 words, what is true when the plan is done, and the review counts the Tickets beside it. A
+  RoadMap brief written earlier shows only its summary.
 - **The analysis brief is asked for more plainly.** The schema the writer is shown, a board agent's
   and a worker's `write_brief` alike, now requires the size and the verdict line, which the sign
   always demanded, and the board agent's request ends with the findings its items must name. A model

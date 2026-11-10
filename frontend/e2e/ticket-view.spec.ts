@@ -104,7 +104,7 @@ test.describe("the Ticket view", () => {
       });
       await page.reload();
       const roadmap = await openPlanDocument(page, "RoadMap");
-      await expect(roadmap.getByText(tickets.ORDER_STEP)).toBeVisible();
+      await expect(roadmap.getByText(tickets.ROADMAP_GOAL)).toBeVisible();
       const first = roadmap.getByRole("region", { name: /^Phase 1 · Idle check/ });
       await first.getByText(tickets.FIVE_STEPS).click();
       await expect(first.getByRole("list", { name: "Steps" })).toBeVisible();

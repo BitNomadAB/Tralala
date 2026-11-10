@@ -55,34 +55,8 @@ interface ChatMessage {
   content?: unknown;
 }
 
-interface PlannedPhase {
-  id?: string;
-  tickets?: { id?: string; required_actor?: string }[];
-}
-
-/** The brief for people of the RoadMap a request carries: every Phase once, every human Ticket. */
-function roadmapBrief(request: string): unknown {
-  const plan = JSON.parse(request.split("Technical RoadMap (JSON):\n")[1] ?? "{}") as {
-    phases?: PlannedPhase[];
-  };
-  const phases = plan.phases ?? [];
-  const human = phases.flatMap((phase) =>
-    (phase.tickets ?? []).filter((ticket) => ticket.required_actor === "human"),
-  );
-  return {
-    schema_version: 1,
-    order: phases.map((phase) => ({
-      phase_id: phase.id,
-      what_happens: "The work of this Phase is done.",
-      done_when: "Its Tickets are complete.",
-    })),
-    your_part: human.length
-      ? [{ text: "Take the steps only a person can take.", ticket_ids: human.map((t) => t.id) }]
-      : [],
-    could_block: [],
-    summary: "The Phases run in order.",
-  };
-}
+/** The brief for people of a RoadMap: its goal in one line; the page counts the Tickets. */
+const ROADMAP_BRIEF = { schema_version: 2, goal: "The plan is done and its Tickets are complete." };
 
 /** The brief a request for people asks for, or null for any other request. */
 function briefFor(messages: unknown): unknown {
@@ -90,7 +64,7 @@ function briefFor(messages: unknown): unknown {
     typeof message.content === "string" ? message.content : "",
   );
   const roadmap = texts.find((content) => content.includes("Technical RoadMap (JSON):"));
-  if (roadmap) return roadmapBrief(roadmap);
+  if (roadmap) return ROADMAP_BRIEF;
   return texts.some((content) => content.includes("Technical analysis (JSON):"))
     ? ANALYSIS_BRIEF
     : null;

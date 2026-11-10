@@ -3,17 +3,14 @@ import { Badge } from "@/components/ui/badge";
 import { renderMarkdown } from "@/lib/markdown";
 import type { DocumentKind, LoopDocument } from "@/lib/types";
 import { showsAnalysisBrief, type BriefApproval } from "./briefApproval";
-import { isHumanBrief, isRoadmapBrief } from "./briefs";
-import { AnalysisBriefView, RoadmapBriefView } from "./BriefView";
-import {
-  DOCUMENT_LABELS,
-  isBrief,
-  isEarlierFormat,
-  staleReasonText,
-  viewAuthorship,
-} from "./loopUi";
+import { isHumanBrief } from "./briefs";
+import { AnalysisBriefView } from "./BriefView";
+import { DOCUMENT_LABELS, isEarlierFormat, staleReasonText, viewAuthorship } from "./loopUi";
 
-/** The current text: the brief's sections for a brief, Markdown for everything else. */
+/**
+ * The current text: the analysis brief's sections, Markdown for everything else. The RoadMap's brief
+ * is shown by RoadmapReview, which passes it as `body`.
+ */
 function CurrentText({
   document,
   technical,
@@ -26,9 +23,6 @@ function CurrentText({
   const payload: unknown = document.current_payload;
   if (showsAnalysisBrief(document) && isHumanBrief(payload)) {
     return <AnalysisBriefView brief={payload} technical={technical} approval={approval} />;
-  }
-  if (isBrief(document) && document.kind === "roadmap" && isRoadmapBrief(payload)) {
-    return <RoadmapBriefView brief={payload} technical={technical} />;
   }
   return renderMarkdown(document.current_content ?? "");
 }

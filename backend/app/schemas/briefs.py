@@ -5,8 +5,8 @@ brief answers what they ask: can it be done, what stands in the way, the highlig
 what they must decide, and what is recommended. The technical revision (``analysis_ai``,
 ``roadmap_ai``) stays complete and unchanged beside it.
 
-The ids in ``finding_ids``, ``phase_ids`` and ``ticket_ids`` carry the traceability back to the
-technical revision; they are never part of the visible text, which the server refuses when it
+The ids in ``finding_ids`` carry the traceability back to the
+technical analysis; they are never part of the visible text, which the server refuses when it
 holds an id, a file path or code (``services/loop_documents_human``). Field order is the order a
 model writes in, evidence before judgement (the comment on ``SCHEMAS`` in
 ``services/loop_generation_prompts``): the obstacles and the highlights come before the verdict,
@@ -18,6 +18,11 @@ what this model parses, on purpose: a brief stored before the sign existed (more
 text, no ``verdict_line`` or ``size``) is still read, and the server refuses a new one that breaks
 the sign when it is handed in (``422 brief_invalid``). The JSON schema a writer is shown carries
 the sign's limits (``json_schema_extra``), so a model and a worker see what is accepted.
+
+The RoadMap brief is its goal in one line (``goal``): the page shows the Phases and their Tickets
+from the plan right under it, with their number, so the brief repeats none of them. A RoadMap
+brief of schema version 1 (the order of work, the person's part, what could block it) stays stored
+as it was written, is shown by its summary and is never parsed again.
 """
 
 from __future__ import annotations
@@ -44,6 +49,8 @@ SIGN_MAX_ITEMS = 3
 SIGN_MAX_DECISIONS = 5
 SIGN_MAX_CHARS = 140
 SIGN_MAX_VERDICT_WORDS = 20
+# The RoadMap brief's goal: one line, as short as the analysis brief's verdict line.
+GOAL_MAX_WORDS = SIGN_MAX_VERDICT_WORDS
 
 
 # Visible text: stripped, never empty, at most so many characters.
@@ -156,36 +163,16 @@ class HumanBriefWriter(HumanBrief):
     model_config = ConfigDict(json_schema_extra=_writer_schema)
 
 
-class BriefPhaseStep(StrictModel):
-    phase_id: Id
-    what_happens: Text300
-    done_when: Text200
-
-
-class BriefPart(StrictModel):
-    text: Text200
-    phase_ids: list[Id] = Field(default_factory=list[str], max_length=30)
-    ticket_ids: list[Id] = Field(default_factory=list[str], max_length=100)
-
-
-class BriefRisk(StrictModel):
-    text: Text200
-    phase_ids: list[Id] = Field(default_factory=list[str], max_length=30)
-
-
 class RoadmapBrief(StrictModel):
-    """The RoadMap for people: every Phase in ``order`` exactly once, and every Ticket a person
-    must do (``required_actor: human``) in ``your_part``."""
+    """The RoadMap for people: what is true when the plan is done, in one line. The Phases and
+    their Tickets follow it on the page, counted from the plan, so the brief repeats none."""
 
-    schema_version: int = Field(default=1, ge=1, le=1)
-    order: list[BriefPhaseStep] = Field(min_length=1, max_length=30)
-    your_part: list[BriefPart] = Field(
-        default_factory=list[BriefPart],
-        max_length=12,
-        description="What the person must do themselves, with the Tickets it concerns",
+    schema_version: int = Field(default=2, ge=2, le=2)
+    goal: Text200 = Field(
+        description=(
+            f"What is true when the plan is done, in one line of at most {GOAL_MAX_WORDS} words"
+        )
     )
-    could_block: list[BriefRisk] = Field(default_factory=list[BriefRisk], max_length=8)
-    summary: Text600
 
 
 class BriefWrite(StrictModel):
@@ -204,6 +191,7 @@ class BriefWrite(StrictModel):
 
 __all__ = [
     "BRIEF_KINDS",
+    "GOAL_MAX_WORDS",
     "OBSTACLE_LEVELS",
     "SIGN_MAX_CHARS",
     "SIGN_MAX_DECISIONS",
@@ -214,10 +202,7 @@ __all__ = [
     "BriefDecision",
     "BriefKind",
     "BriefObstacle",
-    "BriefPart",
-    "BriefPhaseStep",
     "BriefPoint",
-    "BriefRisk",
     "BriefSize",
     "BriefWrite",
     "FindingRef",

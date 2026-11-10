@@ -4,8 +4,8 @@ run).
 The model gets the Info and the technical revision the brief explains, no repository and no tools,
 and answers a JSON object of the brief's schema (``schemas/briefs.py``, sent as the response
 format). The server holds the answer to the rules every brief keeps
-(``loop_documents_human.check_brief``): it parses, names every finding (or every Phase and every
-Ticket a person must do), knows only the ids the technical revision holds, and its text holds no id,
+(``loop_documents_human.check_brief``): it parses, names every finding (a RoadMap brief is its
+goal in one short line), knows only the ids the technical revision holds, and its text holds no id,
 path or code; an analysis brief also keeps the sign (``loop_documents_human_limits``). An answer
 that breaks a rule goes back to the model once, through the repair round every generation shares
 (``loop_generation_ask.repair_round``), with every problem named one per line, the sign's first;

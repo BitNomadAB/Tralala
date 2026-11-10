@@ -234,45 +234,6 @@ def _plan_id(view: DocumentsView) -> str | None:
     return None
 
 
-def _mapped_id(namespace: uuid.UUID, value: str, kind: str) -> str:
-    return value if _is_uuid(value) else str(uuid.uuid5(namespace, f"{kind}:{value}"))
-
-
-def map_brief_ids(brief: RoadmapBrief, loop_id: str) -> RoadmapBrief:
-    """The RoadMap brief with its Phase and Ticket ids mapped as ``map_plan_ids`` maps the plan's,
-    so a brief written with the short ids of its plan (``p1``, ``t1``) names the same items."""
-    namespace = _namespace(loop_id)
-
-    def phases(values: list[str]) -> list[str]:
-        return [_mapped_id(namespace, value, "phase") for value in values]
-
-    return brief.model_copy(
-        update={
-            "order": [
-                step.model_copy(
-                    update={"phase_id": _mapped_id(namespace, step.phase_id, "phase")}
-                )
-                for step in brief.order
-            ],
-            "your_part": [
-                part.model_copy(
-                    update={
-                        "phase_ids": phases(part.phase_ids),
-                        "ticket_ids": [
-                            _mapped_id(namespace, value, "ticket") for value in part.ticket_ids
-                        ],
-                    }
-                )
-                for part in brief.your_part
-            ],
-            "could_block": [
-                risk.model_copy(update={"phase_ids": phases(risk.phase_ids)})
-                for risk in brief.could_block
-            ],
-        }
-    )
-
-
 def _optional_brief[Model: BaseModel](model: type[Model], args: ToolArguments) -> Model | None:
     return None if args.get("brief") is None else parse_payload(model, args, "brief")
 
@@ -326,7 +287,7 @@ def write_roadmap(services: PlanWriting, actor: ActorContext, args: ToolArgument
         {
             "kind": "roadmap",
             "plan": plan,
-            "roadmap_brief": None if brief is None else map_brief_ids(brief, loop_id),
+            "roadmap_brief": brief,
             "expected_analysis_revision_id": _text(args.get("expected_analysis_revision_id")),
             "provenance": _provenance(actor),
         }
@@ -371,7 +332,7 @@ def write_brief(services: PlanWriting, actor: ActorContext, args: ToolArguments)
     brief: HumanBrief | RoadmapBrief = (
         parse_payload(HumanBrief, args, "brief")
         if kind == "analysis"
-        else map_brief_ids(parse_payload(RoadmapBrief, args, "brief"), loop_id)
+        else parse_payload(RoadmapBrief, args, "brief")
     )
     write = BriefWrite.model_validate(
         {
@@ -417,9 +378,10 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
     )
     roadmap_brief, roadmap_definitions = model_argument(
         RoadmapBrief,
-        "Optional: your brief of the RoadMap for the person who approves it: every Phase once in "
-        "order, every Ticket a person must do in your_part; plain text without ids, paths or "
-        "code. Without it a board agent writes one",
+        "Optional: your brief of the RoadMap for the person who approves it: its goal, what is "
+        "true when the plan is done, in one line of at most 20 words, plain text without ids, "
+        "paths or code. The page shows the Phases and Tickets from the plan and counts them. "
+        "Without it a board agent writes one",
     )
     loop_id = string_argument("Loop identifier from read_board or create_loop")
     write_analysis_tool = AgentTool(
@@ -524,7 +486,6 @@ __all__ = [
     "MAX_ERROR_LINES",
     "IdMap",
     "PlanWriting",
-    "map_brief_ids",
     "map_plan_ids",
     "parse_payload",
     "payload_errors",

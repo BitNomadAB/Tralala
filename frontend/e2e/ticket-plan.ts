@@ -77,17 +77,9 @@ export function roadmap(announceSteps: string[] = announce.steps) {
 /** A second step that names a file: the server refuses the whole RoadMap. */
 export const STEP_WITH_FILE = "Add the notice to Banner.tsx.";
 
-export const ORDER_STEP = "The idle check is added.";
+export const ROADMAP_GOAL = "Idle sessions end on their own and people are told before it happens.";
 
-export const ROADMAP_BRIEF = {
-  order: [
-    { phase_id: "p1", what_happens: ORDER_STEP, done_when: "Idle sessions end." },
-    { phase_id: "p2", what_happens: "People are told.", done_when: "The notice is out." },
-  ],
-  your_part: [],
-  could_block: [{ text: "The notice is not ready in time.", phase_ids: ["p2"] }],
-  summary: "Two Phases: the check first, then the announcement.",
-};
+export const ROADMAP_BRIEF = { goal: ROADMAP_GOAL };
 
 /** The Ticket written outside the plan, without a face. */
 export const UNPLANNED = "Show the remaining session time";

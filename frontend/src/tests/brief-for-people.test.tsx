@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { rewriteBlockedReason } from "@/features/loops/loopUi";
 import { generationRun } from "./msw/loops";
-import { briefDocuments, openBrief as open } from "./renderBrief";
+import {
+  briefDocuments,
+  EARLIER_ROADMAP_BRIEF,
+  openBrief as open,
+  ROADMAP_GOAL,
+} from "./renderBrief";
 
 describe("the brief for people", () => {
   it("names who wrote the analysis brief and never shows an id", async () => {
@@ -30,27 +35,27 @@ describe("the brief for people", () => {
     expect(screen.getByText("Yes, with conditions")).toBeInTheDocument();
   });
 
-  it("shows the RoadMap brief in the plan's order, with the person's part", async () => {
+  it("shows the RoadMap brief as its goal and the number of Tickets, nothing more", async () => {
     open(briefDocuments(), "roadmap");
-    // The first of each title is the order of work; the disclosures name the Phases again.
-    const [first] = await screen.findAllByText("Phase 1 — Mail");
-    const [second] = screen.getAllByText("Phase 2 — Policy");
-    if (!first || !second) throw new Error("both Phases are shown");
-    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Your part" })).toBeInTheDocument();
-    const part = screen.getByText("Sign the retention policy.").closest("li");
-    if (!part) throw new Error("the item is a list entry");
-    expect(within(part).getByText("SES-1-2 Sign", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText(ROADMAP_GOAL)).toBeInTheDocument();
+    expect(screen.getByText("1 Ticket")).toBeInTheDocument();
+    // The Phases and Tickets follow it from the plan; the brief repeats none of them.
+    expect(screen.queryByRole("heading", { name: "The order of work" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Your part" })).not.toBeInTheDocument();
     expect(screen.getByText("Written by Planner")).toBeInTheDocument();
+    expect(screen.queryByText("Earlier format")).not.toBeInTheDocument();
   });
 
-  it("says where a RoadMap item comes from, by the Phases' titles", async () => {
-    open(briefDocuments(), "roadmap");
-    const risk = (await screen.findByText("The mail provider may be late.")).closest("li");
-    if (!risk) throw new Error("the item is a list entry");
-    const user = userEvent.setup();
-    await user.click(within(risk).getByText("Where does this come from?"));
-    expect(within(risk).getByText("Phase 1 — Mail")).toBeVisible();
+  it("shows a RoadMap brief written before the goal by its summary alone", async () => {
+    const documents = briefDocuments();
+    open(
+      { ...documents, roadmap: { ...documents.roadmap, current_payload: EARLIER_ROADMAP_BRIEF } },
+      "roadmap",
+    );
+    expect(await screen.findByText("Two Phases: the e-mail, then the policy.")).toBeInTheDocument();
+    expect(screen.queryByText("Sign the retention policy.")).not.toBeInTheDocument();
+    expect(screen.getByText("1 Ticket")).toBeInTheDocument();
+    expect(screen.queryByText("Earlier format")).not.toBeInTheDocument();
   });
 
   it("labels a view written before briefs as the earlier format", async () => {

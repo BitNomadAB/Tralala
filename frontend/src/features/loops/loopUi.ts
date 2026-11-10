@@ -1,4 +1,5 @@
 import type { DocumentKind, LoopDocument, UnplannedTicket } from "@/lib/types";
+import { roadmapGoal } from "./briefs";
 
 export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
   info: "Info",
@@ -66,7 +67,7 @@ export function isBrief(document: LoopDocument): boolean {
   const payload = document.current_payload;
   if (payload === null) return false;
   if (document.kind === "analysis") return typeof payload.verdict === "string";
-  return document.kind === "roadmap" && Array.isArray(payload.order);
+  return document.kind === "roadmap" && roadmapGoal(payload) !== null;
 }
 
 export function isEarlierFormat(document: LoopDocument): boolean {

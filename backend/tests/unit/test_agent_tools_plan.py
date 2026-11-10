@@ -402,14 +402,8 @@ BRIEF: dict[str, JsonValue] = {
     "summary": "People confirm their address by e-mail.",
     "recommendation": "Go ahead and agree who follows up missed e-mails.",
 }
-ROADMAP_BRIEF: dict[str, JsonValue] = {
-    "order": [
-        {"phase_id": "p1", "what_happens": "The first change is made.", "done_when": "It works."},
-        {"phase_id": "p2", "what_happens": "The rest follows.", "done_when": "All is done."},
-    ],
-    "could_block": [{"text": "The second step waits for the first.", "phase_ids": ["p2"]}],
-    "summary": "Two Phases, one after the other.",
-}
+ROADMAP_GOAL = "The first change works and the rest follows."
+ROADMAP_BRIEF: dict[str, JsonValue] = {"goal": ROADMAP_GOAL}
 
 
 def brief_args(kind: str, brief: JsonValue, **extra: str) -> dict[str, JsonValue]:
@@ -493,17 +487,19 @@ def test_the_brief_argument_shows_the_sign_and_its_limits() -> None:
     assert "verdict_line in at most 20 words" in schema
     assert SIGN_QUESTION_EXAMPLE in schema
     assert "brief_invalid" in tools["write_brief"].description
+    # The RoadMap brief is its goal alone: the Phases and Tickets are shown from the plan.
+    roadmap = json.dumps(tools["write_roadmap"].input_schema)
+    assert '"goal"' in roadmap and "your_part" not in roadmap
 
 
-def test_write_roadmap_with_a_brief_maps_its_short_ids_as_the_plans() -> None:
+def test_write_roadmap_with_a_brief_stores_its_goal() -> None:
     w = world(approved_analysis=True)
     answer = write(w, "plan", PLAN, brief=json.dumps(ROADMAP_BRIEF))
     human = w.repos.documents.current(LOOP, "roadmap")
     assert human is not None
-    order = json.loads(human.payload_json or "{}")["order"]
-    assert [step["phase_id"] for step in order] == [P1, P2]
+    assert json.loads(human.payload_json or "{}") == {"schema_version": 2, "goal": ROADMAP_GOAL}
     assert answer["brief"] == {"written": True, "through": "mcp"}
-    assert "### Phase 2 — Phase 2" in human.content
+    assert human.content.startswith(f"# RoadMap\n\n{ROADMAP_GOAL}\n\n")
 
 
 def test_write_brief_rewrites_the_brief_of_the_current_analysis() -> None:
@@ -576,13 +572,8 @@ def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None
     assert "plain_language" in keys(field(analysis, "$defs", "AnalysisFinding", "properties"))
     assert field(analysis, "required") == ["board_id", "loop_id", "analysis"]
     plan = listed["write_roadmap"]
-    assert sorted(keys(field(plan, "$defs"))) == [
-        "BriefPart",
-        "BriefPhaseStep",
-        "BriefRisk",
-        "PlanPhase",
-        "PlanTicket",
-    ]
+    # The RoadMap brief is its goal alone, so it brings no definitions of its own.
+    assert sorted(keys(field(plan, "$defs"))) == ["PlanPhase", "PlanTicket"]
     assert field(analysis, "properties", "brief", "properties", "verdict", "enum") == [
         "yes",
         "yes_with_conditions",

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
 
 from ..schemas.briefs import HumanBrief, RoadmapBrief
 from ..schemas.loops import AnalysisPayload
@@ -175,21 +174,11 @@ def render_analysis_brief(brief: HumanBrief) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def render_roadmap_brief(brief: RoadmapBrief, phases: Mapping[str, tuple[int, str]]) -> str:
-    """The RoadMap brief for people: the order of work by Phase (numbered and named from the
-    plan, in its order), what the person must do and what could block it."""
-    lines = ["# RoadMap", "", brief.summary, "", "## The order of work", ""]
-    steps = sorted(brief.order, key=lambda step: phases.get(step.phase_id, (0, ""))[0])
-    for step in steps:
-        number, name = phases.get(step.phase_id, (0, ""))
-        lines += [f"### Phase {number} — {name}", "", step.what_happens, ""]
-        lines += [f"**Done when:** {step.done_when}", ""]
-    if brief.your_part:
-        lines += ["## Your part", ""] + [f"- {part.text}" for part in brief.your_part] + [""]
-    if brief.could_block:
-        lines += ["## What could block it", ""]
-        lines += [f"- {risk.text}" for risk in brief.could_block]
-    return "\n".join(lines).strip() + "\n"
+def render_roadmap_brief(brief: RoadmapBrief, tickets: int) -> str:
+    """The RoadMap brief for people: the goal and how many Tickets the plan holds; the Phases and
+    their Tickets follow it on the page."""
+    count = "1 Ticket" if tickets == 1 else f"{tickets} Tickets"
+    return f"# RoadMap\n\n{brief.goal}\n\n{count}\n"
 
 
 def render_analysis_technical(payload: AnalysisPayload) -> str:

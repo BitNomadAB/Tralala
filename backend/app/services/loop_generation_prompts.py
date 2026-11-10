@@ -17,6 +17,7 @@ from pydantic import BaseModel, JsonValue
 from ..core.errors import ValidationFailure
 from ..db.generated.board import LoopPlanItemsRow
 from ..schemas.briefs import (
+    GOAL_MAX_WORDS,
     SIGN_MAX_CHARS,
     SIGN_MAX_DECISIONS,
     SIGN_MAX_ITEMS,
@@ -317,13 +318,11 @@ PURPOSE_PROMPTS = {
         "conforms to the schema."
     ),
     "roadmap_human": (
-        "You write a short brief of the RoadMap below for the person who approves it. "
-        f"{BRIEF_RULES} Say in order what happens in each Phase and when it is done (order: "
-        "every Phase exactly once, by its phase_id), what the person must do themselves "
-        "(your_part: every Ticket with required_actor human, by its ticket_ids, with the Phases "
-        "it concerns), and what could block the plan (could_block); then a summary of two or "
-        "three sentences. Use only Phase and Ticket ids the RoadMap holds. Return only a JSON "
-        "object that conforms to the schema."
+        "You write the goal of the RoadMap below for the person who approves it: what is true "
+        f"when the plan is done, in one line of at most {GOAL_MAX_WORDS} words (goal), in the "
+        "words of the Info the person wrote. The page shows the Phases and their Tickets under "
+        f"it, so the goal repeats none of them. {BRIEF_RULES} Return only a JSON object that "
+        "conforms to the schema."
     ),
     "qa": (
         "You are the QA planning agent for a software change initiative (a Loop). Write test "

@@ -1,10 +1,10 @@
 """The brief a person reads, as pure rules: which findings it must name, which ids it may name, what
-its visible text may hold, how a RoadMap brief covers the plan, and how a brief is rendered."""
+its visible text may hold, what a RoadMap brief's goal may be, and how a brief is rendered."""
 
 from __future__ import annotations
 
 import pytest
-from pydantic import JsonValue
+from pydantic import JsonValue, ValidationError
 
 from app.core.errors import ValidationFailure
 from app.schemas.briefs import HumanBrief, RoadmapBrief
@@ -197,54 +197,45 @@ PLAN: dict[str, JsonValue] = {
 }
 
 
-def roadmap_brief(**fields: JsonValue) -> RoadmapBrief:
-    base: dict[str, JsonValue] = {
-        "order": [
-            {"phase_id": P2, "what_happens": "The policy is signed.", "done_when": "Signed."},
-            {"phase_id": P1, "what_happens": "Mail goes out.", "done_when": "Mail arrives."},
-        ],
-        "your_part": [
-            {"text": "Sign the retention policy.", "phase_ids": [P2], "ticket_ids": [T2]}
-        ],
-        "could_block": [{"text": "The provider may be late.", "phase_ids": [P1]}],
+GOAL = "People confirm their address before they sign in."
+
+
+def roadmap_brief(goal: str = GOAL) -> RoadmapBrief:
+    return RoadmapBrief.model_validate({"goal": goal})
+
+
+def test_a_roadmap_brief_is_its_goal_in_one_short_plain_line() -> None:
+    assert check_roadmap_brief(roadmap_brief())["problems"] == []
+    long = check_roadmap_brief(roadmap_brief(" ".join(["word"] * 21)))
+    assert long["problems"] == ["goal: 21 words, at most 20"]
+    two = check_roadmap_brief(roadmap_brief("Mail goes out.\nThe policy is signed."))
+    assert two["problems"] == ["goal: more than one line; say it in one"]
+    named = check_roadmap_brief(roadmap_brief("The gap F-02 names is closed."))
+    assert named["fields"] == ["goal"]
+    # The Phases and Tickets are shown from the plan: the brief names none, so none is missing.
+    assert long["missing_ids"] == [] and long["unknown_ids"] == []
+
+
+def test_a_roadmap_brief_of_the_first_version_is_never_parsed_again() -> None:
+    first: dict[str, JsonValue] = {
+        "order": [{"phase_id": P1, "what_happens": "Mail goes out.", "done_when": "It arrives."}],
         "summary": "Two steps: mail, then the policy.",
     }
-    return RoadmapBrief.model_validate({**base, **fields})
+    with pytest.raises(ValidationError):
+        RoadmapBrief.model_validate(first)
 
 
-def test_a_roadmap_brief_covers_every_phase_once_and_every_human_ticket() -> None:
-    outline = plan_outline(PLAN)
-    assert outline.phases == ((P1, 1, "Mail"), (P2, 2, "Policy"))
-    assert check_roadmap_brief(roadmap_brief(), outline)["problems"] == []
-    twice = roadmap_brief(
-        order=[
-            {"phase_id": P1, "what_happens": "Mail.", "done_when": "Sent."},
-            {"phase_id": P1, "what_happens": "Again.", "done_when": "Sent."},
-        ],
-        your_part=[],
-    )
-    check = check_roadmap_brief(twice, outline)
-    assert check["missing_ids"] == [P2, T2]
-    assert check["problems"] == [
-        f"order: lists a Phase more than once: {P1}",
-        f"order: leaves out the Phase(s) {P2}",
-        f"your_part: leaves out the Ticket(s) a person must do {T2}",
-    ]
-
-
-def test_a_roadmap_brief_naming_an_unknown_phase_or_ticket_is_refused() -> None:
-    other = "33333333-3333-4333-8333-333333333333"
-    stray = roadmap_brief(
-        your_part=[{"text": "Sign it.", "phase_ids": [other], "ticket_ids": [T2, "t9"]}]
-    )
-    assert check_roadmap_brief(stray, plan_outline(PLAN))["unknown_ids"] == [other, "t9"]
-
-
-def test_the_roadmap_brief_renders_the_phases_in_the_plans_order() -> None:
-    text = render_brief(roadmap_brief(), PLAN)
-    assert text.startswith("# RoadMap\n\nTwo steps: mail, then the policy.\n\n## The order of work")
-    assert text.index("### Phase 1 — Mail") < text.index("### Phase 2 — Policy")
-    assert "**Done when:** Mail arrives." in text
-    assert "## Your part\n\n- Sign the retention policy." in text
-    assert "## What could block it\n\n- The provider may be late." in text
-    assert P1 not in text
+def test_the_roadmap_brief_renders_its_goal_and_the_number_of_tickets() -> None:
+    assert plan_outline(PLAN).phases == ((P1, 1, "Mail"), (P2, 2, "Policy"))
+    assert render_brief(roadmap_brief(), PLAN) == f"# RoadMap\n\n{GOAL}\n\n2 Tickets\n"
+    one: dict[str, JsonValue] = {
+        "phases": [
+            {
+                "id": P1,
+                "number": 1,
+                "name": "Mail",
+                "tickets": [{"id": T1, "key": "AN-1", "title": "Send", "required_actor": "any"}],
+            }
+        ]
+    }
+    assert render_brief(roadmap_brief(), one).endswith("\n\n1 Ticket\n")

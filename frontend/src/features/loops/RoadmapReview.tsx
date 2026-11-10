@@ -3,12 +3,11 @@ import { Section } from "@/components/ui/section";
 import { Segmented, SegmentedPanel } from "@/components/ui/segmented";
 import { renderMarkdown } from "@/lib/markdown";
 import type { LoopDocument, LoopDocuments } from "@/lib/types";
-import { isRoadmapBrief } from "./briefs";
-import { RoadmapBriefView } from "./BriefView";
+import { roadmapGoal } from "./briefs";
 import { isBrief } from "./loopUi";
 import { PlanDocumentPanel } from "./PlanDocumentPanel";
 import { RoadmapPhases } from "./RoadmapPhases";
-import { payloadText, planSummary, reviewPlan } from "./roadmapPlan";
+import { payloadText, planSummary, reviewPlan, ticketCount, ticketsText } from "./roadmapPlan";
 
 type View = "you" | "raw";
 
@@ -17,21 +16,41 @@ const VIEWS = [
   { value: "raw", label: "Raw text" },
 ] as const;
 
+/** One line of the plan in short, and how many Tickets the plan holds under it. */
+function Goal({ text, tickets }: { text: string; tickets: number }) {
+  return (
+    <div className="flex flex-col gap-1 text-sm">
+      <p className="m-0">{text}</p>
+      {tickets > 0 ? (
+        <p className="m-0 text-[var(--muted-foreground)]">{ticketsText(tickets)}</p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
- * The plan in short: the brief written for people; for a RoadMap rendered from its structure the
- * plan's own summary, since its Phases follow; an earlier view written as text, as it is.
+ * The plan in short: the goal the brief gives and the number of Tickets, nothing the Phases under
+ * it already say (a brief written before the goal shows its summary); for a RoadMap rendered from
+ * its structure the plan's own summary; an earlier view written as text, as it is.
  */
-function InShort({ roadmap, technical }: { roadmap: LoopDocument; technical: LoopDocument }) {
-  const payload: unknown = roadmap.current_payload;
-  if (isBrief(roadmap) && isRoadmapBrief(payload)) {
-    return <RoadmapBriefView brief={payload} technical={technical.current_payload} />;
-  }
+function InShort({
+  roadmap,
+  technical,
+  tickets,
+}: {
+  roadmap: LoopDocument;
+  technical: LoopDocument;
+  tickets: number;
+}) {
+  const goal = isBrief(roadmap) ? roadmapGoal(roadmap.current_payload) : null;
+  if (goal !== null) return <Goal text={goal} tickets={tickets} />;
   if (roadmap.current_provenance?.rendered === true && reviewPlan(technical.current_payload)) {
     const summary = planSummary(technical.current_payload);
     return (
-      <p className="m-0 text-sm">
-        {summary || "No brief was written for this RoadMap; its Phases follow."}
-      </p>
+      <Goal
+        text={summary || "No brief was written for this RoadMap; its Phases follow."}
+        tickets={tickets}
+      />
     );
   }
   return <div className="prose-sm text-sm">{renderMarkdown(roadmap.current_content ?? "")}</div>;
@@ -82,7 +101,7 @@ export function RoadmapReview({ documents }: { documents: LoopDocuments["documen
           body={
             <div className="grid gap-7">
               <Section title="In short">
-                <InShort roadmap={roadmap} technical={technical} />
+                <InShort roadmap={roadmap} technical={technical} tickets={ticketCount(phases)} />
               </Section>
               {phases ? <RoadmapPhases phases={phases} /> : null}
             </div>

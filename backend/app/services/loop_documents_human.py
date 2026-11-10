@@ -10,9 +10,10 @@ Whoever writes a brief (a connected worker over ``/mcp``, a board agent's run, a
 held to the same rules before it is stored:
 
 - **coverage**: the items of an analysis brief together name, in their ``finding_ids``, every
-  finding of a material category or of category ``decision``; a RoadMap brief lists every Phase in
-  ``order`` exactly once and every Ticket a person must do in ``your_part``;
-- **known ids**: an id the technical revision does not hold is refused;
+  finding of a material category or of category ``decision``; a RoadMap brief is its goal in one
+  line of at most ``GOAL_MAX_WORDS`` words, since the page shows the Phases and Tickets from the
+  plan;
+- **known ids**: an id the technical analysis does not hold is refused;
 - **plain text**: the visible text holds no finding id, no other id, no file path and no code; the
   ids carry the traceability, the text is for people;
 - **the sign** (an analysis brief only, ``loop_documents_human_limits``): the verdict in one line,
@@ -37,12 +38,12 @@ from ..core.context import ActorContext
 from ..core.errors import Conflict, ValidationFailure, VersionConflict
 from ..db.generated.board import LoopDocumentsRow, LoopsRow
 from ..repositories.board import BoardRepositories
-from ..schemas.briefs import HumanBrief, RoadmapBrief
+from ..schemas.briefs import GOAL_MAX_WORDS, HumanBrief, RoadmapBrief
 from ..schemas.loops import AnalysisPayload
 from .loop_documents_human_limits import refuse_sign, sign_findings
 from .loop_documents_render import render_analysis_brief, render_roadmap_brief
 from .loop_documents_revisions import invalidate_downstream, log_loop_activity, write_revision
-from .plain_text import text_problems
+from .plain_text import text_problems, word_count
 
 # The findings a person must be told about; a brief names the decisions as well, since a decision is
 # what a person must take.
@@ -99,17 +100,6 @@ def _analysis_texts(brief: HumanBrief) -> Iterator[tuple[str, str]]:
     if brief.size is not None:
         yield "size.text", brief.size.text
     yield "recommendation", brief.recommendation
-
-
-def _roadmap_texts(brief: RoadmapBrief) -> Iterator[tuple[str, str]]:
-    yield "summary", brief.summary
-    for index, step in enumerate(brief.order):
-        yield f"order[{index}].what_happens", step.what_happens
-        yield f"order[{index}].done_when", step.done_when
-    for index, part in enumerate(brief.your_part):
-        yield f"your_part[{index}].text", part.text
-    for index, risk in enumerate(brief.could_block):
-        yield f"could_block[{index}].text", risk.text
 
 
 # --- the analysis brief --------------------------------------------------------------------------
@@ -212,45 +202,17 @@ def plan_outline(plan: Mapping[str, JsonValue]) -> PlanOutline:
     return PlanOutline(tuple(phases), tuple(tickets))
 
 
-def check_roadmap_brief(brief: RoadmapBrief, plan: PlanOutline) -> BriefCheck:
+def check_roadmap_brief(brief: RoadmapBrief) -> BriefCheck:
+    """The RoadMap brief's goal: one line of at most ``GOAL_MAX_WORDS`` words in plain text. The
+    page shows the Phases and Tickets from the plan, so the brief names none of them."""
     found = _Findings()
-    phase_ids = [phase[0] for phase in plan.phases]
-    ticket_ids = [ticket[0] for ticket in plan.tickets]
-    ordered = [step.phase_id for step in brief.order]
-    named_phases = [
-        *ordered,
-        *(phase_id for part in brief.your_part for phase_id in part.phase_ids),
-        *(phase_id for risk in brief.could_block for phase_id in risk.phase_ids),
-    ]
-    named_tickets = [ticket_id for part in brief.your_part for ticket_id in part.ticket_ids]
-    found.unknown = list(
-        dict.fromkeys(
-            [
-                *(phase_id for phase_id in named_phases if phase_id not in phase_ids),
-                *(ticket_id for ticket_id in named_tickets if ticket_id not in ticket_ids),
-            ]
-        )
-    )
-    if found.unknown:
-        found.problems.append(
-            "phase_ids/ticket_ids: the RoadMap has no Phase or Ticket " + ", ".join(found.unknown)
-        )
-    twice = sorted({phase_id for phase_id in ordered if ordered.count(phase_id) > 1})
-    if twice:
-        found.problems.append("order: lists a Phase more than once: " + ", ".join(twice))
-    absent = [phase_id for phase_id in phase_ids if phase_id not in ordered]
-    if absent:
-        found.problems.append("order: leaves out the Phase(s) " + ", ".join(absent))
-    human = [ticket[0] for ticket in plan.tickets if ticket[3]]
-    unnamed = [ticket_id for ticket_id in human if ticket_id not in named_tickets]
-    if unnamed:
-        found.problems.append(
-            "your_part: leaves out the Ticket(s) a person must do " + ", ".join(unnamed)
-        )
-    found.missing = [*absent, *unnamed]
-    for path, text in _roadmap_texts(brief):
-        for problem in text_problems(text, []):
-            found.wording(path, problem)
+    words = word_count(brief.goal)
+    if words > GOAL_MAX_WORDS:
+        found.wording("goal", f"{words} words, at most {GOAL_MAX_WORDS}")
+    if len(brief.goal.splitlines()) > 1:
+        found.wording("goal", "more than one line; say it in one")
+    for problem in text_problems(brief.goal, []):
+        found.wording("goal", problem)
     return found.result()
 
 
@@ -297,7 +259,7 @@ def check_brief(
     """The brief against the technical revision's payload: an analysis or a canonical plan."""
     if isinstance(brief, HumanBrief):
         return check_analysis_brief(brief, AnalysisPayload.model_validate(technical))
-    return check_roadmap_brief(brief, plan_outline(technical))
+    return check_roadmap_brief(brief)
 
 
 def render_brief(
@@ -306,8 +268,7 @@ def render_brief(
     """The brief as Markdown: what the revision's content holds and an export shows."""
     if isinstance(brief, HumanBrief):
         return render_analysis_brief(brief)
-    outline = plan_outline(technical)
-    return render_roadmap_brief(brief, {phase[0]: (phase[1], phase[2]) for phase in outline.phases})
+    return render_roadmap_brief(brief, len(plan_outline(technical).tickets))
 
 
 def store_brief(

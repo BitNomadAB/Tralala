@@ -139,7 +139,7 @@ test.describe("the planning journey over /mcp", () => {
       });
       Object.assign(ids, (written.id_map as { tickets: Record<string, string> }).tickets);
       const roadmap = await openDocument(page, "RoadMap");
-      await expect(roadmap.getByText(plan.ORDER_STEP)).toBeVisible();
+      await expect(roadmap.getByText(plan.ROADMAP_GOAL)).toBeVisible();
       await roadmap.getByRole("button", { name: /^Approve RoadMap/ }).click();
       await expect(roadmap.getByRole("button", { name: "Approved" })).toBeVisible();
       await showTab(page, "Kanban");
@@ -291,7 +291,7 @@ test.describe("the planning journey over /mcp", () => {
       await expect(analysis.getByText(plan.VERDICT_LINE)).toBeVisible();
       expect(await blockingViolations(page, testInfo, "axe-analysis-brief")).toEqual([]);
       const roadmap = await openDocument(page, "RoadMap");
-      await expect(roadmap.getByText(plan.ORDER_STEP)).toBeVisible();
+      await expect(roadmap.getByText(plan.ROADMAP_GOAL)).toBeVisible();
       expect(await blockingViolations(page, testInfo, "axe-roadmap-brief")).toEqual([]);
       const notes = await showTab(page, "Notes");
       await expect(notes.getByRole("list", { name: "Notes" })).toContainText(plan.NOTE);

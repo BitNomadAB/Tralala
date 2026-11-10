@@ -48,27 +48,8 @@ export interface HumanBrief {
   recommendation: string;
 }
 
-export interface BriefPhaseStep {
-  phase_id: string;
-  what_happens: string;
-  done_when: string;
-}
-
-export interface BriefPart {
-  text: string;
-  phase_ids: string[];
-  ticket_ids: string[];
-}
-
-export interface BriefRisk {
-  text: string;
-  phase_ids: string[];
-}
-
+/** The RoadMap brief: the goal in one line. The page shows the Phases and counts the Tickets. */
 export interface RoadmapBrief {
   schema_version: number;
-  order: BriefPhaseStep[];
-  your_part: BriefPart[];
-  could_block: BriefRisk[];
-  summary: string;
+  goal: string;
 }

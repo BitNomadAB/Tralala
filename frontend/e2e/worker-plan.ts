@@ -152,17 +152,9 @@ export const ROADMAP = {
   ],
 };
 
-export const ORDER_STEP = "The idle check is added and the browsers are agreed.";
+export const ROADMAP_GOAL = "Idle sessions end on the agreed browsers and people are told first.";
 
-export const ROADMAP_BRIEF = {
-  order: [
-    { phase_id: "p1", what_happens: ORDER_STEP, done_when: "Idle sessions end." },
-    { phase_id: "p2", what_happens: "People are told.", done_when: "The notice is out." },
-  ],
-  your_part: [],
-  could_block: [{ text: "The browser list is not agreed in time.", phase_ids: ["p1"] }],
-  summary: "Two Phases: the check first, then the announcement.",
-};
+export const ROADMAP_BRIEF = { goal: ROADMAP_GOAL };
 
 export const WAIT_REASON = "Should a warning show one minute before the session ends?";
 export const COMMENT = "The guard now reads the last-seen time on every call.";
