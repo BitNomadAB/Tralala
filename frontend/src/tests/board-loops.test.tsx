@@ -130,7 +130,9 @@ describe("the board page", () => {
     await user.click(await screen.findByRole("button", { name: "New Loop" }));
     const dialog = await screen.findByRole("dialog", { name: "New Loop" });
     expect(within(dialog).getByLabelText("Name")).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("Broad goal")).toBeInTheDocument();
+    // The name only: the goal is written into Info on the Loop's page.
+    expect(within(dialog).queryByLabelText("Broad goal")).toBeNull();
+    expect(within(dialog).getByText(/Its goal goes into Info/)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Create Loop" })).toBeDisabled();
   });
 

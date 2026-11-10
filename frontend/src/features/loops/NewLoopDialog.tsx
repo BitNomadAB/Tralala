@@ -3,13 +3,17 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Field, Input, Textarea } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 
-/** "New Loop": a name and a broad goal; creating it opens the new Loop's page. */
+/**
+ * "New Loop": a name on one line, nothing else; creating it opens the new Loop's page, where the
+ * goal is written into Info, the document the analysis reads. A second field for the goal would ask
+ * for the same thing twice.
+ */
 export function NewLoopDialog({
   boardId,
   open,
@@ -23,14 +27,12 @@ export function NewLoopDialog({
   const queryClient = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState("");
-  const [goal, setGoal] = useState("");
 
   const createLoop = useMutation({
-    mutationFn: () => api.createLoop(boardId, { name: name.trim(), goal }),
+    mutationFn: () => api.createLoop(boardId, { name: name.trim() }),
     onSuccess: (loop) => {
       onOpenChange(false);
       setName("");
-      setGoal("");
       void queryClient.invalidateQueries({ queryKey: ["loops", boardId] });
       void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
       toast.push({ title: "Loop created", variant: "success" });
@@ -49,7 +51,7 @@ export function NewLoopDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title="New Loop"
-        description="A Loop owns its own Kanban and planning documents. It starts empty."
+        description="A Loop owns its own Kanban and planning documents. Its goal goes into Info, on the next page."
       >
         <form
           className="flex flex-col gap-3"
@@ -66,15 +68,6 @@ export function NewLoopDialog({
               required
               autoFocus
               maxLength={200}
-            />
-          </Field>
-          <Field label="Broad goal" htmlFor="loop-goal">
-            <Textarea
-              id="loop-goal"
-              rows={3}
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              maxLength={20000}
             />
           </Field>
           <div className="flex justify-end gap-2">

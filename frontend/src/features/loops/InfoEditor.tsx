@@ -41,7 +41,7 @@ export function InfoEditor({
           rows={8}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="Requirements, constraints, links and desired outcomes."
+          placeholder="The goal: what should be true when this Loop is done. Then requirements, constraints and links."
           maxLength={200000}
           disabled={readOnly || !isHuman}
         />

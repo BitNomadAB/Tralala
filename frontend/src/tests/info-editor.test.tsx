@@ -22,7 +22,7 @@ describe("InfoEditor copy", () => {
     expect(field).toBeEnabled();
     expect(field).toHaveAttribute(
       "placeholder",
-      "Requirements, constraints, links and desired outcomes.",
+      "The goal: what should be true when this Loop is done. Then requirements, constraints and links.",
     );
     expect(
       screen.getByText(

@@ -133,7 +133,8 @@ steps say what the model read. A repository that could not be read appears there
 ## 5. Run one Loop end to end
 
 A **Board** is a project; a **Loop** is one feature or coherent change inside it. Create a board
-(**New board**), then a Loop inside it (**New Loop** — a name and a broad goal are enough).
+(**New board**), then a Loop inside it (**New Loop** asks for a name only). The goal goes into the
+Loop's **Info**, the document the analysis is written from.
 
 The dashboard lists what **Waits for you** first: every Loop whose next step is your decision, with
 a button that opens it. Under it come **Your boards**, and an archived board sits apart under

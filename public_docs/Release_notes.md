@@ -136,6 +136,9 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **New Loop asks for a name only.** The goal is written into the Loop's **Info**, which the
+  analysis reads and which its plain-language brief explains, so the dialog no longer asks for it a
+  first time. **Edit Loop** still edits a goal, and a worker's `create_loop` still sets one.
 - **Archived boards sit apart.** The dashboard lists an archived board under **Read only**, below
   **Your boards**, and the status filter no longer offers Archived.
 - **An archived board's discussions wait for nobody.** The Discussions inbox and the dashboard's

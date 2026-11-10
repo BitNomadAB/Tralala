@@ -25,11 +25,10 @@ export async function createBoard(page: Page, name: string): Promise<void> {
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 }
 
-export async function createLoop(page: Page, name: string, goal = ""): Promise<string> {
+export async function createLoop(page: Page, name: string): Promise<string> {
   await page.getByRole("button", { name: "New Loop" }).click();
   const dialog = page.getByRole("dialog", { name: "New Loop" });
   await dialog.getByLabel("Name").fill(name);
-  if (goal) await dialog.getByLabel("Broad goal").fill(goal);
   await dialog.getByRole("button", { name: "Create Loop" }).click();
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
   await expect(page.getByRole("region", { name: /^List / }).first()).toBeVisible();
