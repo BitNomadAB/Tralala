@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { TralalaLogo } from "@/components/ui/tralala-logo";
 import { useAuth } from "@/features/auth/useAuth";
 import { cn } from "@/lib/utils";
 import type { ThemeMode } from "@/themes/theme";
@@ -40,9 +41,7 @@ export function AppLayout() {
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_88%,transparent)] backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center gap-4 px-4">
           <NavLink to="/" className="flex items-center gap-2 text-sm">
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-[var(--primary)] text-xs font-medium text-[var(--primary-foreground)]">
-              AI
-            </span>
+            <TralalaLogo className="h-7" />
             <span className="text-sm font-semibold text-[var(--foreground)]">Tralala</span>
           </NavLink>
           <nav className="flex items-center gap-1 text-sm">

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { TralalaLogo } from "@/components/ui/tralala-logo";
 import { describeError } from "@/lib/describeError";
 import { useAuth } from "./useAuth";
 
@@ -40,7 +41,8 @@ export function LoginPage() {
         aria-label="Sign in"
       >
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            <TralalaLogo className="h-9" />
             <h1 className="text-lg font-semibold text-[var(--foreground)]">Tralala</h1>
           </div>
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
