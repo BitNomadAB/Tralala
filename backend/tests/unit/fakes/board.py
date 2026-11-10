@@ -707,7 +707,7 @@ class FakeLoopRepository:
     def set_stage(self, loop_id: str, stage: str, *, now: str) -> None:
         self._change(loop_id, lambda loop: loop.__replace__(stage=stage, updated_at=now))
 
-    def set_current_plan(self, loop_id: str, plan_id: str, *, now: str) -> None:
+    def set_current_plan(self, loop_id: str, plan_id: str | None, *, now: str) -> None:
         self._change(
             loop_id, lambda loop: loop.__replace__(current_plan_id=plan_id, updated_at=now)
         )
@@ -1065,6 +1065,13 @@ class FakeLoopPlanRepository:
             approval_id=approval_id,
             activated_at=plan.activated_at if plan.activated_at is not None else now,
         )
+
+    def retire(self, loop_id: str, *, now: str) -> None:
+        for plan in list(self._state.plans.values()):
+            if plan.loop_id == loop_id and plan.status == "active":
+                self._state.plans[plan.id] = plan.__replace__(
+                    status="superseded", superseded_at=now
+                )
 
 
 class FakeLoopPhaseRepository:

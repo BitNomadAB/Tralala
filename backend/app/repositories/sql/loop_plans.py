@@ -92,6 +92,10 @@ _ACTIVATE = text(
     "UPDATE loop_plans SET status = 'active', approval_id = :approval_id,"
     " activated_at = COALESCE(activated_at, :now) WHERE id = :id"
 )
+_RETIRE = text(
+    "UPDATE loop_plans SET status = 'superseded', superseded_at = :now"
+    " WHERE loop_id = :loop_id AND status = 'active'"
+)
 
 # --- Phases --------------------------------------------------------------------------------------
 
@@ -257,6 +261,9 @@ class SqlLoopPlanRepository:
         self._connection.execute(
             _ACTIVATE, {"approval_id": approval_id, "now": now, "id": plan_id}
         )
+
+    def retire(self, loop_id: str, *, now: str) -> None:
+        self._connection.execute(_RETIRE, {"now": now, "loop_id": loop_id})
 
 
 def _phase_values(row: LoopPhasesRow) -> dict[str, str | int]:

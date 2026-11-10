@@ -65,7 +65,8 @@ message broker.
     or QA, and finalizing a Loop reject agent tokens (`403 human_action_required`) regardless of
     scope, and are never registered as WebMCP tools. Approvals bind to exact document revision ids;
     a changed input invalidates them. A reset supersedes the approval and replaces the scope's
-    documents with an empty draft, so nothing downstream executes against text nobody stands behind.
+    documents with an empty draft, so nothing downstream executes against text nobody stands behind;
+    a RoadMap reset also withdraws the plan in force and takes its Tickets off the Kanban.
     A token may set a wait on a Ticket that waits for nothing; the person who answers it clears it.
     Info has one speculative-stage exception: while the Loop is `draft` or `analysis_review`
     (`WORKER_INFO_STAGES` in `services/loop_documents.py`) a token may write it (`write_info`),

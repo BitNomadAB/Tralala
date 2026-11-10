@@ -68,8 +68,9 @@ class LoopRepository(Protocol):
         """A computed stage; it is not an edit, so the version stays."""
         ...
 
-    def set_current_plan(self, loop_id: str, plan_id: str, *, now: str) -> None:
-        """The plan the Loop now executes; publishing is not an edit, so the version stays."""
+    def set_current_plan(self, loop_id: str, plan_id: str | None, *, now: str) -> None:
+        """The plan the Loop now executes, or none once its plan is withdrawn; publishing is not
+        an edit, so the version stays."""
         ...
 
     def clear_delivery_approvals(self, loop_id: str, *, now: str) -> None:

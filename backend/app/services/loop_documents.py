@@ -497,7 +497,14 @@ class LoopDocumentService:
         self.boards.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
             return reset_scope(
-                repos, actor, loop_id, scope, payload, clock=self._now, new_id=self._new_id
+                repos,
+                actor,
+                loop_id,
+                scope,
+                payload,
+                plans=self.plans,
+                clock=self._now,
+                new_id=self._new_id,
             )
 
     # --- generation results ----------------------------------------------------------------------

@@ -164,8 +164,14 @@ red buttons beside each review, on the left of its decision. Both are available 
 reset is not a rejection: a rejection keeps the text and asks for changes, while a reset clears it.
 Any approval behind the text is superseded and kept as history, the scope's documents are replaced
 by an empty draft, and every approval that depended on them is cleared — so a reset analysis has
-to be generated again before a RoadMap can be. Because the text is retired rather than edited, a
-reset asks for confirmation first (**Reset and clear**).
+to be generated again before a RoadMap can be. The RoadMap is the plan, so **Reset RoadMap** also
+takes the plan off the Kanban: no plan is in force any more, every Ticket a plan published that
+nobody touched is deleted, and the others (started, assigned, completed or with a comment, a
+checklist, an attachment, a note or a discussion) are archived, so what was done on them can be
+restored. A Ticket added outside the plan stays, and a Ticket key is never used again. A RoadMap
+whose text is already empty can still be reset while its plan is on the Kanban. Because the text
+is retired rather than edited, a reset asks for confirmation first (**Reset and clear**), and the
+RoadMap's confirmation says how many Tickets leave the Kanban.
 
 ## Who does the work, and a Ticket's state
 

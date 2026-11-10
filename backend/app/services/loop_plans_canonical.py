@@ -96,6 +96,14 @@ class Publication(TypedDict):
     kept: list[PublishedTicket]
 
 
+class Withdrawal(TypedDict):
+    """What withdrawing the plan in force did to the cards plans published: removed when nobody
+    had touched them, archived otherwise."""
+
+    removed: list[PublishedTicket]
+    archived: list[PublishedTicket]
+
+
 def canonical_ticket(
     ticket: PlanTicket, *, key: str, sequence: int, phase_number: int
 ) -> CanonicalTicket:

@@ -146,7 +146,7 @@ class SqlLoopRepository:
     def set_stage(self, loop_id: str, stage: str, *, now: str) -> None:
         self._connection.execute(_SET_STAGE, {"stage": stage, "now": now, "id": loop_id})
 
-    def set_current_plan(self, loop_id: str, plan_id: str, *, now: str) -> None:
+    def set_current_plan(self, loop_id: str, plan_id: str | None, *, now: str) -> None:
         self._connection.execute(_SET_CURRENT_PLAN, {"plan_id": plan_id, "now": now, "id": loop_id})
 
     def clear_delivery_approvals(self, loop_id: str, *, now: str) -> None:

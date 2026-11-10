@@ -136,6 +136,11 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **Reset RoadMap takes the plan off the Kanban.** Resetting the RoadMap used to clear its text
+  and leave the plan's Tickets on the Kanban until a new RoadMap was approved. Now the plan stops
+  being in force at once: Tickets nobody touched are deleted, the others are archived and can be
+  restored, and a Ticket added outside the plan stays. A RoadMap emptied by an earlier reset while
+  its plan stayed on the Kanban can be reset again to clear it.
 - **The Plan tab holds the planning documents alone.** The list of Phases and their Tickets under
   the RoadMap's review repeated the Kanban, and after **Regenerate RoadMap** it showed the plan in
   force beneath the new one. A human Ticket is confirmed in the Ticket itself, the Loop's header

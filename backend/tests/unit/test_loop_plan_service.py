@@ -932,6 +932,30 @@ def test_a_new_plan_removes_the_earlier_plans_untouched_tickets_and_keeps_the_ot
     assert T4 in state.plan_items
 
 
+def test_withdrawing_the_plan_takes_every_planned_ticket_off_the_kanban() -> None:
+    w = published()
+    state = w.state
+    # Somebody moved T1 and started a discussion on T2; T3 and T4 are untouched; a card added by
+    # hand sits beside them.
+    state.cards[T1] = state.cards[T1].__replace__(version=2)
+    state.discussions["d-1"] = discussion_row("d-1", card_id=T2)
+    state.cards["manual"] = card_row("manual", f"{LOOP}-todo", LOOP)
+    withdrawal = w.plans.withdraw(w.repos, LOOP)
+    # The untouched ones are gone; the worked-on ones are archived with what was done on them.
+    assert sorted(entry["id"] for entry in withdrawal["removed"]) == sorted([T3, T4])
+    assert sorted(entry["id"] for entry in withdrawal["archived"]) == sorted([T1, T2])
+    assert T3 not in state.cards and T4 not in state.cards
+    assert (state.cards[T1].archived_at, state.cards[T2].archived_at) == (STAMP, STAMP)
+    assert state.discussions["d-1"].card_id == T2
+    assert state.cards["manual"].archived_at is None
+    # No plan is in force, and the plan items stay stored so their keys are never used again.
+    assert w.repos.plans.active(LOOP) is None
+    assert state.loops[LOOP].current_plan_id is None
+    assert {T1, T2, T3, T4} <= set(state.plan_items)
+    # Withdrawn again, there is nothing left to take off.
+    assert w.plans.withdraw(w.repos, LOOP) == {"removed": [], "archived": []}
+
+
 def test_publishing_logs_the_plan_and_the_number_of_tickets() -> None:
     w = board()
     state = w.state

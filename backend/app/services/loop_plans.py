@@ -47,6 +47,7 @@ from .loop_plans_canonical import (
     PlanDraft,
     Publication,
     PublishedTicket,
+    Withdrawal,
     canonical_phase,
     canonical_ticket,
     plan_hash,
@@ -329,6 +330,28 @@ class LoopPlanService(PlanViews):
         self._log(repos, actor, "loop.plan_published", loop.id, changes)
         return {"plan_id": plan_id, "tickets": created, "removed": removed, "kept": kept}
 
+    def withdraw(self, repos: BoardRepositories, loop_id: str) -> Withdrawal:
+        """Take the plan off the Kanban, as a RoadMap reset does: no plan is in force any more, and
+        every card a plan published leaves the Kanban, deleted when nobody has touched it
+        (``untouched``) and archived otherwise, so nothing anybody did on it is lost. A card added
+        outside the plan stays. The plan items stay stored, so a Ticket key is never used again."""
+        now = self._now()
+        repos.plans.retire(loop_id, now=now)
+        repos.loops.set_current_plan(loop_id, None, now=now)
+        cards = repos.cards.planned(loop_id)
+        additions = repos.cards.additions([card.id for card in cards])
+        removed: list[PublishedTicket] = []
+        archived: list[PublishedTicket] = []
+        for card in cards:
+            entry: PublishedTicket = {"id": card.id, "key": card.ticket_key or card.id}
+            if untouched(card, additions.get(card.id, 0)):
+                repos.cards.delete(card.id)
+                removed.append(entry)
+            elif card.archived_at is None:
+                repos.cards.archive(card.id, now=now)
+                archived.append(entry)
+        return {"removed": removed, "archived": archived}
+
     # --- views -----------------------------------------------------------------------------------
 
     def plan_view(self, repos: BoardRepositories, loop: LoopsRow) -> PlanView:
@@ -610,6 +633,7 @@ __all__ = [
     "Prerequisites",
     "Publication",
     "PublishedTicket",
+    "Withdrawal",
     "canonical_phase",
     "canonical_ticket",
     "dependencies",

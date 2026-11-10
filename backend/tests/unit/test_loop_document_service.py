@@ -1162,6 +1162,53 @@ def test_a_draft_that_was_never_approved_can_be_reset() -> None:
     assert w.loop.analysis_approval_id is not None
 
 
+def test_a_roadmap_reset_takes_the_plans_tickets_off_the_kanban() -> None:
+    w = world()
+    approved_analysis(w)
+    roadmap(w)
+    review(w, "roadmap")
+    state = w.state
+    # Somebody started T1; T2 is untouched.
+    state.cards[T1] = state.cards[T1].__replace__(version=2)
+    keys = [state.cards[card_id].ticket_key for card_id in (T1, T2)]
+    w.service.reset(HUMAN, BOARD_ID, LOOP, "roadmap", ScopeResetRequest(version=w.loop.version))
+    assert T2 not in state.cards
+    assert state.cards[T1].archived_at == STAMP
+    assert w.repos.plans.active(LOOP) is None
+    assert w.loop.current_plan_id is None
+    # No plan is in force and the analysis still stands, so the Loop plans again.
+    assert w.loop.stage == "planning"
+    entry = state.activity[-1]
+    assert entry.action == "loop.roadmap_reset"
+    changes = json.loads(entry.changes_json)
+    assert (changes["removed"], changes["archived"]) == ([keys[1]], [keys[0]])
+
+
+def test_a_plan_left_in_force_by_an_earlier_reset_can_still_be_reset() -> None:
+    w = world()
+    approved_analysis(w)
+    roadmap(w)
+    review(w, "roadmap")
+    state = w.state
+    plan_id = w.loop.current_plan_id
+    assert plan_id is not None
+    tickets = {card_id: state.cards[card_id] for card_id in (T1, T2)}
+    w.service.reset(HUMAN, BOARD_ID, LOOP, "roadmap", ScopeResetRequest(version=w.loop.version))
+    # A reset made before this rule emptied the RoadMap and left its plan and Tickets in force.
+    state.plans[plan_id] = state.plans[plan_id].__replace__(status="active", superseded_at=None)
+    state.cards.update(tickets)
+    state.loops[LOOP] = w.loop.__replace__(current_plan_id=plan_id)
+    w.service.reset(HUMAN, BOARD_ID, LOOP, "roadmap", ScopeResetRequest(version=w.loop.version))
+    assert T1 not in state.cards and T2 not in state.cards
+    assert w.repos.plans.active(LOOP) is None
+    # With no text, no approval and no plan in force, nothing is left to reset.
+    with pytest.raises(Conflict) as caught:
+        w.service.reset(
+            HUMAN, BOARD_ID, LOOP, "roadmap", ScopeResetRequest(version=w.loop.version)
+        )
+    assert caught.value.code == "nothing_to_reset"
+
+
 # --- what a generation run stores ----------------------------------------------------------------
 
 

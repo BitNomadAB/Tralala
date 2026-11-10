@@ -81,6 +81,10 @@ class LoopPlanRepository(Protocol):
         one under ``approval_id``, activated at ``now`` unless it was activated before."""
         ...
 
+    def retire(self, loop_id: str, *, now: str) -> None:
+        """The Loop's active plan, if it has one, is superseded at ``now``: no plan is in force."""
+        ...
+
 
 class LoopPhaseRepository(Protocol):
     def get(self, loop_id: str, phase_id: str) -> LoopPhasesRow | None:

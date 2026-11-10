@@ -187,6 +187,7 @@ def reset_scope(
     scope: str,
     payload: ScopeResetRequest,
     *,
+    plans: LoopPlanService,
     clock: Callable[[], str],
     new_id: Callable[[], str],
 ) -> ResetResult:
@@ -202,7 +203,9 @@ def reset_scope(
     has_text = _has_text(documents[technical_kind].current) or _has_text(
         documents[human_kind].current
     )
-    if not has_text and not approved:
+    # A RoadMap whose documents are already empty can still have a plan in force on the Kanban.
+    plan_in_force = scope == "roadmap" and repos.plans.active(loop_id) is not None
+    if not has_text and not approved and not plan_in_force:
         raise Conflict(
             "There is nothing to reset in this scope",
             code="nothing_to_reset",
@@ -250,6 +253,13 @@ def reset_scope(
         provenance=provenance,
     )
     cleared = [technical_kind, human_kind]
+    changes: dict[str, object] = {"approval_id": approval_id, "cleared": cleared}
+    if scope == "roadmap":
+        # The RoadMap is the plan: resetting it takes the plan's Tickets off the Kanban.
+        withdrawal = plans.withdraw(repos, loop_id)
+        if withdrawal["removed"] or withdrawal["archived"]:
+            changes["removed"] = [entry["key"] for entry in withdrawal["removed"]]
+            changes["archived"] = [entry["key"] for entry in withdrawal["archived"]]
     invalidate_downstream(
         repos, loop_id, "analysis" if scope == "analysis" else "roadmap_ai", clock=clock
     )
@@ -259,7 +269,7 @@ def reset_scope(
         actor,
         f"loop.{scope}_reset",
         loop_id,
-        {"approval_id": approval_id, "cleared": cleared},
+        changes,
         clock=clock,
         new_id=new_id,
     )

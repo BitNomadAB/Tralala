@@ -1,6 +1,7 @@
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { ticketsText } from "./roadmapPlan";
 
 /** Feedback, reset and the human decision on the open Analysis or RoadMap. */
 export function ScopeReview({
@@ -14,6 +15,7 @@ export function ScopeReview({
   onConfirmResetChange,
   resetPending,
   onReset,
+  resetTickets = 0,
   canReview,
   approveInBrief = false,
   approved,
@@ -34,6 +36,8 @@ export function ScopeReview({
   onConfirmResetChange: (confirm: boolean) => void;
   resetPending: boolean;
   onReset: () => void;
+  /** The plan's Tickets on the Kanban, which a RoadMap reset takes off. */
+  resetTickets?: number | undefined;
   canReview: boolean;
   /** The brief above carries the approve button (an analysis brief), so it is not repeated here. */
   approveInBrief?: boolean | undefined;
@@ -73,6 +77,9 @@ export function ScopeReview({
                 <span className="text-[11px] text-[var(--destructive)]">
                   Resetting clears the {scopeLabel} and any approval behind it. It has to be
                   generated again.
+                  {resetTickets > 0
+                    ? ` Its ${ticketsText(resetTickets)} ${resetTickets === 1 ? "leaves" : "leave"} the Kanban: those nobody touched are deleted, the others archived.`
+                    : null}
                 </span>
                 <Button size="sm" variant="danger" disabled={resetPending} onClick={onReset}>
                   Reset and clear

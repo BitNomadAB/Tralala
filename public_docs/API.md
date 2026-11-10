@@ -447,8 +447,12 @@ equally human-only. It clears the scope's documents — writing an empty draft r
 real inputs — and supersedes any approval behind them, keeping the row as history. It works on a
 draft that was never approved as well as on an approved one, and returns
 `{scope, approval_id, cleared, version}` with `approval_id: null` when there was nothing approved.
-`409 nothing_to_reset` means the scope is already empty; `409 document_empty` refuses to approve a
-blank document, which is what a reset leaves behind.
+Resetting the RoadMap also withdraws the plan in force: the plan is superseded, the Loop has no
+current plan, every card a plan published that nobody touched is deleted and every other one is
+archived; the `loop.roadmap_reset` activity lists both by key (`removed`, `archived`). A card
+added outside the plan stays. `409 nothing_to_reset` means the scope is already empty and, for the
+RoadMap, no plan is in force; `409 document_empty` refuses to approve a blank document, which is
+what a reset leaves behind.
 
 `scope` says where a profile works. `board` profiles answer inside one board; `organisation`
 profiles (`coordinator`, `architect`) work across the whole installation and cannot be selected as

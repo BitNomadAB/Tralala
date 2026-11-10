@@ -95,7 +95,9 @@ export function LoopDocumentsPanel({
       : documents?.roadmap.state === "approved";
   // Reset is for the draft too, not only for an approval: a bad generation has to be clearable before
   // anyone signs it off.
-  const canResetScope = isHuman && !readOnly && (scopeHasText || approvedForScope);
+  // A RoadMap emptied while its plan stayed on the Kanban still has that plan to take off.
+  const planInForce = tab === "roadmap" && loop.plan !== null;
+  const canResetScope = isHuman && !readOnly && (scopeHasText || approvedForScope || planInForce);
   // The text a person would approve is about to be replaced by the brief written for them.
   const writingForPeople = generation.writingForPeople;
   const canReviewScope =
@@ -261,6 +263,7 @@ export function LoopDocumentsPanel({
               onConfirmResetChange={setConfirmWithdraw}
               resetPending={planReview.resetScope.isPending}
               onReset={() => planReview.resetScope.mutate(scope)}
+              resetTickets={planInForce ? (loop.plan?.ticket_total ?? 0) : 0}
               canReview={canReviewScope}
               approveInBrief={briefApproves}
               approved={approvedForScope}
