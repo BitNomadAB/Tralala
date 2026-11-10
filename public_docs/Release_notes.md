@@ -136,6 +136,9 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **An archived board's discussions wait for nobody.** The Discussions inbox and the dashboard's
+  **Waits for you** leave them out: a decision on an archived board is refused, so they are read
+  on the board's Tickets.
 - **The Discussions page is an inbox.** It lists every board's discussions under **Waits for your
   decision**, **Agents are talking** and **Decided**, and the dashboard's **Waits for you** lists
   the discussions that wait for a decision. A discussion starts from a Ticket only, so the page no

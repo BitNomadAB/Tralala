@@ -287,9 +287,10 @@ class DiscussionService:
             return serialize(repos, _thread(repos, discussion_id), with_detail=True)
 
     def inbox(self, actor: ActorContext) -> InboxPage:
-        """What waits for the person across every board: the threads that wait for a decision,
-        the ones the agents are talking in and the decided ones (``discussion_inbox``). It names
-        the boards, so it needs ``boards:read`` beside ``discussions:read``."""
+        """What waits for the person across every board that is not archived: the threads that
+        wait for a decision, the ones the agents are talking in and the decided ones
+        (``discussion_inbox``). It names the boards, so it needs ``boards:read`` beside
+        ``discussions:read``."""
         actor.require("boards:read")
         actor.require("discussions:read")
         return read_inbox(self.registry, self.store)

@@ -366,11 +366,12 @@ do. After Request rework, Ask again starts the next round; Approve and Veto clos
 
 ### The inbox
 
-**Discussions** in the main navigation is an inbox over every board: **Waits for your decision**,
-**Agents are talking** and **Decided**, each with its count and newest first. A row shows the
-verdict (or the round while the agents talk), the question, when it last moved (or the decision
-with who took it) and a line such as "SES-1-PH01-001 · Session expiry · Platform · 3 agents · 2 for
-· 1 against · round 2 of 4". A row opens the discussion as a page of its Ticket. A cancelled
+**Discussions** in the main navigation is an inbox over every board that is not archived (an
+archived board is read-only, so its discussions are read on its Tickets): **Waits for your
+decision**, **Agents are talking** and **Decided**, each with its count and newest first. A row
+shows the verdict (or the round while the agents talk), the question, when it last moved (or the
+decision with who took it) and a line such as "SES-1-PH01-001 · Session expiry · Platform · 3 agents
+· 2 for · 1 against · round 2 of 4". A row opens the discussion as a page of its Ticket. A cancelled
 discussion is not listed, and a discussion starts from a Ticket, never from the inbox. The
 dashboard's **Waits for you** lists the discussions that wait for your decision after the Loops,
 each with **Open discussion**.

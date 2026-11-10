@@ -344,7 +344,8 @@ Nothing infers a default Loop from a board.
   page, Copy link, the inbox's rows and the tab on the Ticket's page lead there. The rail's Ticket
   fact links `/boards/{board_id}/loops/{loop_id}?card={card_id}`.
 - **The inbox**: the Discussions page (`GET /discussions/inbox`, `DiscussionService.inbox`) reads
-  every registry board's threads that are not cancelled, one statement per board database
+  the threads that are not cancelled on every registry board that is not archived (a decision
+  there is refused, so nothing on it waits for anyone), one statement per board database
   (`DiscussionThreadRepository.inbox`: the thread with its Ticket, Loop, newest round and newest
   decision), and the pure rules of `services/discussion_inbox.py` group them by who they wait for
   (`your_decision`, `agents`, `nobody`), newest activity first in each group, at most 200 rows. A

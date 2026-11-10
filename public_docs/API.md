@@ -619,7 +619,7 @@ Editing a template therefore changes future work and never rewrites a past discu
 
 | Method | Path | Scope |
 | --- | --- | --- |
-| GET | `/discussions/inbox` (every board's threads that are not cancelled, by who they wait for) | `boards:read` + `discussions:read` |
+| GET | `/discussions/inbox` (the threads that are not cancelled on every board that is not archived, by who they wait for) | `boards:read` + `discussions:read` |
 | GET | `/boards/{board_id}/discussions?status=&card_id=&limit=` | `discussions:read` |
 | POST | `/boards/{board_id}/discussions` | `discussions:write` |
 | GET | `/boards/{board_id}/discussions/{id}` (participants, messages with their answers, positions, synthesis, votes, runs) | `discussions:read` |
@@ -638,7 +638,8 @@ Loop and deep-links the Ticket as `/boards/{board_id}/loops/{loop_id}?card={card
 keep an immutable role snapshot, so later template edits never rewrite what an agent was told.
 
 `GET /discussions/inbox` is the Discussions page: every thread that is not cancelled, on every
-board, as `{items, total}`. A row is `{discussion_id, board_id, board_name, loop_id, loop_key,
+board that is not archived, as `{items, total}`. An archived board refuses a decision
+(`409 board_archived`), so none of its threads waits for anyone; they are read on its Tickets. A row is `{discussion_id, board_id, board_name, loop_id, loop_key,
 loop_name, card_id, ticket_key, card_title, question, status, run_state, verdict, counts,
 participant_count, round_count, max_rounds, asked_by_name, last_activity_at, decided_by_name,
 waits_for}`: `question` is the thread's goal, `verdict` the newest round's suggested verdict (`null`

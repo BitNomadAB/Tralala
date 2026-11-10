@@ -1,5 +1,5 @@
-"""The Discussions inbox: across every board, what waits for the person, what the agents are
-talking about and what was decided.
+"""The Discussions inbox: across every board that is not archived, what waits for the person, what
+the agents are talking about and what was decided.
 
 The boards are read through the repositories, one statement per board; the grouping, the counts,
 the verdict and who decided are pure functions of the rows, so a unit test gives them a thread and
@@ -186,12 +186,16 @@ def ordered(rows: Iterable[InboxRow], *, limit: int = INBOX_LIMIT) -> InboxPage:
 
 
 def read_inbox(registry: RegistryUnitOfWork, store: BoardUnitOfWork) -> InboxPage:
-    """Every thread that is not cancelled, on every board, as the inbox orders them. A board
-    whose database cannot be read now (missing, or its schema under repair) is left out."""
+    """Every thread that is not cancelled, on every board that is not archived, as the inbox
+    orders them. An archived board is read-only: a decision there is refused (``board_archived``),
+    so none of its threads waits for anyone, and they are read on its Tickets. A board whose
+    database cannot be read now (missing, or its schema under repair) is left out."""
     with registry.reader() as repos:
         boards = repos.boards.all()
     rows: list[InboxRow] = []
     for board in boards:
+        if board.status == "archived":
+            continue
         try:
             with store.reader(board.id) as repos:
                 threads = repos.threads.inbox(limit=BOARD_LIMIT)

@@ -325,6 +325,25 @@ def test_the_inbox_reads_every_board_it_can_open_and_leaves_out_cancelled_thread
     assert page["items"][1]["board_name"] == "Memorial"
 
 
+def test_an_archived_board_is_left_out_because_nothing_can_be_decided_there() -> None:
+    live, old = board_state(), board_state()
+    thread(live, "live")
+    thread(old, "old")
+    thread(old, "old-done", status="approved", card_id="card-2")
+    registry = RegistryState()
+    registry.boards[BOARD_ID] = board_row(BOARD_ID, name="Homepage")
+    registry.boards["b-2"] = board_row("b-2", name="Old site", status="archived")
+    boards = Boards(
+        {
+            BOARD_ID: FakeBoardUnitOfWork(live),
+            "b-2": FakeBoardUnitOfWork(old, databases=("b-2",)),
+        }
+    )
+    page = read_inbox(registry_unit_of_work(registry), boards)
+    assert [(r["discussion_id"], r["board_name"]) for r in page["items"]] == [("live", "Homepage")]
+    assert page["total"] == 1
+
+
 def test_a_thread_whose_ticket_has_gone_reads_without_ticket_or_loop() -> None:
     state = board_state()
     thread(state, "orphan")
