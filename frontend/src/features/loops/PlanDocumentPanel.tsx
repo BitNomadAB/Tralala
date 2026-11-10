@@ -77,7 +77,10 @@ export function PlanDocumentPanel({
       </div>
       {reasons.length > 0 ? (
         <p className="text-[11px] text-[var(--warning)]">
-          Needs regeneration:
+          {/* Written after its approval, it needs a review; any other reason, writing again. */}
+          {reasons.every((reason) => reason === "approval_superseded")
+            ? "Needs a new review:"
+            : "Needs regeneration:"}
           {reasons.map((reason) => (
             <Fragment key={reason}>
               {" "}

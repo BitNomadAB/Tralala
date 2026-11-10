@@ -411,6 +411,13 @@ def test_a_document_state_tells_empty_stale_approved_review_and_requested_change
     assert document_state("analysis", newer, {}, {})["state"] == "draft"
     review = document_slots([document_row("an-1", LOOP, "analysis", status="ready_for_review")])
     assert document_state("analysis", review, {}, {})["state"] == "ready_for_review"
+    # Written after its scope was approved (a RoadMap written again): reviewed as it is, the reason
+    # still listed; with a changed input as well, it is stale.
+    again = {"analysis": ["approval_superseded"]}
+    assert document_state("analysis", review, {}, again)["state"] == "ready_for_review"
+    assert document_state("analysis", review, {}, again)["stale_reasons"] == ["approval_superseded"]
+    both = {"analysis": ["approval_superseded", "analysis_ai_changed"]}
+    assert document_state("analysis", review, {}, both)["state"] == "stale"
     old_flag = document_slots([document_row("an-1", LOOP, "analysis", status="approved")])
     assert document_state("analysis", old_flag, {}, {})["state"] == "draft"
     requested = latest_approvals(

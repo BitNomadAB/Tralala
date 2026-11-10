@@ -271,12 +271,16 @@ def document_entry(row: LoopDocumentsRow | None) -> DocumentEntry | None:
 def document_state(
     kind: str, documents: DocumentSlots, approvals: Approvals, stale: StaleReasons
 ) -> DocumentState:
+    """The document's state for a person and an agent. A revision written after its scope was
+    approved (``approval_superseded`` alone, such as a RoadMap written again) waits for a new
+    review instead of counting as stale: it is reviewed as it is, while a changed input means
+    writing it again. The reasons stay listed either way."""
     current = documents[kind].current
     approved = documents[kind].approved
     reasons = list(stale.get(kind, []))
     if current is None:
         state = "empty"
-    elif reasons:
+    elif any(reason != "approval_superseded" for reason in reasons):
         state = "stale"
     elif approved is not None and approved.id == current.id:
         state = "approved"
