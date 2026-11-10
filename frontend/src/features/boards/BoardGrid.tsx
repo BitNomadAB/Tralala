@@ -4,7 +4,7 @@ import { BoardTile, type BoardLifecycleAction } from "./BoardTile";
 
 /**
  * A named grid of board tiles. The dashboard shows two: the boards in use ("Boards") and, under a
- * heading of their own, the archived ones ("Read only boards").
+ * heading of their own, the archived ones ("Archived boards").
  */
 export function BoardGrid({
   label,

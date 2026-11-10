@@ -10,7 +10,7 @@ export type BoardLifecycleAction = "archive" | "restore" | "duplicate";
 
 /** The chip a board shows when it is not simply in use; an active board shows none. */
 const STATUS_CHIPS: Record<Exclude<BoardStatus, "active">, string> = {
-  archived: "Read only",
+  archived: "Archived",
   maintenance: "In maintenance",
   error: "Needs attention",
   migration_failed: "Migration failed",

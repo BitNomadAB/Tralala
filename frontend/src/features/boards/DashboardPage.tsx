@@ -172,7 +172,7 @@ export function DashboardPage() {
             detail={query || status ? undefined : "A board holds the Loops of one project."}
           />
         ) : inUse.length === 0 ? (
-          // Every board that matches is archived: they are listed under "Read only" below.
+          // Every board that matches is archived: they are listed under "Archived" below.
           <EmptyState
             className="card-surface px-4 py-3.5"
             message={query ? "No active board matches." : "No active boards."}
@@ -183,8 +183,8 @@ export function DashboardPage() {
       </section>
 
       {readOnly.length > 0 ? (
-        <Section title="Read only" count={readOnly.length} level={2}>
-          <BoardGrid label="Read only boards" boards={readOnly} {...tiles} />
+        <Section title="Archived" count={readOnly.length} level={2}>
+          <BoardGrid label="Archived boards" boards={readOnly} {...tiles} />
         </Section>
       ) : null}
 

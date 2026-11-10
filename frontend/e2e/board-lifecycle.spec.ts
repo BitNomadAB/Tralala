@@ -8,22 +8,22 @@ test.describe("board lifecycle", () => {
     await boardWithLoop(page, boardName);
 
     await page.getByRole("link", { name: "Boards" }).click();
-    // Exact: Playwright matches a name by substring, and "Read only boards" contains "Boards".
+    // Exact: Playwright matches a name by substring, and "Archived boards" contains "Boards".
     const tiles = page.getByRole("list", { name: "Boards", exact: true });
-    const readOnly = page.getByRole("list", { name: "Read only boards" });
+    const readOnly = page.getByRole("list", { name: "Archived boards" });
     const row = tiles.getByRole("listitem").filter({ hasText: boardName });
     const archived = readOnly.getByRole("listitem").filter({ hasText: boardName });
     const actions = page.getByRole("button", { name: `More actions for ${boardName}` });
     // An active board shows no chip; its lifecycle actions sit in the tile's quiet menu.
-    await expect(row.getByText("Read only", { exact: true })).toHaveCount(0);
+    await expect(row.getByText("Archived", { exact: true })).toHaveCount(0);
     await actions.click();
     await expect(page.getByRole("menuitem", { name: /^Delete board/ })).toBeDisabled();
 
-    // An archived board leaves the boards in use and sits under "Read only", with its chip.
+    // An archived board leaves the boards in use and sits under "Archived", with its chip.
     await page.getByRole("menuitem", { name: "Archive board" }).click();
-    await expect(archived.getByText("Read only", { exact: true })).toBeVisible();
+    await expect(archived.getByText("Archived", { exact: true })).toBeVisible();
     await expect(row).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: /^Read only \d+$/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Archived \d+$/ })).toBeVisible();
     await actions.click();
     await expect(page.getByRole("menuitem", { name: /^Delete board/ })).toBeEnabled();
 
@@ -31,7 +31,7 @@ test.describe("board lifecycle", () => {
     await page.getByRole("menuitem", { name: "Restore board" }).click();
     await expect(archived).toHaveCount(0);
     await expect(row).toBeVisible();
-    await expect(row.getByText("Read only", { exact: true })).toHaveCount(0);
+    await expect(row.getByText("Archived", { exact: true })).toHaveCount(0);
   });
 
   test("exposes an export archive and an integrity report through the API", async ({ page }) => {

@@ -155,7 +155,7 @@ describe("the board page", () => {
       SUMMARIES,
     );
 
-    expect(await screen.findByText("Read only")).toBeInTheDocument();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
     const current = await screen.findByRole("list", { name: "Current Loops" });
     expect(
       await row(current, "Session expiry").findByText("Waits for you to approve the RoadMap"),

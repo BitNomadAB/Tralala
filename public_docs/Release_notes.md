@@ -141,6 +141,8 @@ Worth knowing when you look at the dashboard:
   a worker's `loop_summaries` and `read_loop` counted both (39 Tickets where the Kanban held 20, two
   Phases numbered 1). They now read the active plan alone. The earlier rows stay stored and a Ticket
   key is never used twice, so the new plan's keys go on from the old ones.
+- **Archived boards say so.** The dashboard's heading and a board's chip read **Archived** instead
+  of Read only.
 - **Reset RoadMap is a button again.** It sits beside the RoadMap's review as **Reset analysis**
   does beside the analysis's, instead of in a menu next to the approve button that nobody found.
 - **The RoadMap for people is its goal and the number of Tickets.** The brief above the Phases no
@@ -156,7 +158,7 @@ Worth knowing when you look at the dashboard:
 - **New Loop asks for a name only.** The goal is written into the Loop's **Info**, which the
   analysis reads and which its plain-language brief explains, so the dialog no longer asks for it a
   first time. **Edit Loop** still edits a goal, and a worker's `create_loop` still sets one.
-- **Archived boards sit apart.** The dashboard lists an archived board under **Read only**, below
+- **Archived boards sit apart.** The dashboard lists an archived board under **Archived**, below
   **Your boards**, and the status filter no longer offers Archived.
 - **An archived board's discussions wait for nobody.** The Discussions inbox and the dashboard's
   **Waits for you** leave them out: a decision on an archived board is refused, so they are read

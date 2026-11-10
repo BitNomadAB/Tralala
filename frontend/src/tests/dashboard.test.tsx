@@ -104,7 +104,7 @@ describe("the dashboard", () => {
     expect(tile.getByText("2 Loops in progress · 1 waits for you")).toBeInTheDocument();
     expect(within(tiles).getByText("No Loops in progress")).toBeInTheDocument();
     // No board is archived, so there is no read-only group.
-    expect(screen.queryByRole("heading", { name: /^Read only/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /^Archived/ })).toBeNull();
 
     // One request for the boards (the tiles and the waiting list share it), one a board.
     expect(state.requests.filter((request) => request === "GET /boards")).toHaveLength(1);
@@ -164,7 +164,7 @@ describe("the dashboard", () => {
     expect(screen.queryByText("Waits for your decision on a discussion")).toBeNull();
   });
 
-  it("lists an archived board under Read only, apart from the boards in use", async () => {
+  it("lists an archived board under Archived, apart from the boards in use", async () => {
     const archived = board("board-3", "Old site", { status: "archived" });
     // The archived board is the most recent, yet it does not sit among the boards in use.
     renderDashboard([archived, WEBSITE], {
@@ -177,14 +177,14 @@ describe("the dashboard", () => {
     const tiles = screen.getByRole("list", { name: "Boards" });
     expect(within(tiles).getByRole("button", { name: "Website" })).toBeInTheDocument();
     expect(within(tiles).queryByRole("button", { name: "Old site" })).toBeNull();
-    expect(within(tiles).queryByText("Read only")).toBeNull();
+    expect(within(tiles).queryByText("Archived")).toBeNull();
 
-    expect(screen.getByRole("heading", { name: "Read only 1" })).toBeInTheDocument();
-    const readOnly = screen.getByRole("list", { name: "Read only boards" });
+    expect(screen.getByRole("heading", { name: "Archived 1" })).toBeInTheDocument();
+    const readOnly = screen.getByRole("list", { name: "Archived boards" });
     const old = within(
       within(readOnly).getByRole("button", { name: "Old site" }).closest("li") ?? readOnly,
     );
-    expect(old.getByText("Read only")).toBeInTheDocument();
+    expect(old.getByText("Archived")).toBeInTheDocument();
     expect(await old.findByText("1 Loop in progress")).toBeInTheDocument();
     // The status filter chooses among the boards in use; the archived ones have their own group.
     const filter = screen.getByRole("combobox", { name: "Filter by status" });
@@ -198,7 +198,7 @@ describe("the dashboard", () => {
 
     expect(await screen.findByText("No active boards.")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Boards" })).toBeNull();
-    const readOnly = screen.getByRole("list", { name: "Read only boards" });
+    const readOnly = screen.getByRole("list", { name: "Archived boards" });
     expect(within(readOnly).getByRole("button", { name: "Old site" })).toBeInTheDocument();
 
     // The archived board keeps its way back and its way out.

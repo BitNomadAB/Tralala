@@ -79,7 +79,7 @@ export function BoardHeader({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="truncate text-2xl font-semibold tracking-tight">{board.name}</h1>
-          {archived ? <Chip>Read only</Chip> : null}
+          {archived ? <Chip>Archived</Chip> : null}
         </div>
         {board.description ? (
           <p className="m-0 mt-2 max-w-[62ch] text-[15.5px] leading-relaxed text-[var(--muted-foreground)]">
