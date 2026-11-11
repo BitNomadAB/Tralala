@@ -448,6 +448,9 @@ def test_a_document_without_its_brief_is_refused_and_nothing_is_stored() -> None
         write_roadmap(w, WORKER, {"board_id": BOARD_ID, "loop_id": LOOP, "plan": PLAN})
     assert roadmap.value.details == {"argument": "brief"}
     assert w.repos.documents.current(LOOP, "roadmap_ai") is None
+    # The tool list says so too, so a worker reads it before it is refused.
+    for name in ("write_analysis", "write_roadmap"):
+        assert "brief" in tool_catalog()[name].input_schema.get("required", [])
 
 
 def test_a_brief_that_misses_a_finding_is_refused_with_its_id() -> None:
@@ -585,7 +588,7 @@ def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None
     findings = field(analysis, "properties", "analysis", "properties", "findings", "items")
     assert findings == {"$ref": "#/$defs/AnalysisFinding"}
     assert "plain_language" in keys(field(analysis, "$defs", "AnalysisFinding", "properties"))
-    assert field(analysis, "required") == ["board_id", "loop_id", "analysis"]
+    assert field(analysis, "required") == ["board_id", "loop_id", "analysis", "brief"]
     plan = listed["write_roadmap"]
     # The RoadMap brief is its goal alone, so it brings no definitions of its own.
     assert sorted(keys(field(plan, "$defs"))) == ["PlanPhase", "PlanTicket"]

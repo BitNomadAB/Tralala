@@ -229,3 +229,7 @@ def test_the_write_tools_and_the_bootstrap_point_at_the_instructions(settings: S
     assert "### read_instructions (requires `loops:generate`)" in bootstrap
     rules = bootstrap.split("## 4. ", 1)[1].split("\n## 5. ", 1)[0]
     assert "(`read_instructions`)" in rules
+    # /llms.txt marks the brief the write tools require as required, not optional.
+    for name in ("write_analysis", "write_roadmap"):
+        section = bootstrap.split(f"### {name} (", 1)[1].split("\n### ", 1)[0]
+        assert "- `brief` (required): " in section

@@ -553,7 +553,7 @@ def plan_tools(
                     "document_stale"
                 ),
             },
-            required=["board_id", "loop_id", "analysis"],
+            required=["board_id", "loop_id", "analysis", "brief"],
             definitions={**analysis_definitions, **human_definitions},
         ),
         handler=write_analysis,
@@ -589,7 +589,7 @@ def plan_tools(
                     "a mismatch returns document_stale"
                 ),
             },
-            required=["board_id", "loop_id", "plan"],
+            required=["board_id", "loop_id", "plan", "brief"],
             definitions={**plan_definitions, **roadmap_definitions},
         ),
         handler=write_roadmap,
