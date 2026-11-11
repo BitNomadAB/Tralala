@@ -26,7 +26,7 @@ from uuid import uuid4
 
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..core.errors import ApiError, Conflict, NotFound
+from ..core.errors import ApiError, Conflict, NotFound, ServiceUnavailable, ValidationFailure
 from ..core.logging import carry_request_id
 from ..db.generated.board import LoopGenerationRunsRow, LoopsRow
 from ..db.generated.registry import AgentsRow, BoardsRow
@@ -50,14 +50,17 @@ from .loop_generation_execute import CLOSED_LOOP_CODES, RunContext, execute_run
 from .loop_generation_prompts import (
     DEFAULT_CONTEXT_CHARS,
     FENCE,
+    INSTRUCTION_PURPOSES,
     MAX_FACE_EXAMPLES,
     MAX_OUTPUT_CHARS,
     PURPOSE_PROMPTS,
     SCHEMAS,
     SNAPSHOT_CAPS,
     JsonObject,
+    WritingInstructions,
     compose_system_prompt,
     face_examples,
+    face_examples_text,
     parse_output,
     response_schema_for,
     user_message,
@@ -97,6 +100,7 @@ __all__ = [
     "RolePrompt",
     "RoleSource",
     "RunEntry",
+    "WritingInstructions",
     "_strip_fences",
     "serialize_run",
 ]
@@ -319,6 +323,46 @@ class LoopGenerationService:
         # Inline (a unit test) the run has already ended; read where it stands now.
         current = self.get(board_id, loop_id, str(run["id"]))
         return {"status": str(current["status"]), "run_id": str(current["id"])}
+
+    def instructions(
+        self, actor: ActorContext, board_id: str, loop_id: str, purpose: str
+    ) -> WritingInstructions:
+        """The instructions a board agent works under for ``purpose`` in this Loop, word for word:
+        the role of the agent a run would use with the purpose's rules and schema, composed as a
+        run composes them (``_system_prompt``), and for a RoadMap the approved faces its request
+        shows. A worker that writes the document itself works to the same text. Without a usable
+        agent there is no role, and the rules and the schema still stand."""
+        actor.require("loops:generate")
+        if purpose not in INSTRUCTION_PURPOSES:
+            raise ValidationFailure(
+                "Unknown purpose",
+                details={"argument": "purpose", "allowed": list(INSTRUCTION_PURPOSES)},
+            )
+        self.board_service.ensure_active(board_id)
+        with self.store.reader(board_id) as repos:
+            require_loop(repos, loop_id)
+            examples = (
+                face_examples_text(repos.plan_items.approved_faces(MAX_FACE_EXAMPLES))
+                if purpose == "roadmap"
+                else None
+            )
+        try:
+            agent = self._resolve_agent(None, board_id, loop_id, purpose)
+        except ServiceUnavailable:
+            return {
+                "purpose": purpose,
+                "agent": None,
+                "role_source": None,
+                "instructions": self._compose_system_prompt(purpose, ""),
+                "examples": examples,
+            }
+        return {
+            "purpose": purpose,
+            "agent": {"id": agent.id, "name": agent.name},
+            "role_source": self._role_prompt(agent)["role_source"],
+            "instructions": self._system_prompt(purpose, agent),
+            "examples": examples,
+        }
 
     def _start(
         self,

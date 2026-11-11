@@ -33,7 +33,14 @@ from .agent_tools_identity import identity_tools, whoami
 from .agent_tools_listing import list_tickets, listing_tools, write_ticket_summaries
 from .agent_tools_loops import loop_summaries, loop_tools
 from .agent_tools_notes import read_notes, write_note
-from .agent_tools_plan import map_plan_ids, plan_tools, write_analysis, write_brief, write_roadmap
+from .agent_tools_plan import (
+    map_plan_ids,
+    plan_tools,
+    read_instructions,
+    write_analysis,
+    write_brief,
+    write_roadmap,
+)
 from .agent_tools_read import (
     ToolArguments,
     ToolResult,
@@ -102,7 +109,9 @@ def _run_arguments() -> InputSchema:
 
 def tool_catalog() -> dict[str, AgentTool]:
     """The worker surface: how to find a task, read it, start one, track it and ask for advice."""
-    write_analysis_tool, write_roadmap_tool, write_brief_tool = plan_tools(_BOARD_ID)
+    read_instructions_tool, write_analysis_tool, write_roadmap_tool, write_brief_tool = plan_tools(
+        _BOARD_ID
+    )
     tools = [
         *identity_tools(),
         AgentTool(
@@ -414,6 +423,7 @@ def tool_catalog() -> dict[str, AgentTool]:
             input_schema=_run_arguments(),
             handler=_run_analysis,
         ),
+        read_instructions_tool,
         write_analysis_tool,
         AgentTool(
             name="run_roadmap",
@@ -549,6 +559,7 @@ __all__ = [
     "read_attachment",
     "read_discussion",
     "read_document",
+    "read_instructions",
     "read_loop",
     "read_notes",
     "reply_discussion",

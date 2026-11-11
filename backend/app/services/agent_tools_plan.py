@@ -54,6 +54,7 @@ from .ticket_face import FACE_INVALID, FACE_STEP_BAD, FACE_STEP_GOOD
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from .loop_documents import LoopDocumentService
     from .loop_documents_views import DocumentsView
+    from .loop_generation import LoopGenerationService
 
 # A schema error answers at most this many lines; the count says how many there were.
 MAX_ERROR_LINES = 20
@@ -64,6 +65,38 @@ class PlanWriting(Protocol):
 
     @property
     def loop_document(self) -> LoopDocumentService: ...
+
+
+class PlanInstructions(Protocol):
+    """What ``read_instructions`` uses of the composition root."""
+
+    @property
+    def loop_generation(self) -> LoopGenerationService: ...
+
+
+# How a worker reads the instructions of a board agent: the same text, its own means.
+INSTRUCTIONS_NOTE = (
+    "These are the instructions a board agent works under for this purpose, word for word: the "
+    "role of the agent the Loop would use, the rules and the JSON schema. Follow them as they are "
+    "written. Where they speak of the request, the supplied context, the tools list_files, "
+    "read_file and search, or answering with the JSON object alone, use your own means: read the "
+    "Loop with read_loop and read_document, and the code where you work. examples, when present, "
+    "are the Ticket faces the owner approved last, which a board agent is shown as the style to "
+    "follow."
+)
+HAND_IN = {
+    "analysis": "Hand the analysis in with write_analysis, as its analysis argument.",
+    "analysis_human": (
+        "Hand the brief in as write_analysis's brief, or later with write_brief (kind analysis)."
+    ),
+    "roadmap": (
+        "Hand the RoadMap in with write_roadmap, as its plan argument; ids may be short (p1, t1) "
+        "and become stable UUIDs."
+    ),
+    "roadmap_human": (
+        "Hand the brief in as write_roadmap's brief, or later with write_brief (kind roadmap)."
+    ),
+}
 
 
 # The ids a model wrote that became UUIDs: ``{"phases": {"p1": ...}, "tickets": {"t1": ...}}``.
@@ -353,8 +386,24 @@ def write_brief(services: PlanWriting, actor: ActorContext, args: ToolArguments)
     }
 
 
-def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentTool]:
-    """The catalogue entries of ``write_analysis``, ``write_roadmap`` and ``write_brief``."""
+def read_instructions(
+    services: PlanInstructions, actor: ActorContext, args: ToolArguments
+) -> ToolResult:
+    """The instructions a board agent works under for one purpose, for a worker that writes the
+    document itself, with how to use them and where the answer goes."""
+    actor.require("loops:generate")
+    board_id = _require(args, "board_id")
+    loop_id = _require(args, "loop_id")
+    purpose = _require(args, "purpose")
+    view = services.loop_generation.instructions(actor, board_id, loop_id, purpose)
+    return {**view, "how_to_use": INSTRUCTIONS_NOTE, "hand_in": HAND_IN[purpose]}
+
+
+def plan_tools(
+    board_id: ArgumentSchema,
+) -> tuple[AgentTool, AgentTool, AgentTool, AgentTool]:
+    """The catalogue entries of ``read_instructions``, ``write_analysis``, ``write_roadmap`` and
+    ``write_brief``."""
     analysis, analysis_definitions = model_argument(
         AnalysisPayload,
         "The analysis as one JSON object, written in the order of its fields: outcome, "
@@ -384,16 +433,39 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
         "Without it a board agent writes one",
     )
     loop_id = string_argument("Loop identifier from read_board or create_loop")
+    read_instructions_tool = AgentTool(
+        name="read_instructions",
+        description=(
+            "Read the instructions a board agent works under before you write an analysis, a "
+            "RoadMap or a brief for people yourself: word for word the role of the agent the "
+            "Loop would use, the rules and the JSON schema, and for a RoadMap the Ticket faces "
+            "the owner approved last as examples. Purpose analysis or roadmap for the document, "
+            "analysis_human or roadmap_human for its brief. Your own document is held to the "
+            "same schema and checks either way; these instructions make it written the same way."
+        ),
+        scopes=("loops:generate",),
+        input_schema=object_schema(
+            {
+                "board_id": board_id,
+                "loop_id": loop_id,
+                "purpose": string_argument("analysis, analysis_human, roadmap or roadmap_human"),
+            },
+            required=["board_id", "loop_id", "purpose"],
+        ),
+        handler=read_instructions,
+    )
     write_analysis_tool = AgentTool(
         name="write_analysis",
         description=(
             "Hand in your own analysis of a Loop that has Info, in Tralala's structure: the "
             "same schema, validation, rendering and review as an analysis a board agent "
-            "writes. technical_detail is for engineers; plain_language is for a project "
-            "manager and every risk, blocker, legal, security or question finding needs it. "
-            "With brief, your decision brief for people is the human view; without it a board "
-            "agent writes one. A person approves it; an approved analysis is replaced only "
-            "after that person requests changes or resets it."
+            "writes. Write it to the instructions that agent works under: read_instructions "
+            "with purpose analysis, and analysis_human for the brief. technical_detail is for "
+            "engineers; plain_language is for a project manager and every risk, blocker, legal, "
+            "security or question finding needs it. With brief, your decision brief for people "
+            "is the human view; without it a board agent writes one. A person approves it; an "
+            "approved analysis is replaced only after that person requests changes or resets "
+            "it."
         ),
         scopes=("loops:generate",),
         input_schema=object_schema(
@@ -417,9 +489,11 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
         description=(
             "Hand in your own RoadMap for a Loop whose analysis is approved: the Phases in "
             "order with their Tickets, in the same schema, validation and review as a "
-            "generated RoadMap. Ids may be short (p1, t1): they become stable UUIDs, listed "
-            "in id_map, so the same ids keep the same Tickets when you hand it in again; a "
-            "brief may use the same short ids. Every Ticket ends with its face for people: "
+            "generated RoadMap. Write it to the instructions a board agent works under: "
+            "read_instructions with purpose roadmap, and roadmap_human for the brief. Ids may "
+            "be short (p1, t1): they become stable UUIDs, listed in id_map, so the same ids "
+            "keep the same Tickets when you hand it in again; a brief may use the same short "
+            "ids. Every Ticket ends with its face for people: "
             "summary of at most 20 words, why and if_skipped in at most 3 sentences each, at "
             "most 3 pros and 3 cons, and 1 to 5 steps saying what changes for the person (a "
             "Ticket that needs more is split), all plain text without file paths, code symbols "
@@ -454,7 +528,8 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
             "stands in the way, for and against, what a person must decide. The schema is "
             "write_analysis's or write_roadmap's brief argument; an analysis brief keeps its "
             "sign (see write_analysis) or is refused with brief_invalid, one message per field "
-            "and rule. Over an approved analysis or "
+            "and rule. read_instructions with purpose analysis_human or roadmap_human gives the "
+            "instructions a board agent writes it to. Over an approved analysis or "
             "RoadMap a person requests changes or resets it first; a brief approves nothing."
         ),
         scopes=("loops:generate",),
@@ -479,17 +554,21 @@ def plan_tools(board_id: ArgumentSchema) -> tuple[AgentTool, AgentTool, AgentToo
         ),
         handler=write_brief,
     )
-    return write_analysis_tool, write_roadmap_tool, write_brief_tool
+    return read_instructions_tool, write_analysis_tool, write_roadmap_tool, write_brief_tool
 
 
 __all__ = [
+    "HAND_IN",
+    "INSTRUCTIONS_NOTE",
     "MAX_ERROR_LINES",
     "IdMap",
+    "PlanInstructions",
     "PlanWriting",
     "map_plan_ids",
     "parse_payload",
     "payload_errors",
     "plan_tools",
+    "read_instructions",
     "write_analysis",
     "write_brief",
     "write_roadmap",

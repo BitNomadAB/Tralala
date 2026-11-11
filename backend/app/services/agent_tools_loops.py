@@ -110,11 +110,19 @@ def next_step(
     if stage == "draft":
         if states["info"] == "empty":
             return "Write the Loop's Info: what should change and why.", "person"
-        return "Ask for the analysis (run_analysis) or hand one in (write_analysis).", "agent"
+        return (
+            "Ask for the analysis (run_analysis) or hand one in, written to a board agent's "
+            "instructions (read_instructions, then write_analysis).",
+            "agent",
+        )
     if stage == "analysis_review":
         return _review("analysis", [states["analysis_ai"], states["analysis"]])
     if stage == "planning":
-        return "Ask for the RoadMap (run_roadmap) or hand one in (write_roadmap).", "agent"
+        return (
+            "Ask for the RoadMap (run_roadmap) or hand one in, written to a board agent's "
+            "instructions (read_instructions, then write_roadmap).",
+            "agent",
+        )
     if stage == "roadmap_review":
         return _review("RoadMap", [states["roadmap_ai"], states["roadmap"]])
     if stage == "replanning":

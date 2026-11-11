@@ -136,6 +136,12 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **An AI that writes the analysis or the RoadMap itself gets the same instructions.** The new
+  worker tool `read_instructions` answers, word for word, what the Loop's own agent works under
+  for an analysis, a RoadMap or their briefs for people: its role, the rules and the schema, and
+  for a RoadMap the Ticket faces approved last. `write_analysis`, `write_roadmap`, `write_brief`
+  and `/llms.txt` point to it, so a document handed in from outside is written the way one
+  generated inside is, and held to the same checks.
 - **Reset RoadMap takes the plan off the Kanban.** Resetting the RoadMap used to clear its text
   and leave the plan's Tickets on the Kanban until a new RoadMap was approved. Now the plan stops
   being in force at once: Tickets nobody touched are deleted, the others are archived and can be

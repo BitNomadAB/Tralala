@@ -40,7 +40,7 @@ each one opens (a tool that lists two scopes needs both):
 | `cards:write` | `write_ticket_summaries`, `set_ticket_wait`, `assign_ticket`, `move_ticket`, and with `comments:write` `create_ticket` and `complete_ticket` | anyone signed in |
 | `comments:write` | `comment_ticket` | anyone signed in |
 | `loops:write` | `create_loop`, `write_info`, `write_note` | anyone signed in |
-| `loops:generate` | `run_analysis`, `write_analysis`, `run_roadmap`, `write_roadmap`, `write_brief` | anyone signed in |
+| `loops:generate` | `run_analysis`, `read_instructions`, `write_analysis`, `run_roadmap`, `write_roadmap`, `write_brief` | anyone signed in |
 | `discussions:read` | `read_discussion` | anyone signed in |
 | `discussions:write` | `ask_agents`, `reply_discussion` | anyone signed in |
 | `history:read` | no tool; the REST history of completed Loops | anyone signed in |
@@ -120,6 +120,7 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | `write_note` | `loops:write` | add a note to the Loop's log: baseline, checks, merge, deploy, what is open |
 | `read_notes` | `loops:read` | read the Loop's notes, a page at a time |
 | `run_analysis` | `loops:generate` | ask the Loop's analysis agent for a candidate |
+| `read_instructions` | `loops:generate` | the instructions a board agent works under for an analysis, a RoadMap or their briefs, word for word, before you write one yourself |
 | `write_analysis` | `loops:generate` | hand in your own analysis, in the same schema and review as a generated one, optionally with its brief (a sign) |
 | `run_roadmap` | `loops:generate` | ask for the RoadMap candidate once the analysis is approved |
 | `write_roadmap` | `loops:generate` | hand in your own RoadMap, every Ticket with its face for people; short Phase and Ticket ids become stable UUIDs |
@@ -171,10 +172,12 @@ list_boards                     -> pick the board; its id comes from here, never
 loop_summaries                  -> what is already under way, so the new Loop does not repeat it
 create_loop(name, goal)         -> a Loop in draft, for the intent you and your person agreed
 write_info(content)             -> the requirements, constraints and desired outcome, written down
+read_instructions(analysis)     -> what the Loop's analysis agent works under, word for word
 write_analysis(analysis, brief) -> your own analysis in Tralala's structure, with its brief for people
   or run_analysis()             -> the Loop's analysis agent writes it
 ask_agents(card_id, question)   -> the role agents' advice on a Ticket meanwhile
   ... a person reads the brief and approves the analysis in Tralala ...
+read_instructions(roadmap)      -> what the Loop's RoadMap agent works under, with the faces approved last
 write_roadmap(plan, brief)      -> the Phases and Tickets, with the brief of the plan
   or run_roadmap()              -> the Loop's RoadMap agent writes it
   ... a person approves the RoadMap: its Tickets are published with their keys ...
@@ -184,8 +187,13 @@ write_note(content)             -> the baseline the work starts from
 An agent can prepare everything and cannot take the two approvals. While a decision is pending,
 `loop_summaries` says who the Loop waits for, and `read_loop` shows each document's state.
 
-Your own analysis and RoadMap are not a second kind of document. `write_analysis` and
-`write_roadmap` take the schemas `GET .../loops/{loop_id}/context` answers under `schemas` (and
+Your own analysis and RoadMap are not a second kind of document, and they are written the same
+way. `read_instructions` answers, word for word, the instructions the board agent the Loop would
+use works under for `analysis`, `roadmap`, `analysis_human` or `roadmap_human` (the briefs): its
+role, the rules and the JSON schema, and for a RoadMap the Ticket faces the owner approved last,
+which that agent is shown as examples. Where those instructions speak of the agent's request, its
+reading tools or answering with JSON alone, you use your own means and hand the JSON in with the
+write tool. `write_analysis` and `write_roadmap` take the schemas `GET .../loops/{loop_id}/context` answers under `schemas` (and
 `tools/list` carries them), go through the same validation as a generated candidate, get the same
 human view and wait for the same approval. `technical_detail` is written for engineers,
 `plain_language` for a project manager; every risk, blocker, legal, security or question finding
