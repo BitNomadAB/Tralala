@@ -219,6 +219,8 @@ def face_examples_text(items: Sequence[LoopPlanItemsRow]) -> str | None:
 
 # The purposes a worker may write itself, and so read the instructions of.
 INSTRUCTION_PURPOSES = ("analysis", "analysis_human", "roadmap", "roadmap_human")
+# A document's brief for people, which a worker writes with it.
+BRIEF_PURPOSES = {"analysis": "analysis_human", "roadmap": "roadmap_human"}
 
 
 class InstructionAgent(TypedDict):
@@ -228,13 +230,15 @@ class InstructionAgent(TypedDict):
 
 class WritingInstructions(TypedDict):
     """What a board agent works under for one purpose in a Loop: the agent a run would use (None
-    without a usable one), where its role comes from, the system prompt word for word, and for a
-    RoadMap the approved faces its request shows."""
+    without a usable one), where its role comes from, the system prompt word for word, for an
+    analysis or a RoadMap the system prompt of its brief for people too, and for a RoadMap the
+    approved faces its request shows."""
 
     purpose: str
     agent: InstructionAgent | None
     role_source: str | None
     instructions: str
+    brief_instructions: str | None
     examples: str | None
 
 

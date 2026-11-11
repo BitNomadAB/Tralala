@@ -166,8 +166,15 @@ def world(*, approved_analysis: bool = False) -> World:
 
 
 def write(w: World, argument: str, payload: JsonValue, **extra: str) -> ToolResult:
-    """``write_analysis`` for an ``analysis``, ``write_roadmap`` for a ``plan``, as the worker."""
-    args: dict[str, JsonValue] = {"board_id": BOARD_ID, "loop_id": LOOP, argument: payload}
+    """``write_analysis`` for an ``analysis``, ``write_roadmap`` for a ``plan``, as the worker,
+    with the brief for people both require (``BRIEF``, ``ROADMAP_BRIEF``) unless one is given."""
+    brief = BRIEF if argument == "analysis" else ROADMAP_BRIEF
+    args: dict[str, JsonValue] = {
+        "board_id": BOARD_ID,
+        "loop_id": LOOP,
+        argument: payload,
+        "brief": brief,
+    }
     args.update(extra)
     handler = write_analysis if argument == "analysis" else write_roadmap
     return handler(w, WORKER, args)
@@ -206,8 +213,7 @@ def test_write_analysis_stores_both_views_from_mcp_and_names_the_next_step() -> 
     assert json.loads(technical.payload_json or "{}")["findings"][1]["id"] == "F-2"
     provenance = {"submitted": True, "through": "mcp", "author": "Coder", "actor_id": "agent-1"}
     assert json.loads(technical.provenance_json) == provenance
-    assert json.loads(human.provenance_json) == {**provenance, "rendered": True}
-    assert "Some people may never get the e-mail." in human.content
+    assert json.loads(human.provenance_json) == {**provenance, "written": True}
     assert field(answer, "documents", "analysis_ai") == {
         "state": "ready_for_review",
         "revision_id": technical.id,
@@ -215,8 +221,9 @@ def test_write_analysis_stores_both_views_from_mcp_and_names_the_next_step() -> 
     }
     assert field(answer, "documents", "analysis", "revision_id") == human.id
     assert answer["stale_reasons"] == {}
-    # Without a board agent to write it for people, the answer says why the view stays rendered.
-    assert answer["human_view"] == {"status": "skipped", "run_id": None, "reason": "not configured"}
+    # The worker wrote the brief with it, so no board agent is asked for one.
+    assert answer["brief"] == {"written": True, "through": "mcp"}
+    assert "human_view" not in answer
     assert "Analysis tab" in str(answer["next_step"])
     assert w.state.loops[LOOP].stage == "analysis_review"
 
@@ -424,15 +431,23 @@ def test_write_analysis_with_a_brief_stores_it_as_the_human_view() -> None:
         "written": True,
     }
     assert "F-2" not in human.content
-    # The worker wrote the brief, so no board agent is asked for one.
-    assert (answer["brief"], answer["human_view"]) == ({"written": True, "through": "mcp"}, None)
+    assert answer["brief"] == {"written": True, "through": "mcp"}
 
 
-def test_write_analysis_without_a_brief_leaves_the_view_rendered() -> None:
+def test_a_document_without_its_brief_is_refused_and_nothing_is_stored() -> None:
+    # The brief comes with the document, so nobody has to ask for it and a board agent never
+    # writes the human view of a document handed in from outside.
     w = world()
-    answer = write(w, "analysis", ANALYSIS)
-    assert answer["brief"] == {"written": False, "through": "mcp"}
-    assert field(answer, "human_view", "status") == "skipped"
+    with pytest.raises(ValidationFailure) as analysis:
+        write_analysis(w, WORKER, {"board_id": BOARD_ID, "loop_id": LOOP, "analysis": ANALYSIS})
+    assert analysis.value.details == {"argument": "brief"}
+    assert "brief_instructions" in analysis.value.message
+    assert w.repos.documents.current(LOOP, "analysis_ai") is None
+    w = world(approved_analysis=True)
+    with pytest.raises(ValidationFailure) as roadmap:
+        write_roadmap(w, WORKER, {"board_id": BOARD_ID, "loop_id": LOOP, "plan": PLAN})
+    assert roadmap.value.details == {"argument": "brief"}
+    assert w.repos.documents.current(LOOP, "roadmap_ai") is None
 
 
 def test_a_brief_that_misses_a_finding_is_refused_with_its_id() -> None:

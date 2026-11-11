@@ -97,8 +97,9 @@ wording is `422 brief_rejected` with every problem named by its field. A brief s
 sign existed is read as it is and never checked again.
 
 Who writes the brief: a connected worker, which may hold its organisation's own sources, policies
-and decisions, gives it as `brief` with `write_analysis` or `write_roadmap`, or later with
-`write_brief`; then no board agent is asked. Otherwise each new `analysis_ai` or `roadmap_ai` is
+and decisions, gives it as `brief` with `write_analysis` or `write_roadmap`, which require it, or
+later with `write_brief`; then no board agent is asked. Otherwise (a generation run, or a candidate
+a person hands in without one) each new `analysis_ai` or `roadmap_ai` is
 first rendered from its structure (provenance `rendered`), and the Loop's analysis or RoadMap agent
 writes the brief in a run of its own (purpose `analysis_human` or `roadmap_human`): it gets the Info
 and the technical revision, no repository, and answers the brief's JSON schema, which shows the size

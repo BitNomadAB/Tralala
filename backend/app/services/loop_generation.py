@@ -48,6 +48,7 @@ from .loop_generation_agents import (
 from .loop_generation_ask import MAX_REPAIRS, CompletionCall
 from .loop_generation_execute import CLOSED_LOOP_CODES, RunContext, execute_run
 from .loop_generation_prompts import (
+    BRIEF_PURPOSES,
     DEFAULT_CONTEXT_CHARS,
     FENCE,
     INSTRUCTION_PURPOSES,
@@ -329,9 +330,10 @@ class LoopGenerationService:
     ) -> WritingInstructions:
         """The instructions a board agent works under for ``purpose`` in this Loop, word for word:
         the role of the agent a run would use with the purpose's rules and schema, composed as a
-        run composes them (``_system_prompt``), and for a RoadMap the approved faces its request
-        shows. A worker that writes the document itself works to the same text. Without a usable
-        agent there is no role, and the rules and the schema still stand."""
+        run composes them (``_system_prompt``); for an analysis or a RoadMap the same for its
+        brief for people, which the worker writes with it; and for a RoadMap the approved faces its
+        request shows. A worker that writes the document itself works to the same text. Without a
+        usable agent there is no role, and the rules and the schema still stand."""
         actor.require("loops:generate")
         if purpose not in INSTRUCTION_PURPOSES:
             raise ValidationFailure(
@@ -346,6 +348,7 @@ class LoopGenerationService:
                 if purpose == "roadmap"
                 else None
             )
+        brief = BRIEF_PURPOSES.get(purpose)
         try:
             agent = self._resolve_agent(None, board_id, loop_id, purpose)
         except ServiceUnavailable:
@@ -354,6 +357,7 @@ class LoopGenerationService:
                 "agent": None,
                 "role_source": None,
                 "instructions": self._compose_system_prompt(purpose, ""),
+                "brief_instructions": self._compose_system_prompt(brief, "") if brief else None,
                 "examples": examples,
             }
         return {
@@ -361,6 +365,8 @@ class LoopGenerationService:
             "agent": {"id": agent.id, "name": agent.name},
             "role_source": self._role_prompt(agent)["role_source"],
             "instructions": self._system_prompt(purpose, agent),
+            # The brief comes from the agent of its document (AGENT_PURPOSE), so the same one.
+            "brief_instructions": self._system_prompt(brief, agent) if brief else None,
             "examples": examples,
         }
 

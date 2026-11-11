@@ -121,7 +121,7 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | `read_notes` | `loops:read` | read the Loop's notes, a page at a time |
 | `run_analysis` | `loops:generate` | ask the Loop's analysis agent for a candidate |
 | `read_instructions` | `loops:generate` | the instructions a board agent works under for an analysis, a RoadMap or their briefs, word for word, before you write one yourself |
-| `write_analysis` | `loops:generate` | hand in your own analysis, in the same schema and review as a generated one, optionally with its brief (a sign) |
+| `write_analysis` | `loops:generate` | hand in your own analysis, in the same schema and review as a generated one, with its brief (a sign), which it requires |
 | `run_roadmap` | `loops:generate` | ask for the RoadMap candidate once the analysis is approved |
 | `write_roadmap` | `loops:generate` | hand in your own RoadMap, every Ticket with its face for people; short Phase and Ticket ids become stable UUIDs |
 | `write_brief` | `loops:generate` | write the brief for people of the current analysis or RoadMap |
@@ -191,9 +191,17 @@ Your own analysis and RoadMap are not a second kind of document, and they are wr
 way. `read_instructions` answers, word for word, the instructions the board agent the Loop would
 use works under for `analysis`, `roadmap`, `analysis_human` or `roadmap_human` (the briefs): its
 role, the rules and the JSON schema, and for a RoadMap the Ticket faces the owner approved last,
-which that agent is shown as examples. Where those instructions speak of the agent's request, its
-reading tools or answering with JSON alone, you use your own means and hand the JSON in with the
-write tool. `write_analysis` and `write_roadmap` take the schemas `GET .../loops/{loop_id}/context` answers under `schemas` (and
+which that agent is shown as examples. For `analysis` and `roadmap` it also answers the brief's
+instructions (`brief_instructions`): you write the brief with the document, and `write_analysis` and
+`write_roadmap` refuse a document without it, so the person always reads a brief your session wrote.
+The same answer starts with `check_first` and `repositories`: the repositories the board agent
+reads (name, url, branch, the commit Tralala read last, and the link's focus and exclude globs).
+Find each one on your machine before you write; when one is not there, tell your person that the
+repository is not downloaded and ask whether to fetch it, and if you go on without it, say so in
+the document, claim nothing about its code and put what you could not check under
+`open_questions`, as a board agent does with a repository it could not read. Where the
+instructions speak of the agent's request, its reading tools or answering with JSON alone, you use
+your own means and hand the JSON in with the write tool. `write_analysis` and `write_roadmap` take the schemas `GET .../loops/{loop_id}/context` answers under `schemas` (and
 `tools/list` carries them), go through the same validation as a generated candidate, get the same
 human view and wait for the same approval. `technical_detail` is written for engineers,
 `plain_language` for a project manager; every risk, blocker, legal, security or question finding
@@ -274,8 +282,9 @@ with one sentence why). Every item holds at most 140 characters. A brief that br
 answers `422 brief_invalid`, one message per field and rule ("Brief, obstacles: 4 items, at most
 3."), with `details.rules` naming each `field` and `rule` and the brief's other problems after the
 sign's, so one round fixes everything. A brief that keeps the sign but misses a finding, names an
-unknown id or holds a path answers `422 brief_rejected` with each problem and its field. Without a
-brief, a board agent writes one. A brief approves nothing.
+unknown id or holds a path answers `422 brief_rejected` with each problem and its field. A brief
+comes with the document: `write_analysis` and `write_roadmap` refuse one without it
+(`422 validation_failed`, argument `brief`). A brief approves nothing.
 
 ### Working the Tickets
 

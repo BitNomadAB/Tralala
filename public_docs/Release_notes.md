@@ -141,7 +141,11 @@ Worth knowing when you look at the dashboard:
   for an analysis, a RoadMap or their briefs for people: its role, the rules and the schema, and
   for a RoadMap the Ticket faces approved last. `write_analysis`, `write_roadmap`, `write_brief`
   and `/llms.txt` point to it, so a document handed in from outside is written the way one
-  generated inside is, and held to the same checks.
+  generated inside is, and held to the same checks. For an analysis or a RoadMap it also answers
+  the brief's instructions, and `write_analysis` and `write_roadmap` now refuse a document
+  without its brief for people, so nobody has to ask for one. It starts with the board's
+  repositories and a check: an AI that does not have one on its machine says so to its person
+  before it writes, instead of writing as if it had read the code.
 - **Reset RoadMap takes the plan off the Kanban.** Resetting the RoadMap used to clear its text
   and leave the plan's Tickets on the Kanban until a new RoadMap was approved. Now the plan stops
   being in force at once: Tickets nobody touched are deleted, the others are archived and can be
