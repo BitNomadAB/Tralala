@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "playwright/test";
 import { blockingViolations } from "./axe";
-import { mcpCall, mcpRefusal } from "./mcp";
+import { mcpCall, mcpRefusal, readInstructions } from "./mcp";
 import {
   boardIdFromUrl,
   closeDialog,
@@ -70,11 +70,13 @@ test.describe("the Ticket view", () => {
       loopId = loop.id;
       loopKey = loop.key;
       await call("write_info", { board_id: boardId, loop_id: loopId, content: plan.INFO });
+      const instructions = await readInstructions(page, token, boardId, loopId, "analysis");
       await call("write_analysis", {
         board_id: boardId,
         loop_id: loopId,
         analysis: plan.ANALYSIS,
         brief: plan.ANALYSIS_BRIEF,
+        instructions_id: instructions.instructions_id,
       });
       await page.goto(`/boards/${boardId}/loops/${loopId}`);
       await expect(page.getByRole("heading", { name: loopName, level: 1 })).toBeVisible();
@@ -85,22 +87,26 @@ test.describe("the Ticket view", () => {
     });
 
     await test.step("a RoadMap whose step names a file is refused with the Ticket and the step", async () => {
+      const instructions = await readInstructions(page, token, boardId, loopId, "roadmap");
       const refusal = await mcpRefusal(page, token, "write_roadmap", {
         board_id: boardId,
         loop_id: loopId,
         plan: tickets.roadmap([tickets.STEP_WITH_FILE, "Send it to everyone who signs in."]),
         brief: tickets.ROADMAP_BRIEF,
+        instructions_id: instructions.instructions_id,
       });
       expect(refusal.code).toBe("face_invalid");
       expect(refusal.message).toContain("Ticket t2, steps[0]: looks like a file path (Banner.tsx)");
     });
 
     await test.step("the RoadMap with faces is reviewed by Phase and approved", async () => {
+      const instructions = await readInstructions(page, token, boardId, loopId, "roadmap");
       await call("write_roadmap", {
         board_id: boardId,
         loop_id: loopId,
         plan: tickets.roadmap(),
         brief: tickets.ROADMAP_BRIEF,
+        instructions_id: instructions.instructions_id,
       });
       await page.reload();
       const roadmap = await openPlanDocument(page, "RoadMap");

@@ -68,3 +68,23 @@ export function rowsOf<Row>(answer: ToolAnswer, field: string): Row[] {
   if (!Array.isArray(value)) throw new Error(`${field} is not a list: ${JSON.stringify(answer)}`);
   return value as Row[];
 }
+
+/**
+ * Reads the instructions a board agent works under for `purpose` (`read_instructions`) and
+ * returns the whole answer; its `instructions_id` goes with what the worker writes to them.
+ */
+export async function readInstructions(
+  page: Page,
+  token: string,
+  boardId: string,
+  loopId: string,
+  purpose: string,
+): Promise<ToolAnswer & { instructions_id: string }> {
+  const answer = await mcpCall(page, token, "read_instructions", {
+    board_id: boardId,
+    loop_id: loopId,
+    purpose,
+  });
+  expect(typeof answer.instructions_id).toBe("string");
+  return { ...answer, instructions_id: String(answer.instructions_id) };
+}

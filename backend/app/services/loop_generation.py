@@ -47,18 +47,25 @@ from .loop_generation_agents import (
 )
 from .loop_generation_ask import MAX_REPAIRS, CompletionCall
 from .loop_generation_execute import CLOSED_LOOP_CODES, RunContext, execute_run
-from .loop_generation_prompts import (
+from .loop_generation_instructions import (
     BRIEF_PURPOSES,
+    INSTRUCTION_PURPOSES,
+    InstructionAgent,
+    LinkedRepositories,
+    WritingInstructions,
+    check_instructions,
+    instructions_id,
+    repository_checks,
+)
+from .loop_generation_prompts import (
     DEFAULT_CONTEXT_CHARS,
     FENCE,
-    INSTRUCTION_PURPOSES,
     MAX_FACE_EXAMPLES,
     MAX_OUTPUT_CHARS,
     PURPOSE_PROMPTS,
     SCHEMAS,
     SNAPSHOT_CAPS,
     JsonObject,
-    WritingInstructions,
     compose_system_prompt,
     face_examples,
     face_examples_text,
@@ -150,6 +157,7 @@ class LoopGenerationService:
         clock: Callable[[], datetime] = _now,
         new_id: Callable[[], str] = _new_id,
         background: bool = True,
+        repositories: LinkedRepositories | None = None,
     ) -> None:
         self.settings = settings
         self.board_service = board_service
@@ -162,6 +170,9 @@ class LoopGenerationService:
         # The board's repositories, as a snapshot or as the workspace a model reads through tools
         # (decisions 0011 and 0025). Absent in tests that only exercise the document flow.
         self.snapshots = snapshots
+        # The board's repositories as a worker checks for them (read_instructions); absent in tests
+        # that only exercise generation, which then list none.
+        self.repositories = repositories
         self.idempotency_ttl_seconds = idempotency_ttl_seconds
         # Documents and repository snapshot together (TRALALA_GENERATION_CONTEXT_CHARS); for a
         # model that reads the repositories through tools, the whole conversation, with the tool
@@ -331,9 +342,11 @@ class LoopGenerationService:
         """The instructions a board agent works under for ``purpose`` in this Loop, word for word:
         the role of the agent a run would use with the purpose's rules and schema, composed as a
         run composes them (``_system_prompt``); for an analysis or a RoadMap the same for its
-        brief for people, which the worker writes with it; and for a RoadMap the approved faces its
-        request shows. A worker that writes the document itself works to the same text. Without a
-        usable agent there is no role, and the rules and the schema still stand."""
+        brief for people, which the worker writes with it, and the board's repositories that agent
+        reads; for a RoadMap the approved faces its request shows; and the id of all of it, which
+        the worker hands in with what it wrote (``require_instructions``). A worker that writes
+        the document itself works to the same text. Without a usable agent there is no role, and
+        the rules and the schema still stand."""
         actor.require("loops:generate")
         if purpose not in INSTRUCTION_PURPOSES:
             raise ValidationFailure(
@@ -350,25 +363,50 @@ class LoopGenerationService:
             )
         brief = BRIEF_PURPOSES.get(purpose)
         try:
-            agent = self._resolve_agent(None, board_id, loop_id, purpose)
+            agent: AgentsRow | None = self._resolve_agent(None, board_id, loop_id, purpose)
         except ServiceUnavailable:
-            return {
-                "purpose": purpose,
-                "agent": None,
-                "role_source": None,
-                "instructions": self._compose_system_prompt(purpose, ""),
-                "brief_instructions": self._compose_system_prompt(brief, "") if brief else None,
-                "examples": examples,
-            }
+            agent = None
+        who: InstructionAgent | None = None
+        role_source: str | None = None
+        if agent is None:
+            text = self._compose_system_prompt(purpose, "")
+            brief_text = self._compose_system_prompt(brief, "") if brief else None
+        else:
+            who = {"id": agent.id, "name": agent.name}
+            role_source = self._role_prompt(agent)["role_source"]
+            text = self._system_prompt(purpose, agent)
+            # The brief comes from the agent of its document (AGENT_PURPOSE), so the same one.
+            brief_text = self._system_prompt(brief, agent) if brief else None
+        # A document reads the board's repositories; a brief reads the document.
+        repositories = None
+        if brief:
+            linked = self.repositories.for_board(board_id) if self.repositories else []
+            repositories = repository_checks(linked)
         return {
             "purpose": purpose,
-            "agent": {"id": agent.id, "name": agent.name},
-            "role_source": self._role_prompt(agent)["role_source"],
-            "instructions": self._system_prompt(purpose, agent),
-            # The brief comes from the agent of its document (AGENT_PURPOSE), so the same one.
-            "brief_instructions": self._system_prompt(brief, agent) if brief else None,
+            "agent": who,
+            "role_source": role_source,
+            "instructions": text,
+            "brief_instructions": brief_text,
             "examples": examples,
+            "repositories": repositories,
+            "instructions_id": instructions_id(purpose, text, brief_text, examples, repositories),
         }
+
+    def require_instructions(
+        self,
+        actor: ActorContext,
+        board_id: str,
+        loop_id: str,
+        purpose: str,
+        given: str | None,
+    ) -> str:
+        """A worker's document for ``purpose`` is written to the current instructions: the id it
+        hands in is the one ``instructions`` answers now, or it is refused
+        (``check_instructions``). Answers that id."""
+        current = self.instructions(actor, board_id, loop_id, purpose)["instructions_id"]
+        check_instructions(current, given, purpose)
+        return current
 
     def _start(
         self,

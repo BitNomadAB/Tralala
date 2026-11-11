@@ -30,8 +30,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Protocol, TypedDict
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, JsonValue, ValidationError
 
@@ -48,53 +48,49 @@ from .agent_tools_schema import (
     string_argument,
 )
 from .loop_documents_human_limits import SIGN_QUESTION_EXAMPLE
-from .loop_generation_prompts import BRIEF_PURPOSES
 from .loops import DOCUMENT_KINDS
 from .ticket_face import FACE_INVALID, FACE_STEP_BAD, FACE_STEP_GOOD
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from .loop_documents import LoopDocumentService
     from .loop_documents_views import DocumentsView
-    from .loop_generation import LoopGenerationService
-    from .repositories import RepositoryEntry
+    from .loop_generation_instructions import WritingInstructions
 
 # A schema error answers at most this many lines; the count says how many there were.
 MAX_ERROR_LINES = 20
 
 
-class PlanWriting(Protocol):
-    """What ``write_analysis`` and ``write_roadmap`` use of the composition root."""
+class Instructions(Protocol):
+    """``LoopGenerationService`` as the plan tools read it: the instructions a board agent works
+    under, and the check that holds a worker's document to them."""
 
-    @property
-    def loop_document(self) -> LoopDocumentService: ...
+    def instructions(
+        self, actor: ActorContext, board_id: str, loop_id: str, purpose: str
+    ) -> WritingInstructions: ...
 
-
-class LinkedRepositories(Protocol):
-    """``RepositoryService`` as ``read_instructions`` reads it: the board's enabled repositories
-    with their links' globs, the ones a board agent reads."""
-
-    def for_board(self, board_id: str) -> list[RepositoryEntry]: ...
+    def require_instructions(
+        self,
+        actor: ActorContext,
+        board_id: str,
+        loop_id: str,
+        purpose: str,
+        given: str | None,
+    ) -> str: ...
 
 
 class PlanInstructions(Protocol):
     """What ``read_instructions`` uses of the composition root."""
 
     @property
-    def loop_generation(self) -> LoopGenerationService: ...
+    def loop_generation(self) -> Instructions: ...
+
+
+class PlanWriting(PlanInstructions, Protocol):
+    """What ``write_analysis``, ``write_roadmap`` and ``write_brief`` use of the composition root:
+    the documents, and the instructions a worker's document is held to."""
 
     @property
-    def repository(self) -> LinkedRepositories: ...
-
-
-class RepositoryCheck(TypedDict):
-    """A repository a board agent reads, as a worker checks for it on its own machine."""
-
-    name: str
-    url: str
-    branch: str | None
-    last_read_commit: str | None
-    focus_paths: list[str]
-    exclude_paths: list[str]
+    def loop_document(self) -> LoopDocumentService: ...
 
 
 # What a worker does before it writes an analysis or a RoadMap: a board agent reads the board's
@@ -114,21 +110,6 @@ CHECK_FIRST = (
 )
 
 
-def repository_checks(entries: Sequence[RepositoryEntry]) -> list[RepositoryCheck]:
-    """The repositories a board agent reads, each with what a worker needs to find it locally."""
-    return [
-        {
-            "name": entry["name"],
-            "url": entry["url"],
-            "branch": entry["branch"] or entry["default_branch"],
-            "last_read_commit": entry.get("last_sha"),
-            "focus_paths": entry.get("focus_paths", []),
-            "exclude_paths": entry.get("exclude_paths", []),
-        }
-        for entry in entries
-    ]
-
-
 # How a worker reads the instructions of a board agent: the same text, its own means.
 INSTRUCTIONS_NOTE = (
     "These are the instructions a board agent works under for this purpose, word for word: the "
@@ -138,7 +119,11 @@ INSTRUCTIONS_NOTE = (
     "Loop with read_loop and read_document, and the code where you work. brief_instructions, "
     "when present, are what the agent writes the brief for people to: write the brief with the "
     "document, from it, and hand both in together. examples, when present, are the Ticket faces "
-    "the owner approved last, which a board agent is shown as the style to follow."
+    "the owner approved last, which a board agent is shown as the style to follow. Hand "
+    "instructions_id in with what you write: write_analysis, write_roadmap and write_brief refuse "
+    "a document without it (instructions_required), and one written to instructions that have "
+    "changed since (instructions_changed), so every worker writes under the same instructions as "
+    "a board agent."
 )
 HAND_IN = {
     "analysis": (
@@ -289,13 +274,33 @@ def _original_face_error(error: ValidationFailure, id_map: IdMap) -> ValidationF
     return ValidationFailure(_written_ids(error.message, id_map), code=error.code, details=details)
 
 
-def _provenance(actor: ActorContext) -> dict[str, object]:
+def _provenance(actor: ActorContext, instructions_id: str) -> dict[str, object]:
+    """Who handed the document in, and the instructions it was written to, as a run keeps the
+    system prompt it worked under."""
     return {
         "submitted": True,
         "through": "mcp",
         "author": actor.actor_name,
         "actor_id": actor.actor_id,
+        "instructions_id": instructions_id,
     }
+
+
+def _instructions(
+    services: PlanInstructions,
+    actor: ActorContext,
+    args: ToolArguments,
+    purpose: str,
+) -> str:
+    """The current instructions' id for ``purpose``, which the worker's ``instructions_id`` must
+    be: refused without it or when the instructions changed since it was read."""
+    return services.loop_generation.require_instructions(
+        actor,
+        _require(args, "board_id"),
+        _require(args, "loop_id"),
+        purpose,
+        _text(args.get("instructions_id")),
+    )
 
 
 def _documents(view: DocumentsView, kinds: tuple[str, ...]) -> ToolResult:
@@ -356,13 +361,14 @@ def write_analysis(services: PlanWriting, actor: ActorContext, args: ToolArgumen
     loop_id = _require(args, "loop_id")
     analysis = parse_payload(AnalysisPayload, args, "analysis")
     brief = _brief(HumanBrief, args, "analysis")
+    instructions_id = _instructions(services, actor, args, "analysis")
     submission = _submission(
         {
             "kind": "analysis",
             "analysis": analysis,
             "analysis_brief": brief,
             "expected_info_revision_id": _text(args.get("expected_info_revision_id")),
-            "provenance": _provenance(actor),
+            "provenance": _provenance(actor, instructions_id),
         }
     )
     view = services.loop_document.submit_candidate(actor, board_id, loop_id, submission)
@@ -383,13 +389,14 @@ def write_roadmap(services: PlanWriting, actor: ActorContext, args: ToolArgument
     loop_id = _require(args, "loop_id")
     plan, id_map = map_plan_ids(parse_payload(PlanPayload, args, "plan"), loop_id)
     brief = _brief(RoadmapBrief, args, "RoadMap")
+    instructions_id = _instructions(services, actor, args, "roadmap")
     submission = _submission(
         {
             "kind": "roadmap",
             "plan": plan,
             "roadmap_brief": brief,
             "expected_analysis_revision_id": _text(args.get("expected_analysis_revision_id")),
-            "provenance": _provenance(actor),
+            "provenance": _provenance(actor, instructions_id),
         }
     )
     try:
@@ -433,6 +440,7 @@ def write_brief(services: PlanWriting, actor: ActorContext, args: ToolArguments)
         if kind == "analysis"
         else parse_payload(RoadmapBrief, args, "brief")
     )
+    _instructions(services, actor, args, f"{kind}_human")
     write = BriefWrite.model_validate(
         {
             "kind": kind,
@@ -464,11 +472,12 @@ def read_instructions(
     loop_id = _require(args, "loop_id")
     purpose = _require(args, "purpose")
     view = services.loop_generation.instructions(actor, board_id, loop_id, purpose)
-    check: ToolResult = {}
-    if purpose in BRIEF_PURPOSES:
-        check["check_first"] = CHECK_FIRST
-        check["repositories"] = repository_checks(services.repository.for_board(board_id))
-    return {**check, **view, "how_to_use": INSTRUCTIONS_NOTE, "hand_in": HAND_IN[purpose]}
+    answer: ToolResult = {}
+    if view["repositories"] is not None:
+        answer["check_first"] = CHECK_FIRST
+        answer["repositories"] = view["repositories"]
+    answer.update({key: value for key, value in view.items() if key != "repositories"})
+    return {**answer, "how_to_use": INSTRUCTIONS_NOTE, "hand_in": HAND_IN[purpose]}
 
 
 def plan_tools(
@@ -505,6 +514,11 @@ def plan_tools(
         "page shows the Phases and Tickets from the plan and counts them",
     )
     loop_id = string_argument("Loop identifier from read_board or create_loop")
+    instructions_id = string_argument(
+        "The instructions_id read_instructions answered for this purpose: the document is "
+        "refused without it (instructions_required) and when the instructions changed since "
+        "(instructions_changed)"
+    )
     read_instructions_tool = AgentTool(
         name="read_instructions",
         description=(
@@ -535,7 +549,8 @@ def plan_tools(
             "Hand in your own analysis of a Loop that has Info, in Tralala's structure: the "
             "same schema, validation, rendering and review as an analysis a board agent "
             "writes. Write it to the instructions that agent works under: read_instructions "
-            "with purpose analysis, which also answers those of its brief. technical_detail is "
+            "with purpose analysis, which also answers those of its brief, and hand in the "
+            "instructions_id it answers. technical_detail is "
             "for engineers; plain_language is for a project manager and every risk, blocker, "
             "legal, security or question finding needs it. brief, your decision brief for "
             "people, is required and is the human view. A person approves it; an approved "
@@ -548,12 +563,13 @@ def plan_tools(
                 "loop_id": loop_id,
                 "analysis": analysis,
                 "brief": human_brief,
+                "instructions_id": instructions_id,
                 "expected_info_revision_id": string_argument(
                     "Optional Info revision id you wrote from (read_loop); a mismatch returns "
                     "document_stale"
                 ),
             },
-            required=["board_id", "loop_id", "analysis", "brief"],
+            required=["board_id", "loop_id", "analysis", "brief", "instructions_id"],
             definitions={**analysis_definitions, **human_definitions},
         ),
         handler=write_analysis,
@@ -564,7 +580,8 @@ def plan_tools(
             "Hand in your own RoadMap for a Loop whose analysis is approved: the Phases in "
             "order with their Tickets, in the same schema, validation and review as a "
             "generated RoadMap. Write it to the instructions a board agent works under: "
-            "read_instructions with purpose roadmap, and roadmap_human for the brief. Ids may "
+            "read_instructions with purpose roadmap, which also answers those of its brief, and "
+            "hand in the instructions_id it answers. Ids may "
             "be short (p1, t1): they become stable UUIDs, listed in id_map, so the same ids "
             "keep the same Tickets when you hand it in again; a brief may use the same short "
             "ids. Every Ticket ends with its face for people: "
@@ -584,12 +601,13 @@ def plan_tools(
                 "loop_id": loop_id,
                 "plan": plan,
                 "brief": roadmap_brief,
+                "instructions_id": instructions_id,
                 "expected_analysis_revision_id": string_argument(
                     "Optional technical analysis (analysis_ai) revision id you planned from; "
                     "a mismatch returns document_stale"
                 ),
             },
-            required=["board_id", "loop_id", "plan", "brief"],
+            required=["board_id", "loop_id", "plan", "brief", "instructions_id"],
             definitions={**plan_definitions, **roadmap_definitions},
         ),
         handler=write_roadmap,
@@ -603,7 +621,8 @@ def plan_tools(
             "write_analysis's or write_roadmap's brief argument; an analysis brief keeps its "
             "sign (see write_analysis) or is refused with brief_invalid, one message per field "
             "and rule. read_instructions with purpose analysis_human or roadmap_human gives the "
-            "instructions a board agent writes it to. Over an approved analysis or "
+            "instructions a board agent writes it to, and the instructions_id to hand in with "
+            "it. Over an approved analysis or "
             "RoadMap a person requests changes or resets it first; a brief approves nothing."
         ),
         scopes=("loops:generate",),
@@ -619,12 +638,13 @@ def plan_tools(
                         "analysis, of write_roadmap's brief for roadmap"
                     ),
                 },
+                "instructions_id": instructions_id,
                 "expected_revision_id": string_argument(
                     "Optional technical revision id (analysis_ai or roadmap_ai) you wrote the "
                     "brief from; a mismatch returns document_stale"
                 ),
             },
-            required=["board_id", "loop_id", "kind", "brief"],
+            required=["board_id", "loop_id", "kind", "brief", "instructions_id"],
         ),
         handler=write_brief,
     )
@@ -637,16 +657,14 @@ __all__ = [
     "INSTRUCTIONS_NOTE",
     "MAX_ERROR_LINES",
     "IdMap",
-    "LinkedRepositories",
+    "Instructions",
     "PlanInstructions",
     "PlanWriting",
-    "RepositoryCheck",
     "map_plan_ids",
     "parse_payload",
     "payload_errors",
     "plan_tools",
     "read_instructions",
-    "repository_checks",
     "write_analysis",
     "write_brief",
     "write_roadmap",

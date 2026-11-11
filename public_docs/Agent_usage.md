@@ -201,7 +201,13 @@ repository is not downloaded and ask whether to fetch it, and if you go on witho
 the document, claim nothing about its code and put what you could not check under
 `open_questions`, as a board agent does with a repository it could not read. Where the
 instructions speak of the agent's request, its reading tools or answering with JSON alone, you use
-your own means and hand the JSON in with the write tool. `write_analysis` and `write_roadmap` take the schemas `GET .../loops/{loop_id}/context` answers under `schemas` (and
+your own means and hand the JSON in with the write tool, with the `instructions_id` the answer
+carries. `write_analysis`, `write_roadmap` and `write_brief` require it: without it they answer
+`422 instructions_required`, and with one whose instructions have changed since (another role,
+other rules, other repositories or globs) `409 instructions_changed`, so read them again. It is
+a fingerprint of what you were handed, so every worker, whatever model it runs, writes under
+the same instructions as a board agent, and the stored document keeps the id in its provenance.
+`write_analysis` and `write_roadmap` take the schemas `GET .../loops/{loop_id}/context` answers under `schemas` (and
 `tools/list` carries them), go through the same validation as a generated candidate, get the same
 human view and wait for the same approval. `technical_detail` is written for engineers,
 `plain_language` for a project manager; every risk, blocker, legal, security or question finding

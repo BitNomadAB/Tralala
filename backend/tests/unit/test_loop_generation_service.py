@@ -36,6 +36,7 @@ from app.services.loop_documents_human import render_brief
 from app.services.loop_documents_views import DocumentsView
 from app.services.loop_generation import MAX_REPAIRS, PURPOSE_PROMPTS, LoopGenerationService
 from app.services.loop_generation_ask import FACE_REPAIR
+from app.services.loop_generation_instructions import LinkedRepositories
 from app.services.loop_generation_prompts import DEFAULT_CONTEXT_CHARS
 from app.services.loop_generation_report import MAX_EXCEPTION_TEXT
 from app.services.loop_generation_runs import MAX_OUTPUT_CHARS, stored_output
@@ -435,6 +436,7 @@ def make(
     runs: Sequence[LoopGenerationRunsRow] = (),
     clock: Callable[[], datetime] = lambda: MOMENT,
     context_chars: int = DEFAULT_CONTEXT_CHARS,
+    linked: LinkedRepositories | None = None,
 ) -> World:
     state = BoardState()
     state.loops = {
@@ -477,6 +479,7 @@ def make(
         clock=clock,
         new_id=ids,
         background=False,
+        repositories=linked,
     )
     qa = QaRecorder()
     links.bind(start_generation=service.start, apply_qa_instructions=qa)

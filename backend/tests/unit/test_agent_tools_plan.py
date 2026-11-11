@@ -5,6 +5,7 @@ the id mapping as a pure function; then what ``tools/list`` and ``/llms.txt`` sa
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import uuid
 from collections.abc import Mapping
@@ -30,6 +31,12 @@ from app.services.agent_tools import (
 )
 from app.services.loop_documents import LoopDocumentService
 from app.services.loop_documents_human_limits import SIGN_QUESTION_EXAMPLE
+from app.services.loop_generation_instructions import (
+    INSTRUCTIONS_CHANGED,
+    INSTRUCTIONS_REQUIRED,
+    WritingInstructions,
+    check_instructions,
+)
 from app.services.loop_plans import LoopPlanService
 from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
@@ -123,12 +130,49 @@ class Ids:
         return f"new-{self.issued}"
 
 
+# The id read_instructions answered the worker; the write tools hold its document to it.
+READ = "instructions-1"
+
+
+@dataclass(frozen=True, slots=True)
+class Instructions:
+    """LoopGenerationService as the write tools use it: the current instructions are READ, and
+    each check records the purpose it was made for. The fingerprint itself is tested in
+    test_loop_generation_instructions on the real service."""
+
+    checked: list[str] = dataclasses.field(default_factory=list[str])
+
+    def instructions(
+        self, actor: ActorContext, board_id: str, loop_id: str, purpose: str
+    ) -> WritingInstructions:
+        del actor, board_id, loop_id
+        return {
+            "purpose": purpose,
+            "agent": None,
+            "role_source": None,
+            "instructions": "",
+            "brief_instructions": None,
+            "examples": None,
+            "repositories": None,
+            "instructions_id": READ,
+        }
+
+    def require_instructions(
+        self, actor: ActorContext, board_id: str, loop_id: str, purpose: str, given: str | None
+    ) -> str:
+        del actor, board_id, loop_id
+        self.checked.append(purpose)
+        check_instructions(READ, given, purpose)
+        return READ
+
+
 @dataclass(frozen=True, slots=True)
 class World:
     """What the tools declare they use of the composition root, and the board under it."""
 
     loop_document: LoopDocumentService
     state: BoardState
+    loop_generation: Instructions = dataclasses.field(default_factory=Instructions)
 
     @property
     def repos(self) -> FakeBoardRepositories:
@@ -167,13 +211,15 @@ def world(*, approved_analysis: bool = False) -> World:
 
 def write(w: World, argument: str, payload: JsonValue, **extra: str) -> ToolResult:
     """``write_analysis`` for an ``analysis``, ``write_roadmap`` for a ``plan``, as the worker,
-    with the brief for people both require (``BRIEF``, ``ROADMAP_BRIEF``) unless one is given."""
+    with the brief for people both require (``BRIEF``, ``ROADMAP_BRIEF``) and the id of the
+    instructions it was written to (``READ``) unless others are given."""
     brief = BRIEF if argument == "analysis" else ROADMAP_BRIEF
     args: dict[str, JsonValue] = {
         "board_id": BOARD_ID,
         "loop_id": LOOP,
         argument: payload,
         "brief": brief,
+        "instructions_id": READ,
     }
     args.update(extra)
     handler = write_analysis if argument == "analysis" else write_roadmap
@@ -211,7 +257,13 @@ def test_write_analysis_stores_both_views_from_mcp_and_names_the_next_step() -> 
     assert technical is not None
     assert human is not None
     assert json.loads(technical.payload_json or "{}")["findings"][1]["id"] == "F-2"
-    provenance = {"submitted": True, "through": "mcp", "author": "Coder", "actor_id": "agent-1"}
+    provenance = {
+        "submitted": True,
+        "through": "mcp",
+        "author": "Coder",
+        "actor_id": "agent-1",
+        "instructions_id": READ,
+    }
     assert json.loads(technical.provenance_json) == provenance
     assert json.loads(human.provenance_json) == {**provenance, "written": True}
     assert field(answer, "documents", "analysis_ai") == {
@@ -414,7 +466,14 @@ ROADMAP_BRIEF: dict[str, JsonValue] = {"goal": ROADMAP_GOAL}
 
 
 def brief_args(kind: str, brief: JsonValue, **extra: str) -> dict[str, JsonValue]:
-    return {"board_id": BOARD_ID, "loop_id": LOOP, "kind": kind, "brief": brief, **extra}
+    return {
+        "board_id": BOARD_ID,
+        "loop_id": LOOP,
+        "kind": kind,
+        "brief": brief,
+        "instructions_id": READ,
+        **extra,
+    }
 
 
 def test_write_analysis_with_a_brief_stores_it_as_the_human_view() -> None:
@@ -428,6 +487,7 @@ def test_write_analysis_with_a_brief_stores_it_as_the_human_view() -> None:
         "through": "mcp",
         "author": "Coder",
         "actor_id": "agent-1",
+        "instructions_id": READ,
         "written": True,
     }
     assert "F-2" not in human.content
@@ -451,6 +511,31 @@ def test_a_document_without_its_brief_is_refused_and_nothing_is_stored() -> None
     # The tool list says so too, so a worker reads it before it is refused.
     for name in ("write_analysis", "write_roadmap"):
         assert "brief" in tool_catalog()[name].input_schema.get("required", [])
+
+
+def test_a_document_written_without_the_current_instructions_is_refused() -> None:
+    # Every worker writes under the instructions a board agent works under: without their id, or
+    # with one that is not current, nothing is stored.
+    w = world()
+    with pytest.raises(ValidationFailure) as missing:
+        write(w, "analysis", ANALYSIS, instructions_id="")
+    assert missing.value.code == INSTRUCTIONS_REQUIRED
+    assert missing.value.details == {"argument": "instructions_id", "purpose": "analysis"}
+    with pytest.raises(Conflict) as changed:
+        write(w, "analysis", ANALYSIS, instructions_id="instructions-0")
+    assert changed.value.code == INSTRUCTIONS_CHANGED
+    assert w.repos.documents.current(LOOP, "analysis_ai") is None
+    write(w, "analysis", ANALYSIS)
+    w.review("analysis")
+    with pytest.raises(Conflict):
+        write(w, "plan", PLAN, instructions_id="instructions-0")
+    assert w.repos.documents.current(LOOP, "roadmap_ai") is None
+    write(w, "plan", PLAN)
+    with pytest.raises(ValidationFailure):
+        write_brief(w, WORKER, brief_args("roadmap", ROADMAP_BRIEF, instructions_id=""))
+    # Each tool checks the instructions of what it writes; a brief, its own.
+    write_brief(w, WORKER, brief_args("roadmap", ROADMAP_BRIEF))
+    assert w.loop_generation.checked[-3:] == ["roadmap", "roadmap_human", "roadmap_human"]
 
 
 def test_a_brief_that_misses_a_finding_is_refused_with_its_id() -> None:
@@ -588,7 +673,13 @@ def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None
     findings = field(analysis, "properties", "analysis", "properties", "findings", "items")
     assert findings == {"$ref": "#/$defs/AnalysisFinding"}
     assert "plain_language" in keys(field(analysis, "$defs", "AnalysisFinding", "properties"))
-    assert field(analysis, "required") == ["board_id", "loop_id", "analysis", "brief"]
+    assert field(analysis, "required") == [
+        "board_id",
+        "loop_id",
+        "analysis",
+        "brief",
+        "instructions_id",
+    ]
     plan = listed["write_roadmap"]
     # The RoadMap brief is its goal alone, so it brings no definitions of its own.
     assert sorted(keys(field(plan, "$defs"))) == ["PlanPhase", "PlanTicket"]
@@ -603,7 +694,13 @@ def test_tools_list_carries_the_payload_schemas_with_their_definitions() -> None
     required = field(analysis, "properties", "brief", "required")
     assert isinstance(required, list)
     assert "size" in required and "verdict_line" in required
-    assert field(listed["write_brief"], "required") == ["board_id", "loop_id", "kind", "brief"]
+    assert field(listed["write_brief"], "required") == [
+        "board_id",
+        "loop_id",
+        "kind",
+        "brief",
+        "instructions_id",
+    ]
     assert keys(field(plan, "properties", "plan", "properties")) == [
         "schema_version",
         "summary",

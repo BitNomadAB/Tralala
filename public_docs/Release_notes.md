@@ -136,6 +136,13 @@ Worth knowing when you look at the dashboard:
   id; an answer that breaks them is sent back once and otherwise kept as prose with the position
   `unclear`. Answers stored earlier are read as they are. The server logs a repair as
   `discussion_answer_repair` and a give-up as `discussion_answer_prose`.
+- **Every AI writes under the same instructions, or not at all.** `read_instructions` answers an
+  `instructions_id`, a fingerprint of exactly what it handed out, and `write_analysis`,
+  `write_roadmap` and `write_brief` require it: without it they answer
+  `422 instructions_required`, and with one whose instructions changed since (another role,
+  other rules, other repositories or globs) `409 instructions_changed`. Whatever model a
+  connected client runs, it cannot hand in a document without having read what a board agent
+  works under, and the document keeps the id in its provenance.
 - **An AI that writes the analysis or the RoadMap itself gets the same instructions.** The new
   worker tool `read_instructions` answers, word for word, what the Loop's own agent works under
   for an analysis, a RoadMap or their briefs for people: its role, the rules and the schema, and

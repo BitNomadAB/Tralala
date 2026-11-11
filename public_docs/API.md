@@ -39,7 +39,7 @@ Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_
 `loop_not_found`,
 `loop_required`, `loop_mismatch`, `loop_read_only`, `document_stale`, `approval_required`,
 `human_action_required`, `invalid_dependency_graph`, `ticket_blocked`, `ticket_waiting`,
-`ticket_completed`, `plan_change_required`,
+`ticket_completed`, `plan_change_required`, `instructions_required`, `instructions_changed`,
 `generation_input_changed`, `generation_unavailable`, `generation_in_progress`, `qa_incomplete`.
 
 Human-only decisions (analysis approval, RoadMap approval, confirming a human-only Ticket,

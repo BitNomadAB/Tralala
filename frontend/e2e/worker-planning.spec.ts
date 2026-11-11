@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "playwright/test";
 import { blockingViolations } from "./axe";
-import { mcpCall, mcpToolNames, rowsOf } from "./mcp";
+import { mcpCall, mcpRefusal, mcpToolNames, readInstructions, rowsOf } from "./mcp";
 import {
   boardIdFromUrl,
   closeDialog,
@@ -96,11 +96,23 @@ test.describe("the planning journey over /mcp", () => {
     });
 
     await test.step("write_analysis with a brief; the person reads both views and approves", async () => {
+      // A worker writes under the instructions a board agent works under: unread, it is refused.
+      const unread = await mcpRefusal(page, token, "write_analysis", {
+        board_id: boardId,
+        loop_id: loopId,
+        analysis: plan.ANALYSIS,
+        brief: plan.ANALYSIS_BRIEF,
+      });
+      expect(unread.code).toBe("instructions_required");
+      const instructions = await readInstructions(page, token, boardId, loopId, "analysis");
+      expect(String(instructions.check_first)).toContain("not downloaded here");
+      expect(String(instructions.brief_instructions)).toContain("decision brief");
       const written = await call("write_analysis", {
         board_id: boardId,
         loop_id: loopId,
         analysis: plan.ANALYSIS,
         brief: plan.ANALYSIS_BRIEF,
+        instructions_id: instructions.instructions_id,
       });
       expect(written.brief).toMatchObject({ written: true, through: "mcp" });
       const analysis = await openDocument(page, "Analysis");
@@ -131,11 +143,13 @@ test.describe("the planning journey over /mcp", () => {
     });
 
     await test.step("write_roadmap; the person approves; the Kanban shows the Tickets", async () => {
+      const instructions = await readInstructions(page, token, boardId, loopId, "roadmap");
       const written = await call("write_roadmap", {
         board_id: boardId,
         loop_id: loopId,
         plan: plan.ROADMAP,
         brief: plan.ROADMAP_BRIEF,
+        instructions_id: instructions.instructions_id,
       });
       Object.assign(ids, (written.id_map as { tickets: Record<string, string> }).tickets);
       const roadmap = await openDocument(page, "RoadMap");
