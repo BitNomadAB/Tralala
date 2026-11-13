@@ -5,7 +5,7 @@ pytest-xdist==3.8.0
 # Coverage of the unit suite in CI, with the floor in pyproject.toml ([tool.coverage.report]).
 pytest-cov==7.1.0
 # Exact: a Ruff release can add rules to the selected families, so CI and local runs pin one.
-ruff==0.17.3
+ruff==0.17.4
 # Exact for the same reason: the strict scope in pyrightconfig.json must mean one thing everywhere.
 # The package ships pyright itself and runs it on the Node.js it finds (CI images have one).
 pyright==1.1.414
