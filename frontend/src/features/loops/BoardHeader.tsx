@@ -78,7 +78,10 @@ export function BoardHeader({
     <header className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="truncate text-2xl font-semibold tracking-tight">{board.name}</h1>
+          {/* A long name wraps instead of being cut off (WCAG 1.4.10). */}
+          <h1 className="min-w-0 break-words text-2xl font-semibold tracking-tight">
+            {board.name}
+          </h1>
           {archived ? <Chip>Archived</Chip> : null}
         </div>
         {board.description ? (

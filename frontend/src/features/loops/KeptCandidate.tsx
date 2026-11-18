@@ -29,8 +29,14 @@ export function KeptCandidate({
   const candidate = staleCandidate(run);
   if (!candidate) return null;
   const phases = reviewPlan(candidate);
+  // The box scrolls; taking the focus lets a keyboard scroll it (WCAG 2.1.1).
   const raw = (
-    <div className="max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
+    <div
+      role="group"
+      aria-label={`Kept ${scopeLabel} text`}
+      tabIndex={0}
+      className="max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin"
+    >
       {renderMarkdown(candidateMarkdown(candidate), { headingLevel: 3 })}
     </div>
   );

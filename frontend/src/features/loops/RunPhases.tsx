@@ -9,7 +9,7 @@ import {
 import { hasTree } from "@/lib/runTrace";
 import type { GenerationRun } from "@/lib/types";
 import type { RunPurpose } from "./loopUi";
-import { RunTree } from "./RunTree";
+import { FailureJson, RunTree } from "./RunTree";
 import { UnreadRepositories } from "./UnreadRepositories";
 
 /** What the step achieved, not what it was supposed to do: a skipped step says so. */
@@ -153,9 +153,9 @@ function PhaseList({
               </p>
             ) : null}
             {failureJson && step.key === failedKey ? (
-              <pre className="ml-6 overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin">
-                {failureJson}
-              </pre>
+              <div className="ml-6">
+                <FailureJson json={failureJson} />
+              </div>
             ) : null}
           </li>
         );

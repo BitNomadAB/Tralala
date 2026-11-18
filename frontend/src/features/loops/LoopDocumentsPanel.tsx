@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useAnnounceWhen } from "@/components/ui/useAnnounce";
 import { generationAgents } from "@/lib/boardAgents";
 import { keys, useAgents, useBoard, useLoopAgents, useLoopDocuments } from "@/lib/queries";
@@ -15,6 +15,7 @@ import { PlanDocumentPanel } from "./PlanDocumentPanel";
 import { approvalLine, approveRoadmapLabel, reviewPlan, ticketCount } from "./roadmapPlan";
 import { RoadmapReview } from "./RoadmapReview";
 import { ScopeReview } from "./ScopeReview";
+import { useFocusBack } from "./useFocusBack";
 import { useGenerationRun } from "./useGenerationRun";
 import { usePlanReview } from "./usePlanReview";
 
@@ -120,6 +121,11 @@ export function LoopDocumentsPanel({
   const { generating, visibleRun, activeRunId } = generation;
   const dismissRun = generating ? undefined : generation.dismissFailure;
   const generateDisabled = readOnly || generation.generate.isPending || generating;
+  // The Generate button is where the focus goes once a run panel is dismissed or a scope reset:
+  // it is always there on a scope, and it starts what the person does next (WCAG 2.4.3).
+  const generateId = useId();
+  const generateButton = () => document.getElementById(generateId);
+  useFocusBack(Boolean(visibleRun), generateButton);
 
   // A save while a run is in flight asks first; the question goes away by itself once the run ends,
   // so a later run cannot bring back a question nobody asked again.
@@ -156,6 +162,7 @@ export function LoopDocumentsPanel({
           onToggleTechnical={() => setTechnical((value) => !value)}
           agentId={agentId}
           onAgentChange={setAgentId}
+          generateId={generateId}
           candidates={candidates}
           savedAgentName={savedAgentName}
           agentLocked={readOnly || generation.following}
@@ -263,7 +270,9 @@ export function LoopDocumentsPanel({
               confirmReset={planReview.confirmWithdraw}
               onConfirmResetChange={setConfirmWithdraw}
               resetPending={planReview.resetScope.isPending}
-              onReset={() => planReview.resetScope.mutate(scope)}
+              onReset={() =>
+                planReview.resetScope.mutate(scope, { onSuccess: () => generateButton()?.focus() })
+              }
               resetTickets={planInForce ? (loop.plan?.ticket_total ?? 0) : 0}
               canReview={canReviewScope}
               approveInBrief={briefApproves}

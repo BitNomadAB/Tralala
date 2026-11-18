@@ -84,12 +84,13 @@ export function usePlanReview({
   const resetScope = useMutation({
     mutationFn: (scope: PlanScope) =>
       api.resetScope(boardId, loop.id, scope, { version: loop.version }),
-    onSuccess: () => {
+    onSuccess: (_reset, scope) => {
       setConfirmWithdraw(false);
       setFeedback("");
       invalidate();
+      // The toast is read out, so it names what was reset.
       toast.push({
-        title: "Scope reset",
+        title: scope === "analysis" ? "Analysis reset" : "RoadMap reset",
         description: "The document is cleared, so it has to be generated again.",
         variant: "success",
       });

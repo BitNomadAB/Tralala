@@ -124,6 +124,15 @@ describe("the board page", () => {
     expect(within(context ?? document.body).getByText("any enabled agent")).toBeInTheDocument();
   });
 
+  it("wraps the board's name and puts Current Loops one heading level under it", async () => {
+    renderBoard(PLATFORM, [DRAFT], SUMMARIES);
+
+    const title = await screen.findByRole("heading", { name: "Platform", level: 1 });
+    expect(title).not.toHaveClass("truncate");
+    expect(title).toHaveClass("break-words");
+    expect(screen.getByRole("heading", { name: /^Current Loops/, level: 2 })).toBeInTheDocument();
+  });
+
   it("opens today's New Loop dialog from the primary button", async () => {
     const user = renderBoard(PLATFORM, [DRAFT], SUMMARIES);
 

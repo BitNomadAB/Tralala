@@ -86,7 +86,8 @@ export function LoopHeader({
     <header className="flex flex-col gap-2">
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[22px] font-semibold leading-tight">{loop.name}</h1>
+          {/* A long name wraps instead of being cut off (WCAG 1.4.10). */}
+          <h1 className="break-words text-[22px] font-semibold leading-tight">{loop.name}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--muted-foreground)]">
             <Chip mono>{loop.key}</Chip>
             <Chip>{STAGE_WORDS[loop.stage]}</Chip>

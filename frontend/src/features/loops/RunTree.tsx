@@ -167,9 +167,15 @@ export function RunTree({
   );
 }
 
-function FailureJson({ json }: { json: string }) {
+/** The failing step's JSON; a long line scrolls, so the box takes the focus for a keyboard. */
+export function FailureJson({ json }: { json: string }) {
   return (
-    <pre className="overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin">
+    <pre
+      role="group"
+      aria-label="The run's error as JSON"
+      tabIndex={0}
+      className="overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin"
+    >
       {json}
     </pre>
   );
