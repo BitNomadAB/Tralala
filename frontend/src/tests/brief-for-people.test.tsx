@@ -75,7 +75,13 @@ describe("the brief for people", () => {
     expect(
       await screen.findByText("Approved: request changes or reset to rewrite"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Rewrite for people/ })).toBeDisabled();
+    // Focusable and read out with its reason, not a disabled button that drops out of the tab order.
+    const rewrite = screen.getByRole("button", {
+      name: /Rewrite for people/,
+      description: "Approved: request changes or reset to rewrite",
+    });
+    expect(rewrite).toHaveAttribute("aria-disabled", "true");
+    expect(rewrite).not.toBeDisabled();
   });
 
   it("says that a brief is being written while its run is on", async () => {
@@ -83,7 +89,10 @@ describe("the brief for people", () => {
       generationRun("running", "writing_for_people", { id: "run-7", purpose: "roadmap_human" }),
     ]);
     expect(await screen.findByText("Writing for people...")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Rewrite for people/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Rewrite for people/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     // The approval counts the Tickets it publishes ("Approve RoadMap · 1 Ticket").
     expect(screen.getByRole("button", { name: /^Approve RoadMap/ })).toBeDisabled();
   });
