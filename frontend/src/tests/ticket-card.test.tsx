@@ -125,16 +125,19 @@ describe("the Kanban card", () => {
     );
     expect(screen.getByText("Needs a person")).toBeInTheDocument();
     expect(screen.getByText("High")).toBeInTheDocument();
-    expect(screen.getByText(new Date("2099-01-31T12:00:00Z").toLocaleDateString())).not.toHaveClass(
-      "text-[var(--destructive)]",
-    );
+    const due = screen.getByText(new Date("2099-01-31T12:00:00Z").toLocaleDateString());
+    expect(due.parentElement).not.toHaveClass("text-[var(--destructive)]");
+    expect(due.parentElement).toHaveTextContent(/^Due \S+$/);
+    expect(screen.queryByText("Overdue")).not.toBeInTheDocument();
   });
 
-  it("shows an overdue date in the danger colour, and no priority mark without one", () => {
+  it("says an overdue date in a word as well as the danger colour, and no priority without one", () => {
     renderCard(ticketCard({ due_at: "2000-01-31T12:00:00Z" }));
-    expect(screen.getByText(new Date("2000-01-31T12:00:00Z").toLocaleDateString())).toHaveClass(
-      "text-[var(--destructive)]",
-    );
+    const due = screen.getByText(new Date("2000-01-31T12:00:00Z").toLocaleDateString());
+    expect(due).toHaveAttribute("datetime", "2000-01-31T12:00:00Z");
+    expect(due.parentElement).toHaveClass("text-[var(--destructive)]");
+    expect(screen.getByText("Overdue")).toBeVisible();
+    expect(due.parentElement).toHaveTextContent(/^Due \S+ Overdue$/);
     for (const word of ["Low", "Medium", "High", "Urgent"]) {
       expect(screen.queryByText(word)).not.toBeInTheDocument();
     }

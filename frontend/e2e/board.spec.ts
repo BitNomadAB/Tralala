@@ -76,6 +76,10 @@ test.describe("boards and cards", () => {
     await page.getByLabel("Filter tickets").fill("login");
     await expect(cardTile(page, "Todo", "Fix login bug")).toBeVisible();
     await expect(cardTile(page, "Todo", "Write documentation")).toHaveCount(0);
+    // The count is on screen and in the announcer; an empty column says why it is empty.
+    await expect(page.getByText("1 Ticket matches", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-announcer="polite"]')).toContainText("1 Ticket matches");
+    await expect(listRegion(page, "Review")).toContainText("No Tickets match the filter");
 
     await page.getByLabel("Filter tickets").fill("");
     await expect(cardTile(page, "Todo", "Write documentation")).toBeVisible();
@@ -94,5 +98,30 @@ test.describe("boards and cards", () => {
       .click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(cardTile(page, "Backlog", "Temporary card")).toHaveCount(0);
+  });
+
+  test("keeps the Kanban usable in a window as small as 400% zoom", async ({ page }) => {
+    await login(page);
+    await boardWithLoop(page, uniqueName("Zoom board"));
+    // 1280 x 1024 at 400%: 320 x 256 CSS pixels.
+    await page.setViewportSize({ width: 320, height: 256 });
+    const columns = page.getByRole("region", { name: "Loop Kanban columns" });
+    await columns.scrollIntoViewIfNeeded();
+    const box = await columns.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(200);
+    // The header is not sticky here, so it never covers the focused control.
+    await expect(page.locator("header").first()).not.toHaveCSS("position", "sticky");
+  });
+
+  test("shows a due date that has passed as Overdue in words", async ({ page }) => {
+    await login(page);
+    await boardWithLoop(page, uniqueName("Due board"));
+    await addCard(page, "Todo", "Late task");
+    const dialog = await openCard(page, "Todo", "Late task");
+    await dialog.getByRole("button", { name: "Due: None" }).click();
+    await dialog.getByLabel("Due date").fill("2000-01-31");
+    await dialog.getByLabel("Due date").press("Enter");
+    await closeDialog(page);
+    await expect(cardTile(page, "Todo", "Late task")).toContainText("Overdue");
   });
 });

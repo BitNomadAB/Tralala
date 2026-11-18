@@ -35,6 +35,7 @@ export function LoopKanban({
   lists,
   cardsByList,
   matchingIds,
+  emptyText = "Drop cards here",
   readOnly,
   onOpenCard,
   onListsChanged,
@@ -46,6 +47,8 @@ export function LoopKanban({
   lists: BoardList[];
   cardsByList: Record<string, Card[]>;
   matchingIds: Set<string> | null;
+  /** What a column without cards says (that no Ticket matches, while the filters are set). */
+  emptyText?: string;
   readOnly: boolean;
   onOpenCard: (cardId: string) => void;
   onListsChanged: () => void;
@@ -158,7 +161,8 @@ export function LoopKanban({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 gap-4">
+    // Never squeezed to a sliver when the page around it is short.
+    <div className="flex min-h-56 flex-1 gap-4">
       <DndContext
         sensors={sensors}
         accessibility={accessibility}
@@ -183,6 +187,7 @@ export function LoopKanban({
                 <KanbanColumn
                   list={list}
                   cards={cards}
+                  emptyText={emptyText}
                   readOnly={readOnly}
                   moveItems={columnMoveItems(lists, list.id, readOnly, (to) => {
                     moves.moveColumn(list.id, to, { announce: true, focus: true });

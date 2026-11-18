@@ -22,6 +22,7 @@ import type { CardControl } from "./useKanbanMoves";
 export function KanbanColumn({
   list,
   cards,
+  emptyText,
   readOnly,
   moveItems,
   cardActions,
@@ -36,6 +37,7 @@ export function KanbanColumn({
 }: {
   list: BoardList;
   cards: Card[];
+  emptyText: string;
   readOnly: boolean;
   moveItems: readonly MenuItem[];
   cardActions: (card: Card) => readonly MenuItem[];
@@ -175,7 +177,7 @@ export function KanbanColumn({
         </SortableContext>
         {cards.length === 0 ? (
           <p className="px-1 py-3 text-center text-xs text-[var(--foreground-faint)]">
-            Drop cards here
+            {emptyText}
           </p>
         ) : null}
       </div>

@@ -39,3 +39,32 @@ describe("the focus around the Ticket dialog", () => {
     });
   });
 });
+
+describe("the board's activity panel", () => {
+  it("takes the focus when it opens, closes on Escape and gives the focus back", async () => {
+    const { header, user } = await renderLoopPage("", "in_progress", {});
+    const actions = within(header).getByRole("button", { name: "Loop actions" });
+    await user.click(actions);
+    await user.click(screen.getByRole("menuitem", { name: "Board activity" }));
+
+    const panel = screen.getByRole("complementary", { name: "Board activity" });
+    // Beside the page, not fixed over it, so nothing the keyboard reaches hides behind it.
+    expect(panel).not.toHaveClass("fixed");
+    expect(within(panel).getByRole("heading", { name: "Activity" })).toHaveFocus();
+    expect(await within(panel).findByText("No activity yet.")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary", { name: "Board activity" })).not.toBeInTheDocument();
+    expect(actions).toHaveFocus();
+  });
+
+  it("gives the focus back from its close button too", async () => {
+    const { header, user } = await renderLoopPage("", "in_progress", {});
+    const actions = within(header).getByRole("button", { name: "Loop actions" });
+    await user.click(actions);
+    await user.click(screen.getByRole("menuitem", { name: "Board activity" }));
+    await user.click(screen.getByRole("button", { name: "Close activity" }));
+    expect(screen.queryByRole("complementary", { name: "Board activity" })).not.toBeInTheDocument();
+    expect(actions).toHaveFocus();
+  });
+});

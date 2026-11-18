@@ -2,19 +2,29 @@ import { Search } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
+import { useAnnounceWhen } from "@/components/ui/useAnnounce";
 import type { Priority } from "@/lib/types";
-import type { TicketFilters } from "./useLoopCards";
+import { matchText, type TicketFilters } from "./useLoopCards";
 
-/** The Kanban's filters: words, a priority, overdue only. The server searches. */
+/**
+ * The Kanban's filters: words, a priority, overdue only. The server searches. Once it has
+ * answered, `matchCount` shows beside them and a screen reader hears it (WCAG 4.1.3), since the
+ * columns change without the focus moving.
+ */
 export function KanbanFilters({
   filters,
   onFiltersChange,
+  matchCount,
 }: {
   filters: TicketFilters;
   onFiltersChange: Dispatch<SetStateAction<TicketFilters>>;
+  matchCount: number | null;
 }) {
+  const matches = matchCount === null ? "" : matchText(matchCount);
+  useAnnounceWhen(matchCount !== null, matches);
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
+      {matches ? <p className="text-xs text-[var(--muted-foreground)]">{matches}</p> : null}
       <div className="relative">
         <Search
           size={14}

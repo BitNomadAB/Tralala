@@ -107,6 +107,7 @@ export function TicketCard({
   // A manual Ticket with a key was added while the Loop's plan executes: outside the plan.
   const unplanned = card.kind === "manual" && card.ticket_key !== null;
   const priority = card.priority === "none" ? null : card.priority;
+  const overdue = card.due_at !== null && isOverdue(card.due_at, card.completed_at);
 
   return (
     <li
@@ -182,14 +183,18 @@ export function TicketCard({
           </span>
         ) : null}
         {card.due_at ? (
+          // Overdue is said in a word, not by the colour alone (WCAG 1.4.1).
           <span
             className={cn(
               "inline-flex items-center gap-1 tabular-nums",
-              isOverdue(card.due_at, card.completed_at) && "text-[var(--destructive)]",
+              overdue && "text-[var(--destructive)]",
             )}
           >
             <CalendarClock size={12} aria-hidden="true" />
-            {new Date(card.due_at).toLocaleDateString()}
+            {/* The spaces keep the words apart for a screen reader; the flex row drops them. */}
+            <span className="sr-only">Due</span>{" "}
+            <time dateTime={card.due_at}>{new Date(card.due_at).toLocaleDateString()}</time>{" "}
+            {overdue ? <span className="font-semibold">Overdue</span> : null}
           </span>
         ) : null}
         {done ? (

@@ -19,7 +19,7 @@ import { LoopNotesPanel } from "./LoopNotesPanel";
 import { LoopNotices } from "./LoopNotices";
 import { LoopPlanTab } from "./LoopPlanTab";
 import { LoopToolbar } from "./LoopToolbar";
-import { NO_FILTERS, useLoopCards, type TicketFilters } from "./useLoopCards";
+import { emptyColumnText, NO_FILTERS, useLoopCards, type TicketFilters } from "./useLoopCards";
 import { parseTab, useLoopView } from "./useLoopView";
 import { useTicketDialog } from "./useTicketDialog";
 
@@ -50,7 +50,7 @@ export function LoopPage() {
   if (!seen.has(view.tab)) setSeen(new Set([...seen, view.tab]));
 
   const lists = useMemo(() => listsQuery.data ?? [], [listsQuery.data]);
-  const { cardsByList, ticketHref, matchingIds } = useLoopCards({
+  const { cardsByList, ticketHref, matchingIds, matchCount } = useLoopCards({
     boardId,
     loopId,
     lists,
@@ -118,8 +118,10 @@ export function LoopPage() {
   return (
     <section
       className={cn(
-        "flex flex-col gap-3",
-        kanban ? "h-[calc(100vh-7rem)]" : "min-h-[calc(100vh-7rem)]",
+        "flex min-h-[calc(100vh-7rem)] flex-col gap-3",
+        // The Kanban fills the window and scrolls inside its columns, but only in a window tall
+        // enough for that; a short one (400% zoom) lets the page grow and scroll (WCAG 1.4.10).
+        kanban && "[@media(min-height:36rem)]:h-[calc(100vh-7rem)]",
       )}
     >
       <LoopToolbar board={board} />
@@ -137,61 +139,64 @@ export function LoopPage() {
 
       <LoopNotices board={board} loop={loop} readOnly={readOnly} />
 
-      <Tabs
-        value={view.tab}
-        onChange={(tab) => view.show(parseTab(tab))}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        <TabList label="Loop views" className="mb-1">
-          <Tab value="kanban">Kanban</Tab>
-          <Tab value="plan">Plan</Tab>
-          <Tab value="notes">Notes</Tab>
-        </TabList>
-        <TabPanel value="kanban" className="flex min-h-0 flex-1 flex-col gap-3">
-          <KanbanFilters filters={filters} onFiltersChange={setFilters} />
-          <LoopKanban
-            boardId={boardId}
-            loopId={loopId}
-            lists={lists}
-            cardsByList={cardsByList}
-            matchingIds={matchingIds}
-            readOnly={readOnly}
-            onOpenCard={dialog.openCard}
-            onListsChanged={invalidateLists}
-            onCardsChanged={invalidateCards}
-          >
-            <AddColumnForm
-              adding={addingList}
-              onAddingChange={setAddingList}
-              name={listName}
-              onNameChange={setListName}
-              readOnly={readOnly}
-              onCreate={(name) => createListMutation.mutate(name)}
-            />
-          </LoopKanban>
-        </TabPanel>
-        <TabPanel value="plan" className="pt-2">
-          {seen.has("plan") ? (
-            <LoopPlanTab
+      <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+        <Tabs
+          value={view.tab}
+          onChange={(tab) => view.show(parseTab(tab))}
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+        >
+          <TabList label="Loop views" className="mb-1">
+            <Tab value="kanban">Kanban</Tab>
+            <Tab value="plan">Plan</Tab>
+            <Tab value="notes">Notes</Tab>
+          </TabList>
+          <TabPanel value="kanban" className="flex min-h-0 flex-1 flex-col gap-3">
+            <KanbanFilters filters={filters} onFiltersChange={setFilters} matchCount={matchCount} />
+            <LoopKanban
               boardId={boardId}
-              loop={loop}
-              doc={view.doc}
-              onDocChange={(doc) => view.show("plan", doc)}
+              loopId={loopId}
+              lists={lists}
+              cardsByList={cardsByList}
+              matchingIds={matchingIds}
+              emptyText={emptyColumnText(matchingIds !== null, matchCount)}
               readOnly={readOnly}
-              onChanged={onLoopChanged}
-            />
-          ) : null}
-        </TabPanel>
-        <TabPanel value="notes" className="pt-2">
-          {seen.has("notes") ? (
-            <LoopNotesPanel boardId={boardId} loop={loop} readOnly={readOnly} />
-          ) : null}
-        </TabPanel>
-      </Tabs>
+              onOpenCard={dialog.openCard}
+              onListsChanged={invalidateLists}
+              onCardsChanged={invalidateCards}
+            >
+              <AddColumnForm
+                adding={addingList}
+                onAddingChange={setAddingList}
+                name={listName}
+                onNameChange={setListName}
+                readOnly={readOnly}
+                onCreate={(name) => createListMutation.mutate(name)}
+              />
+            </LoopKanban>
+          </TabPanel>
+          <TabPanel value="plan" className="pt-2">
+            {seen.has("plan") ? (
+              <LoopPlanTab
+                boardId={boardId}
+                loop={loop}
+                doc={view.doc}
+                onDocChange={(doc) => view.show("plan", doc)}
+                readOnly={readOnly}
+                onChanged={onLoopChanged}
+              />
+            ) : null}
+          </TabPanel>
+          <TabPanel value="notes" className="pt-2">
+            {seen.has("notes") ? (
+              <LoopNotesPanel boardId={boardId} loop={loop} readOnly={readOnly} />
+            ) : null}
+          </TabPanel>
+        </Tabs>
 
-      {showActivity ? (
-        <ActivityPanel boardId={boardId} onClose={() => setShowActivity(false)} />
-      ) : null}
+        {showActivity ? (
+          <ActivityPanel boardId={boardId} onClose={() => setShowActivity(false)} />
+        ) : null}
+      </div>
 
       {dialog.open ? (
         <TicketModal
