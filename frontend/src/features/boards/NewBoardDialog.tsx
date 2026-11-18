@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { useToast } from "@/components/ui/useToast";
 import { AgentPicker } from "@/features/boards/AgentPicker";
 import { pathsPayload, type RepositoryPathsDrafts } from "@/features/boards/repositoryPaths";
@@ -11,11 +12,15 @@ import { RepositoryPicker } from "@/features/boards/RepositoryPicker";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { useTemplates } from "@/lib/queries";
+import { useTemplateDescription } from "./useTemplateDescription";
+
+const DESCRIPTION_ID = "board-description";
 
 /**
  * Creates a board, optionally from a template, and opens it. Always mounted, so a name typed and
  * then cancelled is still there next time; the template and the selections reset when the dialog
- * is dismissed.
+ * is dismissed. A template fills in its description only while the person has not written one;
+ * words they wrote stay, with the template's offered beside the choice (WCAG 3.3.4).
  */
 export function NewBoardDialog({
   open,
@@ -27,8 +32,10 @@ export function NewBoardDialog({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const announce = useAnnounce();
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const descriptionField = useTemplateDescription();
+  const { description } = descriptionField;
   const [templateId, setTemplateId] = useState("");
   const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
   const [repositoryPaths, setRepositoryPaths] = useState<RepositoryPathsDrafts>({});
@@ -50,7 +57,7 @@ export function NewBoardDialog({
       void queryClient.invalidateQueries({ queryKey: ["boards"] });
       onOpenChange(false);
       setName("");
-      setDescription("");
+      descriptionField.clear();
       setTemplateId("");
       setRepositoryIds([]);
       setRepositoryPaths({});
@@ -74,6 +81,7 @@ export function NewBoardDialog({
         onOpenChange(next);
         if (!next) {
           setTemplateId("");
+          descriptionField.dropOffer();
           setRepositoryIds([]);
           setRepositoryPaths({});
           setAgentIds([]);
@@ -106,7 +114,12 @@ export function NewBoardDialog({
                 const next = event.target.value;
                 setTemplateId(next);
                 const template = templates.find((entry) => entry.id === next);
-                setDescription(template ? template.description : "");
+                const choice = descriptionField.choose(template ? template.description : "");
+                if (choice === "kept" && template?.description) {
+                  announce(
+                    "Your description is kept. The next button, Use the template's description, replaces it.",
+                  );
+                }
               }}
             >
               <option value="">Blank board (Backlog → Done)</option>
@@ -129,6 +142,22 @@ export function NewBoardDialog({
                   Labels: {selectedTemplate.labels.map((label) => label.name).join(", ")}
                 </p>
               ) : null}
+              {descriptionField.offer !== null ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <p>The template has its own description; yours is kept.</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      descriptionField.takeOffer();
+                      // The button goes once it is used; the text it brought is where focus goes.
+                      document.getElementById(DESCRIPTION_ID)?.focus();
+                    }}
+                  >
+                    Use the template&apos;s description
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
           <RepositoryPicker
@@ -138,11 +167,11 @@ export function NewBoardDialog({
             onPathsChange={setRepositoryPaths}
           />
           <AgentPicker selected={agentIds} onChange={setAgentIds} />
-          <Field label="Description" htmlFor="board-description">
+          <Field label="Description" htmlFor={DESCRIPTION_ID}>
             <Textarea
-              id="board-description"
+              id={DESCRIPTION_ID}
               value={description}
-              onChange={(event) => setDescription(event.target.value)}
+              onChange={(event) => descriptionField.write(event.target.value)}
               maxLength={20000}
             />
           </Field>

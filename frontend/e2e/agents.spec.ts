@@ -37,6 +37,10 @@ test.describe("role templates and agents", () => {
       .getByRole("link", { name: "Edit Lead Developer" })
       .click();
     await page.getByRole("button", { name: "Restore factory prompt" }).click();
+    await page
+      .getByRole("dialog", { name: "Replace your prompt with the factory text?" })
+      .getByRole("button", { name: "Replace prompt" })
+      .click();
     await expect(page.getByLabel("System prompt")).toHaveValue(/Lead Developer/);
     await page.getByRole("button", { name: "Save role" }).click();
     await expect(roleRow(page, "Lead Developer")).not.toContainText("customized");

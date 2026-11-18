@@ -53,6 +53,10 @@ test("the last enabled administrator cannot be disabled", async ({ page }) => {
   await login(page);
   await page.goto("/settings");
   await page.getByRole("button", { name: "Disable admin" }).click();
+  await page
+    .getByRole("dialog", { name: "Disable your own account?" })
+    .getByRole("button", { name: "Disable account" })
+    .click();
   await expect(page.getByText("At least one enabled administrator must remain")).toBeVisible();
 });
 
@@ -98,6 +102,10 @@ test("disabling a person revokes the agent access they issued", async ({ page, b
   const row = page.locator("li").filter({ hasText: name });
   await expect(row.getByText("1 agent access")).toBeVisible();
   await page.getByRole("button", { name: `Disable ${name}` }).click();
+  await page
+    .getByRole("dialog", { name: `Disable ${name}?` })
+    .getByRole("button", { name: "Disable account" })
+    .click();
   await expect(row.getByText("0 agent accesses")).toBeVisible();
 
   // The key the member issued no longer authenticates.

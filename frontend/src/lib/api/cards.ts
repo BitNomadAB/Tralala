@@ -63,6 +63,15 @@ export const cardsApi = {
     );
   },
 
+  /** Brings an archived column back, as the last column of the Loop. */
+  async restoreList(boardId: string, loopId: string, listId: string): Promise<BoardList> {
+    return json(
+      await request<BoardList>(`/boards/${boardId}/loops/${loopId}/lists/${listId}/restore`, {
+        method: "POST",
+      }),
+    );
+  },
+
   async listBoardTickets(
     boardId: string,
     params: { q?: string; limit?: number } = {},

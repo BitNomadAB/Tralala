@@ -41,6 +41,10 @@ test.describe("repositories", () => {
       .filter({ hasText: renamed })
       .getByRole("button", { name: `Remove ${renamed}` })
       .click();
+    await page
+      .getByRole("dialog", { name: `Remove ${renamed}?` })
+      .getByRole("button", { name: "Remove repository" })
+      .click();
     await expect(page.getByRole("listitem").filter({ hasText: renamed })).toHaveCount(0);
   });
 
@@ -65,6 +69,10 @@ test.describe("repositories", () => {
     await expect(page.getByText("Mirror removed")).toBeVisible();
 
     await entry.getByRole("button", { name: `Remove ${name}`, exact: true }).click();
+    await page
+      .getByRole("dialog", { name: `Remove ${name}?` })
+      .getByRole("button", { name: "Remove repository" })
+      .click();
     await expect(page.getByRole("listitem").filter({ hasText: name })).toHaveCount(0);
   });
 

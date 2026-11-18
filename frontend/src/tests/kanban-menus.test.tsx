@@ -121,3 +121,36 @@ describe("moving a column from its menu", () => {
     });
   });
 });
+
+describe("archiving a column", () => {
+  /** The names of the columns shown, left to right. */
+  const columnNames = () =>
+    screen.getAllByRole("region", { name: /^Column / }).map((region) => region.ariaLabel);
+
+  it("offers Undo, which brings the column back where it stood with the focus on its menu", async () => {
+    const { user, server, column } = await renderBoard();
+    const backlog = await column("Backlog");
+    await user.click(within(backlog).getByRole("button", { name: "Column actions for Backlog" }));
+    await user.click(screen.getByRole("menuitem", { name: "Archive column" }));
+
+    expect(await screen.findByText("Column archived")).toBeInTheDocument();
+    await waitFor(() => expect(columnNames()).toEqual(["Column In Progress", "Column Done"]));
+
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+
+    expect(await screen.findByText("Column restored")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(columnNames()).toEqual(["Column Backlog", "Column In Progress", "Column Done"]),
+    );
+    // Restored last, then moved back to its place: one request each.
+    expect(server.writes.map((write) => write.route)).toEqual([
+      `POST ${LOOP_PATH}/lists/list-1/archive`,
+      `POST ${LOOP_PATH}/lists/list-1/restore`,
+      `POST ${LOOP_PATH}/lists/list-1/move`,
+    ]);
+    expect(server.writes[2]?.body).toEqual({ position: 0 });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Column actions for Backlog" })).toHaveFocus(),
+    );
+  });
+});

@@ -117,6 +117,33 @@ describe("the dashboard's boards", () => {
   });
 });
 
+describe("undoing an archive", () => {
+  it("offers Undo in the toast, which restores the board and keeps focus with its tile", async () => {
+    const user = renderDashboard([PLATFORM, WEBSITE]);
+    await screen.findByRole("link", { name: "Website" });
+    await user.click(screen.getByRole("button", { name: "More actions for Website" }));
+    await user.click(screen.getByRole("menuitem", { name: "Archive board" }));
+    const archived = await screen.findByRole("list", { name: "Archived boards" });
+    expect(within(archived).getByRole("link", { name: "Website" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+
+    expect(await screen.findByText("Board restored")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("list", { name: "Archived boards" })).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("list", { name: "Boards" })).getByRole("button", {
+          name: "More actions for Website",
+        }),
+      ).toHaveFocus(),
+    );
+    // Undo is offered for an archive only: the restore's own toast has none.
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+  });
+});
+
 describe("boardCountWords", () => {
   it("counts the boards a search or filter found, and names the archived among them", () => {
     expect(boardCountWords(2, 1, true)).toBe("3 boards match (1 archived).");

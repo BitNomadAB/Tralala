@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/useAuth";
 import { api } from "@/lib/api";
 import type { Repository } from "@/lib/types";
-import { entryControlId, focusById, removalFocusTarget } from "./removalFocus";
+import { ConfirmDialog, type Confirmation } from "./ConfirmDialog";
+import { entryControlId, removalFocusTarget, useRemovalFocus } from "./removalFocus";
 import { RepositoryDialog, type RepositoryDraft } from "./RepositoryDialog";
 import { RepositoryRow } from "./RepositoryRow";
 import { REPOSITORIES_KEY, useRepositoryActions } from "./useRepositoryActions";
@@ -36,11 +37,28 @@ function draftOf(repository: Repository): RepositoryDraft {
   };
 }
 
+/** What removing `repository` takes away, asked first: it cannot be undone (WCAG 3.3.4). */
+function removeQuestion(repository: Repository): Confirmation {
+  const mirror = repository.provider === "git_https" ? ", and deletes Tralala's mirror of it" : "";
+  const boards = repository.boards.map((board) => board.name);
+  const used =
+    boards.length === 0
+      ? ""
+      : ` ${boards.length === 1 ? "The board" : "The boards"} ${boards.join(", ")} can no longer read it.`;
+  return {
+    title: `Remove ${repository.name}?`,
+    consequence: `This removes the repository and its stored key from Tralala${mirror}.${used} This cannot be undone.`,
+    confirmLabel: "Remove repository",
+  };
+}
+
 export function RepositoriesPage() {
   const { actor } = useAuth();
   usePageTitle({ page: "repositories" });
   const isAdmin = actor?.role === "admin";
   const [draft, setDraft] = useState<RepositoryDraft | null>(null);
+  const [removing, setRemoving] = useState<Repository | null>(null);
+  const removalFocus = useRemovalFocus();
   const { save, check, remove, mirror, checks } = useRepositoryActions(() => setDraft(null));
 
   const repositoriesQuery = useQuery({
@@ -50,7 +68,8 @@ export function RepositoriesPage() {
   });
   const repositories = repositoriesQuery.data ?? [];
 
-  // A removed repository's row goes with its buttons, so focus moves to the next row first.
+  // A removed repository's row goes with its buttons, so the dialog stays open until it is gone
+  // and then gives focus to the next row; after a refusal, back to the row's Remove button.
   function removeRepository(repositoryId: string) {
     const target = removalFocusTarget(
       repositories.map((repository) => repository.id),
@@ -58,7 +77,13 @@ export function RepositoriesPage() {
       checkId,
       HEADING_ID,
     );
-    remove.mutate(repositoryId, { onSuccess: () => focusById(target) });
+    remove.mutate(repositoryId, {
+      onSuccess: () => {
+        removalFocus.remember(target);
+        setRemoving(null);
+      },
+      onError: () => setRemoving(null),
+    });
   }
 
   if (!isAdmin) {
@@ -111,12 +136,25 @@ export function RepositoriesPage() {
               }}
               onCheck={() => check.mutate(repository.id)}
               onEdit={() => setDraft(draftOf(repository))}
-              onRemove={() => removeRepository(repository.id)}
+              onRemove={() => setRemoving(repository)}
               onMirror={(action) => mirror.mutate({ repositoryId: repository.id, action })}
             />
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        question={removing ? removeQuestion(removing) : null}
+        busy={remove.isPending ? "Removing…" : null}
+        onCancel={() => {
+          // Once asked, the removal is under way; the dialog closes when it is done.
+          if (!remove.isPending) setRemoving(null);
+        }}
+        onConfirm={() => {
+          if (removing) removeRepository(removing.id);
+        }}
+        onCloseAutoFocus={removalFocus.onCloseAutoFocus}
+      />
 
       {draft ? (
         <RepositoryDialog

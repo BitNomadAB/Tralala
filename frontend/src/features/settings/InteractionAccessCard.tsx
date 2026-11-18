@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import type { Credential } from "@/lib/types";
 import { AgentAccessGuide } from "./AgentAccessGuide";
+import { ConfirmDialog, type Confirmation } from "./ConfirmDialog";
 import { COPY_BY_HAND, copyText } from "./copyText";
 import { CredentialRow } from "./CredentialRow";
 import { IssuedTokenDialog } from "./IssuedTokenDialog";
@@ -19,6 +20,28 @@ const ROTATE_AND_REVOKE =
   "Rotate issues a new token with the same scopes and revokes the old one at once. Revoke stops a key for good.";
 
 const NEW_ACCESS_ID = "new-access-key";
+
+/** A key the person chose to rotate or revoke, waiting for them to confirm (WCAG 3.3.4). */
+interface KeyAction {
+  type: "rotate" | "revoke";
+  credential: Credential;
+}
+
+/** What the confirmation asks and says: neither action can be undone. */
+function confirmation({ type, credential }: KeyAction): Confirmation {
+  return type === "revoke"
+    ? {
+        title: `Revoke ${credential.name}?`,
+        consequence: "Agents using this key lose access at once. This cannot be undone.",
+        confirmLabel: "Revoke key",
+      }
+    : {
+        title: `Rotate ${credential.name}?`,
+        consequence:
+          "The old token stops working at once, so agents using it lose access until they get the new one. You get the new token once.",
+        confirmLabel: "Rotate key",
+      };
+}
 
 interface InteractionAccessCardProps {
   isAdmin: boolean;
@@ -56,6 +79,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
 
   const [creating, setCreating] = useState(false);
   const [issued, setIssued] = useState<Credential | null>(null);
+  const [asking, setAsking] = useState<KeyAction | null>(null);
   // A token issued from the New access key dialog gives focus back to that button on closing,
   // as the dialog that opened it is gone; a rotated one gives it back to the Rotate button.
   const [returnFocusId, setReturnFocusId] = useState<string | null>(null);
@@ -131,8 +155,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         rotating={rotateMutation.isPending}
         revoking={revokeMutation.isPending && revokeMutation.variables.id === credential.id}
         hintId={showOwner ? othersHintId : mineHintId}
-        onRotate={() => rotateMutation.mutate(credential)}
-        onRevoke={() => revokeMutation.mutate(credential)}
+        onRotate={() => setAsking({ type: "rotate", credential })}
+        onRevoke={() => setAsking({ type: "revoke", credential })}
       />
     );
   }
@@ -204,6 +228,17 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
           </p>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        question={asking ? confirmation(asking) : null}
+        onCancel={() => setAsking(null)}
+        onConfirm={() => {
+          if (!asking) return;
+          setAsking(null);
+          if (asking.type === "revoke") revokeMutation.mutate(asking.credential);
+          else rotateMutation.mutate(asking.credential);
+        }}
+      />
 
       <NewAccessDialog
         open={creating}

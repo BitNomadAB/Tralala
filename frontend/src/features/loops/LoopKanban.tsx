@@ -26,8 +26,8 @@ import { useKanbanMoves } from "./useKanbanMoves";
 /**
  * The Loop's columns with drag and drop: a card moves between columns optimistically, a column moves
  * by position. The same moves are in the card's and the column's menus, for a single pointer or a
- * keyboard without dragging (WCAG 2.5.7). `children` is the slot after the last column ("Add
- * column").
+ * keyboard without dragging (WCAG 2.5.7). Archiving a column offers Undo (`useKanbanMoves`).
+ * `children` is the slot after the last column ("Add column").
  */
 export function LoopKanban({
   boardId,
@@ -80,23 +80,6 @@ export function LoopKanban({
       onListsChanged();
       toast.push({
         title: "Could not rename column",
-        description: describeError(error, undefined),
-        variant: "error",
-      });
-    },
-  });
-
-  const archiveListMutation = useMutation({
-    mutationFn: (listId: string) => api.archiveList(boardId, loopId, listId),
-    onSuccess: () => {
-      onListsChanged();
-      onCardsChanged();
-    },
-    onError: (error) => {
-      moves.columnFocused();
-      onListsChanged();
-      toast.push({
-        title: "Could not archive column",
         description: describeError(error, undefined),
         variant: "error",
       });
@@ -178,7 +161,7 @@ export function LoopKanban({
           role="region"
           aria-label="Loop Kanban columns"
         >
-          {lists.map((list: BoardList, index) => {
+          {lists.map((list: BoardList) => {
             const allCards = cardsByList[list.id] ?? [];
             const cards = matchingIds
               ? allCards.filter((card) => matchingIds.has(card.id))
@@ -208,17 +191,7 @@ export function LoopKanban({
                     await createCardMutation.mutateAsync({ listId: list.id, title });
                   }}
                   onRename={(name) => renameListMutation.mutate({ listId: list.id, name })}
-                  onArchive={() => {
-                    // The focus goes on to the next column's menu (the one before, at the end).
-                    const next = lists[index + 1] ?? lists[index - 1];
-                    if (next) {
-                      moves.focusColumn(
-                        next.id,
-                        (shown) => !shown.some((item) => item.id === list.id),
-                      );
-                    }
-                    archiveListMutation.mutate(list.id);
-                  }}
+                  onArchive={() => moves.archiveColumn(list)}
                 />
               </div>
             );
