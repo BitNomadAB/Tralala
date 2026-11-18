@@ -67,7 +67,12 @@ export function TicketView({
   if (data.card.isLoading) {
     return (
       <div className="p-7">
-        {wrap(<Heading className="sr-only">Ticket</Heading>)}
+        {/* Keeps the outline (and the dialog's name) until the title comes; route focus waits. */}
+        {wrap(
+          <Heading className="sr-only" data-heading-placeholder="">
+            Ticket
+          </Heading>,
+        )}
         <p className="text-sm text-[var(--muted-foreground)]">Loading Ticket…</p>
       </div>
     );
