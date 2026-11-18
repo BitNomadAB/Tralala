@@ -15,10 +15,26 @@ export interface TicketFilters {
 
 export const NO_FILTERS: TicketFilters = { q: "", priority: "", overdue: false };
 
+/** How many Tickets the filters match, in words: "No Tickets match", "1 Ticket matches". */
+export function matchText(count: number): string {
+  if (count === 0) return "No Tickets match";
+  return count === 1 ? "1 Ticket matches" : `${String(count)} Tickets match`;
+}
+
+/**
+ * What an empty column says: where cards go while no filter is set, else that the search is still
+ * under way or that none of its Tickets match.
+ */
+export function emptyColumnText(filtering: boolean, matchCount: number | null): string {
+  if (!filtering) return "Drop cards here";
+  return matchCount === null ? "Filtering…" : "No Tickets match the filter";
+}
+
 /**
  * The Loop's cards column by column (the query keys the drag and drop writes to), the ids the
- * filters match (null when no filter is set) and the resolver that links a Ticket key in a text to
- * that Ticket when this Loop has it.
+ * filters match (null when no filter is set), how many match (null until the search has answered,
+ * and when no filter is set) and the resolver that links a Ticket key in a text to that Ticket when
+ * this Loop has it.
  */
 export function useLoopCards({
   boardId,
@@ -71,5 +87,7 @@ export function useLoopCards({
     return new Set((searchQuery.data?.items ?? []).map((card) => card.id));
   }, [filtersActive, searchQuery.data]);
 
-  return { cardsByList, ticketHref, matchingIds };
+  const matchCount = filtersActive && searchQuery.isSuccess ? searchQuery.data.items.length : null;
+
+  return { cardsByList, ticketHref, matchingIds, matchCount };
 }

@@ -49,7 +49,7 @@ describe("a column change the server refuses", () => {
     const { onListsChanged, user } = renderKanban();
     await user.click(screen.getByRole("button", { name: "Column actions for Backlog" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename column" }));
-    const name = screen.getByRole("textbox", { name: "Rename list Backlog" });
+    const name = screen.getByRole("textbox", { name: "Rename column Backlog" });
     await user.clear(name);
     await user.type(name, "Ideas{Enter}");
 

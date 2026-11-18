@@ -1,6 +1,7 @@
 import { DndContext } from "@dnd-kit/core";
 import { SortableContext } from "@dnd-kit/sortable";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TicketCard } from "@/features/loops/TicketCard";
 import type { Card, TicketFace } from "@/lib/types";
@@ -57,6 +58,29 @@ describe("the Kanban card", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it("opens the Ticket with Enter on the title; the grip beside it is the keyboard's drag handle", async () => {
+    const user = userEvent.setup();
+    const { onOpen, item } = renderCard(ticketCard());
+    const title = within(item).getByRole("button", { name: "Rotate the signing key" });
+    const grip = within(item).getByRole("button", { name: "Move Rotate the signing key" });
+    expect(title).not.toHaveAttribute("aria-roledescription");
+    expect(grip).toHaveAttribute("aria-roledescription", "sortable");
+
+    title.focus();
+    await user.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(grip).not.toHaveAttribute("aria-pressed", "true");
+
+    // Tab goes from the title to its grip; Space there picks the card up instead of opening it.
+    await user.tab();
+    expect(grip).toHaveFocus();
+    await user.keyboard(" ");
+    expect(grip).toHaveAttribute("aria-pressed", "true");
+    await user.keyboard("{Escape}");
+    expect(grip).not.toHaveAttribute("aria-pressed", "true");
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back to the stored summary, and shows none when there is none", () => {
     const { item, onOpen } = renderCard(ticketCard({ summary: "The stored summary." }));
     expect(within(item).getByText("The stored summary.")).toBeInTheDocument();
@@ -74,14 +98,26 @@ describe("the Kanban card", () => {
     const blocked = screen.getByText("Blocked").parentElement;
     expect(blocked).toHaveClass("rounded-full", "border");
     expect(blocked).toHaveAttribute("title", "SES-1-PH01-000");
+    expect(blocked).toHaveTextContent("Blocked: SES-1-PH01-000");
   });
 
   it("shows Needs input with the reason of the wait", () => {
     renderCard(
       ticketCard({ state: "needs_input", waiting_for: "decision", waiting_reason: "Which TTL?" }),
     );
-    expect(screen.getByText("Needs input").parentElement).toHaveAttribute("title", "Which TTL?");
+    const held = screen.getByText("Needs input").parentElement;
+    expect(held).toHaveAttribute("title", "Which TTL?");
+    expect(held).toHaveTextContent("Needs input: Which TTL?");
     expect(screen.queryByText("Blocked")).not.toBeInTheDocument();
+  });
+
+  it("says what Unplanned means in its text, not only on hover", () => {
+    renderCard(ticketCard({ kind: "manual", ticket_key: "SES-1-UNP-001" }));
+    const unplanned = screen.getByText("Unplanned").parentElement;
+    expect(unplanned).toHaveAttribute("title", expect.stringMatching(/^Added outside the plan/));
+    expect(unplanned).toHaveTextContent(
+      "Unplanned: Added outside the plan; it never blocks the plan or the Loop's completion",
+    );
   });
 
   it("marks a completed Ticket done, without a state", () => {
@@ -101,16 +137,19 @@ describe("the Kanban card", () => {
     );
     expect(screen.getByText("Needs a person")).toBeInTheDocument();
     expect(screen.getByText("High")).toBeInTheDocument();
-    expect(screen.getByText(new Date("2099-01-31T12:00:00Z").toLocaleDateString())).not.toHaveClass(
-      "text-[var(--destructive)]",
-    );
+    const due = screen.getByText(new Date("2099-01-31T12:00:00Z").toLocaleDateString());
+    expect(due.parentElement).not.toHaveClass("text-[var(--destructive)]");
+    expect(due.parentElement).toHaveTextContent(/^Due \S+$/);
+    expect(screen.queryByText("Overdue")).not.toBeInTheDocument();
   });
 
-  it("shows an overdue date in the danger colour, and no priority mark without one", () => {
+  it("says an overdue date in a word as well as the danger colour, and no priority without one", () => {
     renderCard(ticketCard({ due_at: "2000-01-31T12:00:00Z" }));
-    expect(screen.getByText(new Date("2000-01-31T12:00:00Z").toLocaleDateString())).toHaveClass(
-      "text-[var(--destructive)]",
-    );
+    const due = screen.getByText(new Date("2000-01-31T12:00:00Z").toLocaleDateString());
+    expect(due).toHaveAttribute("datetime", "2000-01-31T12:00:00Z");
+    expect(due.parentElement).toHaveClass("text-[var(--destructive)]");
+    expect(screen.getByText("Overdue")).toBeVisible();
+    expect(due.parentElement).toHaveTextContent(/^Due \S+ Overdue$/);
     for (const word of ["Low", "Medium", "High", "Urgent"]) {
       expect(screen.queryByText(word)).not.toBeInTheDocument();
     }

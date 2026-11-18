@@ -2,24 +2,34 @@ import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Menu } from "@/components/ui/menu";
+import { Menu, type MenuItem } from "@/components/ui/menu";
 import type { BoardList, Card } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { DragData } from "./dragData";
 import { TicketCard } from "./TicketCard";
+import type { CardControl, ColumnControl } from "./useKanbanMoves";
 
 /**
  * One column of the Loop's Kanban: its name and count, the cards, and "Add card" at the bottom. A
- * column named Done is a column like any other; only completing a Ticket completes it. Renaming and
- * archiving sit in the column's quiet menu.
+ * column named Done is a column like any other; only completing a Ticket completes it. Renaming,
+ * moving left or right (`moveItems`) and archiving sit in the column's quiet menu; each card's own
+ * menu holds `cardActions(card)`. `focus` and `focusCard` hand the focus to this column's grip or
+ * menu button, or to a card's control, after a move (see `useKanbanMoves`).
  */
 export function KanbanColumn({
   list,
   cards,
+  emptyText,
   readOnly,
+  moveItems,
+  cardActions,
+  focusCard,
+  onCardFocused,
+  focus,
+  onFocused,
   onOpenCard,
   onCreateCard,
   onRename,
@@ -27,7 +37,14 @@ export function KanbanColumn({
 }: {
   list: BoardList;
   cards: Card[];
+  emptyText: string;
   readOnly: boolean;
+  moveItems: readonly MenuItem[];
+  cardActions: (card: Card) => readonly MenuItem[];
+  focusCard: { cardId: string; control: CardControl } | null;
+  onCardFocused: () => void;
+  focus: ColumnControl | null;
+  onFocused: () => void;
   onOpenCard: (card: Card) => void;
   onCreateCard: (title: string) => Promise<void>;
   onRename: (name: string) => void;
@@ -46,16 +63,50 @@ export function KanbanColumn({
   const [title, setTitle] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(list.name);
+  const header = useRef<HTMLElement>(null);
+  const footer = useRef<HTMLDivElement>(null);
+  // Which button takes the focus once an inline form has closed (WCAG 2.4.3): "Add card" after a
+  // new card or a cancel, the column's menu after a rename. The form's field is gone by then.
+  const refocus = useRef<"add" | "menu" | null>(null);
+  // Escape ends a rename without saving, even if the field reports a blur as it goes.
+  const renameCancelled = useRef(false);
+
+  useEffect(() => {
+    const target = refocus.current;
+    if (target === null) return;
+    refocus.current = null;
+    const button =
+      target === "add"
+        ? footer.current?.querySelector<HTMLElement>("button")
+        : header.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]');
+    button?.focus();
+  });
+
+  // The column moved (or the one before it went): its grip or menu takes the focus back.
+  useEffect(() => {
+    if (focus === null) return;
+    const selector = focus === "grip" ? "[data-column-grip]" : '[aria-haspopup="menu"]';
+    header.current?.querySelector<HTMLElement>(selector)?.focus();
+    onFocused();
+  }, [focus, onFocused]);
 
   async function submitCard() {
     if (!title.trim()) return;
     await onCreateCard(title.trim());
+    closeAdding();
+  }
+
+  function closeAdding() {
+    refocus.current = "add";
     setTitle("");
     setAdding(false);
   }
 
-  function finishRename() {
+  /** Saves a changed name; after Enter (`refocusMenu`) the focus is on the menu, after a blur not. */
+  function finishRename(refocusMenu: boolean) {
+    if (renameCancelled.current) return;
     if (name.trim() && name.trim() !== list.name) onRename(name.trim());
+    if (refocusMenu) refocus.current = "menu";
     setRenaming(false);
   }
 
@@ -63,36 +114,44 @@ export function KanbanColumn({
     <section
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      aria-label={`List ${list.name}`}
+      aria-label={`Column ${list.name}`}
       className={cn(
         "flex h-full w-[280px] shrink-0 flex-col rounded-[10px] border border-[var(--border-soft)] bg-[var(--surface)]",
         isDragging && "opacity-60",
       )}
     >
-      <header className="flex items-center gap-1.5 px-2.5 pt-2.5">
+      <header ref={header} className="flex items-center gap-1.5 px-2.5 pt-2.5">
         <button
           type="button"
-          className="cursor-grab text-[var(--foreground-faint)] hover:text-[var(--muted-foreground)]"
-          aria-label={`Reorder list ${list.name}`}
+          // 24 px square: the smallest target WCAG 2.5.8 allows.
+          className="inline-flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-[var(--muted-foreground)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]"
+          data-column-grip=""
+          aria-label={`Reorder column ${list.name}`}
           {...attributes}
           {...listeners}
         >
-          <GripVertical size={14} />
+          <GripVertical size={14} aria-hidden="true" />
         </button>
         {renaming ? (
           <form
             className="flex-1"
             onSubmit={(event) => {
               event.preventDefault();
-              finishRename();
+              finishRename(true);
             }}
           >
             <Input
               value={name}
               autoFocus
-              aria-label={`Rename list ${list.name}`}
+              aria-label={`Rename column ${list.name}`}
               onChange={(event) => setName(event.target.value)}
-              onBlur={finishRename}
+              onBlur={() => finishRename(false)}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                renameCancelled.current = true;
+                refocus.current = "menu";
+                setRenaming(false);
+              }}
               className="h-7 text-sm"
             />
           </form>
@@ -108,12 +167,21 @@ export function KanbanColumn({
             {
               label: "Rename column",
               disabled: readOnly,
+              hint: readOnly ? "The Loop is read-only" : undefined,
               onSelect: () => {
+                renameCancelled.current = false;
                 setName(list.name);
                 setRenaming(true);
               },
             },
-            { label: "Archive column", danger: true, disabled: readOnly, onSelect: onArchive },
+            ...moveItems,
+            {
+              label: "Archive column",
+              danger: true,
+              disabled: readOnly,
+              hint: readOnly ? "The Loop is read-only" : undefined,
+              onSelect: onArchive,
+            },
           ]}
         />
       </header>
@@ -131,18 +199,25 @@ export function KanbanColumn({
         >
           <ul className="flex flex-col gap-2">
             {cards.map((card) => (
-              <TicketCard key={card.id} card={card} onOpen={onOpenCard} />
+              <TicketCard
+                key={card.id}
+                card={card}
+                onOpen={onOpenCard}
+                actions={cardActions(card)}
+                focus={focusCard?.cardId === card.id ? focusCard.control : null}
+                onFocused={onCardFocused}
+              />
             ))}
           </ul>
         </SortableContext>
         {cards.length === 0 ? (
           <p className="px-1 py-3 text-center text-xs text-[var(--foreground-faint)]">
-            Drop cards here
+            {emptyText}
           </p>
         ) : null}
       </div>
 
-      <div className="px-2.5 pb-2.5">
+      <div ref={footer} className="px-2.5 pb-2.5">
         {adding ? (
           <form
             onSubmit={(event) => {
@@ -157,10 +232,7 @@ export function KanbanColumn({
               placeholder="Card title"
               onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  setAdding(false);
-                  setTitle("");
-                }
+                if (event.key === "Escape") closeAdding();
               }}
               className="mb-1.5"
             />
@@ -168,14 +240,7 @@ export function KanbanColumn({
               <Button size="sm" type="submit" disabled={!title.trim()}>
                 Add card
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setAdding(false);
-                  setTitle("");
-                }}
-              >
+              <Button size="sm" variant="ghost" onClick={closeAdding}>
                 Cancel
               </Button>
             </div>

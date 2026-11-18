@@ -41,11 +41,14 @@ describe("StateChip", () => {
     );
   });
 
-  it("is a small bordered pill when compact, with the longer reason for a pointer", () => {
+  it("is a small bordered pill when compact, with the longer reason on hover and in its text", () => {
     render(<StateChip state="needs_input" compact title="Which provider?" />);
     const chip = screen.getByText("Needs input").parentElement;
     expect(chip).toHaveClass("rounded-full", "border", "text-xs");
     expect(chip).toHaveAttribute("title", "Which provider?");
+    // A tooltip reaches neither a keyboard nor a screen reader; the hidden text does.
+    expect(screen.getByText(": Which provider?")).toHaveClass("sr-only");
+    expect(chip).toHaveTextContent("Needs input: Which provider?");
   });
 });
 

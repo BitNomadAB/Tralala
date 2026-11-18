@@ -53,13 +53,15 @@ export function AppLayout() {
       >
         Skip to main content
       </a>
-      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_88%,transparent)] backdrop-blur">
-        <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center gap-4 px-4">
+      {/* Sticky only in a window tall enough to spare it: at 400% zoom a header that stays on
+          top would cover what the focus is on (WCAG 2.4.11). Narrow, its rows wrap (1.4.10). */}
+      <header className="top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_88%,transparent)] backdrop-blur [@media(min-height:36rem)]:sticky">
+        <div className="mx-auto flex min-h-14 w-full max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2">
           <NavLink to="/" className="flex items-center gap-2 text-sm">
             <TralalaLogo className="h-7" />
             <span className="text-sm font-semibold text-[var(--foreground)]">Tralala</span>
           </NavLink>
-          <nav className="flex items-center gap-1 text-sm">
+          <nav className="flex flex-wrap items-center gap-1 text-sm">
             <NavLink
               to="/"
               end

@@ -1,91 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { http } from "msw";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ToastProvider } from "@/components/ui/toast";
-import { AuthContext } from "@/features/auth/useAuth";
-import { LoopPage } from "@/features/loops/LoopPage";
-import type { Loop } from "@/lib/types";
-import { LocationProbe } from "./LocationProbe";
-import { summary } from "./msw/boards";
-import { ticketCard } from "./msw/cards";
-import { apiPath, ok } from "./msw/envelope";
-import { BOARD_ID, LOOP, LOOP_ID, LOOP_PATH, planningDialogHandlers } from "./msw/loops";
-import { server } from "./msw/server";
-import { MEMBER } from "./msw/session";
-import { PHASE_NAME, ticketViewHandlers } from "./msw/ticketView";
-
-const PAGE_URL = `/boards/${BOARD_ID}/loops/${LOOP_ID}`;
-const TITLE = "Rotate the signing key";
-
-/**
- * The Loop page signed in as the member, at `query`, over a Loop at `stage` whose row of the
- * board's Loop summaries is `row`. The Ticket of `ticketViewHandlers` sits in the first column;
- * `writes` collects every PATCH or POST on the Loop itself.
- */
-async function renderLoopPage(
-  query: string,
-  stage: Loop["stage"],
-  row: NonNullable<Parameters<typeof summary>[2]>,
-) {
-  const view = ticketViewHandlers(ticketCard({ summary: "The key is rotated every 90 days." }));
-  const writes: { route: string; body: unknown }[] = [];
-  const loopRow = summary(LOOP_ID, LOOP.name, { key: LOOP.key, stage, ...row });
-  server.use(
-    http.get(apiPath(LOOP_PATH), () => ok({ ...LOOP, stage })),
-    http.patch(apiPath(LOOP_PATH), async ({ request }) => {
-      writes.push({ route: `PATCH ${LOOP_PATH}`, body: await request.json() });
-      return ok({ ...LOOP, stage, name: "Session limits" });
-    }),
-    http.post(apiPath(`${LOOP_PATH}/cancel`), async ({ request }) => {
-      writes.push({ route: `POST ${LOOP_PATH}/cancel`, body: await request.json() });
-      return ok({ ...LOOP, stage: "cancelled" });
-    }),
-    http.get(apiPath(`/boards/${BOARD_ID}/loop-summaries`), () =>
-      ok({ board_id: BOARD_ID, loops: [loopRow], count: 1 }),
-    ),
-    http.get(apiPath(`${LOOP_PATH}/cards`), ({ request }) =>
-      ok(new URL(request.url).searchParams.get("list_id") === "list-1" ? [view.state.card] : []),
-    ),
-    http.get(apiPath(`${LOOP_PATH}/notes`), () => ok({ notes: [], count: 0 })),
-    ...view.handlers,
-    ...planningDialogHandlers().handlers,
-  );
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const auth = {
-    actor: MEMBER,
-    loading: false,
-    login: () => Promise.resolve(MEMBER),
-    logout: () => Promise.resolve(),
-    refresh: () => Promise.resolve(MEMBER),
-    signOutLocally: () => undefined,
-  };
-  render(
-    <QueryClientProvider client={queryClient}>
-      <AuthContext.Provider value={auth}>
-        <ToastProvider>
-          <MemoryRouter initialEntries={[`${PAGE_URL}${query}`]}>
-            <Routes>
-              <Route path="/boards/:boardId/loops/:loopId" element={<LoopPage />} />
-            </Routes>
-            <LocationProbe />
-          </MemoryRouter>
-        </ToastProvider>
-      </AuthContext.Provider>
-    </QueryClientProvider>,
-  );
-  // Hidden from the accessibility tree while a Ticket is open over the page.
-  const title = await screen.findByRole("heading", { level: 1, name: LOOP.name, hidden: true });
-  const header = title.closest("header");
-  if (!header) throw new Error("the Loop's title is not in its header");
-  return { header, writes, user: userEvent.setup() };
-}
-
-const query = () => screen.getByRole("status", { name: "Query" });
+import { LOOP_PATH } from "./msw/loops";
+import { PHASE_NAME } from "./msw/ticketView";
+import { query, renderLoopPage, TITLE } from "./renderLoopPage";
 
 describe("the Loop page's header", () => {
   it("shows the key, the stage, what it waits for and the one decision", async () => {
@@ -156,18 +73,18 @@ describe("the Loop page's header", () => {
 describe("the Loop page's tabs", () => {
   it("switch between Kanban, Plan and Notes and keep the tab in the URL", async () => {
     const { user } = await renderLoopPage("", "in_progress", {});
-    const backlog = await screen.findByRole("region", { name: "List Backlog" });
+    const backlog = await screen.findByRole("region", { name: "Column Backlog" });
     expect(await within(backlog).findByText("The key is rotated every 90 days.")).toBeVisible();
     expect(query()).toHaveTextContent("");
 
     await user.click(screen.getByRole("tab", { name: "Notes" }));
     expect(query()).toHaveTextContent("?tab=notes");
     expect(await screen.findByText("No notes yet.")).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "List Backlog" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Column Backlog" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Kanban" }));
     expect(query()).toBeEmptyDOMElement();
-    expect(screen.getByRole("region", { name: "List Backlog" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Column Backlog" })).toBeInTheDocument();
   });
 
   it("land on the Plan tab from a link, with the planning documents alone", async () => {

@@ -41,7 +41,7 @@ function roadmap(titles: string[]) {
 
 function ticketRow(page: Page, title: string): Locator {
   return page
-    .getByRole("region", { name: /^List / })
+    .getByRole("region", { name: /^Column / })
     .getByRole("listitem")
     .filter({ hasText: title });
 }
@@ -101,9 +101,7 @@ async function approvedAnalysis(
 
 /** Somebody starts the Ticket, so it is no longer untouched. */
 async function startTicket(page: Page, title: string): Promise<void> {
-  await ticketRow(page, title)
-    .getByRole("button", { name: new RegExp(title) })
-    .click();
+  await ticketRow(page, title).getByRole("button", { name: title, exact: true }).click();
   const cardDialog = page.getByRole("dialog", { name: title });
   await cardDialog.getByRole("button", { name: "Start work" }).click();
   await expect(cardDialog.getByRole("button", { name: "Mark complete" })).toBeVisible();
@@ -162,7 +160,7 @@ test.describe("a RoadMap written again", () => {
 
     // The untouched Ticket is deleted and the started one archived: neither is on the Kanban.
     await showTab(page, "Kanban");
-    await expect(page.getByRole("region", { name: /^List / }).first()).toBeVisible();
+    await expect(page.getByRole("region", { name: /^Column / }).first()).toBeVisible();
     await expect(ticketRow(page, "Write the mail")).toHaveCount(0);
     await expect(ticketRow(page, "Send the link")).toHaveCount(0);
   });
