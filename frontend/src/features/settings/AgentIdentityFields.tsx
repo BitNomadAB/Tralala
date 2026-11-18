@@ -9,22 +9,22 @@ export function AgentIdentityFields({
   form,
   onChange,
   roles,
-  invalid,
+  refused,
 }: {
   form: AgentForm;
   onChange: (patch: Partial<AgentForm>) => void;
   roles: RoleTemplate[];
-  /** The request fields the last save was refused for. */
-  invalid: ReadonlySet<string>;
+  /** The request fields the last save was refused for, with what the server said about each. */
+  refused: ReadonlyMap<string, string>;
 }) {
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Agent name" htmlFor="agent-name">
+        <Field label="Agent name" htmlFor="agent-name" error={refused.get("name")}>
           <div className="flex gap-1.5">
             <Input
               id="agent-name"
-              {...fieldMark(invalid, "name")}
+              {...fieldMark(refused, "name")}
               value={form.name}
               onChange={(event) => onChange({ name: event.target.value })}
               required
@@ -45,10 +45,11 @@ export function AgentIdentityFields({
           label="Role template"
           htmlFor="agent-role"
           hint="Applied to future discussions only."
+          error={refused.get("role_template_id")}
         >
           <Select
             id="agent-role"
-            {...fieldMark(invalid, "role_template_id")}
+            {...fieldMark(refused, "role_template_id")}
             value={form.roleTemplateId}
             onChange={(event) => onChange({ roleTemplateId: event.target.value })}
           >
@@ -63,10 +64,10 @@ export function AgentIdentityFields({
         </Field>
       </div>
 
-      <Field label="Description" htmlFor="agent-description">
+      <Field label="Description" htmlFor="agent-description" error={refused.get("description")}>
         <Textarea
           id="agent-description"
-          {...fieldMark(invalid, "description")}
+          {...fieldMark(refused, "description")}
           className="min-h-16"
           value={form.description}
           onChange={(event) => onChange({ description: event.target.value })}
@@ -78,10 +79,11 @@ export function AgentIdentityFields({
         label="Role prompt override (optional)"
         htmlFor="agent-override"
         hint="Replaces the template prompt for this agent without touching the shared template."
+        error={refused.get("role_prompt_override")}
       >
         <Textarea
           id="agent-override"
-          {...fieldMark(invalid, "role_prompt_override")}
+          {...fieldMark(refused, "role_prompt_override")}
           className="min-h-32 font-mono text-xs"
           value={form.override}
           onChange={(event) => onChange({ override: event.target.value })}

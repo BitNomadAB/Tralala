@@ -10,17 +10,15 @@ import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { ROLES, type InviteCreated, type Role, type UserAccount } from "@/lib/types";
 import { clipboard, formatDateTime } from "@/lib/utils";
+import { NewUserDialog } from "./NewUserDialog";
+import { ResetPasswordDialog } from "./ResetPasswordDialog";
 
 export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: () => api.listUsers() });
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("member");
   const [resetting, setResetting] = useState<UserAccount | null>(null);
-  const [newPassword, setNewPassword] = useState("");
   const [invited, setInvited] = useState<InviteCreated | null>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -33,19 +31,6 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
     });
   };
 
-  const createMutation = useMutation({
-    mutationFn: () => api.createUser({ name: name.trim(), password, role }),
-    onSuccess: () => {
-      void invalidate();
-      setCreating(false);
-      setName("");
-      setPassword("");
-      setRole("member");
-      toast.push({ title: "User created", variant: "success" });
-    },
-    onError: onError("Could not create the user"),
-  });
-
   const updateMutation = useMutation({
     mutationFn: (payload: { userId: string; role?: Role; disabled?: boolean }) =>
       api.updateUser(payload.userId, { role: payload.role, disabled: payload.disabled }),
@@ -57,17 +42,6 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
       });
     },
     onError: onError("Could not update the user"),
-  });
-
-  const resetMutation = useMutation({
-    mutationFn: () => api.resetUserPassword(resetting?.id ?? "", newPassword),
-    onSuccess: () => {
-      void invalidate();
-      setResetting(null);
-      setNewPassword("");
-      toast.push({ title: "Password reset", description: "Existing sessions were signed out." });
-    },
-    onError: onError("Could not reset the password"),
   });
 
   const inviteMutation = useMutation({
@@ -172,59 +146,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
         ) : null}
       </ul>
 
-      <Dialog open={creating} onOpenChange={setCreating}>
-        <DialogContent title="New user" description="They can sign in right away.">
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (name.trim() && password.length >= 8) createMutation.mutate();
-            }}
-          >
-            <Field label="Username" htmlFor="user-name">
-              <Input
-                id="user-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-                maxLength={100}
-              />
-            </Field>
-            <Field label="Initial password" htmlFor="user-password" hint="At least 8 characters.">
-              <Input
-                id="user-password"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-              />
-            </Field>
-            <Field label="Role" htmlFor="user-role">
-              <Select
-                id="user-role"
-                value={role}
-                onChange={(event) => setRole(event.target.value as Role)}
-              >
-                {ROLES.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCreating(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!name.trim() || password.length < 8}>
-                Create user
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <NewUserDialog open={creating} onOpenChange={setCreating} />
 
       <Dialog open={Boolean(invited)} onOpenChange={(open) => !open && setInvited(null)}>
         <DialogContent
@@ -260,40 +182,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(resetting)} onOpenChange={(open) => !open && setResetting(null)}>
-        <DialogContent
-          title={`Reset password for ${resetting?.name ?? ""}`}
-          description="They are signed out everywhere and must use the new password."
-        >
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (newPassword.length >= 8) resetMutation.mutate();
-            }}
-          >
-            <Field label="New password" htmlFor="reset-password" hint="At least 8 characters.">
-              <Input
-                id="reset-password"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                required
-              />
-            </Field>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setResetting(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={newPassword.length < 8}>
-                Reset password
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <ResetPasswordDialog user={resetting} onClose={() => setResetting(null)} />
     </div>
   );
 }

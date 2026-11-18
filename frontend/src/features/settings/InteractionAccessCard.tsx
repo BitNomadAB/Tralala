@@ -1,10 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, ShieldCheck } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { scopeChoicesFor } from "@/lib/agentAccess";
 import { api } from "@/lib/api";
@@ -13,6 +11,7 @@ import type { Credential } from "@/lib/types";
 import { AgentAccessGuide } from "./AgentAccessGuide";
 import { CredentialRow } from "./CredentialRow";
 import { IssuedTokenDialog } from "./IssuedTokenDialog";
+import { NewAccessDialog } from "./NewAccessDialog";
 
 interface InteractionAccessCardProps {
   isAdmin: boolean;
@@ -49,9 +48,6 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     : `Your access expires after ${limits?.default_days ?? 30} days by default and never lasts longer than ${limits?.max_days ?? 365}.`;
 
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [scopes, setScopes] = useState<string[]>([]);
-  const [expires, setExpires] = useState(defaultExpiry);
   const [issued, setIssued] = useState<Credential | null>(null);
 
   const credentials = credentialsQuery.data ?? [];
@@ -66,28 +62,6 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     void queryClient.invalidateQueries({ queryKey: ["credentials"] });
     void queryClient.invalidateQueries({ queryKey: ["users"] });
   }
-
-  const createMutation = useMutation({
-    mutationFn: () =>
-      api.createCredential({
-        name: name.trim(),
-        scopes,
-        expires_in_days: expires.trim() === "" ? undefined : Number(expires),
-      }),
-    onSuccess: (credential) => {
-      setIssued(credential);
-      setCreating(false);
-      setName("");
-      invalidate();
-    },
-    onError: (error) => {
-      toast.push({
-        title: "Could not create the agent access",
-        description: describeError(error, undefined),
-        variant: "error",
-      });
-    },
-  });
 
   const revokeMutation = useMutation({
     mutationFn: (credential: Credential) => api.revokeCredential(credential.id),
@@ -127,16 +101,6 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     toast.push({ title: "Token copied", variant: "success" });
   }
 
-  function openCreate() {
-    // Start from the smallest useful set instead of the first N scopes in the catalogue, and keep it
-    // when the scope list is still loading: both are valid for every role.
-    const candidates = ["boards:read", "cards:read"];
-    const known = scopeChoices.length > 0 ? scopeChoices : candidates;
-    setScopes(candidates.filter((scope) => known.includes(scope)));
-    setExpires(defaultExpiry);
-    setCreating(true);
-  }
-
   function renderRow(credential: Credential, showOwner: boolean) {
     return (
       <CredentialRow
@@ -156,7 +120,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold">Interaction agent access</h2>
           <Badge tone="brand">you</Badge>
-          <Button size="sm" className="ml-auto" onClick={openCreate}>
+          <Button size="sm" className="ml-auto" onClick={() => setCreating(true)}>
             <KeyRound size={14} /> New access key
           </Button>
         </div>
@@ -207,73 +171,19 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         </div>
       ) : null}
 
-      <Dialog open={creating} onOpenChange={setCreating}>
-        <DialogContent
-          title="New interaction agent access"
-          description="Scopes decide what the agent may do. Grant what it needs, nothing more."
-        >
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (name.trim() && scopes.length > 0) createMutation.mutate();
-            }}
-          >
-            <Field
-              label="Agent name"
-              htmlFor="credential-name"
-              hint="Name it after the machine that will hold the key."
-            >
-              <Input
-                id="credential-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-                maxLength={200}
-              />
-            </Field>
-            <fieldset className="flex flex-col gap-1.5">
-              <legend className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                Scopes
-              </legend>
-              {scopeChoices.map((scope) => (
-                <label key={scope} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={scopes.includes(scope)}
-                    onChange={(event) =>
-                      setScopes((current) =>
-                        event.target.checked
-                          ? [...current, scope]
-                          : current.filter((value) => value !== scope),
-                      )
-                    }
-                  />
-                  {scope}
-                </label>
-              ))}
-            </fieldset>
-            <Field label="Expires in days" htmlFor="credential-expiry" hint={expiryHint}>
-              <Input
-                id="credential-expiry"
-                type="number"
-                min={isAdmin ? 0 : 1}
-                max={3650}
-                value={expires}
-                onChange={(event) => setExpires(event.target.value)}
-              />
-            </Field>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCreating(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!name.trim() || scopes.length === 0}>
-                <ShieldCheck size={14} /> Create access
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <NewAccessDialog
+        open={creating}
+        onOpenChange={setCreating}
+        isAdmin={isAdmin}
+        scopeChoices={scopeChoices}
+        defaultExpiry={defaultExpiry}
+        expiryHint={expiryHint}
+        onIssued={(credential) => {
+          setIssued(credential);
+          setCreating(false);
+          invalidate();
+        }}
+      />
 
       <IssuedTokenDialog
         issued={issued}

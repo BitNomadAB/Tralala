@@ -13,7 +13,7 @@ export function AgentConnectionFields({
   endpointLocked,
   testModels,
   stored,
-  invalid,
+  refused,
 }: {
   form: AgentForm;
   onChange: (patch: Partial<AgentForm>) => void;
@@ -23,8 +23,8 @@ export function AgentConnectionFields({
   endpointLocked: boolean;
   testModels: string[];
   stored: Agent | undefined;
-  /** The request fields the last save was refused for. */
-  invalid: ReadonlySet<string>;
+  /** The request fields the last save was refused for, with what the server said about each. */
+  refused: ReadonlyMap<string, string>;
 }) {
   const { connectionType, noKey } = form;
   const hasStoredKey = Boolean(stored?.has_api_key);
@@ -33,6 +33,7 @@ export function AgentConnectionFields({
       <Field
         label="Connection type"
         htmlFor="agent-connection"
+        error={refused.get("connection_type")}
         hint={
           connectionType === "a2a"
             ? "An agent that already runs outside Tralala. It brings its own tools, memory and way of working; the role here only decides how it answers in this board."
@@ -41,7 +42,7 @@ export function AgentConnectionFields({
       >
         <Select
           id="agent-connection"
-          {...fieldMark(invalid, "connection_type")}
+          {...fieldMark(refused, "connection_type")}
           value={connectionType}
           onChange={(event) => onChange({ connectionType: event.target.value as ConnectionType })}
         >
@@ -71,6 +72,7 @@ export function AgentConnectionFields({
       <Field
         label={connectionType === "a2a" ? "Agent endpoint or card URL" : "API base URL"}
         htmlFor="agent-base-url"
+        error={refused.get("base_url")}
         hint={
           endpointLocked
             ? "Fixed by the preset. Choose Custom to point somewhere else."
@@ -79,7 +81,7 @@ export function AgentConnectionFields({
       >
         <Input
           id="agent-base-url"
-          {...fieldMark(invalid, "base_url")}
+          {...fieldMark(refused, "base_url")}
           value={form.baseUrl}
           onChange={(event) => onChange({ baseUrl: event.target.value })}
           placeholder={
@@ -108,6 +110,7 @@ export function AgentConnectionFields({
               : "Model identifier (optional)"
         }
         htmlFor="agent-model"
+        error={refused.get("model")}
         hint={
           connectionType === "a2a"
             ? "Optional. The A2A agent chooses its own model."
@@ -118,7 +121,7 @@ export function AgentConnectionFields({
       >
         <Input
           id="agent-model"
-          {...fieldMark(invalid, "model")}
+          {...fieldMark(refused, "model")}
           value={form.model}
           onChange={(event) => onChange({ model: event.target.value })}
           placeholder={
@@ -145,6 +148,7 @@ export function AgentConnectionFields({
                 : "API key (optional)"
         }
         htmlFor="agent-api-key"
+        error={refused.get("api_key")}
         hint={
           hasStoredKey
             ? `A key is stored${stored?.api_key_hint ? ` (${stored.api_key_hint})` : ""}. Leave empty to keep it.`
@@ -157,7 +161,7 @@ export function AgentConnectionFields({
       >
         <Input
           id="agent-api-key"
-          {...fieldMark(invalid, "api_key")}
+          {...fieldMark(refused, "api_key")}
           type="password"
           autoComplete="off"
           value={noKey ? "" : form.apiKey}
@@ -190,13 +194,13 @@ export function AgentConnectionFields({
 export function AgentTuningFields({
   form,
   onChange,
-  invalid,
+  refused,
   lengthProblem,
 }: {
   form: AgentForm;
   onChange: (patch: Partial<AgentForm>) => void;
-  /** The request fields the last save was refused for. */
-  invalid: ReadonlySet<string>;
+  /** The request fields the last save was refused for, with what the server said about each. */
+  refused: ReadonlyMap<string, string>;
   /** Why the answer length is above the preset's cap, or null. */
   lengthProblem: string | null;
 }) {
@@ -205,11 +209,12 @@ export function AgentTuningFields({
       <Field
         label="Temperature"
         htmlFor="agent-temperature"
+        error={refused.get("temperature")}
         hint="Empty uses the provider's default."
       >
         <Input
           id="agent-temperature"
-          {...fieldMark(invalid, "temperature")}
+          {...fieldMark(refused, "temperature")}
           type="number"
           step="0.1"
           min={0}
@@ -222,12 +227,12 @@ export function AgentTuningFields({
       <Field
         label="Maximum answer length (tokens)"
         htmlFor="agent-max-tokens"
-        hint={lengthProblem ?? "Empty uses the provider's default."}
+        hint="Empty uses the provider's default."
+        error={refused.get("max_output_tokens") ?? lengthProblem}
       >
         <Input
           id="agent-max-tokens"
-          {...fieldMark(invalid, "max_output_tokens")}
-          {...(lengthProblem ? { "aria-invalid": true } : {})}
+          {...fieldMark(refused, "max_output_tokens")}
           type="number"
           min={1}
           placeholder="provider default"
@@ -238,11 +243,12 @@ export function AgentTuningFields({
       <Field
         label="Timeout (seconds)"
         htmlFor="agent-timeout"
+        error={refused.get("timeout_seconds")}
         hint="How long a call waits for the answer; a connection test waits at most 30 s."
       >
         <Input
           id="agent-timeout"
-          {...fieldMark(invalid, "timeout_seconds")}
+          {...fieldMark(refused, "timeout_seconds")}
           type="number"
           min={1}
           max={MAX_TIMEOUT_SECONDS}
@@ -252,8 +258,9 @@ export function AgentTuningFields({
       </Field>
       <label className="mt-6 flex items-center gap-2 text-sm">
         <input
+          id="agent-enabled"
           type="checkbox"
-          {...fieldMark(invalid, "enabled")}
+          {...fieldMark(refused, "enabled")}
           checked={form.enabled}
           onChange={(event) => onChange({ enabled: event.target.checked })}
         />

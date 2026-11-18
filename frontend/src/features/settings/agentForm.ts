@@ -121,11 +121,30 @@ export function withProvider(form: AgentForm, providerId: string): AgentForm {
 export type AgentField = Exclude<keyof AgentPayload, "clear_api_key">;
 
 /**
- * What ties an input to the request field it is sent as: its `name`, and `aria-invalid` while the
- * last save was refused for that field.
+ * The id of the control that sends each request field, in the order the editor shows them, so a
+ * refused save can put the server's message under the right field and focus the first of them.
  */
-export function fieldMark(invalid: ReadonlySet<string>, field: AgentField) {
-  return { name: field, "aria-invalid": invalid.has(field) || undefined };
+export const AGENT_CONTROLS: Readonly<Record<AgentField, string>> = {
+  name: "agent-name",
+  role_template_id: "agent-role",
+  description: "agent-description",
+  role_prompt_override: "agent-override",
+  connection_type: "agent-connection",
+  base_url: "agent-base-url",
+  model: "agent-model",
+  api_key: "agent-api-key",
+  temperature: "agent-temperature",
+  max_output_tokens: "agent-max-tokens",
+  timeout_seconds: "agent-timeout",
+  enabled: "agent-enabled",
+};
+
+/**
+ * What ties an input to the request field it is sent as: its `name`, and `aria-invalid` while the
+ * last save was refused for that field (its Field says so too; the bare checkbox has no Field).
+ */
+export function fieldMark(refused: ReadonlyMap<string, string>, field: AgentField) {
+  return { name: field, "aria-invalid": refused.has(field) || undefined };
 }
 
 /**

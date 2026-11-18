@@ -100,8 +100,9 @@ describe("signing out in the app", () => {
     await user.type(screen.getByLabelText("Repeat new password"), "new-password-2");
     await clickAndAwaitServer("Change password");
 
-    expect(screen.getByText("Could not change the password")).toBeInTheDocument();
-    expect(screen.getByText("Current password is incorrect")).toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toHaveAccessibleDescription(
+      "Error: Current password is incorrect.",
+    );
     // The session is still valid, so nothing ends it: the page stays, and so does the session.
     await aMinuteLater();
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();

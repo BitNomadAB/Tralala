@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -48,11 +48,26 @@ describe("the agent form when a save is refused", () => {
     expect(
       screen.getByText("max_output_tokens: Must be at most 8192 for this preset"),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Maximum answer length (tokens)")).toHaveAttribute(
-      "aria-invalid",
-      "true",
-    );
+    const maxTokens = screen.getByLabelText("Maximum answer length (tokens)");
+    expect(maxTokens).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText("API base URL")).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("says the refusal under the field it names and moves focus there", async () => {
+    await saveNewAgent(() =>
+      failure(422, "validation_failed", "Must be at most 8192 for this preset", {
+        field: "max_output_tokens",
+      }),
+    );
+
+    const maxTokens = screen.getByLabelText("Maximum answer length (tokens)");
+    await waitFor(() => expect(maxTokens).toHaveFocus());
+    expect(maxTokens).toHaveAccessibleDescription(
+      "Error: Must be at most 8192 for this preset. Empty uses the provider's default.",
+    );
+    expect(screen.getByLabelText("API base URL")).toHaveAccessibleDescription(
+      "Credentials are encrypted; local endpoints are allowed.",
+    );
   });
 
   it("shows the message as before and marks nothing when the refusal names no field", async () => {

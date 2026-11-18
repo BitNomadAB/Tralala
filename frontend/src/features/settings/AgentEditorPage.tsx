@@ -1,16 +1,18 @@
 import { ArrowLeft, Copy, PlugZap, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { describeError, fieldErrors } from "@/lib/describeError";
+import { fieldProblems } from "@/lib/fieldProblems";
 import { presetById, presetRequirements } from "@/lib/providers";
 import { useAgent, useRoleTemplates } from "@/lib/queries";
 import type { Agent, AgentTestResult } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { AgentConnectionFields, AgentTuningFields } from "./AgentConnectionFields";
 import {
+  AGENT_CONTROLS,
   answerLengthProblem,
   emptyAgentForm,
   hydrateAgentForm,
@@ -54,8 +56,16 @@ export function AgentEditorPage() {
     onTested: setTestResult,
     onDeleted: () => setConfirming(false),
   });
-  // The inputs the last save was refused for, by the field the API named; the next save clears them.
-  const invalid = new Set(fieldErrors(actions.save.error).map(({ field }) => field));
+  // The inputs the last save was refused for, by the field the API named, with what it said about
+  // each; the next save clears them.
+  const saveError = actions.save.error;
+  const refused = new Map(fieldErrors(saveError).map(({ field, message }) => [field, message]));
+  // Once a refusal is on screen, focus goes to the first field it names, so that field is announced
+  // with the message now under it. A new refusal is a new error object, so each one moves focus.
+  useEffect(() => {
+    const [first] = fieldProblems(saveError, AGENT_CONTROLS);
+    if (first) document.getElementById(first.id)?.focus();
+  }, [saveError]);
 
   if (!isNew && agentQuery.isLoading) {
     return <p className="text-sm text-[var(--muted-foreground)]">Loading agent…</p>;
@@ -139,7 +149,7 @@ export function AgentEditorPage() {
           if (canSave) actions.save.mutate();
         }}
       >
-        <AgentIdentityFields form={form} onChange={update} roles={roles} invalid={invalid} />
+        <AgentIdentityFields form={form} onChange={update} roles={roles} refused={refused} />
 
         <div className="grid gap-4 sm:grid-cols-2">
           <AgentConnectionFields
@@ -153,12 +163,12 @@ export function AgentEditorPage() {
             endpointLocked={endpointLocked}
             testModels={testModels}
             stored={stored}
-            invalid={invalid}
+            refused={refused}
           />
           <AgentTuningFields
             form={form}
             onChange={update}
-            invalid={invalid}
+            refused={refused}
             lengthProblem={lengthProblem}
           />
         </div>

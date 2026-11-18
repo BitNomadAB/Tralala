@@ -3,8 +3,14 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { TralalaLogo } from "@/components/ui/tralala-logo";
+import { useFieldErrors } from "@/components/ui/useFieldErrors";
+import { ApiError } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
+import { problemAt } from "@/lib/fieldProblems";
 import { useAuth } from "./useAuth";
+
+/** Said under the password when the server refuses the pair; it does not tell which one is wrong. */
+const WRONG_CREDENTIALS = "The username or password is not right.";
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -12,20 +18,31 @@ export function LoginPage() {
   const location = useLocation();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
+  // A refusal that is about no field (the server is down, too many attempts) is said above Sign in.
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const fields = useFieldErrors();
 
   const target = (location.state as { from?: string } | null)?.from ?? "/";
 
   async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPending(true);
     setError(null);
+    const missing = [
+      ...problemAt("username", username.trim() ? null : "Enter your username."),
+      ...problemAt("password", password ? null : "Enter your password."),
+    ];
+    if (fields.report(missing)) return;
+    setPending(true);
     try {
       await login(username, password);
       void navigate(target, { replace: true });
     } catch (loginError) {
-      setError(describeError(loginError, "Unable to sign in right now."));
+      if (loginError instanceof ApiError && loginError.code === "invalid_credentials") {
+        fields.report([{ id: "password", message: WRONG_CREDENTIALS }]);
+      } else {
+        setError(describeError(loginError, "Unable to sign in right now."));
+      }
     } finally {
       setPending(false);
     }
@@ -39,6 +56,7 @@ export function LoginPage() {
         }}
         className="card-surface flex w-full max-w-sm flex-col gap-4 p-7"
         aria-label="Sign in"
+        noValidate
       >
         <div>
           <div className="flex items-center gap-2.5">
@@ -49,24 +67,30 @@ export function LoginPage() {
             Self-hosted boards for humans and agents.
           </p>
         </div>
-        <Field label="Username" htmlFor="username">
+        <Field label="Username" htmlFor="username" error={fields.errorOf("username")}>
           <Input
             id="username"
             name="username"
             autoComplete="username"
             value={username}
-            onChange={(event) => setUsername(event.target.value)}
+            onChange={(event) => {
+              setUsername(event.target.value);
+              fields.set("username", null);
+            }}
             required
           />
         </Field>
-        <Field label="Password" htmlFor="password">
+        <Field label="Password" htmlFor="password" error={fields.errorOf("password")}>
           <Input
             id="password"
             name="password"
             type="password"
             autoComplete="current-password"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              fields.set("password", null);
+            }}
             required
           />
         </Field>

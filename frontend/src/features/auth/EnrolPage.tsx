@@ -2,9 +2,37 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
+import { useFieldErrors } from "@/components/ui/useFieldErrors";
+import { api, ApiError } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
+import {
+  confirmationProblem,
+  MIN_PASSWORD_LENGTH,
+  passwordProblem,
+  problemAt,
+  type FieldProblem,
+} from "@/lib/fieldProblems";
 import { useAuth } from "./useAuth";
+
+/** The refusals that are about the token: the link is wrong, used or old. */
+const TOKEN_REFUSALS: ReadonlySet<string> = new Set([
+  "invite_invalid",
+  "invite_used",
+  "invite_expired",
+]);
+
+/**
+ * Where a refusal of the invitation belongs: the token's own refusals under the token, the
+ * password policy (`validation_failed`) under the password, anything else nowhere.
+ */
+function refusalProblems(error: unknown): FieldProblem[] {
+  if (!(error instanceof ApiError)) return [];
+  if (TOKEN_REFUSALS.has(error.code)) return [{ id: "enrol-token", message: error.message }];
+  if (error.code === "validation_failed") {
+    return [{ id: "enrol-password", message: error.message }];
+  }
+  return [];
+}
 
 /**
  * Public page behind an invitation link. The token is single use: it sets the password and signs the
@@ -18,23 +46,37 @@ export function EnrolPage() {
   const [token, setToken] = useState(params.get("token") ?? "");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  // A refusal about no field (a disabled account, the server is down) is said above the button.
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const fields = useFieldErrors();
 
-  const mismatch = confirmation.length > 0 && confirmation !== password;
-  const ready = token.trim().length > 0 && password.length >= 8 && password === confirmation;
+  // A mismatch is said once the person has left the second field, or on submit, never while they
+  // are still typing it; once said, it goes away as soon as the two match.
+  function checkConfirmation(nextPassword: string, nextConfirmation: string, leaving: boolean) {
+    if (!leaving && !fields.errorOf("enrol-confirmation")) return;
+    if (leaving && nextConfirmation === "") return;
+    fields.set("enrol-confirmation", confirmationProblem(nextPassword, nextConfirmation));
+  }
 
   async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!ready) return;
-    setPending(true);
     setError(null);
+    const problems = [
+      ...problemAt("enrol-token", token.trim() ? null : "Paste the invitation token."),
+      ...problemAt("enrol-password", passwordProblem(password)),
+      ...problemAt("enrol-confirmation", confirmationProblem(password, confirmation)),
+    ];
+    if (fields.report(problems)) return;
+    setPending(true);
     try {
       await api.enrol(token.trim(), password);
       await refresh();
       void navigate("/", { replace: true });
     } catch (enrolError) {
-      setError(describeError(enrolError, "Unable to use this invitation right now."));
+      if (!fields.report(refusalProblems(enrolError))) {
+        setError(describeError(enrolError, "Unable to use this invitation right now."));
+      }
     } finally {
       setPending(false);
     }
@@ -48,6 +90,7 @@ export function EnrolPage() {
         }}
         className="card-surface flex w-full max-w-sm flex-col gap-4 p-7"
         aria-label="Accept invitation"
+        noValidate
       >
         <div>
           <h1 className="text-lg font-semibold text-[var(--foreground)]">Choose your password</h1>
@@ -59,51 +102,67 @@ export function EnrolPage() {
           label="Invitation token"
           htmlFor="enrol-token"
           hint="Filled in from the link; paste it here if you only received the code."
+          error={fields.errorOf("enrol-token")}
         >
           <Input
             id="enrol-token"
             name="token"
             value={token}
-            onChange={(event) => setToken(event.target.value)}
+            onChange={(event) => {
+              setToken(event.target.value);
+              fields.set("enrol-token", null);
+            }}
             autoComplete="one-time-code"
             required
           />
         </Field>
-        <Field label="Password" htmlFor="enrol-password" hint="At least 8 characters.">
+        <Field
+          label="Password"
+          htmlFor="enrol-password"
+          hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
+          error={fields.errorOf("enrol-password")}
+        >
           <Input
             id="enrol-password"
             name="password"
             type="password"
             autoComplete="new-password"
-            minLength={8}
+            minLength={MIN_PASSWORD_LENGTH}
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              fields.set("enrol-password", null);
+              checkConfirmation(event.target.value, confirmation, false);
+            }}
             required
           />
         </Field>
-        <Field label="Repeat password" htmlFor="enrol-confirmation">
+        <Field
+          label="Repeat password"
+          htmlFor="enrol-confirmation"
+          error={fields.errorOf("enrol-confirmation")}
+        >
           <Input
             id="enrol-confirmation"
             name="confirmation"
             type="password"
             autoComplete="new-password"
-            minLength={8}
+            minLength={MIN_PASSWORD_LENGTH}
             value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value)}
+            onChange={(event) => {
+              setConfirmation(event.target.value);
+              checkConfirmation(password, event.target.value, false);
+            }}
+            onBlur={() => checkConfirmation(password, confirmation, true)}
             required
           />
         </Field>
-        {mismatch ? (
-          <p role="alert" className="text-xs text-[var(--destructive)]">
-            The two passwords do not match.
-          </p>
-        ) : null}
         {error ? (
           <p role="alert" className="text-xs text-[var(--destructive)]">
             {error}
           </p>
         ) : null}
-        <Button type="submit" disabled={!ready || pending}>
+        <Button type="submit" disabled={pending}>
           {pending ? "Saving…" : "Set password and sign in"}
         </Button>
         <Link className="text-[11px] underline" to="/login">
