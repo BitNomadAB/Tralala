@@ -2,8 +2,10 @@ import { cva, type VariantProps } from "class-variance-authority";
 import type { ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
+// aria-disabled looks and takes the pointer exactly as disabled does; unlike disabled it stays
+// focusable, which is what ReasonButton (reason-button.tsx) relies on.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]",
+  "inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]",
   {
     variants: {
       variant: {
@@ -12,7 +14,7 @@ const buttonVariants = cva(
           "bg-[var(--surface-raised)] text-[var(--foreground)] border border-[var(--border)] hover:brightness-110",
         ghost:
           "text-[var(--muted-foreground)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)]",
-        danger: "bg-[var(--destructive)] text-white hover:brightness-110",
+        danger: "bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:brightness-110",
         outline:
           "border border-[var(--border)] bg-transparent text-[var(--foreground)] hover:bg-[var(--surface-raised)]",
         quiet:

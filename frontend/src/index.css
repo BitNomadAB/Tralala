@@ -43,9 +43,11 @@
   --primary-foreground: #07142a;
   --accent: #7ba7ff;
   --destructive: #f87171;
+  --destructive-foreground: #ffffff;
   --success: #34d399;
   --warning: #e3b341;
   --ring: #6ba3ff;
+  --field-border: var(--border);
   --grid-line: rgba(75, 139, 245, 0.07);
   --glow-primary: rgba(75, 139, 245, 0.2);
   --glow-secondary: rgba(52, 211, 153, 0.12);
@@ -73,9 +75,11 @@
   --primary-foreground: #ffffff;
   --accent: #1f5fd0;
   --destructive: #c73a3f;
+  --destructive-foreground: #ffffff;
   --success: #0f8a5f;
   --warning: #97690a;
   --ring: #2f6fe4;
+  --field-border: var(--border);
   --grid-line: rgba(47, 111, 228, 0.1);
   --glow-primary: rgba(47, 111, 228, 0.13);
   --glow-secondary: rgba(16, 185, 129, 0.1);
@@ -103,9 +107,11 @@
   --primary-foreground: #3d0d00;
   --accent: #ffb59f;
   --destructive: #ff897d;
+  --destructive-foreground: #ffffff;
   --success: #90d792;
   --warning: #ffc46b;
   --ring: #ffb59f;
+  --field-border: var(--border);
   --grid-line: rgba(255, 181, 159, 0.09);
   --glow-primary: rgba(255, 112, 67, 0.24);
   --glow-secondary: rgba(148, 204, 255, 0.14);
@@ -133,9 +139,11 @@
   --primary-foreground: #ffffff;
   --accent: #b3401f;
   --destructive: #ba1a1a;
+  --destructive-foreground: #ffffff;
   --success: #2e7d32;
   --warning: #8a5300;
   --ring: #d8461f;
+  --field-border: var(--border);
   --grid-line: rgba(216, 70, 31, 0.1);
   --glow-primary: rgba(255, 112, 67, 0.16);
   --glow-secondary: rgba(47, 102, 144, 0.1);
@@ -148,7 +156,9 @@
   --card-shadow: 0 1px 2px rgba(35, 25, 23, 0.07);
 }
 
-/* Classic ? the original flat Tralala palette, kept as an extra option with no motion. */
+/* Classic ? the original flat Tralala palette, kept as an extra option with no motion. It is the kit
+   held to WCAG 2.2 AA contrast: 4.5:1 for text (badges included) and 3:1 for a field's edge and the
+   focus ring, checked by src/tests/palette-contrast.test.ts. */
 :root[data-theme-kit="classic"] {
   color-scheme: dark;
   --background: #0b0f14;
@@ -159,13 +169,15 @@
   --foreground-faint: #788596;
   --border: #222c38;
   --border-soft: #1a212a;
-  --primary: #4f8cff;
+  --primary: #669bff;
   --primary-foreground: #04101f;
   --accent: #1d9bf0;
-  --destructive: #f2555a;
+  --destructive: #f47176;
+  --destructive-foreground: #1f0507;
   --success: #3fb950;
   --warning: #d29922;
-  --ring: #4f8cff;
+  --ring: #669bff;
+  --field-border: #606b7a;
   --grid-line: transparent;
   --glow-primary: transparent;
   --glow-secondary: transparent;
@@ -183,13 +195,15 @@
   --foreground-faint: #656f7d;
   --border: #d8dee6;
   --border-soft: #eceff3;
-  --primary: #2563eb;
+  --primary: #134fd1;
   --primary-foreground: #ffffff;
-  --accent: #0b7bd4;
-  --destructive: #c62a2f;
-  --success: #1a7f37;
-  --warning: #9a6700;
-  --ring: #2563eb;
+  --accent: #0a6ebe;
+  --destructive: #ab2429;
+  --destructive-foreground: #ffffff;
+  --success: #15682d;
+  --warning: #7b5300;
+  --ring: #134fd1;
+  --field-border: #808a97;
   --card-shadow: none;
 }
 
@@ -456,6 +470,16 @@ body {
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   box-shadow: var(--card-shadow);
+}
+
+/* A label chip's text: the label's own colour, made readable for each mode by labelInk()
+   (src/lib/labelInk.ts), or the theme's text colour when the label's colour is not hex. */
+.label-ink {
+  color: var(--label-ink-dark, var(--foreground));
+}
+
+:root[data-theme="light"] .label-ink {
+  color: var(--label-ink-light, var(--foreground));
 }
 
 /*

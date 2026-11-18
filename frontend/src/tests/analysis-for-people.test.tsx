@@ -126,7 +126,10 @@ describe("the analysis written for people", () => {
       await screen.findByText(/A board agent is writing the brief of this analysis for people/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve analysis" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Rewrite for people/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Rewrite for people/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   it("can be approved once nobody is writing it", async () => {

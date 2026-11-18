@@ -124,7 +124,7 @@ function PhaseList({
                 ) : step.state === "skipped" ? (
                   <Minus size={10} />
                 ) : step.state === "active" ? (
-                  <Loader2 size={10} className="animate-spin" />
+                  <Loader2 size={10} className="motion-safe:animate-spin" />
                 ) : (
                   index + 1
                 )}

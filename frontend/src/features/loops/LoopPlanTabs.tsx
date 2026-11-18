@@ -1,6 +1,7 @@
 import { Lock, PenLine, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
+import { ReasonButton } from "@/components/ui/reason-button";
 import type { GenerationCandidates } from "@/lib/boardAgents";
 import type { PlanScope, PlanTab } from "./loopUi";
 
@@ -75,22 +76,9 @@ export function LoopPlanTabs({
         </div>
       ) : null}
       {tab !== "info" && !technical && onRewrite ? (
-        <span className="flex items-center gap-1.5">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={rewriteBlocked !== null}
-            aria-describedby={rewriteBlocked ? "rewrite-blocked" : undefined}
-            onClick={onRewrite}
-          >
-            <PenLine size={14} /> Rewrite for people
-          </Button>
-          {rewriteBlocked ? (
-            <span id="rewrite-blocked" className="text-[11px] text-[var(--muted-foreground)]">
-              {rewriteBlocked}
-            </span>
-          ) : null}
-        </span>
+        <ReasonButton size="sm" variant="ghost" disabledReason={rewriteBlocked} onClick={onRewrite}>
+          <PenLine size={14} /> Rewrite for people
+        </ReasonButton>
       ) : null}
       {tab !== "info" ? (
         <label className="ml-auto flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
@@ -128,9 +116,11 @@ export function LoopPlanTabs({
           variant="outline"
           aria-busy={generating}
           data-generating={generating ? "true" : undefined}
+          // The pulse and its glow only where motion is welcome (WCAG 2.2.2); under reduced motion
+          // the running state is the steady ring and the "Generating…" text.
           className={
             generating
-              ? "animate-pulse border-[var(--primary)] text-[var(--primary)] shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100"
+              ? "motion-safe:animate-pulse border-[var(--primary)] text-[var(--primary)] motion-safe:shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100"
               : undefined
           }
           disabled={generateDisabled}
