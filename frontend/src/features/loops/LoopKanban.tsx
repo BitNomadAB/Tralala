@@ -70,6 +70,15 @@ export function LoopKanban({
     mutationFn: ({ listId, name }: { listId: string; name: string }) =>
       api.renameList(boardId, loopId, listId, name),
     onSuccess: onListsChanged,
+    // The column shows the stored name again, so say why the new one did not stay.
+    onError: (error) => {
+      onListsChanged();
+      toast.push({
+        title: "Could not rename column",
+        description: describeError(error, undefined),
+        variant: "error",
+      });
+    },
   });
 
   const archiveListMutation = useMutation({
@@ -77,6 +86,14 @@ export function LoopKanban({
     onSuccess: () => {
       onListsChanged();
       onCardsChanged();
+    },
+    onError: (error) => {
+      onListsChanged();
+      toast.push({
+        title: "Could not archive column",
+        description: describeError(error, undefined),
+        variant: "error",
+      });
     },
   });
 

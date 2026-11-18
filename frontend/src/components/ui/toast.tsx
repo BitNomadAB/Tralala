@@ -1,6 +1,7 @@
 import { CheckCircle2, Info, TriangleAlert, XCircle } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
+import { AnnouncerProvider } from "./announcer";
 import { ToastContext, type ToastInput, type ToastVariant } from "./useToast";
 
 interface Toast {
@@ -37,35 +38,38 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo(() => ({ push }), [push]);
 
+  // The announcer comes with the toasts, so every view under the provider can announce as well.
   return (
-    <ToastContext.Provider value={value}>
-      {children}
-      <div
-        aria-live="polite"
-        aria-atomic="true"
-        className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(340px,90vw)] flex-col gap-2"
-      >
-        {toasts.map((toast) => {
-          const Icon = icons[toast.variant];
-          return (
-            <div
-              key={toast.id}
-              role="status"
-              className="pointer-events-auto flex gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-lg"
-            >
-              <Icon size={16} className={cn("mt-0.5 shrink-0", tones[toast.variant])} />
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--foreground)]">{toast.title}</p>
-                {toast.description ? (
-                  <p className="mt-0.5 text-xs text-[var(--muted-foreground)] break-words">
-                    {toast.description}
-                  </p>
-                ) : null}
+    <AnnouncerProvider>
+      <ToastContext.Provider value={value}>
+        {children}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(340px,90vw)] flex-col gap-2"
+        >
+          {toasts.map((toast) => {
+            const Icon = icons[toast.variant];
+            return (
+              <div
+                key={toast.id}
+                role="status"
+                className="pointer-events-auto flex gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-lg"
+              >
+                <Icon size={16} className={cn("mt-0.5 shrink-0", tones[toast.variant])} />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--foreground)]">{toast.title}</p>
+                  {toast.description ? (
+                    <p className="mt-0.5 text-xs text-[var(--muted-foreground)] break-words">
+                      {toast.description}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </ToastContext.Provider>
+            );
+          })}
+        </div>
+      </ToastContext.Provider>
+    </AnnouncerProvider>
   );
 }

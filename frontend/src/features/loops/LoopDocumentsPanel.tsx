@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useAnnounceWhen } from "@/components/ui/useAnnounce";
 import { generationAgents } from "@/lib/boardAgents";
 import { keys, useAgents, useBoard, useLoopAgents, useLoopDocuments } from "@/lib/queries";
 import type { DocumentKind, Loop } from "@/lib/types";
@@ -110,6 +111,9 @@ export function LoopDocumentsPanel({
     });
   const scope: PlanScope = tab === "analysis" ? "analysis" : "roadmap";
   const scopeLabel = tab === "analysis" ? "analysis" : "RoadMap";
+  const writingNotice = `A board agent is writing the brief of this ${scopeLabel} for people. It can be approved when that is done.`;
+  // Read out when it starts: the line below appears with its text, which a screen reader misses.
+  useAnnounceWhen(writingForPeople, writingNotice);
   // An analysis brief carries "Approve analysis" at its end; the review below then leaves it out.
   const briefApproves =
     tab === "analysis" && !technical && !!documents && showsAnalysisBrief(documents.analysis);
@@ -173,10 +177,7 @@ export function LoopDocumentsPanel({
           })}
         />
         {writingForPeople ? (
-          <p role="status" className="mt-2 text-xs text-[var(--muted-foreground)]">
-            A board agent is writing the brief of this {scopeLabel} for people. It can be approved
-            when that is done.
-          </p>
+          <p className="mt-2 text-xs text-[var(--muted-foreground)]">{writingNotice}</p>
         ) : null}
         {/* Once, under the button that started the run; from 2xl the aside beside it shows it instead. */}
         {visibleRun ? (
