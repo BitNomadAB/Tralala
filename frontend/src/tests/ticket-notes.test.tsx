@@ -84,6 +84,15 @@ describe("Your notes", () => {
       within(row("Try it on the next Loop instead.")).getByRole("button", { name: "Edit" }),
     );
     await user.click(screen.getByRole("button", { name: "Delete" }));
+    // It asks first, with the focus on Keep; Keep sends nothing and goes back to Delete.
+    expect(screen.getByText("Delete this note?")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Keep" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.queryByText("Delete this note?")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toHaveFocus());
+    expect(view.notes.writes).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByRole("list", { name: "Your notes" })).toBeNull());
     expect(view.notes.writes).toEqual([
       {

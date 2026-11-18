@@ -5,6 +5,7 @@ import { ApiError, api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { BoardList, Card, CardDetail, Workplace } from "@/lib/types";
+import { focusRestoredCard } from "./archiveFocus";
 import { startWorkTarget } from "./ticketRules";
 
 /** What the toast says when the version the view sent is no longer the Ticket's. */
@@ -24,6 +25,8 @@ const AT_THE_END = 10_000;
  * the rest. A refusal is a toast; a `409 version_conflict` says to reload, and the refetch puts
  * the field back to what the server holds. A decision that went through is announced ("Work
  * started", "Ticket completed"), so a screen reader hears it wherever the focus goes next.
+ * Archiving runs at once and closes the view; its toast offers Undo, which restores the Ticket
+ * (the view is gone by then, so Undo needs nothing of it but the ids).
  */
 export function useTicketActions({
   boardId,
@@ -83,12 +86,41 @@ export function useTicketActions({
     }
   }
 
+  const cardId = card.id;
+
+  /** Undo of an archive: restores the Ticket and refetches the board it comes back to. */
+  function restore() {
+    api.restoreCard(boardId, loopId, cardId).then(
+      async () => {
+        toast.push({ title: "Ticket restored", variant: "success" });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: keys.loopCardsPrefix(boardId, loopId) }),
+          queryClient.invalidateQueries({ queryKey: keys.lists(boardId, loopId) }),
+          queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loopId) }),
+          queryClient.invalidateQueries({ queryKey: keys.card(boardId, loopId, cardId) }),
+        ]);
+        focusRestoredCard(cardId);
+      },
+      (error: unknown) => {
+        toast.push({
+          title: "Could not restore the Ticket",
+          description: describeError(error, undefined),
+          variant: "error",
+        });
+      },
+    );
+  }
+
   const archive = useMutation({
     mutationFn: () => api.archiveCard(boardId, loopId, card.id),
     onSuccess: () => {
       refresh();
       onArchived();
-      toast.push({ title: "Ticket archived", variant: "success" });
+      toast.push({
+        title: "Ticket archived",
+        variant: "success",
+        action: { label: "Undo", onClick: restore },
+      });
     },
     onError: (error: unknown) => {
       toast.push({

@@ -32,6 +32,7 @@ export function TicketLayout({
   data,
   modal,
   onClose,
+  onArchived,
   pageHref,
   titleWrap,
   ticketHref,
@@ -46,6 +47,8 @@ export function TicketLayout({
   data: ReturnType<typeof useTicketData>;
   modal: boolean;
   onClose: () => void;
+  /** Called once the Ticket is archived, instead of `onClose`. */
+  onArchived: (() => void) | undefined;
   pageHref: string | undefined;
   titleWrap: ((heading: ReactElement) => ReactElement) | undefined;
   ticketHref: MarkdownOptions["ticketHref"] | undefined;
@@ -78,7 +81,7 @@ export function TicketLayout({
     lists: data.lists,
     actorId: actorId ?? null,
     refresh: data.refresh,
-    onArchived: onClose,
+    onArchived: onArchived ?? onClose,
   });
   const { root, heading, afterDecision } = useTicketFocus(focusOnOpen);
 

@@ -22,6 +22,7 @@ export function TicketView({
   cardId,
   host,
   onClose,
+  onArchived,
   pageHref,
   titleWrap,
   ticketHref,
@@ -33,6 +34,8 @@ export function TicketView({
   host: "modal" | "page";
   /** Leaves the Ticket: closes the dialog, or goes back to the board from the page. */
   onClose: () => void;
+  /** Leaves the Ticket once it is archived; `onClose` when not given. */
+  onArchived?: (() => void) | undefined;
   /** The Ticket's own page, linked from the dialog's head. */
   pageHref?: string | undefined;
   /** Wraps the title heading, so the dialog is named by it. */
@@ -87,6 +90,7 @@ export function TicketView({
       data={data}
       modal={host === "modal"}
       onClose={onClose}
+      onArchived={onArchived}
       pageHref={pageHref}
       titleWrap={titleWrap}
       ticketHref={ticketHref}

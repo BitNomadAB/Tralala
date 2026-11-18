@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Textarea } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
@@ -5,6 +6,7 @@ import type { CardNote } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 import { PendingButton } from "./PendingButton";
 import { SAVING } from "./ticketWork";
+import { focusTarget, useFocusAfter } from "./useFocusAfter";
 
 const LINK =
   "rounded text-[var(--muted-foreground)] hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]";
@@ -15,7 +17,8 @@ export const NOTE_TEXT_FIRST = "Write the note first.";
 /**
  * One note: the author's mark, the text (or its field while edited, which takes the focus) and the
  * author line with Edit for the author. The row carries the note's id and its Edit button a focus
- * mark, so the list can give the focus back to it after a save or a cancel.
+ * mark, so the list can give the focus back to it after a save or a cancel. Delete asks once, as a
+ * file's delete does: "Delete this note?" with the focus on Keep, which gives it back to Delete.
  */
 export function NoteRow({
   note,
@@ -39,8 +42,12 @@ export function NoteRow({
   onDelete: () => void;
   onCancel: () => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
+  const row = useRef<HTMLLIElement>(null);
+  const focusAfter = useFocusAfter();
   return (
     <li
+      ref={row}
       data-note-id={note.id}
       className="grid grid-cols-[26px_minmax(0,1fr)] items-start gap-2.5 text-[14.5px]"
     >
@@ -74,21 +81,49 @@ export function NoteRow({
             value={editing}
             onChange={(event) => onChange(event.target.value)}
           />
-          <div className="flex flex-wrap items-start gap-2">
-            <ReasonButton
-              size="sm"
-              disabledReason={!editing.trim() ? NOTE_TEXT_FIRST : pending ? SAVING : null}
-              onClick={onSave}
-            >
-              Save
-            </ReasonButton>
-            <PendingButton variant="outline" size="sm" pending={pending} onClick={onDelete}>
-              Delete
-            </PendingButton>
-            <PendingButton variant="quiet" size="sm" pending={pending} onClick={onCancel}>
-              Cancel
-            </PendingButton>
-          </div>
+          {confirming ? (
+            // Keyed apart from the buttons, so Keep mounts anew and takes the focus.
+            <div key="confirm" className="flex flex-wrap items-center gap-2 text-[13px]">
+              <span>Delete this note?</span>
+              <PendingButton variant="danger" size="sm" pending={pending} onClick={onDelete}>
+                {pending ? "Deleting…" : "Delete"}
+              </PendingButton>
+              <PendingButton
+                variant="outline"
+                size="sm"
+                autoFocus
+                pending={pending}
+                onClick={() => {
+                  setConfirming(false);
+                  focusAfter(() => focusTarget(row.current, "delete-note"));
+                }}
+              >
+                Keep
+              </PendingButton>
+            </div>
+          ) : (
+            <div key="buttons" className="flex flex-wrap items-start gap-2">
+              <ReasonButton
+                size="sm"
+                disabledReason={!editing.trim() ? NOTE_TEXT_FIRST : pending ? SAVING : null}
+                onClick={onSave}
+              >
+                Save
+              </ReasonButton>
+              <PendingButton
+                variant="outline"
+                size="sm"
+                data-focus-target="delete-note"
+                pending={pending}
+                onClick={() => setConfirming(true)}
+              >
+                Delete
+              </PendingButton>
+              <PendingButton variant="quiet" size="sm" pending={pending} onClick={onCancel}>
+                Cancel
+              </PendingButton>
+            </div>
+          )}
         </div>
       )}
     </li>

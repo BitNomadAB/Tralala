@@ -98,6 +98,7 @@ describe("the focus around the notes", () => {
     await screen.findByText(SECOND.text);
     await user.click(within(noteRow(MINE.text)).getByRole("button", { name: "Edit" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByText(MINE.text)).toBeNull());
     await waitFor(() =>
       expect(within(noteRow(SECOND.text)).getByRole("button", { name: "Edit" })).toHaveFocus(),
@@ -105,6 +106,7 @@ describe("the focus around the notes", () => {
     await waitFor(() => expect(announcer()).toHaveTextContent("Note deleted"));
 
     await user.click(within(noteRow(SECOND.text)).getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByText(SECOND.text)).toBeNull());
     await waitFor(() =>

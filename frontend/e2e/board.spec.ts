@@ -100,6 +100,14 @@ test.describe("boards and cards", () => {
       .click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(cardTile(page, "Backlog", "Temporary card")).toHaveCount(0);
+    // The card left the board, so the focus is on its column's Add card; Undo brings it back.
+    await expect(
+      listRegion(page, "Backlog").getByRole("button", { name: "Add card" }),
+    ).toBeFocused();
+    await expect(page.getByText("Ticket archived", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(page.getByText("Ticket restored", { exact: true })).toBeVisible();
+    await expect(cardTile(page, "Backlog", "Temporary card")).toBeVisible();
   });
 
   test("keeps the Kanban usable in a window as small as 400% zoom", async ({ page }) => {
