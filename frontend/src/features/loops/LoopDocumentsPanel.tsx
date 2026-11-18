@@ -14,6 +14,7 @@ import { FOR_PEOPLE_PURPOSE, rewriteBlockedReason, type PlanScope, type PlanTab 
 import { PlanDocumentPanel } from "./PlanDocumentPanel";
 import { approvalLine, approveRoadmapLabel, reviewPlan, ticketCount } from "./roadmapPlan";
 import { RoadmapReview } from "./RoadmapReview";
+import { useRunAnnouncement } from "./runStatus";
 import { ScopeReview } from "./ScopeReview";
 import { useFocusBack } from "./useFocusBack";
 import { useGenerationRun } from "./useGenerationRun";
@@ -126,6 +127,8 @@ export function LoopDocumentsPanel({
   const generateId = useId();
   const generateButton = () => document.getElementById(generateId);
   useFocusBack(Boolean(visibleRun), generateButton);
+  // Once per page, though the run shows in two panels (one of them hidden by the breakpoint).
+  useRunAnnouncement(scope, visibleRun);
 
   // A save while a run is in flight asks first; the question goes away by itself once the run ends,
   // so a later run cannot bring back a question nobody asked again.
