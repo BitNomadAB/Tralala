@@ -10,23 +10,24 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
 import { useToast } from "@/components/ui/useToast";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
-import { keys } from "@/lib/queries";
 import type { BoardList, Card } from "@/lib/types";
 import { dragData } from "./dragData";
 import { KANBAN_INSTRUCTIONS, kanbanAnnouncements } from "./kanbanAnnouncements";
 import { KanbanColumn } from "./KanbanColumn";
-import { currentTarget, dropTarget, findCard, type CardTarget } from "./kanbanMoves";
-import { LIST_LIMIT } from "./loopUi";
+import { cardMoveItems, columnMoveItems, currentTarget, dropTarget, findCard } from "./kanbanMoves";
 import { TicketCard } from "./TicketCard";
+import { useKanbanMoves } from "./useKanbanMoves";
 
 /**
  * The Loop's columns with drag and drop: a card moves between columns optimistically, a column moves
- * by position. `children` is the slot after the last column ("Add column").
+ * by position. The same moves are in the card's and the column's menus, for a single pointer or a
+ * keyboard without dragging (WCAG 2.5.7). `children` is the slot after the last column ("Add
+ * column").
  */
 export function LoopKanban({
   boardId,
@@ -51,7 +52,6 @@ export function LoopKanban({
   onCardsChanged: () => void;
   children: ReactNode;
 }) {
-  const queryClient = useQueryClient();
   const toast = useToast();
   const [activeCard, setActiveCard] = useState<Card | null>(null);
 
@@ -90,6 +90,7 @@ export function LoopKanban({
       onCardsChanged();
     },
     onError: (error) => {
+      moves.columnFocused();
       onListsChanged();
       toast.push({
         title: "Could not archive column",
@@ -99,36 +100,15 @@ export function LoopKanban({
     },
   });
 
-  const moveListMutation = useMutation({
-    mutationFn: ({ listId, position }: { listId: string; position: number }) =>
-      api.moveList(boardId, loopId, listId, position),
-    onSuccess: onListsChanged,
-    onError: () => {
-      onListsChanged();
-      toast.push({ title: "Could not reorder columns", variant: "error" });
-    },
+  const moves = useKanbanMoves({
+    boardId,
+    loopId,
+    lists,
+    cardsByList,
+    onListsChanged,
+    onCardsChanged,
   });
-
-  const moveCardMutation = useMutation({
-    mutationFn: ({ card, listId, position }: { card: Card; listId: string; position: number }) =>
-      api.moveCard(boardId, loopId, card.id, {
-        version: card.version,
-        list_id: listId,
-        position,
-      }),
-    onSettled: onCardsChanged,
-    onError: (error) => {
-      onCardsChanged();
-      toast.push({
-        title: "Could not move ticket",
-        description:
-          error instanceof ApiError && error.code === "version_conflict"
-            ? "The ticket changed elsewhere. The loop has been refreshed."
-            : describeError(error, undefined),
-        variant: "error",
-      });
-    },
-  });
+  const state = { lists, cardsByList };
 
   // What a screen reader hears during a drag names the Ticket or the column and where it is.
   const accessibility = useMemo(
@@ -146,26 +126,7 @@ export function LoopKanban({
 
   function handleDragStart(event: DragStartEvent) {
     const data = dragData(event.active.data.current);
-    if (data?.type === "card") setActiveCard(findCard({ lists, cardsByList }, data.cardId) ?? null);
-  }
-
-  /** Moves the card at once on screen, then on the server; a refusal reloads the columns. */
-  function moveCard(card: Card, target: CardTarget) {
-    const targetCards = (cardsByList[target.listId] ?? []).filter((item) => item.id !== card.id);
-    const sourceCards = (cardsByList[card.list_id] ?? []).filter((item) => item.id !== card.id);
-    queryClient.setQueryData<Card[]>(
-      keys.listCards(boardId, loopId, card.list_id, LIST_LIMIT),
-      sourceCards,
-    );
-    queryClient.setQueryData<Card[]>(
-      keys.listCards(boardId, loopId, target.listId, LIST_LIMIT),
-      () => {
-        const next = [...targetCards];
-        next.splice(target.index, 0, { ...card, list_id: target.listId });
-        return next;
-      },
-    );
-    moveCardMutation.mutate({ card, listId: target.listId, position: target.index });
+    if (data?.type === "card") setActiveCard(findCard(state, data.cardId) ?? null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -180,19 +141,20 @@ export function LoopKanban({
       const overId = overData?.listId ?? over.id;
       const toIndex = lists.findIndex((list) => list.id === overId);
       if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
-      moveListMutation.mutate({ listId: activeData.listId, position: toIndex });
+      moves.moveColumn(activeData.listId, toIndex);
       return;
     }
 
     if (activeData?.type !== "card") return;
-    const state = { lists, cardsByList };
     const card = findCard(state, activeData.cardId);
     const target = card ? dropTarget(state, card, overData) : null;
     if (!card || !target) return;
     // Dropped where it was: nothing to store.
     const here = currentTarget(state, card);
     if (target.listId === here.listId && target.index === here.index) return;
-    moveCard(card, target);
+    // dnd-kit says where it landed; a keyboard keeps the focus on the grip of the moved card.
+    const byKeyboard = event.activatorEvent instanceof KeyboardEvent;
+    moves.moveCard(card, target, byKeyboard ? { focus: "grip" } : {});
   }
 
   return (
@@ -210,23 +172,46 @@ export function LoopKanban({
           role="region"
           aria-label="Loop Kanban columns"
         >
-          {lists.map((list: BoardList) => {
+          {lists.map((list: BoardList, index) => {
             const allCards = cardsByList[list.id] ?? [];
             const cards = matchingIds
               ? allCards.filter((card) => matchingIds.has(card.id))
               : allCards;
+            const focusCard = moves.cardFocus?.listId === list.id ? moves.cardFocus : null;
             return (
               <div key={list.id} className="h-full">
                 <KanbanColumn
                   list={list}
                   cards={cards}
                   readOnly={readOnly}
+                  moveItems={columnMoveItems(lists, list.id, readOnly, (to) => {
+                    moves.moveColumn(list.id, to, { announce: true, focus: true });
+                  })}
+                  cardActions={(card) =>
+                    cardMoveItems(state, card, readOnly, (target) => {
+                      moves.moveCard(card, target, { announce: true, focus: "actions" });
+                    })
+                  }
+                  focusCard={focusCard}
+                  onCardFocused={moves.cardFocused}
+                  focusMenu={moves.columnFocus === list.id}
+                  onMenuFocused={moves.columnFocused}
                   onOpenCard={(card) => onOpenCard(card.id)}
                   onCreateCard={async (title) => {
                     await createCardMutation.mutateAsync({ listId: list.id, title });
                   }}
                   onRename={(name) => renameListMutation.mutate({ listId: list.id, name })}
-                  onArchive={() => archiveListMutation.mutate(list.id)}
+                  onArchive={() => {
+                    // The focus goes on to the next column's menu (the one before, at the end).
+                    const next = lists[index + 1] ?? lists[index - 1];
+                    if (next) {
+                      moves.focusColumn(
+                        next.id,
+                        (shown) => !shown.some((item) => item.id === list.id),
+                      );
+                    }
+                    archiveListMutation.mutate(list.id);
+                  }}
                 />
               </div>
             );

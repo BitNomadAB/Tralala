@@ -2,24 +2,33 @@ import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Menu } from "@/components/ui/menu";
+import { Menu, type MenuItem } from "@/components/ui/menu";
 import type { BoardList, Card } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { DragData } from "./dragData";
 import { TicketCard } from "./TicketCard";
+import type { CardControl } from "./useKanbanMoves";
 
 /**
  * One column of the Loop's Kanban: its name and count, the cards, and "Add card" at the bottom. A
- * column named Done is a column like any other; only completing a Ticket completes it. Renaming and
- * archiving sit in the column's quiet menu.
+ * column named Done is a column like any other; only completing a Ticket completes it. Renaming,
+ * moving left or right (`moveItems`) and archiving sit in the column's quiet menu; each card's own
+ * menu holds `cardActions(card)`. `focusMenu` and `focusCard` hand the focus to this column's menu
+ * button or to a card's control after a move (see `useKanbanMoves`).
  */
 export function KanbanColumn({
   list,
   cards,
   readOnly,
+  moveItems,
+  cardActions,
+  focusCard,
+  onCardFocused,
+  focusMenu,
+  onMenuFocused,
   onOpenCard,
   onCreateCard,
   onRename,
@@ -28,6 +37,12 @@ export function KanbanColumn({
   list: BoardList;
   cards: Card[];
   readOnly: boolean;
+  moveItems: readonly MenuItem[];
+  cardActions: (card: Card) => readonly MenuItem[];
+  focusCard: { cardId: string; control: CardControl } | null;
+  onCardFocused: () => void;
+  focusMenu: boolean;
+  onMenuFocused: () => void;
   onOpenCard: (card: Card) => void;
   onCreateCard: (title: string) => Promise<void>;
   onRename: (name: string) => void;
@@ -46,6 +61,14 @@ export function KanbanColumn({
   const [title, setTitle] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(list.name);
+  const header = useRef<HTMLElement>(null);
+
+  // After the column moved, its menu button keeps the focus the menu gave back to it.
+  useEffect(() => {
+    if (!focusMenu) return;
+    header.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
+    onMenuFocused();
+  }, [focusMenu, onMenuFocused]);
 
   async function submitCard() {
     if (!title.trim()) return;
@@ -69,7 +92,7 @@ export function KanbanColumn({
         isDragging && "opacity-60",
       )}
     >
-      <header className="flex items-center gap-1.5 px-2.5 pt-2.5">
+      <header ref={header} className="flex items-center gap-1.5 px-2.5 pt-2.5">
         <button
           type="button"
           className="cursor-grab text-[var(--foreground-faint)] hover:text-[var(--muted-foreground)]"
@@ -108,12 +131,20 @@ export function KanbanColumn({
             {
               label: "Rename column",
               disabled: readOnly,
+              hint: readOnly ? "The Loop is read-only" : undefined,
               onSelect: () => {
                 setName(list.name);
                 setRenaming(true);
               },
             },
-            { label: "Archive column", danger: true, disabled: readOnly, onSelect: onArchive },
+            ...moveItems,
+            {
+              label: "Archive column",
+              danger: true,
+              disabled: readOnly,
+              hint: readOnly ? "The Loop is read-only" : undefined,
+              onSelect: onArchive,
+            },
           ]}
         />
       </header>
@@ -131,7 +162,14 @@ export function KanbanColumn({
         >
           <ul className="flex flex-col gap-2">
             {cards.map((card) => (
-              <TicketCard key={card.id} card={card} onOpen={onOpenCard} />
+              <TicketCard
+                key={card.id}
+                card={card}
+                onOpen={onOpenCard}
+                actions={cardActions(card)}
+                focus={focusCard?.cardId === card.id ? focusCard.control : null}
+                onFocused={onCardFocused}
+              />
             ))}
           </ul>
         </SortableContext>

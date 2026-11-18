@@ -2,11 +2,14 @@ import type { DraggableSyntheticListeners } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { CalendarClock, Check, Flag, GripVertical } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Chip, StateChip } from "@/components/ui/chip";
+import { Menu, type MenuItem } from "@/components/ui/menu";
 import type { Card } from "@/lib/types";
 import { cn, isOverdue } from "@/lib/utils";
 import type { DragData } from "./dragData";
+import type { CardControl } from "./useKanbanMoves";
 
 const PRIORITY_WORDS: Record<Exclude<Card["priority"], "none">, string> = {
   low: "Low",
@@ -54,16 +57,24 @@ const GRIP =
  * due date when set, "done" once completed, "Needs a person" for a person's task, and the owner.
  * The title is the button that opens the Ticket (Enter or a click); it covers the whole card, so a
  * pointer drags the card from anywhere on it. The grip beside the title ("Move <title>") is the
- * keyboard's drag handle: Space or Enter picks the card up, the arrow keys move it.
+ * keyboard's drag handle: Space or Enter picks the card up, the arrow keys move it. `actions`, the
+ * menu after the grip ("Actions for <title>"), moves it without dragging. `focus` names the control
+ * that takes the focus once the card shows where it moved to; `onFocused` says it did.
  */
 export function TicketCard({
   card,
   onOpen,
   overlay = false,
+  actions,
+  focus = null,
+  onFocused,
 }: {
   card: Card;
   onOpen?: (card: Card) => void;
   overlay?: boolean;
+  actions?: readonly MenuItem[] | undefined;
+  focus?: CardControl | null | undefined;
+  onFocused?: (() => void) | undefined;
 }) {
   // Destructured, so the ref callbacks stay separate from the values read while rendering.
   const {
@@ -80,6 +91,15 @@ export function TicketCard({
     disabled: overlay,
   });
   const style = overlay ? undefined : { transform: CSS.Transform.toString(transform), transition };
+  const controls = useRef<HTMLDivElement>(null);
+
+  // A moved card is rendered anew in its column, so the focus is given back to it here.
+  useEffect(() => {
+    if (focus === null) return;
+    const selector = focus === "grip" ? "[data-card-grip]" : '[aria-haspopup="menu"]';
+    controls.current?.querySelector<HTMLElement>(selector)?.focus();
+    onFocused?.();
+  }, [focus, onFocused]);
 
   const summary = cardSummary(card);
   const held = card.state === "needs_input" || card.state === "blocked" ? card.state : null;
@@ -115,10 +135,11 @@ export function TicketCard({
           </span>
         ) : (
           // Above the title's full-card click area, so the grip takes its own pointer and keys.
-          <div className="relative z-10 -mr-1 flex shrink-0 items-center">
+          <div ref={controls} className="relative z-10 -mr-1 flex shrink-0 items-center">
             <button
               type="button"
               ref={setActivatorNodeRef}
+              data-card-grip=""
               aria-label={`Move ${card.title}`}
               className={cn(
                 GRIP,
@@ -129,6 +150,7 @@ export function TicketCard({
             >
               <GripVertical size={14} aria-hidden="true" />
             </button>
+            {actions ? <Menu label={`Actions for ${card.title}`} items={actions} /> : null}
           </div>
         )}
       </div>

@@ -91,8 +91,51 @@ test.describe("drag and drop", () => {
     await expect(said).toContainText(`${title} dropped in In Progress, position 1 of 1.`);
     await expect(cardTile(page, "In Progress", title)).toBeVisible();
     await expect(todo.getByRole("listitem")).toHaveCount(0);
+    // The card is rendered anew in its new column; its grip there keeps the focus.
+    await expect(
+      cardTile(page, "In Progress", title).getByRole("button", {
+        name: `Move ${title}`,
+        exact: true,
+      }),
+    ).toBeFocused();
 
     await page.reload();
     await expect(cardTile(page, "In Progress", title)).toBeVisible();
+  });
+
+  test("moves a card and a column from their menus, without dragging", async ({ page }) => {
+    await login(page);
+    await boardWithLoop(page, uniqueName("Menu move board"));
+    const title = uniqueName("Menu card");
+    await addCard(page, "Todo", title);
+
+    await cardTile(page, "Todo", title)
+      .getByRole("button", { name: `Actions for ${title}`, exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: "Move to Done" }).click();
+    const moved = cardTile(page, "Done", title);
+    await expect(moved).toBeVisible();
+    await expect(moved.getByRole("button", { name: `Actions for ${title}` })).toBeFocused();
+    await expect(page.locator('[data-announcer="polite"]')).toContainText(
+      `${title} moved to Done, position 1 of 1.`,
+    );
+
+    await listRegion(page, "Backlog")
+      .getByRole("button", { name: "Column actions for Backlog" })
+      .click();
+    await expect(
+      page.getByRole("menuitem", { name: "Move left: Already the first column" }),
+    ).toBeVisible();
+    await page.getByRole("menuitem", { name: "Move right" }).click();
+    await expect(page.getByRole("region", { name: /^Column / }).nth(1)).toHaveAccessibleName(
+      "Column Backlog",
+    );
+    await expect(page.getByRole("button", { name: "Column actions for Backlog" })).toBeFocused();
+
+    await page.reload();
+    await expect(cardTile(page, "Done", title)).toBeVisible();
+    await expect(page.getByRole("region", { name: /^Column / }).first()).toHaveAccessibleName(
+      "Column Todo",
+    );
   });
 });

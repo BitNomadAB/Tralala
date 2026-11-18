@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { dragText, KANBAN_INSTRUCTIONS } from "@/features/loops/kanbanAnnouncements";
-import { currentTarget, dropTarget, placeAt, type KanbanState } from "@/features/loops/kanbanMoves";
+import {
+  cardMoveItems,
+  columnMoveItems,
+  currentTarget,
+  dropTarget,
+  placeAt,
+  type CardTarget,
+  type KanbanState,
+} from "@/features/loops/kanbanMoves";
 import type { Card } from "@/lib/types";
 import { ticketCard } from "./msw/cards";
 import { COLUMNS } from "./msw/ticketView";
@@ -103,5 +111,73 @@ describe("what a screen reader hears during a drag", () => {
     expect(dragText(STATE, "start", undefined, undefined)).toBeUndefined();
     expect(dragText(STATE, "start", { ...active, cardId: "gone" }, undefined)).toBeUndefined();
     expect(KANBAN_INSTRUCTIONS.draggable).toMatch(/Space or Enter.*arrow keys.*Escape/);
+  });
+});
+
+describe("the moves in a card's menu", () => {
+  /** Each entry as "label -> target" or "label: reason", choosing the enabled ones. */
+  function entries(card: Card, readOnly = false): string[] {
+    let chosen: CardTarget | null = null;
+    return cardMoveItems(STATE, card, readOnly, (target) => {
+      chosen = target;
+    }).map((item) => {
+      if (item.disabled) return `${item.label}: ${item.hint ?? ""}`;
+      item.onSelect();
+      const target: CardTarget | null = chosen;
+      return target ? `${item.label} -> ${target.listId}#${target.index}` : item.label;
+    });
+  }
+
+  it("moves within the column and to the end of every other column", () => {
+    expect(entries(B)).toEqual([
+      "Move up -> list-1#0",
+      "Move down -> list-1#2",
+      "Move to top -> list-1#0",
+      "Move to bottom -> list-1#2",
+      "Move to In Progress -> list-2#1",
+      "Move to Done -> list-3#0",
+    ]);
+  });
+
+  it("keeps a move that would not move the card, with the reason", () => {
+    expect(entries(A).slice(0, 4)).toEqual([
+      "Move up: Already at the top",
+      "Move down -> list-1#1",
+      "Move to top: Already at the top",
+      "Move to bottom -> list-1#2",
+    ]);
+    expect(entries(D).slice(0, 4)).toEqual([
+      "Move up: Already at the top",
+      "Move down: Already at the bottom",
+      "Move to top: Already at the top",
+      "Move to bottom: Already at the bottom",
+    ]);
+  });
+
+  it("offers no move in a read-only Loop, and says so", () => {
+    expect(new Set(entries(B, true).map((entry) => entry.split(": ")[1]))).toEqual(
+      new Set(["The Loop is read-only"]),
+    );
+  });
+});
+
+describe("the moves in a column's menu", () => {
+  function entries(listId: string, readOnly = false): string[] {
+    const chosen: number[] = [];
+    return columnMoveItems(COLUMNS, listId, readOnly, (index) => chosen.push(index)).map((item) => {
+      if (item.disabled) return `${item.label}: ${item.hint ?? ""}`;
+      item.onSelect();
+      return `${item.label} -> ${String(chosen.at(-1))}`;
+    });
+  }
+
+  it("moves one place left or right, and says why not at either end", () => {
+    expect(entries("list-1")).toEqual(["Move left: Already the first column", "Move right -> 1"]);
+    expect(entries("list-2")).toEqual(["Move left -> 0", "Move right -> 2"]);
+    expect(entries("list-3")).toEqual(["Move left -> 1", "Move right: Already the last column"]);
+    expect(entries("list-2", true)).toEqual([
+      "Move left: The Loop is read-only",
+      "Move right: The Loop is read-only",
+    ]);
   });
 });

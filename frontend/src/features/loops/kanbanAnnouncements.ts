@@ -106,5 +106,6 @@ export const KANBAN_INSTRUCTIONS: ScreenReaderInstructions = {
   draggable:
     "To move a Ticket or a column, press Space or Enter on its grip to pick it up. Use the arrow " +
     "keys to move it: up and down within a column, left and right to another column. Press Space " +
-    "or Enter to drop it there, or Escape to cancel.",
+    "or Enter to drop it there, or Escape to cancel. The actions menu of a Ticket or a column " +
+    "moves it without dragging.",
 };
