@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
@@ -28,7 +28,7 @@ function renderInbox(rows: DiscussionInboxRow[], total = rows.length) {
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  return { api, user: userEvent.setup() };
+  return { api, user: userEvent.setup(), queryClient };
 }
 
 const WAITING = inboxRow("wait-1", {
@@ -65,7 +65,8 @@ describe("the Discussions inbox", () => {
       ),
     ).toBeVisible();
     await screen.findByRole("list", { name: "Waits for your decision" });
-    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
+    // Under the page's h1, the sections are h2.
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual([
       "Waits for your decision 1",
       "Agents are talking 1",
       "Decided 1",
@@ -118,6 +119,31 @@ describe("the Discussions inbox", () => {
       screen.getByText("When you ask the agents about a Ticket, the discussion shows up here."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /Waits for your decision/ })).toBeNull();
+  });
+
+  it("keeps a row in its section while focus is in the lists, and regroups once it leaves", async () => {
+    const rows = [WAITING, TALKING];
+    const { queryClient } = renderInbox(rows);
+    const waiting = await screen.findByRole("list", { name: "Waits for your decision" });
+    const link = within(waiting).getByRole("link");
+    act(() => link.focus());
+    rows[0] = {
+      ...WAITING,
+      status: "vetoed",
+      waits_for: "nobody",
+      decided_by_name: "Grace Hopper",
+    };
+    await act(() => queryClient.invalidateQueries());
+
+    // The row says what it is now, where it was: the link under focus is the same one.
+    await waitFor(() => expect(link).toHaveTextContent("Vetoed by Grace Hopper"));
+    expect(link).toHaveFocus();
+    expect(screen.getByText("Nothing decided yet.")).toBeInTheDocument();
+
+    act(() => link.blur());
+    const decided = await screen.findByRole("list", { name: "Decided" });
+    expect(decided).toHaveTextContent(WAITING.question);
+    expect(screen.queryByRole("list", { name: "Waits for your decision" })).toBeNull();
   });
 
   it("says how many of all the discussions are listed when the inbox is capped", async () => {

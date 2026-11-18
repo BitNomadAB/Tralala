@@ -1,13 +1,18 @@
+import { useId } from "react";
 import { Link } from "react-router-dom";
 import { Avatar } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { ToneMark } from "@/components/ui/chip";
 import { Expander } from "@/components/ui/expander";
 import { Fact, Facts } from "@/components/ui/facts";
+import { ReasonButton } from "@/components/ui/reason-button";
 import { SectionHeader } from "@/components/ui/section";
 import type { Discussion } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 import {
+  NOT_YET,
   roundsText,
+  runControlBlocked,
   runControls,
   stateOf,
   ticketOnLoopPath,
@@ -15,8 +20,9 @@ import {
   type RunAction,
 } from "./discussionRules";
 
+// The quiet button, made to read as a line of text in the rail's More.
 const MORE_ITEM =
-  "rounded text-left text-[13px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:text-[var(--muted-foreground)]";
+  "h-auto justify-start rounded border-0 px-0 py-0 text-left text-[13px] font-normal text-[var(--muted-foreground)] hover:bg-transparent hover:text-[var(--foreground)]";
 
 const DANGER = "hover:text-[var(--destructive)]";
 
@@ -24,7 +30,8 @@ const DANGER = "hover:text-[var(--destructive)]";
  * The rail beside the discussion, the Ticket rail's shape: where it stands in words, the facts
  * (the Ticket as a link that opens it over the Kanban, who asked, the agents, the rounds, the
  * tokens, when it started), and More (Pause or Resume and Stop the run while the agents answer,
- * Copy link, Cancel discussion).
+ * Copy link, Cancel discussion). Status and Facts are named groups, not landmarks: the rail is the
+ * one landmark. Their headings sit at `level`, under the view's heading.
  */
 export function DiscussionRail({
   boardId,
@@ -33,6 +40,7 @@ export function DiscussionRail({
   onControl,
   busy,
   onCopyLink,
+  level,
 }: {
   boardId: string;
   discussion: Discussion;
@@ -41,18 +49,22 @@ export function DiscussionRail({
   onControl: (action: RunAction) => void;
   busy: boolean;
   onCopyLink: () => void;
+  level: 2 | 3;
 }) {
+  const statusId = useId();
+  const factsId = useId();
+  const control = runControlBlocked(discussion, busy);
   const state = stateOf(discussion, { decidedBy: discussion.decided_by_name, stoppedBy });
   const ticket = discussion.ticket_key ?? discussion.card_title ?? "Ticket";
   return (
     <aside aria-label="Status and facts" className="grid content-start gap-[22px]">
-      <section aria-label="Status">
-        <SectionHeader title="Status" />
+      <div role="group" aria-labelledby={statusId}>
+        <SectionHeader id={statusId} title="Status" level={level} />
         <ToneMark tone={state.tone} word={state.word} reason={state.reason ?? undefined} />
-      </section>
+      </div>
 
-      <section aria-label="Facts">
-        <SectionHeader title="Facts" />
+      <div role="group" aria-labelledby={factsId}>
+        <SectionHeader id={factsId} title="Facts" level={level} />
         <Facts>
           <Fact label="Ticket">
             {discussion.loop_id ? (
@@ -81,31 +93,39 @@ export function DiscussionRail({
           </Fact>
           <Fact label="Started">{formatDate(discussion.created_at)}</Fact>
         </Facts>
-      </section>
+      </div>
 
       <Expander title="More">
         <ul className="m-0 grid list-none gap-1.5 p-0">
-          {runControls(discussion, true).map((item) => (
-            <li key={item.action}>
-              <button
-                type="button"
+          {runControls(discussion, true).map((item, index) => (
+            // By place, not by action: Pause becomes Resume on the same button, which keeps focus.
+            <li key={index}>
+              <ReasonButton
+                variant="quiet"
+                size="sm"
                 className={cn(MORE_ITEM, item.action === "stop" && DANGER)}
-                disabled={busy || !discussion.active_run}
+                disabledReason={control}
                 onClick={() => onControl(item.action)}
               >
                 {item.label}
-              </button>
+              </ReasonButton>
             </li>
           ))}
           <li>
-            <button type="button" className={MORE_ITEM} onClick={onCopyLink}>
+            <Button variant="quiet" size="sm" className={MORE_ITEM} onClick={onCopyLink}>
               Copy link
-            </button>
+            </Button>
           </li>
           <li>
-            <button type="button" className={MORE_ITEM} disabled title="Later">
+            <ReasonButton
+              variant="quiet"
+              size="sm"
+              className={MORE_ITEM}
+              disabledReason={NOT_YET}
+              onClick={() => undefined}
+            >
               Cancel discussion
-            </button>
+            </ReasonButton>
           </li>
         </ul>
       </Expander>

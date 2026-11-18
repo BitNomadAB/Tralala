@@ -34,6 +34,31 @@ export const INBOX_GROUPS: readonly {
   { waitsFor: "nobody", title: "Decided", empty: "Nothing decided yet." },
 ];
 
+/** An inbox row's id, unique across the boards it lists. */
+export function inboxRowId(row: DiscussionInboxRow): string {
+  return `${row.board_id}/${row.discussion_id}`;
+}
+
+/** Each row's section, by row id: what the inbox holds while focus is in its lists. */
+export type HeldSections = ReadonlyMap<string, DiscussionWaitsFor>;
+
+/** Where every row stands now, to hold while focus is in the lists. */
+export function inboxSections(rows: readonly DiscussionInboxRow[]): HeldSections {
+  return new Map(rows.map((row) => [inboxRowId(row), row.waits_for]));
+}
+
+/**
+ * The section a row is listed in: where it stands, or while `held` is given, where it stood when
+ * focus came into the lists, so a refetch never moves the link under the keyboard to another
+ * list (WCAG 2.4.3). A row that came in since goes where it stands; its text is always current.
+ */
+export function inboxSection(
+  row: DiscussionInboxRow,
+  held: HeldSections | null,
+): DiscussionWaitsFor {
+  return held?.get(inboxRowId(row)) ?? row.waits_for;
+}
+
 /**
  * The mark in front of an inbox row: the round while the agents talk ("Round 2 of 3"), the
  * suggested verdict once there is one, and "No answer yet" before the first round.
@@ -207,9 +232,12 @@ export const NO_ASKABLE_AGENT =
 /** The most agents one discussion may ask (the server's limit). */
 export const MOST_ASKED = 12;
 
+/** Why "Ask" cannot be pressed on a board where no agent can answer, beside the full sentence. */
+export const NO_AGENT_TO_ASK = "No agent can answer on this board";
+
 /** Why "Ask" cannot be pressed yet, or null when it can. */
 export function askBlocked(question: string, selected: number, agents: number): string | null {
-  if (agents === 0) return NO_ASKABLE_AGENT;
+  if (agents === 0) return NO_AGENT_TO_ASK;
   if (question.trim() === "") return "Write the question first";
   if (selected === 0) return "Choose at least one agent";
   if (selected > MOST_ASKED) return `Choose at most ${String(MOST_ASKED)} agents`;

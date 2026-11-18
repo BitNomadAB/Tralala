@@ -7,6 +7,7 @@ import {
   askTitle,
   discussionWaitsFor,
   MOST_ASKED,
+  NO_AGENT_TO_ASK,
   NO_ASKABLE_AGENT,
   noTicketDiscussion,
   ticketDiscussionAside,
@@ -126,7 +127,7 @@ describe("asking the agents", () => {
   });
 
   it.each([
-    ["Why?", 1, 0, NO_ASKABLE_AGENT],
+    ["Why?", 1, 0, NO_AGENT_TO_ASK],
     ["   ", 1, 2, "Write the question first"],
     ["Why?", 0, 2, "Choose at least one agent"],
     ["Why?", MOST_ASKED + 1, 20, "Choose at most 12 agents"],

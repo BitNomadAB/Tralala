@@ -16,7 +16,8 @@ export interface DiscussionRowItem {
 /**
  * Discussions as rows of links: the mark and the question, the text on the right and the meta
  * line under them. It knows no page: the caller gives the words and `hrefFor`, so the inbox and a
- * Ticket's Discussions tab show the same rows.
+ * Ticket's Discussions tab show the same rows. On a narrow screen the text on the right goes on
+ * its own line under the question, so nothing is cut or scrolled at 320 px (WCAG 1.4.10).
  */
 export function DiscussionRows<Row extends DiscussionRowItem>({
   rows,
@@ -34,13 +35,13 @@ export function DiscussionRows<Row extends DiscussionRowItem>({
         <li key={row.id} className="border-b border-[var(--border-soft)]">
           <Link
             to={hrefFor(row)}
-            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 rounded-md px-1 py-3 text-inherit no-underline hover:bg-[var(--surface-raised)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]"
+            className="grid grid-cols-1 items-center gap-x-4 gap-y-1.5 rounded-md px-1 py-3 text-inherit no-underline hover:bg-[var(--surface-raised)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] sm:grid-cols-[minmax(0,1fr)_auto]"
           >
             <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[15px] font-medium text-[var(--foreground)]">
               <ToneMark compact tone={row.mark.tone} word={row.mark.word} />
-              <span className="min-w-0">{row.question}</span>
+              <span className="min-w-0 [overflow-wrap:anywhere]">{row.question}</span>
             </span>
-            <span className="whitespace-nowrap text-[12.5px] text-[var(--foreground-faint)]">
+            <span className="text-[12.5px] text-[var(--foreground-faint)] sm:whitespace-nowrap">
               {row.aside}
             </span>
             <span className="col-span-full text-[12.5px] text-[var(--foreground-faint)]">

@@ -1,5 +1,5 @@
 import { ChevronLeft, ExternalLink, X } from "lucide-react";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement, ReactNode, Ref } from "react";
 import type { Discussion } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { askedLine } from "./discussionRules";
@@ -14,10 +14,13 @@ const TITLE =
  * The discussion's head, the Ticket head's shape: Back to the Ticket, the Ticket's key and
  * "Discussion", Open as page and Close where the host offers them; the question as the view's
  * heading, the line "Asked by … · n agents · round r of max", then the sign and the actions.
+ * The heading takes focus from a script (`headingRef`, tabIndex -1): when the view opens over the
+ * Kanban, and when an action took away the control that had focus.
  */
 export function DiscussionHead({
   discussion,
   level,
+  headingRef,
   titleWrap = (heading) => heading,
   page,
   onBack,
@@ -28,6 +31,7 @@ export function DiscussionHead({
   discussion: Discussion;
   /** h1 on the page, h2 inside the dialog and on the Discussions page. */
   level: 1 | 2;
+  headingRef?: Ref<HTMLHeadingElement> | undefined;
   titleWrap?: ((heading: ReactElement) => ReactElement) | undefined;
   page: boolean;
   onBack?: (() => void) | undefined;
@@ -73,7 +77,11 @@ export function DiscussionHead({
           </button>
         ) : null}
       </div>
-      {titleWrap(<Heading className={TITLE}>{discussion.goal}</Heading>)}
+      {titleWrap(
+        <Heading ref={headingRef} tabIndex={-1} className={TITLE}>
+          {discussion.goal}
+        </Heading>,
+      )}
       <p className="m-0 mt-2 text-[13.5px] text-[var(--muted-foreground)]">
         {askedLine(discussion)}
       </p>

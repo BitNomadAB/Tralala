@@ -1,22 +1,28 @@
-import { Button } from "@/components/ui/button";
+import { useId } from "react";
 import { Menu } from "@/components/ui/menu";
+import { ReasonButton } from "@/components/ui/reason-button";
 import type { Discussion } from "@/lib/types";
 import {
   decisionBlocked,
   isClosed,
   isTalking,
+  NOT_YET,
+  RUN_BUSY,
+  runControlBlocked,
   runControls,
   talkBlocked,
   type ReviewDecision,
   type RunAction,
 } from "./discussionRules";
+import { HeldButton } from "./HeldButton";
 
 /**
  * The actions row under the sign: the person's decision (Approve as the primary, Request rework,
  * Veto), then Let them talk it out, then More (Copy link, Cancel discussion). While the agents
- * answer, Stop takes the place of the decision and More holds Pause or Resume. A decided
- * discussion keeps Let them talk it out, disabled with the reason, and More; an action that
- * cannot be taken yet says why on its button.
+ * answer, Stop comes first and More holds Pause or Resume. A button that cannot be pressed says
+ * why and stays where it is, so focus stays on it: the decision shares one reason line under the
+ * row. Only Stop, once the run is over, and the decision, once it is taken, leave; the view then
+ * gives focus to its heading (`useFocusRescue`).
  */
 export function DiscussionActions({
   discussion,
@@ -36,75 +42,74 @@ export function DiscussionActions({
   busy: boolean;
   onCopyLink: () => void;
 }) {
+  const reasonId = useId();
   const closed = isClosed(discussion);
-  const talking = isTalking(discussion);
-  const blocked = decisionBlocked(discussion);
-  const decision = { disabled: blocked !== null, title: blocked ?? undefined };
-  const talkReason = talkBlocked(discussion);
+  const blocked = closed ? null : decisionBlocked(discussion);
+  const decision = { held: blocked !== null, reasonId, size: "sm" as const };
+  const control = runControlBlocked(discussion, busy);
   return (
-    <div className="mb-4 mt-[18px] flex flex-wrap items-center gap-2">
-      {talking ? (
-        <Button
-          variant="danger-quiet"
-          size="sm"
-          disabled={busy || !discussion.active_run}
-          onClick={() => onControl("stop")}
-        >
-          Stop
-        </Button>
-      ) : (
-        <>
-          {closed ? null : (
-            <>
-              <Button size="sm" {...decision} onClick={() => onReview("approve")}>
-                Approve
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                {...decision}
-                onClick={() => onReview("rework")}
-              >
-                Request rework
-              </Button>
-              <Button variant="danger" size="sm" {...decision} onClick={() => onReview("veto")}>
-                Veto
-              </Button>
-              <span aria-hidden="true" className="mx-1 h-5 w-px bg-[var(--border)]" />
-            </>
-          )}
-          <Button
-            variant="secondary"
+    <div className="mb-4 mt-[18px] grid gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        {isTalking(discussion) ? (
+          <ReasonButton
+            variant="danger-quiet"
             size="sm"
-            disabled={talkReason !== null || busy}
-            title={talkReason ?? undefined}
-            onClick={onTalk}
+            disabledReason={control}
+            onClick={() => onControl("stop")}
           >
-            Let them talk it out
-          </Button>
-        </>
+            Stop
+          </ReasonButton>
+        ) : null}
+        {closed ? null : (
+          <>
+            <HeldButton {...decision} onClick={() => onReview("approve")}>
+              Approve
+            </HeldButton>
+            <HeldButton {...decision} variant="secondary" onClick={() => onReview("rework")}>
+              Request rework
+            </HeldButton>
+            <HeldButton {...decision} variant="danger" onClick={() => onReview("veto")}>
+              Veto
+            </HeldButton>
+            <span aria-hidden="true" className="mx-1 h-5 w-px bg-[var(--border)]" />
+          </>
+        )}
+        <ReasonButton
+          variant="secondary"
+          size="sm"
+          disabledReason={talkBlocked(discussion) ?? (busy ? RUN_BUSY : null)}
+          onClick={onTalk}
+        >
+          Let them talk it out
+        </ReasonButton>
+        <Menu
+          label="More actions"
+          items={[
+            ...runControls(discussion).map((item) => ({
+              label: item.label,
+              onSelect: () => onControl(item.action),
+              disabled: control !== null,
+              hint: control ?? undefined,
+            })),
+            { label: "Copy link", onSelect: onCopyLink },
+            ...(closed
+              ? []
+              : [
+                  {
+                    label: "Cancel discussion",
+                    onSelect: () => undefined,
+                    disabled: true,
+                    hint: NOT_YET,
+                  },
+                ]),
+          ]}
+        />
+      </div>
+      {blocked === null ? null : (
+        <p id={reasonId} className="m-0 text-[11px] text-[var(--muted-foreground)]">
+          {blocked}
+        </p>
       )}
-      <Menu
-        label="More actions"
-        items={[
-          ...runControls(discussion).map((item) => ({
-            label: item.label,
-            onSelect: () => onControl(item.action),
-            disabled: busy || !discussion.active_run,
-          })),
-          { label: "Copy link", onSelect: onCopyLink },
-          ...(closed
-            ? []
-            : [
-                {
-                  label: "Cancel discussion",
-                  onSelect: () => undefined,
-                  disabled: true,
-                  hint: "Later",
-                },
-              ]),
-        ]}
-      />
     </div>
   );
 }

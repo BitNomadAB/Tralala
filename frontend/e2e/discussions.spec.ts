@@ -92,7 +92,7 @@ test.describe("a discussion on a Ticket", () => {
       // Every round leaves a suggestion; with no answer it cannot tell and names who is missing.
       await expect(sign).toContainText(`No answer yet from ${agentName}`, RUN_TIMEOUT);
       await expect(sign).toContainText("Unclear");
-      await expect(thread.getByRole("region", { name: "Status" })).toContainText(
+      await expect(thread.getByRole("group", { name: "Status" })).toContainText(
         "Waits for your decision",
       );
       await expect(thread.getByText("No agent could be reached", { exact: true })).toBeVisible();
@@ -100,7 +100,7 @@ test.describe("a discussion on a Ticket", () => {
       await expect(
         answers.getByText(`No answer from ${agentName}: the agent could not be reached.`),
       ).toBeVisible();
-      const facts = thread.getByRole("region", { name: "Facts" });
+      const facts = thread.getByRole("group", { name: "Facts" });
       await expect(facts).toContainText("1 of 3");
       // The stop code is for Raw text only.
       await expect(thread.getByRole("tabpanel", { name: "For you" })).not.toContainText(
@@ -129,14 +129,18 @@ test.describe("a discussion on a Ticket", () => {
       await talk.getByLabel("Time budget in seconds").fill("30");
       await talk.getByRole("button", { name: "Start" }).click();
       await expect(talk).toHaveCount(0);
-      // While the agents answer, the sign says where they are and Stop replaces the decision.
+      // While the agents answer, the sign says where they are, Stop comes first and the decision
+      // waits where it is (held, so a focused button keeps focus).
       await expect(sign).toContainText("Agents are answering");
       await expect(sign).toContainText("round 2 of 3");
       await expect(thread.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
-      await expect(thread.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+      await expect(thread.getByRole("button", { name: "Approve", exact: true })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
 
       // A failing run stops instead of retrying the same broken endpoint for every round.
-      await expect(thread.getByRole("region", { name: "Facts" })).toContainText(
+      await expect(thread.getByRole("group", { name: "Facts" })).toContainText(
         "2 of 3",
         RUN_TIMEOUT,
       );
@@ -191,7 +195,7 @@ test.describe("a discussion on a Ticket", () => {
       await page.getByRole("button", { name: "Approve", exact: true }).click();
       const review = page.getByRole("dialog", { name: "Approve outcome" });
       await review.getByRole("button", { name: "Confirm" }).click();
-      await expect(page.getByRole("region", { name: "Status" })).toContainText(
+      await expect(page.getByRole("group", { name: "Status" })).toContainText(
         `Approved by ${person}`,
       );
     });

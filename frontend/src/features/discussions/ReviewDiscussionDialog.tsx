@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Textarea } from "@/components/ui/input";
+import { ReasonButton } from "@/components/ui/reason-button";
 import type { ReviewDecision } from "./discussionRules";
 
 const TITLES: Record<ReviewDecision, string> = {
@@ -13,7 +14,7 @@ const TITLES: Record<ReviewDecision, string> = {
 /**
  * Asks for the person's decision on a discussion: a note for an approval, an explanation for a
  * veto or rework. `onConfirm` records it (the view's review mutation); a decision never changes
- * the Ticket.
+ * the Ticket. Until Confirm can be pressed it says why beside it, and stays focusable.
  */
 export function ReviewDiscussionDialog({
   decision,
@@ -27,6 +28,11 @@ export function ReviewDiscussionDialog({
   onConfirm: (decision: ReviewDecision, reason: string) => void;
 }) {
   const [reason, setReason] = useState("");
+  const blocked = pending
+    ? "Recording the decision…"
+    : decision !== "approve" && !reason.trim()
+      ? "Write the explanation first"
+      : null;
   const close = () => {
     setReason("");
     onClose();
@@ -42,8 +48,7 @@ export function ReviewDiscussionDialog({
           className="flex flex-col gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!decision) return;
-            if (decision === "approve" || reason.trim()) onConfirm(decision, reason.trim());
+            if (decision && blocked === null) onConfirm(decision, reason.trim());
           }}
         >
           <Field
@@ -62,13 +67,13 @@ export function ReviewDiscussionDialog({
             <Button variant="ghost" onClick={close}>
               Cancel
             </Button>
-            <Button
+            <ReasonButton
               type="submit"
               variant={decision === "approve" ? "primary" : "danger"}
-              disabled={pending || (decision !== "approve" && !reason.trim())}
+              disabledReason={blocked}
             >
               Confirm
-            </Button>
+            </ReasonButton>
           </div>
         </form>
       </DialogContent>

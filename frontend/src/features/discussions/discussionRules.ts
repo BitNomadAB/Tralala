@@ -197,6 +197,9 @@ export function replyHint(discussion: Discussion): string {
     : "The agents answer in a new round.";
 }
 
+/** What the reply says when "Ask again" is pressed with nothing written. */
+export const EMPTY_REPLY = "Write your reply first.";
+
 /**
  * Whether the UI starts the round a reply asks for: the server starts it itself on a thread that
  * answers every reply (`auto_run` is then set, also when it could not start one), and leaves it
@@ -244,34 +247,6 @@ export interface TalkRequest {
   rounds: number;
   token_budget?: number;
   time_budget_seconds?: number;
-}
-
-const WHOLE = /^\d+$/;
-
-function budget(value: string, most: number): number | null | undefined {
-  const trimmed = value.trim();
-  if (trimmed === "") return undefined;
-  if (!WHOLE.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return parsed <= most ? parsed : null;
-}
-
-/** The dialog's fields as the start call takes them, or null while one of them is not valid. */
-export function talkRequest(
-  fields: { rounds: string; tokens: string; seconds: string },
-  most: number,
-): TalkRequest | null {
-  const rounds = budget(fields.rounds, most);
-  const tokens = budget(fields.tokens, 5_000_000);
-  const seconds = budget(fields.seconds, 3600);
-  if (rounds === null || rounds === undefined || rounds < 1) return null;
-  if (tokens === null || seconds === null) return null;
-  return {
-    autonomous: true,
-    rounds,
-    ...(tokens === undefined ? {} : { token_budget: tokens }),
-    ...(seconds === undefined ? {} : { time_budget_seconds: seconds }),
-  };
 }
 
 /** The progress line while the agents answer: "2 of 3 agents have answered this round". */
@@ -343,6 +318,19 @@ export function runControls(
   }
   if (discussion.run_state === "paused") return [{ action: "resume", label: "Resume" }, ...stop];
   return [];
+}
+
+/** Why a run's button waits while a start, Pause, Resume or Stop is on its way. */
+export const RUN_BUSY = "Wait a moment: the run is changing";
+
+/** Why a button for something Tralala does not offer yet cannot be pressed. */
+export const NOT_YET = "Not available yet";
+
+/** Why Pause, Resume and Stop cannot be pressed now, or null when they can. */
+export function runControlBlocked(discussion: Discussion, busy: boolean): string | null {
+  if (busy) return RUN_BUSY;
+  if (!discussion.active_run) return "The run has not started yet";
+  return null;
 }
 
 const CONTROLLED: Record<RunAction, string> = {
