@@ -100,6 +100,10 @@ test.describe("settings", () => {
     await expect(row.getByText("active", { exact: true })).toBeVisible();
 
     await row.getByRole("button", { name: `Revoke ${agentName}` }).click();
+    await page
+      .getByRole("dialog", { name: `Revoke ${agentName}?` })
+      .getByRole("button", { name: "Revoke key" })
+      .click();
     await expect(row.getByText("revoked", { exact: true })).toBeVisible();
   });
 });

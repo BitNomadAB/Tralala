@@ -14,6 +14,15 @@ import { describeError } from "@/lib/describeError";
 import { useRoleTemplate } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
 import { ButtonLink } from "./ButtonLink";
+import { ConfirmDialog } from "./ConfirmDialog";
+
+/** Restoring writes the factory prompt at once, over the person's own (WCAG 3.3.4). */
+const RESTORE_QUESTION = {
+  title: "Replace your prompt with the factory text?",
+  consequence:
+    "The factory prompt replaces yours and is saved at once. Your own prompt, and any changes to it you have not saved, are lost.",
+  confirmLabel: "Replace prompt",
+};
 
 export function RoleTemplateEditorPage() {
   const { roleId } = useParams();
@@ -29,6 +38,7 @@ export function RoleTemplateEditorPage() {
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   // Fill the form from the loaded role once per role, while rendering rather than in an effect.
   const loaded: RoleTemplate | undefined = roleQuery.data;
@@ -198,14 +208,14 @@ export function RoleTemplateEditorPage() {
             </ReasonButton>
           ) : null}
           {role?.built_in ? (
-            <Button
+            <ReasonButton
               type="button"
               variant="outline"
-              disabled={restoreMutation.isPending}
-              onClick={() => restoreMutation.mutate()}
+              disabledReason={restoreMutation.isPending ? "Restoring…" : null}
+              onClick={() => setRestoring(true)}
             >
               <RotateCcw size={14} /> Restore factory prompt
-            </Button>
+            </ReasonButton>
           ) : null}
           {!isNew ? (
             <Button
@@ -234,6 +244,15 @@ export function RoleTemplateEditorPage() {
           </Button>
         </div>
       </form>
+
+      <ConfirmDialog
+        question={restoring ? RESTORE_QUESTION : null}
+        onCancel={() => setRestoring(false)}
+        onConfirm={() => {
+          setRestoring(false);
+          restoreMutation.mutate();
+        }}
+      />
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent title="Delete role template" description="This cannot be undone.">

@@ -262,15 +262,59 @@ describe("the Repositories page's commands", () => {
     );
 
     await user.click((await row("hub app")).getByRole("button", { name: "Remove hub app" }));
+    await user.click(screen.getByRole("button", { name: "Remove repository" }));
     const next = (await row("mirrored app")).getByRole("button", {
       name: "Test access to mirrored app",
     });
     await waitFor(() => expect(next).toHaveFocus());
 
     await user.click(screen.getByRole("button", { name: "Remove mirrored app" }));
+    await user.click(screen.getByRole("button", { name: "Remove repository" }));
     const heading = screen.getByRole("heading", { name: "Repositories", level: 1 });
     await waitFor(() => expect(heading).toHaveFocus());
     expect(await screen.findByText(/No repositories yet/)).toBeInTheDocument();
+  });
+});
+
+describe("removing a repository", () => {
+  it("asks first, says what goes with it, and Cancel removes nothing", async () => {
+    const used = { ...MIRRORED, boards: [{ id: "board-1", name: "Platform" }] };
+    const { user, sent } = await renderPage([GITHUB, used]);
+    const remove = (await row("mirrored app")).getByRole("button", {
+      name: "Remove mirrored app",
+    });
+    await user.click(remove);
+
+    const dialog = screen.getByRole("dialog", { name: "Remove mirrored app?" });
+    expect(dialog).toHaveAccessibleDescription(
+      "This removes the repository and its stored key from Tralala, and deletes Tralala's mirror of it. The board Platform can no longer read it. This cannot be undone.",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(remove).toHaveFocus());
+    expect(sent).toEqual([]);
+  });
+
+  it("removes it once it is confirmed, and gives focus back to its button when that fails", async () => {
+    const { user } = await renderPage([GITHUB]);
+    const deletes: string[] = [];
+    server.use(
+      http.delete(apiPath("/repositories/:id"), ({ request }) => {
+        deletes.push(requestPath(request));
+        return failure(409, "conflict", "The repository is in use by a running analysis");
+      }),
+    );
+    const remove = (await row("hub app")).getByRole("button", { name: "Remove hub app" });
+    await user.click(remove);
+    expect(screen.getByRole("dialog", { name: "Remove hub app?" })).toHaveAccessibleDescription(
+      "This removes the repository and its stored key from Tralala. This cannot be undone.",
+    );
+    await user.click(screen.getByRole("button", { name: "Remove repository" }));
+
+    expect(await screen.findByText("Could not remove")).toBeInTheDocument();
+    expect(deletes).toEqual(["/repositories/repo-hub"]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(remove).toHaveFocus());
   });
 });
 

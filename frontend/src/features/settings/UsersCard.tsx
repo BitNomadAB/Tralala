@@ -1,17 +1,37 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Link2, Plus, Power } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useId, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
-import { ROLES, type InviteCreated, type Role, type UserAccount } from "@/lib/types";
-import { formatDateTime } from "@/lib/utils";
+import type { InviteCreated, Role, UserAccount } from "@/lib/types";
+import { ConfirmDialog, type Confirmation } from "./ConfirmDialog";
 import { InvitationDialog } from "./InvitationDialog";
 import { NewUserDialog } from "./NewUserDialog";
+import { entryControlId, focusById } from "./removalFocus";
 import { ResetPasswordDialog } from "./ResetPasswordDialog";
+import { UserRow } from "./UserRow";
+
+const roleSelectId = (userId: string) => entryControlId("user-role", userId);
+
+const ROLE_WORDS: Record<Role, string> = { admin: "an administrator", member: "a member" };
+
+/** What disabling `user` does, asked first: it signs them out and revokes what they issued. */
+function disableQuestion(user: UserAccount, isSelf: boolean): Confirmation {
+  const kept = "Enabling the account later does not bring that access back.";
+  return isSelf
+    ? {
+        title: "Disable your own account?",
+        consequence: `This signs you out at once and revokes the agent access you issued. ${kept}`,
+        confirmLabel: "Disable account",
+      }
+    : {
+        title: `Disable ${user.name}?`,
+        consequence: `This signs ${user.name} out at once and revokes the agent access they issued. ${kept}`,
+        confirmLabel: "Disable account",
+      };
+}
 
 export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const queryClient = useQueryClient();
@@ -20,7 +40,11 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<UserAccount | null>(null);
   const [invited, setInvited] = useState<InviteCreated | null>(null);
+  const [disabling, setDisabling] = useState<UserAccount | null>(null);
+  // A role chosen in a row's select and not saved yet, per user id.
+  const [roles, setRoles] = useState<Record<string, Role>>({});
   const disableHintId = useId();
+  const roleHintId = useId();
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["users"] });
 
@@ -32,13 +56,32 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
     });
   };
 
-  const updateMutation = useMutation({
-    mutationFn: (payload: { userId: string; role?: Role; disabled?: boolean }) =>
-      api.updateUser(payload.userId, { role: payload.role, disabled: payload.disabled }),
+  const roleMutation = useMutation({
+    mutationFn: (payload: { userId: string; role: Role }) =>
+      api.updateUser(payload.userId, { role: payload.role }),
+    onSuccess: (user) => {
+      // The stored role shows at once, so the select does not flick back while the list reloads.
+      queryClient.setQueryData<UserAccount[]>(["users"], (current) =>
+        current?.map((entry) => (entry.id === user.id ? user : entry)),
+      );
+      void invalidate();
+      setRoles((current) =>
+        Object.fromEntries(Object.entries(current).filter(([userId]) => userId !== user.id)),
+      );
+      // The Save role button goes once the role is stored, so focus goes back to the select.
+      focusById(roleSelectId(user.id));
+      toast.push({ title: `${user.name} is now ${ROLE_WORDS[user.role]}`, variant: "success" });
+    },
+    onError: onError("Could not change the role"),
+  });
+
+  const accessMutation = useMutation({
+    mutationFn: (payload: { userId: string; disabled: boolean }) =>
+      api.updateUser(payload.userId, { disabled: payload.disabled }),
     onSuccess: (user) => {
       void invalidate();
       toast.push({
-        title: user.disabled ? `${user.name} is disabled` : `${user.name} updated`,
+        title: user.disabled ? `${user.name} is disabled` : `${user.name} is enabled`,
         variant: "success",
       });
     },
@@ -70,6 +113,9 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
         agent access. Only administrators manage accounts; disabling somebody also revokes the agent
         access they issued.
       </p>
+      <p id={roleHintId} className="mt-1 text-xs text-[var(--muted-foreground)]">
+        A new role takes effect when you press Save role beside it.
+      </p>
       <p id={disableHintId} className="mt-1 text-xs text-[var(--muted-foreground)]">
         Disable signs the person out and revokes their agent access. Enable lets them sign in again;
         access that was revoked stays revoked.
@@ -80,77 +126,45 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
           <li className="py-2.5 text-xs text-[var(--muted-foreground)]">Loading users…</li>
         ) : null}
         {users.map((user) => (
-          <li key={user.id} className="flex flex-wrap items-center gap-2 py-2.5">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">
-                {user.name}
-                {user.id === currentUserId ? " (you)" : ""}
-              </p>
-              <p className="text-[11px] text-[var(--muted-foreground)]">
-                Created {formatDateTime(user.created_at)} ·{" "}
-                {user.agent_access_count === 1
-                  ? "1 agent access"
-                  : `${user.agent_access_count} agent accesses`}
-                {user.agent_access_last_used_at
-                  ? ` · last used ${formatDateTime(user.agent_access_last_used_at)}`
-                  : ""}
-              </p>
-            </div>
-            <Select
-              aria-label={`Role of ${user.name}`}
-              className="w-28"
-              value={user.role}
-              onChange={(event) =>
-                updateMutation.mutate({ userId: user.id, role: event.target.value as Role })
-              }
-            >
-              {ROLES.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </Select>
-            <Badge tone={user.disabled ? "danger" : "success"}>
-              {user.disabled ? "disabled" : "active"}
-            </Badge>
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label={`Create an invitation link for ${user.name}`}
-              title="Invitation link"
-              disabled={user.disabled}
-              // While the link is being made the button stays focusable, so focus is not lost.
-              aria-disabled={inviting(user.id) ? true : undefined}
-              onClick={() => {
-                if (!inviting(user.id)) inviteMutation.mutate(user.id);
-              }}
-            >
-              <Link2 size={14} />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label={`Reset password for ${user.name}`}
-              title="Reset password"
-              onClick={() => setResetting(user)}
-            >
-              <KeyRound size={14} />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label={`${user.disabled ? "Enable" : "Disable"} ${user.name}`}
-              aria-describedby={disableHintId}
-              onClick={() => updateMutation.mutate({ userId: user.id, disabled: !user.disabled })}
-            >
-              <Power size={14} />
-            </Button>
-          </li>
+          <UserRow
+            key={user.id}
+            user={user}
+            isSelf={user.id === currentUserId}
+            role={roles[user.id] ?? user.role}
+            roleSelectId={roleSelectId(user.id)}
+            saving={roleMutation.isPending && roleMutation.variables.userId === user.id}
+            inviting={inviting(user.id)}
+            roleHintId={roleHintId}
+            disableHintId={disableHintId}
+            onRoleChange={(role) => setRoles((current) => ({ ...current, [user.id]: role }))}
+            onSaveRole={() => {
+              const role = roles[user.id];
+              if (role) roleMutation.mutate({ userId: user.id, role });
+            }}
+            onInvite={() => inviteMutation.mutate(user.id)}
+            onResetPassword={() => setResetting(user)}
+            onToggleDisabled={() => {
+              // Enabling is undone by disabling again, so it needs no question; disabling
+              // revokes agent access for good, so it asks first (WCAG 3.3.4).
+              if (user.disabled) accessMutation.mutate({ userId: user.id, disabled: false });
+              else setDisabling(user);
+            }}
+          />
         ))}
         {!usersQuery.isLoading && users.length === 0 ? (
           <li className="py-2.5 text-xs text-[var(--muted-foreground)]">No users yet.</li>
         ) : null}
       </ul>
+
+      <ConfirmDialog
+        question={disabling ? disableQuestion(disabling, disabling.id === currentUserId) : null}
+        onCancel={() => setDisabling(null)}
+        onConfirm={() => {
+          if (!disabling) return;
+          setDisabling(null);
+          accessMutation.mutate({ userId: disabling.id, disabled: true });
+        }}
+      />
 
       <NewUserDialog open={creating} onOpenChange={setCreating} />
 
