@@ -98,7 +98,9 @@ const STATES: Record<TicketState, { word: string; tone: MarkTone }> = {
 
 /**
  * A word with a coloured dot in front of it (the state line's mark, an analysis verdict): the dot
- * only repeats the word, so it is hidden from a screen reader; `reason` follows muted.
+ * only repeats the word, so it is hidden from a screen reader; `reason` follows muted. `title`, the
+ * longer reason a pointer shows on hover, is in the text for a screen reader as well, since a
+ * tooltip alone reaches neither the keyboard nor a screen reader.
  */
 export function ToneMark({
   tone,
@@ -113,7 +115,7 @@ export function ToneMark({
   reason?: ReactNode;
   /** The bordered pill a Kanban card carries in its bottom row. */
   compact?: boolean | undefined;
-  /** The longer reason for a pointer ("Waiting for SES-1-PH01-001"). */
+  /** The longer reason on hover ("Waiting for SES-1-PH01-001"), also read by a screen reader. */
   title?: string | undefined;
   className?: string | undefined;
 }) {
@@ -136,6 +138,7 @@ export function ToneMark({
       {reason === undefined ? null : (
         <span className="text-[var(--muted-foreground)]">· {reason}</span>
       )}
+      {title ? <span className="sr-only">: {title}</span> : null}
     </span>
   );
 }
@@ -155,7 +158,7 @@ export function StateChip({
   state: TicketState;
   reason?: ReactNode;
   compact?: boolean | undefined;
-  /** The longer reason for a pointer ("Waiting for SES-1-PH01-001"). */
+  /** The longer reason on hover ("Waiting for SES-1-PH01-001"), also read by a screen reader. */
   title?: string | undefined;
   className?: string | undefined;
 }) {

@@ -98,14 +98,26 @@ describe("the Kanban card", () => {
     const blocked = screen.getByText("Blocked").parentElement;
     expect(blocked).toHaveClass("rounded-full", "border");
     expect(blocked).toHaveAttribute("title", "SES-1-PH01-000");
+    expect(blocked).toHaveTextContent("Blocked: SES-1-PH01-000");
   });
 
   it("shows Needs input with the reason of the wait", () => {
     renderCard(
       ticketCard({ state: "needs_input", waiting_for: "decision", waiting_reason: "Which TTL?" }),
     );
-    expect(screen.getByText("Needs input").parentElement).toHaveAttribute("title", "Which TTL?");
+    const held = screen.getByText("Needs input").parentElement;
+    expect(held).toHaveAttribute("title", "Which TTL?");
+    expect(held).toHaveTextContent("Needs input: Which TTL?");
     expect(screen.queryByText("Blocked")).not.toBeInTheDocument();
+  });
+
+  it("says what Unplanned means in its text, not only on hover", () => {
+    renderCard(ticketCard({ kind: "manual", ticket_key: "SES-1-UNP-001" }));
+    const unplanned = screen.getByText("Unplanned").parentElement;
+    expect(unplanned).toHaveAttribute("title", expect.stringMatching(/^Added outside the plan/));
+    expect(unplanned).toHaveTextContent(
+      "Unplanned: Added outside the plan; it never blocks the plan or the Loop's completion",
+    );
   });
 
   it("marks a completed Ticket done, without a state", () => {

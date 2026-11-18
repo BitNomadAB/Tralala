@@ -1,8 +1,12 @@
 import { Plus } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-/** The slot after the last column: a button that opens a one-field form for a new column. */
+/**
+ * The slot after the last column: a button that opens a one-field form for a new column. Once the
+ * form closes (the column added, Cancel or Escape) the focus is back on "Add column" (WCAG 2.4.3).
+ */
 export function AddColumnForm({
   adding,
   onAddingChange,
@@ -18,8 +22,23 @@ export function AddColumnForm({
   readOnly: boolean;
   onCreate: (name: string) => void;
 }) {
+  const slot = useRef<HTMLDivElement>(null);
+  const refocus = useRef(false);
+
+  useEffect(() => {
+    if (!refocus.current || adding) return;
+    refocus.current = false;
+    slot.current?.querySelector("button")?.focus();
+  });
+
+  function close() {
+    refocus.current = true;
+    onNameChange("");
+    onAddingChange(false);
+  }
+
   return (
-    <div className="w-[240px] shrink-0">
+    <div ref={slot} className="w-[240px] shrink-0">
       {adding ? (
         <form
           className="card-surface flex flex-col gap-2 p-3"
@@ -27,8 +46,7 @@ export function AddColumnForm({
             event.preventDefault();
             if (!name.trim()) return;
             onCreate(name.trim());
-            onNameChange("");
-            onAddingChange(false);
+            close();
           }}
         >
           <Input
@@ -38,17 +56,14 @@ export function AddColumnForm({
             placeholder="Column name"
             onChange={(event) => onNameChange(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                onAddingChange(false);
-                onNameChange("");
-              }
+              if (event.key === "Escape") close();
             }}
           />
           <div className="flex gap-1.5">
             <Button size="sm" type="submit" disabled={!name.trim()}>
               Add column
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => onAddingChange(false)}>
+            <Button size="sm" variant="ghost" onClick={close}>
               Cancel
             </Button>
           </div>

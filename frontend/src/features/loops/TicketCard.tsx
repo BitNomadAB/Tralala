@@ -25,12 +25,15 @@ const PRIORITY_TONES: Record<Exclude<Card["priority"], "none">, string> = {
   urgent: "text-[var(--destructive)]",
 };
 
+/** What "Unplanned" on a card means. */
+const UNPLANNED = "Added outside the plan; it never blocks the plan or the Loop's completion";
+
 /** What the card says the Ticket is about: the face's summary, else the stored one. */
 function cardSummary(card: Pick<Card, "face" | "summary">): string {
   return (card.face?.summary ?? "").trim() || card.summary.trim();
 }
 
-/** Why a held Ticket is held, for a pointer: what blocks it, else the reason of its wait. */
+/** Why a held Ticket is held, on hover and for a screen reader: what blocks it, else its wait. */
 function heldReason(card: Card): string | undefined {
   const blockers = card.blockers.map((blocker) => blocker.key ?? blocker.reason).join(", ");
   return (card.state === "blocked" && blockers) || card.waiting_reason || undefined;
@@ -171,8 +174,10 @@ export function TicketCard({
           <Chip className="px-1.5 py-px text-xs">Needs a person</Chip>
         ) : null}
         {unplanned ? (
-          <span title="Added outside the plan; it never blocks the plan or the Loop's completion">
-            Unplanned
+          <span title={UNPLANNED}>
+            <span>Unplanned</span>
+            {/* What the hover says, for a screen reader too. */}
+            <span className="sr-only">: {UNPLANNED}</span>
           </span>
         ) : null}
         {card.kind === "qa" ? <span>QA</span> : null}

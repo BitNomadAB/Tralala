@@ -64,6 +64,23 @@ export function KanbanColumn({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(list.name);
   const header = useRef<HTMLElement>(null);
+  const footer = useRef<HTMLDivElement>(null);
+  // Which button takes the focus once an inline form has closed (WCAG 2.4.3): "Add card" after a
+  // new card or a cancel, the column's menu after a rename. The form's field is gone by then.
+  const refocus = useRef<"add" | "menu" | null>(null);
+  // Escape ends a rename without saving, even if the field reports a blur as it goes.
+  const renameCancelled = useRef(false);
+
+  useEffect(() => {
+    const target = refocus.current;
+    if (target === null) return;
+    refocus.current = null;
+    const button =
+      target === "add"
+        ? footer.current?.querySelector<HTMLElement>("button")
+        : header.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]');
+    button?.focus();
+  });
 
   // After the column moved, its menu button keeps the focus the menu gave back to it.
   useEffect(() => {
@@ -75,12 +92,20 @@ export function KanbanColumn({
   async function submitCard() {
     if (!title.trim()) return;
     await onCreateCard(title.trim());
+    closeAdding();
+  }
+
+  function closeAdding() {
+    refocus.current = "add";
     setTitle("");
     setAdding(false);
   }
 
-  function finishRename() {
+  /** Saves a changed name; Enter (`refocus`) puts the focus on the menu, leaving the field does not. */
+  function finishRename(refocusMenu: boolean) {
+    if (renameCancelled.current) return;
     if (name.trim() && name.trim() !== list.name) onRename(name.trim());
+    if (refocusMenu) refocus.current = "menu";
     setRenaming(false);
   }
 
@@ -109,7 +134,7 @@ export function KanbanColumn({
             className="flex-1"
             onSubmit={(event) => {
               event.preventDefault();
-              finishRename();
+              finishRename(true);
             }}
           >
             <Input
@@ -117,7 +142,13 @@ export function KanbanColumn({
               autoFocus
               aria-label={`Rename column ${list.name}`}
               onChange={(event) => setName(event.target.value)}
-              onBlur={finishRename}
+              onBlur={() => finishRename(false)}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                renameCancelled.current = true;
+                refocus.current = "menu";
+                setRenaming(false);
+              }}
               className="h-7 text-sm"
             />
           </form>
@@ -135,6 +166,7 @@ export function KanbanColumn({
               disabled: readOnly,
               hint: readOnly ? "The Loop is read-only" : undefined,
               onSelect: () => {
+                renameCancelled.current = false;
                 setName(list.name);
                 setRenaming(true);
               },
@@ -182,7 +214,7 @@ export function KanbanColumn({
         ) : null}
       </div>
 
-      <div className="px-2.5 pb-2.5">
+      <div ref={footer} className="px-2.5 pb-2.5">
         {adding ? (
           <form
             onSubmit={(event) => {
@@ -197,10 +229,7 @@ export function KanbanColumn({
               placeholder="Card title"
               onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  setAdding(false);
-                  setTitle("");
-                }
+                if (event.key === "Escape") closeAdding();
               }}
               className="mb-1.5"
             />
@@ -208,14 +237,7 @@ export function KanbanColumn({
               <Button size="sm" type="submit" disabled={!title.trim()}>
                 Add card
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setAdding(false);
-                  setTitle("");
-                }}
-              >
+              <Button size="sm" variant="ghost" onClick={closeAdding}>
                 Cancel
               </Button>
             </div>

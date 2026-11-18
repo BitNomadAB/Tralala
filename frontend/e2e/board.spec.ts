@@ -21,6 +21,8 @@ test.describe("boards and cards", () => {
 
     const cardTitle = uniqueName("Write checklist");
     await addCard(page, "Todo", cardTitle);
+    // The form closed; the focus is back on the button that opens it.
+    await expect(listRegion(page, "Todo").getByRole("button", { name: "Add card" })).toBeFocused();
 
     const dialog = await openCard(page, "Todo", cardTitle);
     // The title is the dialog's heading; a click edits it and Enter saves it.
