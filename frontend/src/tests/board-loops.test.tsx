@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -173,5 +173,32 @@ describe("the board page", () => {
     );
     await user.click(within(menu).getByRole("menuitem", { name: "Delete board" }));
     expect(await screen.findByRole("dialog", { name: "Delete board permanently" })).toBeVisible();
+  });
+});
+
+describe("archiving a board from its page", () => {
+  it("offers Undo, which restores it and gives focus back to the board's menu", async () => {
+    const shown = { ...PLATFORM };
+    const sent: string[] = [];
+    const user = renderBoard(shown, [REVIEW], SUMMARIES);
+    server.use(
+      http.get(apiPath("/boards/board-1"), () => ok(shown)),
+      http.post(apiPath("/boards/board-1/:action"), ({ params }) => {
+        sent.push(String(params.action));
+        shown.status = params.action === "archive" ? "archived" : "active";
+        return ok(shown);
+      }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Board actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Archive board" }));
+    expect(await screen.findByText("Board archived")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+
+    expect(await screen.findByText("Board restored")).toBeInTheDocument();
+    expect(sent).toEqual(["archive", "restore"]);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Board actions" })).toHaveFocus(),
+    );
   });
 });

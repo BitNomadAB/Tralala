@@ -16,8 +16,9 @@ const DONE: Record<BoardLifecycleAction, string> = {
 /**
  * Archive, restore, duplicate and delete a board, as the dashboard's tiles and the board page's
  * menu offer them: each refreshes the board lists and says what happened, in a toast a screen
- * reader reads too; `onDone` hears of each that succeeded. Deleting asks for the board's name
- * first (`deleting`, `confirmName`), as `DeleteBoardDialog` shows it.
+ * reader reads too; `onDone` hears of each that succeeded. Archiving acts at once and its toast
+ * offers Undo, which restores the board (WCAG 3.3.4). Deleting asks for the board's name first
+ * (`deleting`, `confirmName`), as `DeleteBoardDialog` shows it.
  */
 export function useBoardLifecycle({
   onDeleted,
@@ -44,7 +45,11 @@ export function useBoardLifecycle({
     },
     onSuccess: (_result, action) => {
       refresh(action.board);
-      toast.push({ title: DONE[action.type], variant: "success" });
+      toast.push({
+        title: DONE[action.type],
+        variant: "success",
+        action: action.type === "archive" ? undoArchive(action.board) : undefined,
+      });
       onDone?.(action.type, action.board);
     },
     onError: (error) => {
@@ -55,6 +60,31 @@ export function useBoardLifecycle({
       });
     },
   });
+
+  /**
+   * Undo for an archived board: restores it. The Undo button leaves with its toast, so focus,
+   * which would fall to the page, goes back to what had it when the board was archived (the board
+   * page's menu), if that is still there; the dashboard's `onDone` follows the tile instead.
+   */
+  function undoArchive(board: Board) {
+    const active = document.activeElement;
+    const returnTo = active instanceof HTMLElement ? active : null;
+    return {
+      label: "Undo",
+      onClick: () => {
+        lifecycle.mutate(
+          { type: "restore", board },
+          {
+            onSuccess: () => {
+              const lost =
+                document.activeElement === null || document.activeElement === document.body;
+              if (lost && returnTo?.isConnected) returnTo.focus();
+            },
+          },
+        );
+      },
+    };
+  }
 
   const remove = useMutation({
     mutationFn: (board: Board) => api.deleteBoard(board.id, confirmName),
