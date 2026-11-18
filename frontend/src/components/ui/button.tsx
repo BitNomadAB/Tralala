@@ -12,7 +12,7 @@ const buttonVariants = cva(
           "bg-[var(--surface-raised)] text-[var(--foreground)] border border-[var(--border)] hover:brightness-110",
         ghost:
           "text-[var(--muted-foreground)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)]",
-        danger: "bg-[var(--destructive)] text-white hover:brightness-110",
+        danger: "bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:brightness-110",
         outline:
           "border border-[var(--border)] bg-transparent text-[var(--foreground)] hover:bg-[var(--surface-raised)]",
         quiet:

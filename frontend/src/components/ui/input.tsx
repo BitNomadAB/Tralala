@@ -7,8 +7,9 @@ import type {
 } from "react";
 import { cn } from "@/lib/utils";
 
+// --field-border, not --border: a field's edge is how it is found (WCAG 1.4.11, 3:1 in Classic).
 const base =
-  "w-full rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]";
+  "w-full rounded-lg border border-[var(--field-border)] bg-[var(--surface-raised)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]";
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={cn(base, "h-9", className)} {...props} />;

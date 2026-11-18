@@ -220,7 +220,7 @@ function DueEditor({
             onDone();
           }
         }}
-        className="h-8 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--foreground)]"
+        className="h-8 rounded-md border border-[var(--field-border)] bg-[var(--surface)] px-2 text-sm text-[var(--foreground)]"
       />
       {value ? (
         <Button
@@ -240,7 +240,11 @@ function DueEditor({
   );
 }
 
-/** The board's labels as toggles; each press saves, Done (or Escape) closes the picker. */
+/**
+ * The board's labels as toggles; each press saves, Done (or Escape) closes the picker. Every label
+ * is shown at full colour and a chosen one carries a check mark: dimming the others made their
+ * names unreadable and told the choice by contrast alone.
+ */
 function LabelPicker({
   chosen,
   labels,
@@ -270,9 +274,9 @@ function LabelPicker({
               onKeyDown={(event) => {
                 if (event.key === "Escape") onDone();
               }}
-              className={selected ? "opacity-100" : "opacity-45"}
+              className="rounded-full"
             >
-              <LabelChip name={label.name} color={label.color} />
+              <LabelChip name={label.name} color={label.color} selected={selected} />
             </button>
           );
         })
