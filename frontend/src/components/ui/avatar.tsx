@@ -1,9 +1,9 @@
 import { cn } from "@/lib/utils";
 
 const SIZES = {
-  sm: "size-[22px] text-[11px]",
+  sm: "size-[22px] text-xs",
   /** A person's note: a little larger than an event row's mark. */
-  xs: "size-[26px] text-[11px]",
+  xs: "size-[26px] text-xs",
   md: "size-8 text-[13px]",
 } as const;
 

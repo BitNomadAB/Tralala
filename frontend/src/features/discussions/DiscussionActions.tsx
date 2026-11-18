@@ -106,7 +106,7 @@ export function DiscussionActions({
         />
       </div>
       {blocked === null ? null : (
-        <p id={reasonId} className="m-0 text-[11px] text-[var(--muted-foreground)]">
+        <p id={reasonId} className="m-0 text-xs text-[var(--muted-foreground)]">
           {blocked}
         </p>
       )}

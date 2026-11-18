@@ -52,7 +52,7 @@ export function KeptCandidate({
         <span className="font-medium text-[var(--foreground)]">Kept result</span>
         <Badge tone="warning">not promoted</Badge>
       </div>
-      <p className="text-[11px] text-[var(--muted-foreground)]">
+      <p className="text-xs text-[var(--muted-foreground)]">
         The planning documents changed while the model was working, so this {scopeLabel} was kept
         for inspection and not used. It was written from the documents as they were when the run
         started.

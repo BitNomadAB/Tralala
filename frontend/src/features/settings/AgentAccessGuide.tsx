@@ -11,7 +11,7 @@ function Code({ children }: { children: string }) {
       role="group"
       aria-label="Code block"
       tabIndex={0}
-      className="mt-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-[11px] leading-relaxed"
+      className="mt-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-xs leading-relaxed"
     >
       <code>{children}</code>
     </pre>
@@ -72,7 +72,7 @@ export function AgentAccessGuide({
             with the address you use to open Tralala, which is normally{" "}
             <span className="font-mono">https://…</span> over a tailnet or behind a proxy.
             <Code>{snippet}</Code>
-            <p className="mt-2 text-[11px]">
+            <p className="mt-2 text-xs">
               <span className="font-mono">type</span> names the transport (Streamable HTTP), not the
               scheme — keep <span className="font-mono">http</span> even when the address is{" "}
               <span className="font-mono">https://</span>. The scheme lives in{" "}
@@ -82,7 +82,7 @@ export function AgentAccessGuide({
               <button
                 type="button"
                 onClick={() => onCopy(snippet)}
-                className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] hover:bg-[var(--surface)]"
+                className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--surface)]"
               >
                 <Copy size={12} /> Copy this block
               </button>
@@ -100,7 +100,7 @@ export function AgentAccessGuide({
             else. Revoke the key when the work is finished; disabling your account stops it too.
           </li>
         </ol>
-        <p className="text-[11px] italic">
+        <p className="text-xs italic">
           The endpoint is <span className="font-mono">{"<Your URL>"}/mcp</span>; its tool list is
           described in plain text at <span className="font-mono">{"<Your URL>"}/llms.txt</span>.
         </p>

@@ -73,7 +73,7 @@ export function LoopNotesPanel({
             key={note.id}
             className="rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-2.5"
           >
-            <p className="text-[11px] text-[var(--muted-foreground)]">
+            <p className="text-xs text-[var(--muted-foreground)]">
               {note.author_name}
               {note.author_actor_type === "agent" ? " (agent)" : ""} ·{" "}
               <time dateTime={note.created_at}>{new Date(note.created_at).toLocaleString()}</time>

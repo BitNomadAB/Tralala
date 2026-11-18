@@ -183,7 +183,7 @@ export function EnrolPage() {
         <Button type="submit" aria-disabled={pending ? true : undefined}>
           {pending ? "Saving…" : "Set password and sign in"}
         </Button>
-        <Link className="text-[11px] underline" to="/login">
+        <Link className="text-xs underline" to="/login">
           I already have a password
         </Link>
       </form>

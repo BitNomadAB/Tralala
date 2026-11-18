@@ -106,12 +106,12 @@ export function LoginPage() {
         <Button type="submit" aria-disabled={pending ? true : undefined}>
           {pending ? "Signing in…" : "Sign in"}
         </Button>
-        <p className="text-[11px] leading-relaxed text-[var(--muted-foreground)]">
+        <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">
           First run uses the administrator credentials configured on the server. If none was
           configured, the server generated one and wrote it to
           <code> data/.bootstrap-password</code>.
         </p>
-        <p className="text-[11px] text-[var(--muted-foreground)]">
+        <p className="text-xs text-[var(--muted-foreground)]">
           Got an invitation link? Open it directly, or{" "}
           <Link className="underline" to="/enrol">
             enter its token here

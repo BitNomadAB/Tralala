@@ -28,7 +28,7 @@ function Points({
   const Heading = level === 3 ? "h3" : "h4";
   return (
     <div className="grid content-start gap-1.5">
-      <Heading className="m-0 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[var(--foreground-faint)]">
+      <Heading className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--foreground-faint)]">
         {label}
       </Heading>
       {items.length === 0 ? (

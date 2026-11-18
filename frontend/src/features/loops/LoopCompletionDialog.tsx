@@ -205,7 +205,7 @@ export function LoopCompletionDialog({
                 </Button>
               </div>
               {!isHuman ? (
-                <p className="text-[11px] text-[var(--warning)]">
+                <p className="text-xs text-[var(--warning)]">
                   Only a signed-in person can accept implementation or QA.
                 </p>
               ) : null}
@@ -235,7 +235,7 @@ export function LoopCompletionDialog({
                         key={scenario.id}
                         className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--border)] px-2 py-1.5"
                       >
-                        <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
+                        <span className="font-mono text-xs text-[var(--muted-foreground)]">
                           {scenario.id}
                         </span>
                         <span className="text-sm">{scenario.title}</span>

@@ -200,7 +200,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
             <li className="py-2.5 text-xs text-[var(--muted-foreground)]">No agent access yet.</li>
           ) : null}
         </ul>
-        <p id={mineHintId} className="mt-2 text-[11px] text-[var(--muted-foreground)]">
+        <p id={mineHintId} className="mt-2 text-xs text-[var(--muted-foreground)]">
           {ROTATE_AND_REVOKE}
         </p>
       </div>
@@ -220,10 +220,10 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
               </li>
             ) : null}
           </ul>
-          <p id={othersHintId} className="mt-2 text-[11px] text-[var(--muted-foreground)]">
+          <p id={othersHintId} className="mt-2 text-xs text-[var(--muted-foreground)]">
             {ROTATE_AND_REVOKE}
           </p>
-          <p className="mt-3 text-[11px] text-[var(--muted-foreground)]">
+          <p className="mt-3 text-xs text-[var(--muted-foreground)]">
             Yours may hold any grantable scope: <code>{scopeChoices.join(", ")}</code>
           </p>
         </div>

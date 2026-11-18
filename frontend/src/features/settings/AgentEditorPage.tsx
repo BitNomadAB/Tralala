@@ -180,7 +180,7 @@ export function AgentEditorPage() {
 
         {testResult ? <AgentTestResultPanel result={testResult} /> : null}
         {stored?.last_tested_at ? (
-          <p className="text-[11px] text-[var(--muted-foreground)]">
+          <p className="text-xs text-[var(--muted-foreground)]">
             Last test {stored.last_test_status} · {formatDateTime(stored.last_tested_at)}
           </p>
         ) : null}

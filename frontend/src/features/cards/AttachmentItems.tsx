@@ -94,9 +94,7 @@ export function AttachmentRow({
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate font-medium" title={name}>
-            {name}
-          </p>
+          <p className="break-words font-medium">{name}</p>
           <p className="text-[var(--muted-foreground)]">
             {formatSize(attachment.size_bytes)} · Uploaded by{" "}
             {uploaderText(attachment.uploaded_by_actor_id, currentActorId)} ·{" "}

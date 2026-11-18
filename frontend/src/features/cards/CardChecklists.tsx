@@ -102,7 +102,7 @@ function ChecklistBlock({
       <div className="mb-1.5 flex items-center gap-2">
         <CheckSquare size={14} aria-hidden="true" className="text-[var(--muted-foreground)]" />
         <span className="text-xs font-semibold">{checklist.title}</span>
-        <span className="text-[11px] text-[var(--muted-foreground)]">
+        <span className="text-xs text-[var(--muted-foreground)]">
           {done}/{checklist.items.length}
         </span>
       </div>

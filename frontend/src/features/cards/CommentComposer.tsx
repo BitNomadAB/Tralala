@@ -130,9 +130,7 @@ export function CommentComposer({
                   >
                     <Bot size={14} aria-hidden="true" />
                     <span className="font-medium">{agent.name}</span>
-                    <span className="ml-auto text-[11px]">
-                      {agent.role_template_name ?? "no role"}
-                    </span>
+                    <span className="ml-auto text-xs">{agent.role_template_name ?? "no role"}</span>
                     <CornerDownLeft
                       size={12}
                       aria-hidden="true"

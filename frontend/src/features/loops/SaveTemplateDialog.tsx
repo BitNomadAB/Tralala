@@ -76,7 +76,7 @@ export function SaveTemplateDialog({
               maxLength={20000}
             />
           </Field>
-          <p className="text-[11px] text-[var(--muted-foreground)]">
+          <p className="text-xs text-[var(--muted-foreground)]">
             Captures {columnCount} columns. Tickets are not copied.
           </p>
           <div className="flex justify-end gap-2">

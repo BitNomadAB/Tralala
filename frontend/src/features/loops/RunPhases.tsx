@@ -57,7 +57,7 @@ export function RunPhases({
       }
     >
       <div className="flex items-center justify-between gap-2">
-        <h3 className={`font-semibold ${compact ? "text-[11px]" : "text-sm"}`}>
+        <h3 className={`font-semibold ${compact ? "text-xs" : "text-sm"}`}>
           {running ? "Working" : run.status === "completed" ? "Done" : "Stopped"}
         </h3>
         {onDismiss ? (
@@ -71,7 +71,7 @@ export function RunPhases({
           </button>
         ) : null}
       </div>
-      <UnreadRepositories run={run} compact={compact} />
+      <UnreadRepositories run={run} />
       {hasTree(run) ? (
         <RunTree purpose={purpose} run={run} compact={compact} failureJson={failureJson} />
       ) : (
@@ -97,11 +97,7 @@ function PhaseList({
   const failedKey = failedStepKey(run);
   const repositories = repositoryOutcome(run);
   return (
-    <ol
-      className={
-        compact ? "flex flex-row flex-wrap gap-2 text-[11px]" : "flex flex-col gap-2 text-xs"
-      }
-    >
+    <ol className={`flex gap-2 text-xs ${compact ? "flex-row flex-wrap" : "flex-col"}`}>
       {steps.map((step, index) => {
         return (
           <li key={step.key} className="flex flex-col gap-1">
@@ -113,14 +109,14 @@ function PhaseList({
                   <StateText state={step.state} />
                 </span>
                 {compact ? null : (
-                  <span className="text-[11px] text-[var(--muted-foreground)]">
+                  <span className="text-xs text-[var(--muted-foreground)]">
                     {stepCaption(step)}
                   </span>
                 )}
               </div>
             </div>
             {step.key === "analysing_repository" && repositories.kind !== "waiting" ? (
-              <p className="ml-6 text-[11px] text-[var(--muted-foreground)]">
+              <p className="ml-6 text-xs text-[var(--muted-foreground)]">
                 {repositories.kind === "none"
                   ? "No enabled repository is linked to this board."
                   : repositories.lines.join("; ")}
@@ -129,7 +125,7 @@ function PhaseList({
             {step.key === "analysing_repository" &&
             repositories.kind === "waiting" &&
             step.state === "active" ? (
-              <p className="ml-6 text-[11px] italic text-[var(--muted-foreground)]">
+              <p className="ml-6 text-xs italic text-[var(--muted-foreground)]">
                 Fetching the linked repositories…
               </p>
             ) : null}

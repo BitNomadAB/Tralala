@@ -58,7 +58,7 @@ export function InfoEditor({
           disabled={readOnly || !isHuman}
         />
       </Field>
-      {!isHuman ? <p className="text-[11px] text-[var(--warning)]">{INFO_AGENT_NOTE}</p> : null}
+      {!isHuman ? <p className="text-xs text-[var(--warning)]">{INFO_AGENT_NOTE}</p> : null}
       <div className="flex justify-end">
         {saveGuard ??
           (readOnly || !isHuman ? (

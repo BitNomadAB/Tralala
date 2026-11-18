@@ -21,7 +21,7 @@ export function InfoSaveGuard({
 }) {
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      <span role="alert" className="text-[11px] text-[var(--warning)]">
+      <span role="alert" className="text-xs text-[var(--warning)]">
         A generation run is in progress; saving now discards its result, which is only kept for
         inspection.
       </span>

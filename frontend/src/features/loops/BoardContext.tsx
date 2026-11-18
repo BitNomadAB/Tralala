@@ -21,7 +21,7 @@ export function BoardContext({
     .filter((name): name is string => Boolean(name));
 
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
       <span className="flex items-center gap-1 text-[var(--muted-foreground)]">
         <GitBranch size={11} /> Code
       </span>

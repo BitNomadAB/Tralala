@@ -77,16 +77,16 @@ export function ActivityPanel({ boardId, onClose }: { boardId: string; onClose: 
           <ul className="flex flex-col gap-2.5">
             {(data ?? []).map((entry) => (
               <li key={entry.id} className="border-b border-[var(--border)] pb-2 last:border-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={entry.actor_type === "agent" ? "brand" : "neutral"}>
                     {entry.actor_type}
                   </Badge>
                   <span className="text-xs font-medium">{entry.action}</span>
-                  <span className="ml-auto text-[10px] text-[var(--muted-foreground)]">
+                  <span className="ml-auto text-xs text-[var(--muted-foreground)]">
                     {formatDateTime(entry.timestamp)}
                   </span>
                 </div>
-                <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                   {entry.entity_type} · {entry.entity_id.slice(0, 8)}
                   {entry.actor_id ? ` · actor ${entry.actor_id.slice(0, 8)}` : ""}
                 </p>

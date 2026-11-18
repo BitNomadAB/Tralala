@@ -156,9 +156,12 @@ export function KanbanColumn({
             />
           </form>
         ) : (
-          <h2 className="m-0 flex flex-1 items-baseline justify-between gap-2 truncate text-[13px] font-semibold text-[var(--muted-foreground)]">
-            <span className="truncate">{list.name}</span>
-            <span className="tabular-nums text-[var(--foreground-faint)]">{cards.length}</span>
+          // A long name wraps instead of being cut off (WCAG 1.4.10).
+          <h2 className="m-0 flex min-w-0 flex-1 items-baseline justify-between gap-2 text-[13px] font-semibold text-[var(--muted-foreground)]">
+            <span className="min-w-0 break-words">{list.name}</span>
+            <span className="shrink-0 tabular-nums text-[var(--foreground-faint)]">
+              {cards.length}
+            </span>
           </h2>
         )}
         <Menu

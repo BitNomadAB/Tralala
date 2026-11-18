@@ -69,7 +69,7 @@ export function ScopeReview({
   return (
     <div className="flex flex-col gap-2 border-t border-[var(--border)] pt-3">
       {!isHuman ? (
-        <p className="text-[11px] text-[var(--warning)]">
+        <p className="text-xs text-[var(--warning)]">
           Approving is a human decision; agents can generate and comment only.
         </p>
       ) : null}
@@ -87,7 +87,7 @@ export function ScopeReview({
           {canReset ? (
             confirmReset ? (
               <>
-                <span id={warningId} role="alert" className="text-[11px] text-[var(--destructive)]">
+                <span id={warningId} role="alert" className="text-xs text-[var(--destructive)]">
                   Resetting clears the {scopeLabel} and any approval behind it. It has to be
                   generated again.
                   {resetTickets > 0

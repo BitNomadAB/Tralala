@@ -70,10 +70,7 @@ export function CardComments({
               <span className="font-medium">{job.agent_name}</span>
               <Badge tone={MENTION_TONES[job.status]}>{job.status}</Badge>
               {job.error ? (
-                <span
-                  className="max-w-[220px] truncate text-[var(--destructive)]"
-                  title={job.error}
-                >
+                <span className="min-w-[12rem] flex-1 break-words text-[var(--destructive)]">
                   {job.error}
                 </span>
               ) : null}
@@ -95,7 +92,7 @@ export function CardComments({
       <ul className="flex flex-col gap-2">
         {comments.map((entry) => (
           <li key={entry.id} className="rounded-lg border border-[var(--border)] p-2.5">
-            <div className="flex items-center gap-2 text-[11px] text-[var(--muted-foreground)]">
+            <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
               <span className="font-medium text-[var(--foreground)]">
                 {entry.actor_name ?? "Unknown"}
               </span>

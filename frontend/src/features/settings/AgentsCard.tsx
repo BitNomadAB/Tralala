@@ -116,7 +116,7 @@ export function AgentsCard() {
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                     <Bot size={14} className="shrink-0 text-[var(--muted-foreground)]" />
-                    <span className="truncate">{agent.name}</span>
+                    <span className="min-w-0 break-words">{agent.name}</span>
                     <Badge tone={agent.enabled ? "success" : "neutral"}>
                       {agent.enabled ? "enabled" : "disabled"}
                     </Badge>
@@ -125,13 +125,13 @@ export function AgentsCard() {
                       <Badge tone="brand">organisation</Badge>
                     ) : null}
                   </p>
-                  <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                     {agent.role_template_name ?? "No role"} ·{" "}
                     {providerLabelFor(agent.base_url) ??
                       (agent.connection_type === "a2a" ? "A2A" : "OpenAI-compatible")}{" "}
                     · {agent.model ?? "no model"} · {agent.base_url}
                   </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
+                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
                     <Badge tone={testTone(agent)}>{agent.last_test_status ?? "not tested"}</Badge>
                     {agent.last_tested_at ? (
                       <span>tested {formatDateTime(agent.last_tested_at)}</span>

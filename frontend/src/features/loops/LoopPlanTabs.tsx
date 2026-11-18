@@ -92,7 +92,7 @@ export function LoopPlanTabs({
         </ReasonButton>
       ) : null}
       {tab !== "info" ? (
-        <label className="ml-auto flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
+        <label className="ml-auto flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
           Agent
           <Select
             aria-label="Generation agent"

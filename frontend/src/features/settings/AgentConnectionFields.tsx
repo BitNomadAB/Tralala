@@ -92,7 +92,7 @@ export function AgentConnectionFields({
         />
         {preset?.docsUrl ? (
           <a
-            className="text-[11px] underline text-[var(--muted-foreground)]"
+            className="text-xs underline text-[var(--muted-foreground)]"
             href={preset.docsUrl}
             target="_blank"
             rel="noreferrer noopener"
@@ -180,7 +180,7 @@ export function AgentConnectionFields({
           This endpoint needs no key
         </label>
         {noKey ? (
-          <p className="text-[11px] text-[var(--muted-foreground)]">
+          <p className="text-xs text-[var(--muted-foreground)]">
             No <code>Authorization</code> header is sent, in the test or in a call. A model on the
             same machine or network usually works this way.
           </p>

@@ -107,7 +107,7 @@ export function HistoryPage() {
                 className="card-surface flex w-full flex-wrap items-center gap-2 p-3 text-left hover:border-[var(--primary)]"
                 onClick={() => setSelected(record.id)}
               >
-                <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
+                <span className="font-mono text-xs text-[var(--muted-foreground)]">
                   {record.loop_key ?? "—"}
                 </span>
                 <span className="text-sm font-medium">{record.loop_name}</span>
@@ -117,13 +117,13 @@ export function HistoryPage() {
                 <Badge tone={record.qa_status === "accepted" ? "success" : "neutral"}>
                   QA {record.qa_status}
                 </Badge>
-                <span className="ml-auto text-[11px] text-[var(--muted-foreground)]">
+                <span className="ml-auto text-xs text-[var(--muted-foreground)]">
                   {new Date(
                     record.completed_at ?? record.imported_at ?? record.created_at,
                   ).toLocaleString()}
                 </span>
                 {record.label ? (
-                  <span className="w-full text-[11px] text-[var(--warning)]">{record.label}</span>
+                  <span className="w-full text-xs text-[var(--warning)]">{record.label}</span>
                 ) : null}
               </button>
             </li>
@@ -182,13 +182,13 @@ function HistoryRecordDialog({
           <p className="text-sm text-[var(--destructive)]">Record unavailable.</p>
         ) : (
           <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted-foreground)]">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
               <span className="font-mono">{record.loop_key ?? "imported"}</span>
               <span>QA {record.qa_status}</span>
               <span>hash {record.content_hash.slice(0, 12)}…</span>
             </div>
             {record.warnings.length > 0 ? (
-              <ul className="rounded-lg border border-[var(--warning)] p-2 text-[11px] text-[var(--warning)]">
+              <ul className="rounded-lg border border-[var(--warning)] p-2 text-xs text-[var(--warning)]">
                 {record.warnings.map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
@@ -224,7 +224,7 @@ function HistoryRecordDialog({
                   <ol className="flex flex-col gap-1.5">
                     {notes.map((note) => (
                       <li key={note.id}>
-                        <span className="text-[11px] text-[var(--muted-foreground)]">
+                        <span className="text-xs text-[var(--muted-foreground)]">
                           {note.author_name}
                         </span>
                         {renderMarkdown(note.content, { headingLevel: 3 })}
@@ -239,7 +239,7 @@ function HistoryRecordDialog({
                 <h2 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
                   Evidence
                 </h2>
-                <ul className="text-[11px] text-[var(--muted-foreground)]">
+                <ul className="text-xs text-[var(--muted-foreground)]">
                   {record.artifacts.map((artifact) => (
                     <li key={artifact.id}>
                       {artifact.filename} · {artifact.media_type} · {artifact.inclusion}

@@ -47,7 +47,7 @@ export function LastRunStatus({
 }) {
   return (
     <p
-      className={`mt-2 text-[11px] ${
+      className={`mt-2 text-xs ${
         lastRun?.status === "failed"
           ? "text-[var(--destructive)]"
           : "text-[var(--muted-foreground)]"

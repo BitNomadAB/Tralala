@@ -47,7 +47,7 @@ export function RepositoryPathFields({
           />
         </Field>
       </div>
-      <p className="text-[11px] text-[var(--muted-foreground)]">
+      <p className="text-xs text-[var(--muted-foreground)]">
         One glob per line, relative to the repository root; <code>*</code> also crosses folders.
         With focus paths only matching files are read; excluded files never are. Both empty reads
         the whole repository.

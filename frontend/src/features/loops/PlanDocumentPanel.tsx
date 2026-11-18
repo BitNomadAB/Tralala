@@ -82,7 +82,7 @@ export function PlanDocumentPanel({
         ) : null}
       </div>
       {reasons.length > 0 ? (
-        <p className="text-[11px] text-[var(--warning)]">
+        <p className="text-xs text-[var(--warning)]">
           {/* Written after its approval, it needs a review; any other reason, writing again. */}
           {reasons.every((reason) => reason === "approval_superseded")
             ? "Needs a new review:"

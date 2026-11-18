@@ -70,17 +70,17 @@ export function AgentPicker({
               <Bot size={13} className="text-[var(--muted-foreground)]" />
               <span className="font-medium">{agent.name}</span>
               {agent.role_template_name ? (
-                <span className="text-[11px] text-[var(--muted-foreground)]">
+                <span className="text-xs text-[var(--muted-foreground)]">
                   {agent.role_template_name}
                 </span>
               ) : null}
               {canGenerate ? (
-                <span className="flex items-center gap-1 text-[11px] text-[var(--muted-foreground)]">
+                <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
                   <Sparkles size={11} />
                   {agent.model ?? "default model"}
                 </span>
               ) : (
-                <span className="text-[11px] text-[var(--warning)]">
+                <span className="text-xs text-[var(--warning)]">
                   {agent.enabled ? "cannot generate" : "disabled"}
                 </span>
               )}

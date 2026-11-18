@@ -44,7 +44,7 @@ export function ReasonButton({
         }}
       />
       {blocked ? (
-        <span id={reasonId} className="text-[11px] text-[var(--muted-foreground)]">
+        <span id={reasonId} className="text-xs text-[var(--muted-foreground)]">
           {disabledReason}
         </span>
       ) : null}

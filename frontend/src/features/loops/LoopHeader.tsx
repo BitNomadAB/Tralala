@@ -118,7 +118,7 @@ export function LoopHeader({
       {loop.goal ? <p className="text-xs text-[var(--muted-foreground)]">{loop.goal}</p> : null}
 
       {loop.warnings.length > 0 ? (
-        <ul className="flex flex-wrap gap-2 text-[11px]">
+        <ul className="flex flex-wrap gap-2 text-xs">
           {loop.warnings.map((warning) => (
             <li key={`${warning.code}-${warning.kind ?? ""}`}>
               <Badge tone={warning.code === "approval_required" ? "neutral" : "warning"}>
@@ -130,7 +130,7 @@ export function LoopHeader({
       ) : null}
 
       {humanActions.length > 0 ? (
-        <ul className="flex flex-col gap-1 text-[11px] text-[var(--warning)]">
+        <ul className="flex flex-col gap-1 text-xs text-[var(--warning)]">
           {humanActions.map((item) => (
             <li key={item.id} className="inline-flex items-center gap-1">
               <AlertTriangle size={12} aria-hidden="true" />

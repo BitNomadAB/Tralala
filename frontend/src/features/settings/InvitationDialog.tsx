@@ -21,7 +21,7 @@ export function InvitationDialog({
       hint="Shown once; a new link replaces it."
       onClose={onClose}
     >
-      <p className="text-[11px] text-[var(--muted-foreground)]">
+      <p className="text-xs text-[var(--muted-foreground)]">
         Valid until {invited ? formatDateTime(invited.expires_at) : ""}. Anyone with the link can
         claim the account until it is used or a new link is created.
       </p>
