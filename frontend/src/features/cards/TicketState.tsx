@@ -3,10 +3,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StateChip } from "@/components/ui/chip";
 import { Field, Select, Textarea } from "@/components/ui/input";
+import { ReasonButton } from "@/components/ui/reason-button";
 import type { Card, Wait } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { stateReason } from "./ticketRules";
-import { WAIT_HINTS, WAIT_LABELS, WAITING_REASON_MAX, WAITS } from "./ticketWork";
+import { SAVING, WAIT_HINTS, WAIT_LABELS, WAITING_REASON_MAX, WAITS } from "./ticketWork";
 import { useCardWork } from "./useCardWork";
 
 const LINK =
@@ -80,16 +81,15 @@ export function TicketState({
           <p className="m-0 text-[var(--muted-foreground)]">
             Only a person can do this work; confirm it once it is done.
           </p>
-          <Button
+          <ReasonButton
             variant="secondary"
             size="sm"
-            className="w-fit"
-            disabled={pending || confirmBlocked !== null}
-            title={confirmBlocked ?? undefined}
+            wrapperClassName="justify-self-start"
+            disabledReason={confirmBlocked ?? (pending ? SAVING : null)}
             onClick={onConfirm}
           >
             <CircleCheck size={14} aria-hidden="true" /> Confirm human action
-          </Button>
+          </ReasonButton>
         </div>
       ) : null}
 
