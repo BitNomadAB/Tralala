@@ -2,6 +2,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useFocusReturn } from "./useFocusReturn";
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -24,12 +25,13 @@ export function DialogContent({
   /** Where focus goes on closing; without it, back to what opened the dialog. */
   onCloseAutoFocus?: ((event: Event) => void) | undefined;
 }) {
+  const focusReturn = useFocusReturn(onOpenAutoFocus, onCloseAutoFocus);
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
       <DialogPrimitive.Content
-        onOpenAutoFocus={onOpenAutoFocus}
-        onCloseAutoFocus={onCloseAutoFocus}
+        onOpenAutoFocus={focusReturn.onOpenAutoFocus}
+        onCloseAutoFocus={focusReturn.onCloseAutoFocus}
         className={cn(
           "fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[min(680px,94vw)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl scrollbar-thin",
           className,
@@ -69,11 +71,14 @@ export const DialogTitle = DialogPrimitive.Title;
  * this one Escape would close the menu and the whole dialog at once.
  */
 export function DialogFrame({ children, className }: { children: ReactNode; className?: string }) {
+  const focusReturn = useFocusReturn();
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
       <DialogPrimitive.Content
         aria-describedby={undefined}
+        onOpenAutoFocus={focusReturn.onOpenAutoFocus}
+        onCloseAutoFocus={focusReturn.onCloseAutoFocus}
         onEscapeKeyDown={(event) => {
           if (keepsEscape(event.target)) event.preventDefault();
         }}
