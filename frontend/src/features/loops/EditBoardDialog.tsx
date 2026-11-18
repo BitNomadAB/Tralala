@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { AgentPicker } from "@/features/boards/AgentPicker";
 import type { RepositoryPathsDrafts } from "@/features/boards/repositoryPaths";
@@ -76,9 +77,9 @@ export function EditBoardDialog({
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={saving || !draft.name.trim()}>
+            <HeldButton type="submit" held={saving} disabled={!draft.name.trim()}>
               {saving ? "Saving…" : "Save board"}
-            </Button>
+            </HeldButton>
           </div>
         </form>
       </DialogContent>

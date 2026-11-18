@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
@@ -69,9 +70,9 @@ export function LoopCancelDialog({
             <Button variant="ghost" type="button" onClick={onClose}>
               Keep the Loop
             </Button>
-            <Button type="submit" variant="danger" disabled={cancel.isPending}>
+            <HeldButton type="submit" variant="danger" held={cancel.isPending}>
               {cancel.isPending ? "Cancelling…" : "Cancel Loop"}
-            </Button>
+            </HeldButton>
           </div>
         </form>
       </DialogContent>

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useAnnounce } from "@/components/ui/useAnnounce";
 import { useToast } from "@/components/ui/useToast";
@@ -179,9 +180,9 @@ export function NewBoardDialog({
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={createMutation.isPending || !name.trim()}>
+            <HeldButton type="submit" held={createMutation.isPending} disabled={!name.trim()}>
               {createMutation.isPending ? "Creating…" : "Create board"}
-            </Button>
+            </HeldButton>
           </div>
         </form>
       </DialogContent>

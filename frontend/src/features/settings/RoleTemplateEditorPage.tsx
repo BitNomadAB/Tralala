@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
 import { useToast } from "@/components/ui/useToast";
@@ -218,14 +219,14 @@ export function RoleTemplateEditorPage() {
             </ReasonButton>
           ) : null}
           {!isNew ? (
-            <Button
+            <HeldButton
               type="button"
               variant="outline"
-              disabled={duplicateMutation.isPending}
+              held={duplicateMutation.isPending}
               onClick={() => duplicateMutation.mutate()}
             >
               <Copy size={14} /> Duplicate
-            </Button>
+            </HeldButton>
           ) : null}
           <Button
             type="button"
@@ -236,12 +237,13 @@ export function RoleTemplateEditorPage() {
           >
             Cancel
           </Button>
-          <Button
+          <HeldButton
             type="submit"
-            disabled={!name.trim() || !systemPrompt.trim() || saveMutation.isPending}
+            held={saveMutation.isPending}
+            disabled={!name.trim() || !systemPrompt.trim()}
           >
             {saveMutation.isPending ? "Saving…" : "Save role"}
-          </Button>
+          </HeldButton>
         </div>
       </form>
 
@@ -264,13 +266,13 @@ export function RoleTemplateEditorPage() {
             <Button variant="ghost" onClick={() => setConfirming(false)}>
               Cancel
             </Button>
-            <Button
+            <HeldButton
               variant="danger"
-              disabled={deleteMutation.isPending}
+              held={deleteMutation.isPending}
               onClick={() => deleteMutation.mutate()}
             >
               Delete role
-            </Button>
+            </HeldButton>
           </div>
         </DialogContent>
       </Dialog>

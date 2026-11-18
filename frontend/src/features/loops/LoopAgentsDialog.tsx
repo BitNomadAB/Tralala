@@ -3,6 +3,7 @@ import { Bot } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
@@ -128,9 +129,9 @@ export function LoopAgentsDialog({
             </p>
           )}
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={save.isPending}>
+            <HeldButton type="submit" size="sm" held={save.isPending}>
               Save agents
-            </Button>
+            </HeldButton>
             <Button type="button" size="sm" variant="ghost" onClick={onClose}>
               Cancel
             </Button>

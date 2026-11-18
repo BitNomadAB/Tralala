@@ -6,6 +6,7 @@ import { usePageTitle } from "@/app/usePageTitle";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
@@ -169,9 +170,9 @@ export function TemplateEditorPage() {
           >
             Cancel
           </Button>
-          <Button type="submit" disabled={!name.trim() || saveMutation.isPending}>
+          <HeldButton type="submit" held={saveMutation.isPending} disabled={!name.trim()}>
             {saveMutation.isPending ? "Saving…" : "Save template"}
-          </Button>
+          </HeldButton>
         </div>
       </form>
 
@@ -187,13 +188,13 @@ export function TemplateEditorPage() {
             <Button variant="ghost" onClick={() => setConfirming(false)}>
               Cancel
             </Button>
-            <Button
+            <HeldButton
               variant="danger"
-              disabled={deleteMutation.isPending}
+              held={deleteMutation.isPending}
               onClick={() => deleteMutation.mutate()}
             >
               Delete template
-            </Button>
+            </HeldButton>
           </div>
         </DialogContent>
       </Dialog>

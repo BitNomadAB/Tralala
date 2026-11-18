@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
@@ -188,13 +189,13 @@ export function AgentsCard() {
             <Button variant="ghost" onClick={() => setDeleting(null)}>
               Cancel
             </Button>
-            <Button
+            <HeldButton
               variant="danger"
-              disabled={deleteMutation.isPending}
+              held={deleteMutation.isPending}
               onClick={() => deleting && deleteMutation.mutate(deleting)}
             >
               Delete agent
-            </Button>
+            </HeldButton>
           </div>
         </DialogContent>
       </Dialog>

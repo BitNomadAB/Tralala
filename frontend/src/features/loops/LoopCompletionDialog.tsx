@@ -2,26 +2,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys, useQaCycle } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
+import { QaScenarioResults, type ResultStatus } from "./QaScenarioResults";
 import { UnplannedWarning } from "./Unplanned";
 
 type QaStatus = "not_tested" | "tested_with_issues" | "passed";
-type ResultStatus = "passed" | "failed" | "blocked" | "not_run" | "not_applicable";
-
-const RESULT_OPTIONS: { value: ResultStatus; label: string }[] = [
-  { value: "passed", label: "Passed" },
-  { value: "failed", label: "Failed" },
-  { value: "blocked", label: "Blocked" },
-  { value: "not_run", label: "Not run" },
-  { value: "not_applicable", label: "Not applicable" },
-];
 
 export function LoopCompletionDialog({
   boardId,
@@ -200,9 +192,13 @@ export function LoopCompletionDialog({
                 />
               </Field>
               <div className="flex justify-end">
-                <Button disabled={!isHuman || accept.isPending} onClick={() => accept.mutate()}>
+                <HeldButton
+                  held={accept.isPending}
+                  disabled={!isHuman}
+                  onClick={() => accept.mutate()}
+                >
                   {qaStatus === "passed" ? "Accept and complete the Loop" : "Accept implementation"}
-                </Button>
+                </HeldButton>
               </div>
               {!isHuman ? (
                 <p className="text-xs text-[var(--warning)]">
@@ -223,52 +219,22 @@ export function LoopCompletionDialog({
                   One QA Task in the Kanban carries both an agent view and a human view built from
                   the same scenario ids.
                 </p>
-                {scenarios.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-[var(--border)] p-2 text-xs text-[var(--muted-foreground)]">
-                    No QA instructions yet. Generate them with a configured agent, or supply a
-                    scenario set through the API.
-                  </p>
-                ) : (
-                  <ul className="flex flex-col gap-1.5">
-                    {scenarios.map((scenario) => (
-                      <li
-                        key={scenario.id}
-                        className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--border)] px-2 py-1.5"
-                      >
-                        <span className="font-mono text-xs text-[var(--muted-foreground)]">
-                          {scenario.id}
-                        </span>
-                        <span className="text-sm">{scenario.title}</span>
-                        <Select
-                          className="ml-auto h-7 w-auto"
-                          aria-label={`Result for ${scenario.id}`}
-                          value={draftResults[scenario.id] ?? ""}
-                          onChange={(event) =>
-                            setDraftResults((current) => ({
-                              ...current,
-                              [scenario.id]: event.target.value as ResultStatus,
-                            }))
-                          }
-                        >
-                          <option value="">Not recorded</option>
-                          {RESULT_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </Select>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <QaScenarioResults
+                  scenarios={scenarios}
+                  results={draftResults}
+                  onResultChange={(scenarioId, status) =>
+                    setDraftResults((current) => ({ ...current, [scenarioId]: status }))
+                  }
+                />
                 <div className="flex flex-wrap justify-end gap-2">
-                  <Button
+                  <HeldButton
                     variant="outline"
-                    disabled={Object.keys(draftResults).length === 0 || submitResults.isPending}
+                    held={submitResults.isPending}
+                    disabled={Object.keys(draftResults).length === 0}
                     onClick={() => submitResults.mutate()}
                   >
                     Record results
-                  </Button>
+                  </HeldButton>
                   <Select
                     aria-label="Scenarios approved as not applicable"
                     className="h-8 w-auto"
@@ -284,19 +250,21 @@ export function LoopCompletionDialog({
                       </option>
                     ))}
                   </Select>
-                  <Button
+                  <HeldButton
                     variant="outline"
-                    disabled={!isHuman || decide.isPending}
+                    held={decide.isPending}
+                    disabled={!isHuman}
                     onClick={() => decide.mutate("rejected")}
                   >
                     <XCircle size={14} /> Reject QA
-                  </Button>
-                  <Button
-                    disabled={!isHuman || decide.isPending}
+                  </HeldButton>
+                  <HeldButton
+                    held={decide.isPending}
+                    disabled={!isHuman}
                     onClick={() => decide.mutate("accepted")}
                   >
                     <CheckCircle2 size={14} /> Accept QA and complete
-                  </Button>
+                  </HeldButton>
                 </div>
               </section>
             ) : null}
