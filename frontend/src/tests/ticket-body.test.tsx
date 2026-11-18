@@ -169,44 +169,50 @@ describe("Raw text", () => {
 });
 
 describe("editing the face", () => {
-  it("shows live counters and sends the whole face with the version", async () => {
-    const { view, user } = await renderTicket(faceCard());
-    await user.click(screen.getByRole("button", { name: "Edit what will be done" }));
-    const form = screen.getByRole("form", { name: "Edit the face" });
-    expect(form).toHaveTextContent("7 of 20 words");
-    expect(form).toHaveTextContent("5 of 5 steps");
-    expect(form).toHaveTextContent("2 of 3 sentences");
-    expect(form).toHaveTextContent("3 of 3 points");
-    const steps = within(form).getByLabelText("What will be done");
-    await user.clear(steps);
-    await user.type(steps, "Make a new key every night.{Enter}Refuse an older key.");
-    expect(form).toHaveTextContent("2 of 5 steps");
-    const why = within(form).getByLabelText("Why it is needed");
-    await user.type(why, " It hurts. Twice");
-    expect(form).toHaveTextContent("4 of 3 sentences");
-    await user.clear(why);
-    await user.type(why, "Leaked keys work forever.");
-    await user.click(within(form).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(screen.queryByRole("form", { name: "Edit the face" })).toBeNull());
-    expect(writes(view)).toEqual([
-      {
-        route: `PATCH ${CARD_PATH}`,
-        body: {
-          version: 3,
-          summary: FACE.summary,
-          why: "Leaked keys work forever.",
-          if_skipped: FACE.if_skipped,
-          pros: FACE.pros,
-          cons: FACE.cons,
-          steps: ["Make a new key every night.", "Refuse an older key."],
+  // It types about a hundred keys through user-event, each one re-rendering the live counters:
+  // about 2 s alone, past the default 5 s when the whole suite runs in parallel.
+  it(
+    "shows live counters and sends the whole face with the version",
+    { timeout: 15_000 },
+    async () => {
+      const { view, user } = await renderTicket(faceCard());
+      await user.click(screen.getByRole("button", { name: "Edit what will be done" }));
+      const form = screen.getByRole("form", { name: "Edit the face" });
+      expect(form).toHaveTextContent("7 of 20 words");
+      expect(form).toHaveTextContent("5 of 5 steps");
+      expect(form).toHaveTextContent("2 of 3 sentences");
+      expect(form).toHaveTextContent("3 of 3 points");
+      const steps = within(form).getByLabelText("What will be done");
+      await user.clear(steps);
+      await user.type(steps, "Make a new key every night.{Enter}Refuse an older key.");
+      expect(form).toHaveTextContent("2 of 5 steps");
+      const why = within(form).getByLabelText("Why it is needed");
+      await user.type(why, " It hurts. Twice");
+      expect(form).toHaveTextContent("4 of 3 sentences");
+      await user.clear(why);
+      await user.type(why, "Leaked keys work forever.");
+      await user.click(within(form).getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(screen.queryByRole("form", { name: "Edit the face" })).toBeNull());
+      expect(writes(view)).toEqual([
+        {
+          route: `PATCH ${CARD_PATH}`,
+          body: {
+            version: 3,
+            summary: FACE.summary,
+            why: "Leaked keys work forever.",
+            if_skipped: FACE.if_skipped,
+            pros: FACE.pros,
+            cons: FACE.cons,
+            steps: ["Make a new key every night.", "Refuse an older key."],
+          },
         },
-      },
-    ]);
-    const forYou = panel("For you");
-    const shown = within(forYou).getByRole("list", { name: "Steps" });
-    expect(within(shown).getAllByRole("listitem")).toHaveLength(2);
-    expect(forYou).toHaveTextContent("2 of 5");
-  });
+      ]);
+      const forYou = panel("For you");
+      const shown = within(forYou).getByRole("list", { name: "Steps" });
+      expect(within(shown).getAllByRole("listitem")).toHaveLength(2);
+      expect(forYou).toHaveTextContent("2 of 5");
+    },
+  );
 
   it("shows each message of a 422 under its field, as the server words it", async () => {
     const { user } = await renderTicket(faceCard());
