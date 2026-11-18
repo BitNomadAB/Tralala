@@ -45,12 +45,22 @@ describe("the face's counting rules, as the server's", () => {
       cons: "",
       steps: "1\n2\n3\n4",
     });
-    expect(counts.summary).toEqual({ text: "0 of 20 words", over: true });
-    expect(counts.why).toEqual({ text: "4 of 3 sentences", over: true });
+    expect(counts.summary).toEqual({ text: "0 of 20 words, needs at least 1 word", over: true });
+    expect(counts.why).toEqual({ text: "4 of 3 sentences, 1 too many", over: true });
     expect(counts.if_skipped).toEqual({ text: "1 of 3 sentences", over: false });
-    expect(counts.pros).toEqual({ text: "4 of 3 points", over: true });
+    expect(counts.pros).toEqual({ text: "4 of 3 points, 1 too many", over: true });
     expect(counts.cons).toEqual({ text: "0 of 3 points", over: false });
     expect(counts.steps).toEqual({ text: "4 of 5 steps", over: false });
+    const empty = faceCounts({
+      summary: "a",
+      why: "",
+      if_skipped: "",
+      pros: "",
+      cons: "",
+      steps: "",
+    });
+    expect(empty.steps).toEqual({ text: "0 of 5 steps, needs at least 1 step", over: true });
+    expect(empty.why.text).toBe("0 of 3 sentences, needs at least 1 sentence");
   });
 
   it("turns a face into a draft and back", () => {

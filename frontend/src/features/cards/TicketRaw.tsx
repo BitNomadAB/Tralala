@@ -1,10 +1,15 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useRef, useState } from "react";
 import { MarkdownField } from "@/components/ui/markdown-field";
 import { RawBlock as Block, RawText as Raw } from "@/components/ui/raw-text";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import type { MarkdownOptions } from "@/lib/markdown";
 import type { Card, LoopReadiness } from "@/lib/types";
+import { PendingButton } from "./PendingButton";
 import { planEntryText } from "./ticketText";
+import { useFocusAfter } from "./useFocusAfter";
+
+/** The description's field, which takes the focus when Edit description opens it. */
+const FIELD_ID = "card-description";
 
 const LINK =
   "rounded border-0 bg-transparent p-0 text-[13px] text-[var(--muted-foreground)] hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]";
@@ -12,15 +17,19 @@ const LINK =
 /**
  * "Raw text": everything the agent wrote, as it is and unstyled on purpose: the summary for AI,
  * the description's Markdown source (which a person edits here), the acceptance criteria, the
- * evidence and the plan entry. A block with nothing in it is absent.
+ * evidence and the plan entry. A block with nothing in it is absent. Edit description puts the
+ * focus in the field; Save (announced) and Cancel give it back to Edit description.
  */
 export function TicketRaw({
+  level,
   card,
   readiness,
   readOnly,
   onSaveDescription,
   ticketHref,
 }: {
+  /** The level of the section around it; each block's label is one level under it. */
+  level: 2 | 3;
   card: Card;
   readiness: LoopReadiness | undefined;
   readOnly: boolean;
@@ -32,6 +41,13 @@ export function TicketRaw({
   const [draft, setDraft] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const blockLevel = level === 2 ? 3 : 4;
+  const announce = useAnnounce();
+  const focusAfter = useFocusAfter();
+  const editButton = useRef<HTMLButtonElement>(null);
+  const backToEdit = () => {
+    focusAfter(() => editButton.current);
+  };
   const item =
     card.plan_item_id === null
       ? undefined
@@ -39,11 +55,13 @@ export function TicketRaw({
 
   async function save(text: string) {
     setSaving(true);
-    if (await onSaveDescription(text)) {
-      setDraft(null);
-      setPreview(false);
-    }
+    const saved = await onSaveDescription(text);
     setSaving(false);
+    if (!saved) return;
+    setDraft(null);
+    setPreview(false);
+    announce("Description saved");
+    backToEdit();
   }
 
   return (
@@ -53,7 +71,7 @@ export function TicketRaw({
         it is, for when you want to dig.
       </p>
       {card.summary ? (
-        <Block label="Summary for AI">
+        <Block level={blockLevel} label="Summary for AI">
           <Raw text={card.summary} />
           {card.summary_source === "agent" ? (
             <p className="m-0 mt-1 text-xs text-[var(--foreground-faint)]">Written by an agent.</p>
@@ -67,10 +85,19 @@ export function TicketRaw({
       ) : null}
       {card.description || !readOnly ? (
         <Block
+          level={blockLevel}
           label="Description"
           action={
             readOnly || draft !== null ? undefined : (
-              <button type="button" className={LINK} onClick={() => setDraft(card.description)}>
+              <button
+                ref={editButton}
+                type="button"
+                className={LINK}
+                onClick={() => {
+                  setDraft(card.description);
+                  focusAfter(() => document.getElementById(FIELD_ID));
+                }}
+              >
                 Edit description
               </button>
             )
@@ -85,7 +112,7 @@ export function TicketRaw({
           ) : (
             <div className="grid gap-2">
               <MarkdownField
-                id="card-description"
+                id={FIELD_ID}
                 title="Description"
                 label="Card description (Markdown)"
                 value={draft}
@@ -96,33 +123,42 @@ export function TicketRaw({
                 ticketHref={ticketHref}
               />
               <div className="flex gap-2">
-                <Button
+                <PendingButton
                   size="sm"
-                  disabled={saving || draft === card.description}
+                  pending={saving}
+                  disabled={draft === card.description}
                   onClick={() => void save(draft)}
                 >
                   {saving ? "Saving…" : "Save description"}
-                </Button>
-                <Button variant="quiet" size="sm" disabled={saving} onClick={() => setDraft(null)}>
+                </PendingButton>
+                <PendingButton
+                  variant="quiet"
+                  size="sm"
+                  pending={saving}
+                  onClick={() => {
+                    setDraft(null);
+                    backToEdit();
+                  }}
+                >
                   Cancel
-                </Button>
+                </PendingButton>
               </div>
             </div>
           )}
         </Block>
       ) : null}
       {card.acceptance_criteria.length > 0 ? (
-        <Block label="Accepted when">
+        <Block level={blockLevel} label="Accepted when">
           <Raw text={card.acceptance_criteria.join("\n")} />
         </Block>
       ) : null}
       {card.expected_evidence.length > 0 ? (
-        <Block label="Evidence">
+        <Block level={blockLevel} label="Evidence">
           <Raw text={card.expected_evidence.join("\n")} />
         </Block>
       ) : null}
       {item ? (
-        <Block label="Plan entry">
+        <Block level={blockLevel} label="Plan entry">
           <Raw text={planEntryText(item, readiness)} />
         </Block>
       ) : null}

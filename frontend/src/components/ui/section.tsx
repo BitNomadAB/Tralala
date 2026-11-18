@@ -13,6 +13,11 @@ interface HeaderProps {
   /** `sm`: the small uppercase label; `lg`: the bold sentence-case heading ("What will be done"). */
   size?: "sm" | "lg" | undefined;
   level?: HeadingLevel | undefined;
+  /**
+   * The heading can take the focus from code (`tabIndex` -1, not in the tab order), for a view
+   * that moves the focus to the section once the control that had it is gone (a deleted row).
+   */
+  focusable?: boolean | undefined;
 }
 
 /** A section's heading line: the title, a muted `count` after it, and the `trailing` slot. */
@@ -22,6 +27,7 @@ export function SectionHeader({
   trailing,
   size = "sm",
   level = 3,
+  focusable = false,
   id,
   className,
 }: HeaderProps & { id?: string | undefined; className?: string | undefined }) {
@@ -30,6 +36,7 @@ export function SectionHeader({
     <header className={cn("mb-2.5 flex items-baseline justify-between gap-3", className)}>
       <Heading
         id={id}
+        tabIndex={focusable ? -1 : undefined}
         className={cn(
           "m-0 font-semibold",
           size === "lg"

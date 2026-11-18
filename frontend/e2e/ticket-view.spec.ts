@@ -177,7 +177,7 @@ test.describe("the Ticket view", () => {
 
     await test.step("Open as page shows the same Ticket; Back to the board returns", async () => {
       const dialog = page.getByRole("dialog", { name: tickets.FIVE_STEPS });
-      await dialog.getByRole("button", { name: "Open as page" }).click();
+      await dialog.getByRole("link", { name: "Open as page" }).click();
       await expect(page).toHaveURL(
         new RegExp(`/boards/${boardId}/loops/${loopId}/tickets/[0-9a-f-]{36}$`),
       );

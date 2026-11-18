@@ -1,6 +1,8 @@
 import { CircleCheck, Clock, Ellipsis, MessageSquare, Paperclip, Play } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { ReasonButton } from "@/components/ui/reason-button";
+import { ALREADY_WAITS, SAVING } from "./ticketWork";
 
 export type PrimaryAction =
   | { kind: "start"; onStart: () => void }
@@ -11,6 +13,8 @@ export type PrimaryAction =
  * The actions row under the title: one primary decision (Start work, or Mark complete), then Mark
  * as waiting, Comment, Add file, and a quiet "more" with Copy link, Ask the agents, Mark
  * incomplete for a completed Ticket, and Archive. A read-only Ticket keeps Comment and Copy link.
+ * A button that cannot be pressed says why beside it (what holds completion back, the wait that is
+ * set, a change still being saved) and stays focusable.
  */
 export function TicketActions({
   primary,
@@ -42,30 +46,34 @@ export function TicketActions({
   return (
     <div className="mb-4 mt-[18px] flex flex-wrap gap-2">
       {primary?.kind === "start" && !readOnly ? (
-        <Button size="sm" disabled={pending} onClick={primary.onStart}>
+        <ReasonButton
+          size="sm"
+          data-primary-action="start"
+          disabledReason={pending ? SAVING : null}
+          onClick={primary.onStart}
+        >
           <Play size={15} aria-hidden="true" /> Start work
-        </Button>
+        </ReasonButton>
       ) : null}
       {primary?.kind === "complete" && !readOnly ? (
-        <Button
+        <ReasonButton
           size="sm"
-          disabled={pending || primary.blocked !== null}
-          title={primary.blocked ?? undefined}
+          data-primary-action="complete"
+          disabledReason={primary.blocked ?? (pending ? SAVING : null)}
           onClick={primary.onComplete}
         >
           <CircleCheck size={15} aria-hidden="true" /> Mark complete
-        </Button>
+        </ReasonButton>
       ) : null}
       {completed || readOnly ? null : (
-        <Button
+        <ReasonButton
           variant="secondary"
           size="sm"
-          disabled={waiting}
-          title={waiting ? "It already waits; clear the wait in the rail" : undefined}
+          disabledReason={waiting ? ALREADY_WAITS : null}
           onClick={onWait}
         >
           <Clock size={15} aria-hidden="true" /> Mark as waiting
-        </Button>
+        </ReasonButton>
       )}
       <Button variant="secondary" size="sm" onClick={onComment}>
         <MessageSquare size={15} aria-hidden="true" /> Comment
@@ -89,7 +97,9 @@ export function TicketActions({
 
 /**
  * The quiet "more" button and the few actions it shows. Escape or a press outside closes it, and
- * Escape inside it never reaches the dialog around it.
+ * Escape inside it never reaches the dialog around it. Choosing an item gives the focus back to
+ * the button before the item runs, so it is not lost with the menu (a dialog the item opens gives
+ * it back to the button too).
  */
 function MoreMenu({ items }: { items: { label: string; onSelect: () => void }[] }) {
   const [open, setOpen] = useState(false);
@@ -108,12 +118,16 @@ function MoreMenu({ items }: { items: { label: string; onSelect: () => void }[] 
     };
   }, [open]);
 
+  function closeToButton() {
+    setOpen(false);
+    root.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }
+
   /** Escape closes the menu and gives the focus back to its button. */
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "Escape" || !open) return;
     event.preventDefault();
-    setOpen(false);
-    root.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    closeToButton();
   }
 
   return (
@@ -142,7 +156,7 @@ function MoreMenu({ items }: { items: { label: string; onSelect: () => void }[] 
                 autoFocus={item === items[0]}
                 onKeyDown={onKeyDown}
                 onClick={() => {
-                  setOpen(false);
+                  closeToButton();
                   item.onSelect();
                 }}
                 className="w-full rounded-md px-2.5 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--surface-raised)] focus-visible:bg-[var(--surface-raised)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]"

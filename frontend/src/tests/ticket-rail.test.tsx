@@ -121,10 +121,31 @@ describe("the Ticket's rail", () => {
     ]);
   });
 
-  it("keeps Move to another Loop for later", async () => {
+  it("keeps Move to another Loop for later, and says so beside it", async () => {
     await renderTicket();
-    const move = within(rail()).getByRole("button", { name: "Move to another Loop…" });
-    expect(move).toBeDisabled();
-    expect(move).toHaveAttribute("title", "Later");
+    const move = within(rail()).getByRole("button", {
+      name: "Move to another Loop…",
+      description: "Not available yet",
+    });
+    expect(move).toHaveAttribute("aria-disabled", "true");
+    expect(move).not.toHaveAttribute("title");
+  });
+
+  it("says beside Confirm human action what holds it back", async () => {
+    await renderTicket(
+      ticketCard({
+        list_id: "list-2",
+        human_action_required: true,
+        waiting_for: "information",
+        waiting_reason: "Which account?",
+      }),
+    );
+    const status = within(rail()).getByRole("region", { name: "Status" });
+    expect(
+      within(status).getByRole("button", {
+        name: "Confirm human action",
+        description: "Clear the wait first",
+      }),
+    ).toHaveAttribute("aria-disabled", "true");
   });
 });

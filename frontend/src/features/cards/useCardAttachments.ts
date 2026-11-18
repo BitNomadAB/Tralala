@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { ApiError, api } from "@/lib/api";
 import { attachmentRefusal } from "@/lib/api/attachmentRules";
 import { describeError } from "@/lib/describeError";
@@ -34,10 +35,18 @@ export interface UploadEntry {
   message: string | null;
 }
 
+/** What a screen reader hears when a file has its answer: "plan.md: uploaded", or the reason. */
+export function uploadAnnouncement(entry: Pick<UploadEntry, "name" | "status" | "message">) {
+  return entry.status === "uploaded"
+    ? `${entry.name}: uploaded`
+    : `${entry.name}: ${entry.message ?? "not uploaded"}`;
+}
+
 /**
  * A Ticket's files: the list from its query, uploads one after another with a result each, and a
  * delete that asks once. A successful change writes into the list's query at once and calls
- * `onChanged`, so the dialog refetches what records it (the Ticket's activity).
+ * `onChanged`, so the dialog refetches what records it (the Ticket's activity). Each upload's
+ * result is announced as it comes, a refused file at once.
  */
 export function useCardAttachments({
   boardId,
@@ -49,6 +58,7 @@ export function useCardAttachments({
   onChanged?: (() => void) | undefined;
 }) {
   const queryClient = useQueryClient();
+  const announce = useAnnounce();
   const queryKey = keys.attachments(boardId, cardId);
   const list = useQuery({
     queryKey,
@@ -99,8 +109,11 @@ export function useCardAttachments({
     try {
       await upload.mutateAsync(file);
       update(key, { status: "uploaded" });
+      announce(uploadAnnouncement({ name: file.name, status: "uploaded", message: null }));
     } catch (uploadError) {
-      update(key, { status: "failed", message: attachmentErrorText(uploadError) });
+      const message = attachmentErrorText(uploadError);
+      update(key, { status: "failed", message });
+      announce(uploadAnnouncement({ name: file.name, status: "failed", message }));
     }
   }
 
@@ -118,6 +131,9 @@ export function useCardAttachments({
       return { entry, file };
     });
     setUploads((current) => [...current, ...checked.map(({ entry }) => entry)]);
+    for (const { entry } of checked) {
+      if (entry.status === "refused") announce(uploadAnnouncement(entry));
+    }
     for (const { entry, file } of checked) {
       if (entry.status === "waiting") {
         queue.current = queue.current.then(() => send(entry.key, file));
@@ -149,8 +165,14 @@ export function useCardAttachments({
     keep: () => {
       setConfirming(null);
     },
-    confirmDelete: (attachmentId: string) => {
-      remove.mutate(attachmentId);
+    /** Resolves true once the file is deleted. */
+    confirmDelete: async (attachmentId: string): Promise<boolean> => {
+      try {
+        await remove.mutateAsync(attachmentId);
+        return true;
+      } catch {
+        return false;
+      }
     },
     deleting: remove.isPending,
   };

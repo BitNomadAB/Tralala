@@ -1,20 +1,20 @@
-import { useId } from "react";
-import { Avatar } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { useId, useRef } from "react";
 import { Expander } from "@/components/ui/expander";
 import { Textarea } from "@/components/ui/input";
-import type { CardNote } from "@/lib/types";
-import { formatDate } from "@/lib/utils";
+import { useAnnounce } from "@/components/ui/useAnnounce";
+import { afterDeletedRow, rowOf } from "./afterDelete";
+import { NoteRow } from "./NoteRow";
+import { PendingButton } from "./PendingButton";
 import { notesHint } from "./ticketText";
+import { focusTarget, useFocusAfter } from "./useFocusAfter";
 import { useTicketNotes } from "./useTicketNotes";
-
-const LINK =
-  "rounded text-[var(--muted-foreground)] hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]";
 
 /**
  * "Your notes": what people wrote on the Ticket, each with its author and date, and Edit for the
  * person who wrote it; a composer under the list. Open from the start when there is a note or the
  * Ticket has no face. A read-only Ticket shows its notes and says why there is no composer.
+ * Saving and deleting are announced, and the focus goes on (WCAG 2.4.3): back to the note's Edit
+ * after a save or a cancel, to the next note after a delete, to the composer after a new note.
  */
 export function TicketNotes({
   boardId,
@@ -41,13 +41,29 @@ export function TicketNotes({
   const notes = useTicketNotes({ boardId, loopId, cardId, onChanged });
   const composer = useId();
   const helper = useId();
+  const announce = useAnnounce();
+  const focusAfter = useFocusAfter();
+  const root = useRef<HTMLDivElement>(null);
+  const editOf = (noteId: string) =>
+    focusTarget(rowOf(root.current, "note-id", noteId), "edit-note");
+  // After a delete: the next note's Edit, else the one before, else the section's own button.
+  const afterDeleted = (noteId: string) =>
+    afterDeletedRow(root.current, { attribute: "note-id", id: noteId, target: "edit-note" }, () =>
+      root.current?.closest("details")?.querySelector<HTMLElement>("summary"),
+    );
+
+  async function add() {
+    if (!(await notes.add())) return;
+    announce("Note saved");
+    document.getElementById(composer)?.focus();
+  }
   return (
     <Expander
       title="Your notes"
       hint={notes.loaded ? notesHint(notes.notes.length) : undefined}
       defaultOpen={openByDefault || notes.notes.length > 0}
     >
-      <div className="grid gap-2.5">
+      <div ref={root} className="grid gap-2.5">
         {notes.notes.length > 0 ? (
           <ul aria-label="Your notes" className="m-0 grid list-none gap-2.5 p-0">
             {notes.notes.map((note) => (
@@ -59,9 +75,24 @@ export function TicketNotes({
                 pending={notes.pending}
                 onEdit={() => notes.startEdit(note)}
                 onChange={notes.changeEdit}
-                onSave={() => notes.saveEdit(note)}
-                onDelete={() => notes.remove(note.id)}
-                onCancel={notes.cancelEdit}
+                onSave={() => {
+                  void notes.saveEdit(note).then((saved) => {
+                    if (!saved) return;
+                    announce("Note saved");
+                    focusAfter(() => editOf(note.id));
+                  });
+                }}
+                onDelete={() => {
+                  void notes.remove(note.id).then((deleted) => {
+                    if (!deleted) return;
+                    announce("Note deleted");
+                    focusAfter(() => afterDeleted(note.id));
+                  });
+                }}
+                onCancel={() => {
+                  notes.cancelEdit();
+                  focusAfter(() => editOf(note.id));
+                }}
               />
             ))}
           </ul>
@@ -78,7 +109,7 @@ export function TicketNotes({
             className="grid gap-2.5"
             onSubmit={(event) => {
               event.preventDefault();
-              notes.add();
+              void add();
             }}
           >
             <Textarea
@@ -94,84 +125,19 @@ export function TicketNotes({
               <small id={helper} className="text-[12.5px] text-[var(--foreground-faint)]">
                 Your notes stay with the Ticket and your coding agent can read them.
               </small>
-              <Button
+              <PendingButton
                 type="submit"
                 variant="outline"
                 size="sm"
-                disabled={notes.pending || !notes.text.trim()}
+                pending={notes.pending}
+                disabled={!notes.text.trim()}
               >
                 Save note
-              </Button>
+              </PendingButton>
             </div>
           </form>
         )}
       </div>
     </Expander>
-  );
-}
-
-/** One note: the author's mark, the text (or its field while edited) and the author line. */
-function NoteRow({
-  note,
-  own,
-  editing,
-  pending,
-  onEdit,
-  onChange,
-  onSave,
-  onDelete,
-  onCancel,
-}: {
-  note: CardNote;
-  own: boolean;
-  /** The text being edited, or null while the note is read. */
-  editing: string | null;
-  pending: boolean;
-  onEdit: () => void;
-  onChange: (text: string) => void;
-  onSave: () => void;
-  onDelete: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <li className="grid grid-cols-[26px_minmax(0,1fr)] items-start gap-2.5 text-[14.5px]">
-      <Avatar name={note.author} size="xs" />
-      {editing === null ? (
-        <div>
-          <p className="m-0 mb-0.5 whitespace-pre-wrap">{note.text}</p>
-          <div className="mt-[3px] text-[12.5px] text-[var(--foreground-faint)]">
-            {note.author} · {formatDate(note.written_at)}
-            {own ? (
-              <>
-                {" · "}
-                <button type="button" className={LINK} onClick={onEdit}>
-                  Edit
-                </button>
-              </>
-            ) : null}
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-2">
-          <Textarea
-            aria-label="Edit the note"
-            className="min-h-14"
-            value={editing}
-            onChange={(event) => onChange(event.target.value)}
-          />
-          <div className="flex gap-2">
-            <Button size="sm" disabled={pending || !editing.trim()} onClick={onSave}>
-              Save
-            </Button>
-            <Button variant="outline" size="sm" disabled={pending} onClick={onDelete}>
-              Delete
-            </Button>
-            <Button variant="quiet" size="sm" disabled={pending} onClick={onCancel}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-    </li>
   );
 }

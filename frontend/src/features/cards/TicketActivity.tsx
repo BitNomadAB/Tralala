@@ -20,9 +20,12 @@ import type { TicketDiscussions as TicketDiscussionsState } from "./useTicketDis
  */
 function TicketWork({
   card,
+  level,
   ticketHref,
 }: {
   card: CardDetail;
+  /** The level of a heading in a completion comment. */
+  level: 3 | 4;
   ticketHref?: MarkdownOptions["ticketHref"];
 }) {
   const summary = card.summary_source === "agent" && card.summary ? card.summary : null;
@@ -67,7 +70,7 @@ function TicketWork({
             {comment.actor_name ?? "Unknown"} · {formatDateTime(comment.created_at)}
           </span>
           <div className="text-sm">
-            {renderMarkdown(comment.content, { ticketHref, headingLevel: 4 })}
+            {renderMarkdown(comment.content, { ticketHref, headingLevel: level })}
           </div>
         </li>
       ))}
@@ -86,6 +89,7 @@ const TABS: readonly ActivityTab[] = ["comments", "discussions", "history", "wor
  * tab shows, so the head's Comment can focus it once the Comments tab is back.
  */
 export function TicketActivity({
+  level = 3,
   card,
   live,
   comments,
@@ -98,6 +102,8 @@ export function TicketActivity({
   onTabChange,
   ticketHref,
 }: {
+  /** The heading level of "Activity": 2 under the page's h1, 3 under the dialog's h2. */
+  level?: 2 | 3 | undefined;
   card: CardDetail;
   live: boolean;
   comments: ReturnType<typeof useCardComments>;
@@ -122,6 +128,7 @@ export function TicketActivity({
   return (
     <Section
       title="Activity"
+      level={level}
       trailing={
         onAsk ? (
           <Button variant="secondary" size="sm" onClick={onAsk}>
@@ -156,7 +163,7 @@ export function TicketActivity({
             comments={card.comments ?? []}
             comment={comments.comment}
             onCommentChange={comments.changeComment}
-            onCommentBlur={comments.closeSuggestions}
+            onCloseSuggestions={comments.closeSuggestions}
             suggestions={comments.suggestions}
             mentionIndex={comments.mentionIndex}
             onMentionIndexChange={comments.setMentionIndex}
@@ -172,7 +179,7 @@ export function TicketActivity({
           <CardHistory entries={history} nameOf={nameOf} />
         </TabPanel>
         <TabPanel value="work">
-          <TicketWork card={card} ticketHref={ticketHref} />
+          <TicketWork card={card} level={level === 2 ? 3 : 4} ticketHref={ticketHref} />
         </TabPanel>
       </Tabs>
     </Section>

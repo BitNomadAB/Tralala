@@ -31,6 +31,17 @@ export function notesHint(count: number): string {
 }
 
 /**
+ * What a screen reader hears while the mention suggestions are open, when they open and each time
+ * the highlight moves: "3 agents. Alpha highlighted." A textarea cannot say it is expanded, so this
+ * says what is there and what Enter would choose.
+ */
+export function mentionAnnouncement(names: readonly string[], highlighted: number): string {
+  const count = names.length === 1 ? "1 agent" : `${names.length} agents`;
+  const name = names[highlighted];
+  return name === undefined ? `${count}.` : `${count}. ${name} highlighted.`;
+}
+
+/**
  * The plan item's own fields as the Plan entry shows them: what the planner wrote, without what
  * the server computes on every read (ready, blockers, state, completion), without the lists shown
  * above it, and with the Tickets it depends on by key. Empty texts and lists are left out.

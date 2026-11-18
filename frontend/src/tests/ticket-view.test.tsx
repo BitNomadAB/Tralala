@@ -32,7 +32,8 @@ describe("the Ticket over the Kanban", () => {
     expect(copyKey.parentElement).toHaveTextContent(KEY);
     expect(await within(modal).findByText(PHASE_NAME, { selector: "b" })).toBeInTheDocument();
     expect(modal).toHaveTextContent(`Phase 1 · ${PHASE_NAME}`);
-    for (const name of ["Open as page", "Close dialog", "Start work", "Mark as waiting"]) {
+    expect(within(modal).getByRole("link", { name: "Open as page" })).toBeInTheDocument();
+    for (const name of ["Close dialog", "Start work", "Mark as waiting"]) {
       expect(within(modal).getByRole("button", { name })).toBeInTheDocument();
     }
     for (const name of ["Comment", "More actions"]) {
@@ -67,7 +68,9 @@ describe("the Ticket over the Kanban", () => {
     expect(view.state.csrf).toEqual([CSRF, CSRF]);
     expect(screen.getByRole("button", { name: `Owner: ${MEMBER.name}` })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start work" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Mark complete" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Mark complete" })).not.toHaveAttribute(
+      "aria-disabled",
+    );
   });
 
   it("only moves a Ticket that already has an owner", async () => {
@@ -94,13 +97,42 @@ describe("the Ticket over the Kanban", () => {
     expect(screen.getByRole("button", { name: "Mark incomplete" })).toBeInTheDocument();
   });
 
-  it("says what holds Mark complete back while the Ticket waits", async () => {
-    await renderTicket(
+  it("says beside Mark complete and Mark as waiting what holds them back while the Ticket waits", async () => {
+    const { view, user } = await renderTicket(
       ticketCard({ list_id: "list-2", waiting_for: "decision", waiting_reason: "Which store?" }),
     );
-    const complete = screen.getByRole("button", { name: "Mark complete" });
-    expect(complete).toBeDisabled();
-    expect(complete).toHaveAttribute("title", "Clear the wait first");
+    const complete = screen.getByRole("button", {
+      name: "Mark complete",
+      description: "Clear the wait first",
+    });
+    expect(complete).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("Clear the wait first")).toBeVisible();
+    const wait = screen.getByRole("button", {
+      name: "Mark as waiting",
+      description: "It already waits; clear the wait in the rail.",
+    });
+    expect(wait).toHaveAttribute("aria-disabled", "true");
+    // Both stay in the tab order, and a press does nothing.
+    await user.click(complete);
+    await user.click(wait);
+    expect(writes(view)).toEqual([]);
+    expect(screen.queryByLabelText("It waits for")).toBeNull();
+  });
+
+  it("says what holds Mark complete back while earlier work is open", async () => {
+    await renderTicket(
+      ticketCard({
+        list_id: "list-2",
+        ready: false,
+        blockers: [{ type: "ticket", id: "item-0", key: "SES-1-PH01-000", reason: "" }],
+      }),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Mark complete",
+        description: "Blocked by SES-1-PH01-000",
+      }),
+    ).toHaveAttribute("aria-disabled", "true");
   });
 
   it("edits the title inline: Enter saves with the version, Escape keeps it", async () => {
@@ -188,7 +220,7 @@ describe("the Ticket over the Kanban", () => {
 
   it("opens as a page with the breadcrumb and a way back to the board", async () => {
     const { user } = await renderTicket();
-    await user.click(screen.getByRole("button", { name: "Open as page" }));
+    await user.click(screen.getByRole("link", { name: "Open as page" }));
     expect(await screen.findByRole("heading", { level: 1, name: TITLE })).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Location" })).toHaveTextContent(TICKET_URL);
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -203,7 +235,7 @@ describe("the Ticket over the Kanban", () => {
       "href",
       "/boards/board-1/loops/loop-1",
     );
-    expect(screen.queryByRole("button", { name: "Open as page" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open as page" })).toBeNull();
     expect(screen.getByRole("button", { name: "Start work" })).toBeInTheDocument();
   });
 

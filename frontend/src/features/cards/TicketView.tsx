@@ -1,32 +1,20 @@
-import { useRef, useState, type ReactElement, type ReactNode } from "react";
-import { flushSync } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import type { ReactElement } from "react";
 import { useToast } from "@/components/ui/useToast";
 import { useAuth } from "@/features/auth/useAuth";
-import { AskAgentsDialog } from "@/features/discussions/AskAgentsDialog";
-import { ticketDiscussionPath } from "@/features/discussions/inboxRules";
 import { describeError } from "@/lib/describeError";
 import type { MarkdownOptions } from "@/lib/markdown";
-import type { CardDetail } from "@/lib/types";
-import { clipboard, cn } from "@/lib/utils";
 import { useCardTools } from "@/webmcp/useWebMcp";
 import { CardChecklists } from "./CardChecklists";
-import { TicketActions, type PrimaryAction } from "./TicketActions";
-import type { ActivityTab } from "./TicketActivity";
-import { TicketBody } from "./TicketBody";
-import { TicketHead } from "./TicketHead";
-import { TicketRail } from "./TicketRail";
-import { completeBlocked, phaseName, ticketPagePath } from "./ticketRules";
+import { TicketLayout } from "./TicketLayout";
 import { useCardChecklists } from "./useCardChecklists";
 import { useCardComments } from "./useCardComments";
-import { useTicketActions } from "./useTicketActions";
 import { useTicketData } from "./useTicketData";
-import { useTicketDiscussions } from "./useTicketDiscussions";
 
 /**
  * One Ticket, the same tree over the Kanban (`TicketModal`) and on its own page (`TicketPage`):
  * the head with the decision, the main column, and the rail with the column, the state and the
- * facts. The hosts only draw the frame around it.
+ * facts. The hosts only draw the frame around it. The title is the host's h1 on the page and the
+ * dialog's h2, so every section under it is one level deeper: h2 on the page, h3 in the dialog.
  */
 export function TicketView({
   boardId,
@@ -34,9 +22,11 @@ export function TicketView({
   cardId,
   host,
   onClose,
-  onOpenPage,
+  onArchived,
+  pageHref,
   titleWrap,
   ticketHref,
+  focusOnOpen = false,
 }: {
   boardId: string;
   loopId: string;
@@ -44,10 +34,15 @@ export function TicketView({
   host: "modal" | "page";
   /** Leaves the Ticket: closes the dialog, or goes back to the board from the page. */
   onClose: () => void;
-  onOpenPage?: (() => void) | undefined;
+  /** Leaves the Ticket once it is archived; `onClose` when not given. */
+  onArchived?: (() => void) | undefined;
+  /** The Ticket's own page, linked from the dialog's head. */
+  pageHref?: string | undefined;
   /** Wraps the title heading, so the dialog is named by it. */
   titleWrap?: ((heading: ReactElement) => ReactElement) | undefined;
   ticketHref?: MarkdownOptions["ticketHref"];
+  /** Gives the title the focus once the Ticket is shown: the host swapped it in. */
+  focusOnOpen?: boolean | undefined;
 }) {
   const toast = useToast();
   const { actor } = useAuth();
@@ -66,11 +61,13 @@ export function TicketView({
 
   const card = data.card.data;
   const wrap = titleWrap ?? ((heading: ReactElement) => heading);
+  const Heading = host === "page" ? "h1" : "h2";
+  const sectionLevel = host === "page" ? 2 : 3;
 
   if (data.card.isLoading) {
     return (
       <div className="p-7">
-        {wrap(<h2 className="sr-only">Ticket</h2>)}
+        {wrap(<Heading className="sr-only">Ticket</Heading>)}
         <p className="text-sm text-[var(--muted-foreground)]">Loading Ticket…</p>
       </div>
     );
@@ -78,7 +75,7 @@ export function TicketView({
   if (!card) {
     return (
       <div className="p-7">
-        {wrap(<h2 className="sr-only">Ticket</h2>)}
+        {wrap(<Heading className="sr-only">Ticket</Heading>)}
         <p role="alert" className="text-sm text-[var(--destructive)]">
           {describeError(data.card.error, "Ticket unavailable.")}
         </p>
@@ -93,13 +90,16 @@ export function TicketView({
       data={data}
       modal={host === "modal"}
       onClose={onClose}
-      onOpenPage={onOpenPage}
+      onArchived={onArchived}
+      pageHref={pageHref}
       titleWrap={titleWrap}
       ticketHref={ticketHref}
       actorId={actor?.id}
       comments={comments}
+      focusOnOpen={focusOnOpen}
       checklists={
         <CardChecklists
+          level={sectionLevel}
           checklists={card.checklists ?? []}
           checklistTitle={checklists.checklistTitle}
           onChecklistTitleChange={checklists.setChecklistTitle}
@@ -111,188 +111,5 @@ export function TicketView({
         />
       }
     />
-  );
-}
-
-/**
- * The view once the card has loaded: the head, the main column and the rail, and "Ask the agents"
- * (from Activity's header or the actions' More), which opens the new discussion where the Ticket
- * is shown: in the dialog over the Kanban, or as a page of the Ticket.
- */
-function TicketLayout({
-  boardId,
-  loopId,
-  card,
-  data,
-  modal,
-  onClose,
-  onOpenPage,
-  titleWrap,
-  ticketHref,
-  actorId,
-  comments,
-  checklists,
-}: {
-  boardId: string;
-  loopId: string;
-  card: CardDetail;
-  data: ReturnType<typeof useTicketData>;
-  modal: boolean;
-  onClose: () => void;
-  onOpenPage: (() => void) | undefined;
-  titleWrap: ((heading: ReactElement) => ReactElement) | undefined;
-  ticketHref: MarkdownOptions["ticketHref"] | undefined;
-  actorId: string | undefined;
-  comments: ReturnType<typeof useCardComments>;
-  checklists: ReactNode;
-}) {
-  const toast = useToast();
-  const navigate = useNavigate();
-  const picker = useRef<HTMLInputElement | null>(null);
-  const [waitOpen, setWaitOpen] = useState(false);
-  const [asking, setAsking] = useState(false);
-  const [activityTab, setActivityTab] = useState<ActivityTab>("comments");
-  const discussions = useTicketDiscussions(boardId, card.id, activityTab === "discussions");
-  const discussionHref = (discussionId: string) =>
-    ticketDiscussionPath(modal ? "modal" : "page", boardId, loopId, card.id, discussionId);
-  const onAsk = data.readOnly
-    ? undefined
-    : () => {
-        setAsking(true);
-      };
-  const actions = useTicketActions({
-    boardId,
-    loopId,
-    card,
-    lists: data.lists,
-    actorId: actorId ?? null,
-    refresh: data.refresh,
-    onArchived: onClose,
-  });
-
-  function copy(text: string, done: string) {
-    const target = clipboard();
-    if (!target) {
-      toast.push({ title: "This browser does not allow copying here", variant: "warning" });
-      return;
-    }
-    target.writeText(text).then(
-      () => toast.push({ title: done, variant: "success" }),
-      () => toast.push({ title: "Could not copy", variant: "error" }),
-    );
-  }
-  const copyLink = () => {
-    copy(`${window.location.origin}${ticketPagePath(boardId, loopId, card.id)}`, "Link copied");
-  };
-
-  const completed = card.completed_at !== null;
-  const primary: PrimaryAction = actions.startTarget
-    ? { kind: "start", onStart: () => void actions.startWork() }
-    : completed || card.human_action_required
-      ? null
-      : {
-          kind: "complete",
-          onComplete: () => void actions.setCompleted(true),
-          blocked: completeBlocked(card),
-        };
-
-  return (
-    <div className={cn(modal && "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]")}>
-      <TicketHead
-        card={card}
-        phase={
-          card.phase_number === null
-            ? null
-            : { number: card.phase_number, name: phaseName(card, data.readiness) }
-        }
-        level={modal ? 2 : 1}
-        titleWrap={titleWrap}
-        readOnly={data.readOnly}
-        onSaveTitle={(title) => void actions.update({ title })}
-        onCopyKey={(key) => copy(key, "Copied")}
-        onOpenPage={onOpenPage}
-        onClose={modal ? onClose : undefined}
-        page={!modal}
-        actions={
-          <TicketActions
-            primary={primary}
-            pending={actions.pending}
-            readOnly={data.readOnly}
-            completed={completed}
-            waiting={card.waiting_for !== "nothing"}
-            onWait={() => setWaitOpen(true)}
-            onComment={() => {
-              // The composer is in the Comments tab: show it before it takes the focus.
-              flushSync(() => setActivityTab("comments"));
-              comments.commentField.current?.focus();
-            }}
-            onAddFile={() => picker.current?.click()}
-            onCopyLink={copyLink}
-            onAsk={() => setAsking(true)}
-            onReopen={() => void actions.setCompleted(false)}
-            onArchive={actions.archive}
-          />
-        }
-      />
-      <div
-        className={cn("px-4 pb-10 pt-[26px] sm:px-7", modal && "overflow-y-auto scrollbar-thin")}
-      >
-        <div className="grid grid-cols-1 gap-7 min-[860px]:grid-cols-[minmax(0,1fr)_280px] min-[860px]:gap-11">
-          <TicketBody
-            boardId={boardId}
-            loopId={loopId}
-            card={card}
-            readOnly={data.readOnly}
-            readOnlyReason={
-              data.loop?.stage === "completed"
-                ? "This Loop is completed; notes are read-only."
-                : "This Ticket is read-only, so notes cannot be added or changed."
-            }
-            actorId={actorId}
-            live={data.live}
-            comments={comments}
-            history={data.history}
-            discussions={discussions}
-            discussionHref={discussionHref}
-            onAsk={onAsk}
-            readiness={data.readiness}
-            people={data.people}
-            ticketHref={ticketHref}
-            picker={picker}
-            activityTab={activityTab}
-            onActivityTabChange={setActivityTab}
-            onSaveDescription={(description) => actions.update({ description })}
-            refresh={data.refresh}
-          />
-          <TicketRail
-            boardId={boardId}
-            loopId={loopId}
-            card={card}
-            lists={data.lists}
-            readiness={data.readiness}
-            people={data.people}
-            labels={data.labels}
-            readOnly={data.readOnly}
-            actions={actions}
-            refresh={data.refresh}
-            waitOpen={waitOpen}
-            onWaitOpenChange={setWaitOpen}
-            onCopyLink={copyLink}
-            checklists={checklists}
-          />
-        </div>
-      </div>
-      <AskAgentsDialog
-        key={asking ? "open" : "closed"}
-        open={asking}
-        boardId={boardId}
-        cardId={card.id}
-        onClose={() => setAsking(false)}
-        onAsked={(discussionId) => {
-          setAsking(false);
-          void navigate(discussionHref(discussionId));
-        }}
-      />
-    </div>
   );
 }

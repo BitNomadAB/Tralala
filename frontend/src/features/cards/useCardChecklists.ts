@@ -1,11 +1,26 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "@/lib/api";
-import type { ChecklistItem } from "@/lib/types";
+import { keys } from "@/lib/queries";
+import type { CardDetail, ChecklistItem } from "@/lib/types";
+
+/** The card with one checklist item ticked or unticked, as the server will answer it. */
+export function withItemToggled(card: CardDetail, itemId: string): CardDetail {
+  return {
+    ...card,
+    checklists: (card.checklists ?? []).map((checklist) => ({
+      ...checklist,
+      items: checklist.items.map((item) =>
+        item.id === itemId ? { ...item, completed: !item.completed } : item,
+      ),
+    })),
+  };
+}
 
 /**
  * The card's checklist forms and mutations. Called by the dialog, so text typed into a form lives
- * as long as the dialog does.
+ * as long as the dialog does. A tick shows at once (the checkbox a person just pressed reads its
+ * new state), and the refetch afterwards puts back what the server holds, also after a refusal.
  */
 export function useCardChecklists({
   boardId,
@@ -20,6 +35,7 @@ export function useCardChecklists({
   refresh: () => void;
   onError: (error: unknown) => void;
 }) {
+  const queryClient = useQueryClient();
   const [checklistTitle, setChecklistTitle] = useState("");
   const [itemText, setItemText] = useState<Record<string, string>>({});
 
@@ -45,6 +61,11 @@ export function useCardChecklists({
   const toggleItemMutation = useMutation({
     mutationFn: (item: ChecklistItem) =>
       api.updateChecklistItem(boardId, item.id, { completed: !item.completed }),
+    onMutate: (item: ChecklistItem) => {
+      queryClient.setQueryData<CardDetail>(keys.card(boardId, loopId, cardId), (current) =>
+        current ? withItemToggled(current, item.id) : current,
+      );
+    },
     onSuccess: refresh,
     onError,
   });

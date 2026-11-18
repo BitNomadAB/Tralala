@@ -1,10 +1,10 @@
-import { Bot, Send } from "lucide-react";
+import { Bot } from "lucide-react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/input";
 import type { AgentDirectoryEntry, Comment, MentionJob } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
+import { CommentComposer } from "./CommentComposer";
 
 const MENTION_TONES: Record<MentionJob["status"], "neutral" | "brand" | "success" | "danger"> = {
   queued: "neutral",
@@ -14,8 +14,8 @@ const MENTION_TONES: Record<MentionJob["status"], "neutral" | "brand" | "success
 };
 
 /**
- * The agent mention jobs, the comment thread and the composer with @-mention suggestions; Ctrl
- * (or Cmd) + Enter sends, as the Send button does. The composer stays open on a Ticket of a
+ * The agent mention jobs, the comment thread and the composer with @-mention suggestions
+ * (`CommentComposer`). The composer stays open on a Ticket of a
  * completed, archived or cancelled Loop: such a Loop takes comments on its Tickets (only an
  * archived board refuses one), and a comment written after the Loop was completed says so.
  */
@@ -27,7 +27,7 @@ export function CardComments({
   comments,
   comment,
   onCommentChange,
-  onCommentBlur,
+  onCloseSuggestions,
   suggestions,
   mentionIndex,
   onMentionIndexChange,
@@ -42,7 +42,7 @@ export function CardComments({
   comments: Comment[];
   comment: string;
   onCommentChange: (value: string, caret: number) => void;
-  onCommentBlur: () => void;
+  onCloseSuggestions: () => void;
   suggestions: AgentDirectoryEntry[];
   mentionIndex: number;
   onMentionIndexChange: Dispatch<SetStateAction<number>>;
@@ -66,7 +66,7 @@ export function CardComments({
               key={job.id}
               className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs"
             >
-              <Bot size={14} className="text-[var(--muted-foreground)]" />
+              <Bot size={14} aria-hidden="true" className="text-[var(--muted-foreground)]" />
               <span className="font-medium">{job.agent_name}</span>
               <Badge tone={MENTION_TONES[job.status]}>{job.status}</Badge>
               {job.error ? (
@@ -116,89 +116,17 @@ export function CardComments({
           <li className="text-xs text-[var(--muted-foreground)]">No comments yet.</li>
         ) : null}
       </ul>
-      <form
-        className="mt-2 flex items-end gap-1.5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (comment.trim()) onSubmitComment(comment.trim());
-        }}
-      >
-        <div className="relative flex-1">
-          <Textarea
-            ref={commentField}
-            id="new-comment"
-            className="min-h-16"
-            placeholder="Write a comment. Type @ to bring in an agent."
-            aria-label="New comment"
-            aria-autocomplete="list"
-            // A textarea is a textbox, which takes no aria-expanded (axe: aria-allowed-attr); it
-            // points at the suggestions only while they are shown, so the reference always resolves.
-            aria-controls={suggestions.length > 0 ? "mention-suggestions" : undefined}
-            value={comment}
-            onChange={(event) => onCommentChange(event.target.value, event.target.selectionStart)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault();
-                if (comment.trim()) onSubmitComment(comment.trim());
-                return;
-              }
-              if (suggestions.length === 0) return;
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                onMentionIndexChange((current) => (current + 1) % suggestions.length);
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                onMentionIndexChange(
-                  (current) => (current - 1 + suggestions.length) % suggestions.length,
-                );
-              } else if (event.key === "Enter") {
-                event.preventDefault();
-                const highlighted = suggestions[mentionIndex];
-                if (highlighted) onChooseAgent(highlighted);
-              }
-            }}
-            onBlur={onCommentBlur}
-          />
-          {suggestions.length > 0 ? (
-            <div
-              id="mention-suggestions"
-              role="listbox"
-              aria-label="Mention an agent"
-              className="absolute bottom-full left-0 z-10 mb-1 w-72 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-lg"
-            >
-              {suggestions.map((agent, index) => (
-                <button
-                  key={agent.id}
-                  type="button"
-                  role="option"
-                  aria-selected={index === mentionIndex}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    onChooseAgent(agent);
-                  }}
-                  className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs ${
-                    index === mentionIndex
-                      ? "bg-[var(--surface-raised)] text-[var(--foreground)]"
-                      : "text-[var(--muted-foreground)]"
-                  }`}
-                >
-                  <Bot size={14} />
-                  <span className="font-medium">{agent.name}</span>
-                  <span className="ml-auto text-[11px]">
-                    {agent.role_template_name ?? "no role"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        <Button type="submit" size="icon" aria-label="Send comment" disabled={!comment.trim()}>
-          <Send size={14} />
-        </Button>
-      </form>
-      <p className="m-0 mt-1.5 text-xs text-[var(--foreground-faint)]">
-        <kbd className="font-sans">Ctrl</kbd> + <kbd className="font-sans">Enter</kbd> sends
-      </p>
+      <CommentComposer
+        comment={comment}
+        onCommentChange={onCommentChange}
+        onCloseSuggestions={onCloseSuggestions}
+        suggestions={suggestions}
+        mentionIndex={mentionIndex}
+        onMentionIndexChange={onMentionIndexChange}
+        onChooseAgent={onChooseAgent}
+        commentField={commentField}
+        onSubmitComment={onSubmitComment}
+      />
     </div>
   );
 }

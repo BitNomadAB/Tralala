@@ -72,8 +72,14 @@ export function useCardWork({
         return false;
       }
     },
-    clearWait: () => {
-      clear.mutate();
+    /** Resolves true once the wait is cleared. */
+    clearWait: async (): Promise<boolean> => {
+      try {
+        await clear.mutateAsync();
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }

@@ -166,8 +166,9 @@ function patched(body: Record<string, unknown>): Partial<CardDetail> {
 /**
  * Everything the Ticket view reads and writes over one card in `state.card`: the card and its
  * wait routes (`ticketWorkHandlers`), the board, the Loop, its columns, the plan's readiness, the
- * labels, the people, the history, mentions and files, and the card's `PATCH`, move, archive and
- * confirm, each checking the version as the server does, and the card's notes (`noteHandlers`).
+ * labels, the people, the history, mentions and files, and the card's `PATCH`, move, archive,
+ * restore and confirm, each checking the version as the server does, and the card's notes
+ * (`noteHandlers`).
  * `state.bodies` holds every write's body, `state.csrf` the CSRF header of every write. `options`
  * give the Loop's fields (a completed stage), the notes, the card's history, its discussions
  * (`GET /discussions?card_id=` and each one's detail; none by default) and the agents the board
@@ -257,7 +258,13 @@ export function ticketViewHandlers(
     ),
     http.post(apiPath(`${CARD_PATH}/archive`), ({ request }) => {
       state.bodies.push({ route: `POST ${requestPath(request)}`, body: null });
-      return ok({ ...state.card, archived_at: NOW });
+      state.card = { ...state.card, archived_at: NOW };
+      return ok(state.card);
+    }),
+    http.post(apiPath(`${CARD_PATH}/restore`), ({ request }) => {
+      state.bodies.push({ route: `POST ${requestPath(request)}`, body: null });
+      state.card = { ...state.card, archived_at: null };
+      return ok(state.card);
     }),
   ];
   return { state, notes: notes.state, handlers };

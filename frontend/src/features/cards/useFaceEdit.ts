@@ -20,7 +20,7 @@ const NO_ERRORS: FaceErrors = { fields: {}, other: [] };
  * A person's edit of the Ticket's face: the draft opened from the face as it is, the live
  * counters, and Save, which sends the whole face with the card's version. A `422 face_invalid`
  * keeps the draft open with each message under its field; a `409` says to reload. Once saved, the
- * answer is written into the card's query and the draft closes.
+ * answer is written into the card's query and the draft closes; `save` resolves true then.
  */
 export function useFaceEdit({
   boardId,
@@ -82,8 +82,14 @@ export function useFaceEdit({
       setDraft(null);
       setErrors(NO_ERRORS);
     },
-    save: () => {
-      if (draft) save.mutate(draft);
+    save: async (): Promise<boolean> => {
+      if (!draft) return false;
+      try {
+        await save.mutateAsync(draft);
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }

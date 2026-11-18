@@ -1,9 +1,12 @@
 import { useRef, type RefObject } from "react";
 import { DropZone } from "@/components/ui/drop-zone";
 import { Section } from "@/components/ui/section";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { ATTACHMENT_EXTENSIONS, attachmentKindsText } from "@/lib/api/attachmentRules";
+import { afterDeletedRow, rowOf } from "./afterDelete";
 import { AttachmentRow, UploadList } from "./AttachmentItems";
 import { useCardAttachments } from "./useCardAttachments";
+import { focusTarget, useFocusAfter } from "./useFocusAfter";
 
 const LINK =
   "rounded border-0 bg-transparent p-0 text-[13px] text-[var(--muted-foreground)] hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]";
@@ -11,9 +14,11 @@ const LINK =
 /**
  * "Files": what is attached to a Ticket and, unless it is read-only, an Add file link and a drop
  * zone that take several files at once, each upload with its own result. The drop zone's picker is
- * `picker` when given, so the Ticket's own Add file opens the same one.
+ * `picker` when given, so the Ticket's own Add file opens the same one. Keep gives the focus back
+ * to the file's delete button; a delete is announced and hands it to the next file (WCAG 2.4.3).
  */
 export function TicketFiles({
+  level,
   boardId,
   cardId,
   readOnly,
@@ -21,6 +26,8 @@ export function TicketFiles({
   onChanged,
   picker,
 }: {
+  /** The heading level of "Files"; h3 unless the host says otherwise. */
+  level?: 2 | 3 | undefined;
   boardId: string;
   cardId: string;
   readOnly: boolean;
@@ -33,10 +40,24 @@ export function TicketFiles({
   const own = useRef<HTMLInputElement>(null);
   const input = picker ?? own;
   const files = useCardAttachments({ boardId, cardId, onChanged });
+  const announce = useAnnounce();
+  const focusAfter = useFocusAfter();
+  const body = useRef<HTMLDivElement>(null);
+  const deleteButton = (attachmentId: string) =>
+    focusTarget(rowOf(body.current, "attachment-id", attachmentId), "delete-file");
+  // After a delete: the next file's delete button, else the one before, else the Files heading.
+  const afterDeleted = (attachmentId: string) =>
+    afterDeletedRow(
+      body.current,
+      { attribute: "attachment-id", id: attachmentId, target: "delete-file" },
+      () => body.current?.closest("section")?.querySelector<HTMLElement>("h2, h3, h4"),
+    );
 
   return (
     <Section
       title="Files"
+      level={level}
+      focusable
       count={files.attachments.length}
       trailing={
         readOnly ? undefined : (
@@ -46,7 +67,7 @@ export function TicketFiles({
         )
       }
     >
-      <div className="grid gap-2.5">
+      <div ref={body} className="grid gap-2.5">
         {readOnly ? null : (
           <DropZone
             hint="Drop a file here, or use Add file."
@@ -77,8 +98,21 @@ export function TicketFiles({
                 confirming={files.confirming === attachment.id}
                 deleting={files.deleting}
                 onAskDelete={() => files.askDelete(attachment.id)}
-                onKeep={files.keep}
-                onDelete={() => files.confirmDelete(attachment.id)}
+                onKeep={() => {
+                  files.keep();
+                  focusAfter(() => deleteButton(attachment.id));
+                }}
+                onDelete={() => {
+                  void files.confirmDelete(attachment.id).then((deleted) => {
+                    if (!deleted) {
+                      // The question closed with the refusal: back to the file's delete button.
+                      focusAfter(() => deleteButton(attachment.id));
+                      return;
+                    }
+                    announce(`${attachment.original_filename} deleted`);
+                    focusAfter(() => afterDeleted(attachment.id));
+                  });
+                }}
               />
             ))}
           </ul>

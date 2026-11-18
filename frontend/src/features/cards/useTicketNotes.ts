@@ -15,10 +15,21 @@ export function noteErrorText(error: unknown): string {
   return describeError(error, "The note was not saved.");
 }
 
+/** Waits for a mutation; true once the server took it (a refusal is already in `error`). */
+async function settles(run: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * A person's notes on a Ticket: the list from its query, the composer's text, the one note being
- * edited, and add, edit (with the version it read) and delete. Every success refetches the list and
- * calls `onChanged`, so the view refetches what records it; a card event refetches the list too.
+ * edited, and add, edit (with the version it read) and delete, each resolving true once saved, so
+ * the view can say so and move the focus on. Every success refetches the list and calls
+ * `onChanged`, so the view refetches what records it; a card event refetches the list too.
  */
 export function useTicketNotes({
   boardId,
@@ -101,9 +112,8 @@ export function useTicketNotes({
     editing,
     error,
     pending: add.isPending || edit.isPending || remove.isPending,
-    add: () => {
-      if (text.trim()) add.mutate(text.trim());
-    },
+    add: (): Promise<boolean> =>
+      text.trim() ? settles(() => add.mutateAsync(text.trim())) : Promise.resolve(false),
     startEdit: (note: CardNote) => {
       setError(null);
       setEditing({ id: note.id, text: note.text });
@@ -114,13 +124,12 @@ export function useTicketNotes({
     cancelEdit: () => {
       setEditing(null);
     },
-    saveEdit: (note: CardNote) => {
-      if (editing?.id === note.id && editing.text.trim()) {
-        edit.mutate({ id: note.id, text: editing.text.trim(), version: note.version });
-      }
-    },
-    remove: (noteId: string) => {
-      remove.mutate(noteId);
-    },
+    saveEdit: (note: CardNote): Promise<boolean> =>
+      editing?.id === note.id && editing.text.trim()
+        ? settles(() =>
+            edit.mutateAsync({ id: note.id, text: editing.text.trim(), version: note.version }),
+          )
+        : Promise.resolve(false),
+    remove: (noteId: string): Promise<boolean> => settles(() => remove.mutateAsync(noteId)),
   };
 }

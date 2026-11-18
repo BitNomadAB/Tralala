@@ -1,6 +1,15 @@
 import type { BadgeTone } from "@/components/ui/badge";
 import type { TicketState, Wait, Workplace } from "@/lib/types";
 
+/** Why a button cannot be pressed while the change before it is still being saved. */
+export const SAVING = "Saving…";
+
+/** Why the head's Mark as waiting cannot be pressed: the Ticket waits already. */
+export const ALREADY_WAITS = "It already waits; clear the wait in the rail.";
+
+/** Why an action that is planned but not built yet (Move to another Loop) cannot be pressed. */
+export const NOT_YET = "Not available yet";
+
 /** The server's limit on a wait's reason (`WAITING_REASON_CHARS`). */
 export const WAITING_REASON_MAX = 500;
 

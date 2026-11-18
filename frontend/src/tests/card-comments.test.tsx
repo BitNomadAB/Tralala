@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
+import { ToastProvider } from "@/components/ui/toast";
 import { CardComments } from "@/features/cards/CardComments";
 import { useCardComments } from "@/features/cards/useCardComments";
 import { ApiError, api } from "@/lib/api";
@@ -61,7 +62,7 @@ function Comments() {
         comments={card.data.comments ?? []}
         comment={comments.comment}
         onCommentChange={comments.changeComment}
-        onCommentBlur={comments.closeSuggestions}
+        onCloseSuggestions={comments.closeSuggestions}
         suggestions={comments.suggestions}
         mentionIndex={comments.mentionIndex}
         onMentionIndexChange={comments.setMentionIndex}
@@ -108,7 +109,9 @@ async function renderComments(later: Comment[] = [], refusal?: "board_archived")
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <Comments />
+      <ToastProvider>
+        <Comments />
+      </ToastProvider>
     </QueryClientProvider>,
   );
   await screen.findByText("Shipped as planned.");
