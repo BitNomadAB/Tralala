@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Breadcrumb, CRUMB_LINK } from "@/components/ui/breadcrumb";
 import { api } from "@/lib/api";
 import { keys, useBoard, useLoop, useReadiness } from "@/lib/queries";
@@ -22,6 +23,12 @@ export function TicketPage() {
   const card = useQuery({
     queryKey: keys.card(boardId, loopId, cardId),
     queryFn: () => api.getCard(boardId, loopId, cardId),
+  });
+  usePageTitle({
+    page: "ticket",
+    ticketKey: card.data?.ticket_key,
+    ticket: card.data?.title,
+    loop: loop.data?.name,
   });
   const loopPath = loopPagePath(boardId, loopId);
   const phase = card.data ? phaseText(card.data, readiness.data) : null;

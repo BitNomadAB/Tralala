@@ -1,5 +1,6 @@
 import { GitBranch } from "lucide-react";
 import { Link } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { useAuth } from "@/features/auth/useAuth";
 import { THEME_KITS, type ThemeKit, type ThemeMode } from "@/themes/theme";
 import { useTheme } from "@/themes/useTheme";
@@ -26,6 +27,7 @@ const kitSwatches: Record<ThemeKit, { background: string; primary: string; accen
 export function SettingsPage() {
   const { mode, kit, setMode, setKit } = useTheme();
   const { actor } = useAuth();
+  usePageTitle({ page: "settings" });
   const isAdmin = actor?.role === "admin";
   return (
     <section className="flex max-w-4xl flex-col gap-8">

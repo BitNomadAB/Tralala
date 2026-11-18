@@ -1,9 +1,10 @@
 import { QueryErrorResetBoundary } from "@tanstack/react-query";
-import { Component, Suspense, type ReactNode } from "react";
+import { Component, Suspense, useEffect, useRef, type ReactNode } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { isReloadingForStaleChunk } from "./chunkLoading";
+import { usePageTitle } from "./usePageTitle";
 
 /**
  * A layout route that renders the matched child route inside an error boundary. App.tsx places one
@@ -110,11 +111,21 @@ function RouteErrorFallback({ error, onRetry }: { error: unknown; onRetry: () =>
       </div>
     );
   }
+  return <PageErrorAlert error={error} onRetry={onRetry} />;
+}
+
+function PageErrorAlert({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  usePageTitle({ page: "error" });
+  // The page the person expected is gone, so focus moves to what says why, as on a new page.
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
   const apiError = error instanceof ApiError ? error : null;
   return (
     <div className="flex justify-center px-4 py-12">
       <div role="alert" className="card-surface flex w-full max-w-md flex-col gap-3 p-6">
-        <h1 className="text-lg font-semibold text-[var(--foreground)]">
+        <h1 ref={heading} tabIndex={-1} className="text-lg font-semibold text-[var(--foreground)]">
           This page could not be shown
         </h1>
         <p className="text-sm text-[var(--muted-foreground)]">

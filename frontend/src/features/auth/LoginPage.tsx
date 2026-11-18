@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { TralalaLogo } from "@/components/ui/tralala-logo";
@@ -8,6 +9,7 @@ import { useAuth } from "./useAuth";
 
 export function LoginPage() {
   const { login } = useAuth();
+  usePageTitle({ page: "login" });
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState("admin");

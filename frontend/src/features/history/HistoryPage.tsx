@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Search } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -14,6 +15,7 @@ import type { HistoryDetail, HistorySummary } from "@/lib/types";
 export function HistoryPage() {
   const { boardId = "" } = useParams();
   const boardQuery = useBoard(boardId);
+  usePageTitle({ page: "history", board: boardQuery.data?.name });
   const [q, setQ] = useState("");
   const [sourceKind, setSourceKind] = useState("");
   const [qaStatus, setQaStatus] = useState("");

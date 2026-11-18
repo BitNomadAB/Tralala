@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
@@ -24,6 +25,7 @@ export function TemplateEditorPage() {
     queryFn: () => api.getTemplate(String(templateId)),
     enabled: !isNew,
   });
+  usePageTitle({ page: "board-template", isNew, template: templateQuery.data?.name });
 
   const [hydratedId, setHydratedId] = useState<string | null>(isNew ? "new" : null);
   const [name, setName] = useState("");

@@ -36,8 +36,23 @@ export function AppLayout() {
     void navigate("/login", { replace: true });
   }
 
+  // The skip link moves focus itself: a jump to "#main" alone would put the fragment in the URL
+  // and, in some browsers, scroll without moving where the next Tab starts.
+  function skipToMain(event: React.MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    document.getElementById("main")?.focus();
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
+      {/* First in the page, so the first Tab offers to jump past the header (WCAG 2.4.1). */}
+      <a
+        href="#main"
+        onClick={skipToMain}
+        className="sr-only rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-medium text-[var(--foreground)] shadow-lg focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50"
+      >
+        Skip to main content
+      </a>
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_88%,transparent)] backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center gap-4 px-4">
           <NavLink to="/" className="flex items-center gap-2 text-sm">
@@ -108,7 +123,7 @@ export function AppLayout() {
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6">
+      <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6">
         <Outlet />
       </main>
     </div>

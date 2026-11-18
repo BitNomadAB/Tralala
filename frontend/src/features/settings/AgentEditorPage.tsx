@@ -1,6 +1,7 @@
 import { ArrowLeft, Copy, PlugZap, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -26,6 +27,7 @@ export function AgentEditorPage() {
   const isNew = !agentId || agentId === "new";
   const navigate = useNavigate();
   const agentQuery = useAgent(String(agentId));
+  usePageTitle({ page: "agent", isNew, agent: agentQuery.data?.name });
   const rolesQuery = useRoleTemplates();
   const roles = rolesQuery.data ?? [];
 

@@ -1,3 +1,4 @@
+import { usePageTitle } from "@/app/usePageTitle";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Section } from "@/components/ui/section";
 import { describeError } from "@/lib/describeError";
@@ -27,6 +28,7 @@ function item(row: DiscussionInboxRow): InboxItem {
  */
 export function DiscussionsPage() {
   const inbox = useDiscussionInbox();
+  usePageTitle({ page: "discussions" });
   const rows = inbox.data?.items ?? [];
   const total = inbox.data?.total ?? 0;
 
