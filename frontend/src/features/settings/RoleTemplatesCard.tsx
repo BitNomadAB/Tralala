@@ -3,13 +3,13 @@ import { Plus, ShieldHalf, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { useRoleTemplates } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
-import { ButtonLink } from "./ButtonLink";
 import { entryControlId, removalFocusTarget, useRemovalFocus } from "./removalFocus";
 
 const HEADING_ID = "settings-role-templates";

@@ -5,6 +5,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { usePageTitle } from "@/app/usePageTitle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
@@ -13,7 +14,6 @@ import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { useRoleTemplate } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
-import { ButtonLink } from "./ButtonLink";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 /** Restoring writes the factory prompt at once, over the person's own (WCAG 3.3.4). */

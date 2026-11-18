@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { usePageTitle } from "@/app/usePageTitle";
-import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input } from "@/components/ui/input";
 import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { api, ApiError } from "@/lib/api";
@@ -180,9 +180,9 @@ export function EnrolPage() {
             {error}
           </p>
         ) : null}
-        <Button type="submit" aria-disabled={pending ? true : undefined}>
+        <HeldButton type="submit" held={pending}>
           {pending ? "Saving…" : "Set password and sign in"}
-        </Button>
+        </HeldButton>
         <Link className="text-xs underline" to="/login">
           I already have a password
         </Link>

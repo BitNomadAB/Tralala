@@ -1,7 +1,7 @@
 import { RefreshCw, Trash2 } from "lucide-react";
-import { useId, type MouseEvent } from "react";
+import { useId } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import type { Credential } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { CREDENTIAL_TONES, credentialState } from "./credentialState";
@@ -34,10 +34,6 @@ export function CredentialRow({
   const revoked = state === "revoked";
   // A revoked key's buttons are described by its "revoked" badge, any other's by what they do.
   const describedBy = revoked ? stateId : hintId;
-  const guard = (blocked: boolean, action: () => void) => (event: MouseEvent) => {
-    if (blocked) event.preventDefault();
-    else action();
-  };
   return (
     <li className="flex flex-wrap items-center gap-2 py-2.5">
       <div className="min-w-0 flex-1">
@@ -67,26 +63,26 @@ export function CredentialRow({
       <Badge id={stateId} tone={CREDENTIAL_TONES[state]}>
         {state}
       </Badge>
-      <Button
+      <HeldButton
         size="icon"
         variant="ghost"
         aria-label={`Rotate ${credential.name}`}
         aria-describedby={describedBy}
-        aria-disabled={revoked || rotating ? true : undefined}
-        onClick={guard(revoked || rotating, onRotate)}
+        held={revoked || rotating}
+        onClick={onRotate}
       >
         <RefreshCw size={14} />
-      </Button>
-      <Button
+      </HeldButton>
+      <HeldButton
         size="icon"
         variant="ghost"
         aria-label={`Revoke ${credential.name}`}
         aria-describedby={describedBy}
-        aria-disabled={revoked || revoking ? true : undefined}
-        onClick={guard(revoked || revoking, onRevoke)}
+        held={revoked || revoking}
+        onClick={onRevoke}
       >
         <Trash2 size={14} />
-      </Button>
+      </HeldButton>
     </li>
   );
 }

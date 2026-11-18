@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { usePageTitle } from "@/app/usePageTitle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ReasonButton } from "@/components/ui/reason-button";
 import { describeError, fieldErrors } from "@/lib/describeError";
@@ -23,7 +24,6 @@ import {
 } from "./agentForm";
 import { AgentIdentityFields } from "./AgentIdentityFields";
 import { AgentTestResultPanel } from "./AgentTestResultPanel";
-import { ButtonLink } from "./ButtonLink";
 import { useAgentActions } from "./useAgentActions";
 
 export function AgentEditorPage() {

@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input } from "@/components/ui/input";
 import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { useToast } from "@/components/ui/useToast";
@@ -154,9 +154,9 @@ export function SecurityCard() {
         </Field>
       </div>
       <div className="mt-3 flex justify-end">
-        <Button type="submit" size="sm" aria-disabled={mutation.isPending ? true : undefined}>
+        <HeldButton type="submit" size="sm" held={mutation.isPending}>
           <ShieldCheck size={14} /> Change password
-        </Button>
+        </HeldButton>
       </div>
     </form>
   );

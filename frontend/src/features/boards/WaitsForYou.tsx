@@ -1,8 +1,8 @@
+import { ButtonLink } from "@/components/ui/button-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Section } from "@/components/ui/section";
 import { inboxPath, WAITS_ON_DISCUSSION } from "@/features/discussions/inboxRules";
 import { loopHref } from "@/features/loops/loopNextAction";
-import { ButtonLink } from "@/features/settings/ButtonLink";
 import type { DiscussionInboxRow } from "@/lib/types";
 import type { WaitingRow } from "./boardSummaries";
 

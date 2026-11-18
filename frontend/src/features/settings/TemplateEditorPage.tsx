@@ -4,13 +4,13 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePageTitle } from "@/app/usePageTitle";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import type { BoardTemplate } from "@/lib/types";
-import { ButtonLink } from "./ButtonLink";
 import { TemplateLabelsField, type LabelDraft } from "./TemplateLabelsField";
 import { TemplateListsField } from "./TemplateListsField";
 
