@@ -128,9 +128,11 @@ export function LoopPlanTabs({
           variant="outline"
           aria-busy={generating}
           data-generating={generating ? "true" : undefined}
+          // The pulse and its glow only where motion is welcome (WCAG 2.2.2); under reduced motion
+          // the running state is the steady ring and the "Generating…" text.
           className={
             generating
-              ? "animate-pulse border-[var(--primary)] text-[var(--primary)] shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100"
+              ? "motion-safe:animate-pulse border-[var(--primary)] text-[var(--primary)] motion-safe:shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100"
               : undefined
           }
           disabled={generateDisabled}

@@ -37,7 +37,7 @@ function StageIcon({ state, number }: { state: RunStepState; number: number }) {
       ) : state === "skipped" ? (
         <Minus size={10} />
       ) : state === "active" ? (
-        <Loader2 size={10} className="animate-spin" />
+        <Loader2 size={10} className="motion-safe:animate-spin" />
       ) : (
         number
       )}

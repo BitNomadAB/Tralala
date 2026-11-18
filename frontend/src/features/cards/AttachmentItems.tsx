@@ -140,7 +140,7 @@ function UploadIcon({ status }: { status: UploadEntry["status"] }) {
   if (status === "refused" || status === "failed") {
     return <CircleAlert size={14} aria-hidden="true" className="text-[var(--destructive)]" />;
   }
-  return <LoaderCircle size={14} aria-hidden="true" className="animate-spin" />;
+  return <LoaderCircle size={14} aria-hidden="true" className="motion-safe:animate-spin" />;
 }
 
 /** The files a person added in this dialog, each with its own state and its own result. */
