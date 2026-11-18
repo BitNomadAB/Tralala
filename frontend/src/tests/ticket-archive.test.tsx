@@ -25,7 +25,9 @@ function Board() {
         <button type="button" data-ticket-open={CARD_ID}>
           {TITLE}
         </button>
-        <button type="button">Add card</button>
+        <button type="button" data-focus-target="add-card">
+          Add card
+        </button>
       </section>
       {open ? (
         <TicketModal
@@ -95,6 +97,32 @@ describe("archiving a Ticket", () => {
     await archiveFromMore(user);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(screen.getByRole("button", { name: "Add card" })).toHaveFocus());
+  });
+
+  it("finds the column's Add card by its marker, not its words, and passes over it disabled", () => {
+    const { rerender } = render(
+      <section aria-label="Column Backlog">
+        <button type="button" data-ticket-open={CARD_ID}>
+          {TITLE}
+        </button>
+        <button type="button">Add card</button>
+        <button type="button" data-focus-target="add-card">
+          New Ticket
+        </button>
+      </section>,
+    );
+    expect(afterArchiveTarget(CARD_ID)).toBe(screen.getByRole("button", { name: "New Ticket" }));
+    rerender(
+      <section aria-label="Column Backlog">
+        <button type="button" data-ticket-open={CARD_ID}>
+          {TITLE}
+        </button>
+        <button type="button" data-focus-target="add-card" disabled>
+          Add card
+        </button>
+      </section>,
+    );
+    expect(afterArchiveTarget(CARD_ID)).toBeNull();
   });
 
   it("falls back to the page's main region, and to nothing without one", () => {

@@ -3,7 +3,7 @@ import { Expander } from "@/components/ui/expander";
 import { HeldButton } from "@/components/ui/held-button";
 import { Textarea } from "@/components/ui/input";
 import { useAnnounce } from "@/components/ui/useAnnounce";
-import { afterDeletedRow, rowOf } from "./afterDelete";
+import { afterDeletedRow, rowIndex, rowOf } from "./afterDelete";
 import { NoteRow } from "./NoteRow";
 import { notesHint } from "./ticketText";
 import { focusTarget, useFocusAfter } from "./useFocusAfter";
@@ -47,9 +47,12 @@ export function TicketNotes({
   const editOf = (noteId: string) =>
     focusTarget(rowOf(root.current, "note-id", noteId), "edit-note");
   // After a delete: the next note's Edit, else the one before, else the section's own button.
-  const afterDeleted = (noteId: string) =>
-    afterDeletedRow(root.current, { attribute: "note-id", id: noteId, target: "edit-note" }, () =>
-      root.current?.closest("details")?.querySelector<HTMLElement>("summary"),
+  // Where the note stood is taken before the delete, as the note may have left by then.
+  const afterDeleted = (noteId: string, index: number) =>
+    afterDeletedRow(
+      root.current,
+      { attribute: "note-id", id: noteId, target: "edit-note", index },
+      () => root.current?.closest("details")?.querySelector<HTMLElement>("summary"),
     );
 
   async function add() {
@@ -83,10 +86,11 @@ export function TicketNotes({
                   });
                 }}
                 onDelete={() => {
+                  const index = rowIndex(root.current, "note-id", note.id);
                   void notes.remove(note.id).then((deleted) => {
                     if (!deleted) return;
                     announce("Note deleted");
-                    focusAfter(() => afterDeleted(note.id));
+                    focusAfter(() => afterDeleted(note.id, index));
                   });
                 }}
                 onCancel={() => {

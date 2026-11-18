@@ -3,7 +3,7 @@ import { DropZone } from "@/components/ui/drop-zone";
 import { Section } from "@/components/ui/section";
 import { useAnnounce } from "@/components/ui/useAnnounce";
 import { ATTACHMENT_EXTENSIONS, attachmentKindsText } from "@/lib/api/attachmentRules";
-import { afterDeletedRow, rowOf } from "./afterDelete";
+import { afterDeletedRow, rowIndex, rowOf } from "./afterDelete";
 import { AttachmentRow, UploadList } from "./AttachmentItems";
 import { useCardAttachments } from "./useCardAttachments";
 import { focusTarget, useFocusAfter } from "./useFocusAfter";
@@ -46,10 +46,11 @@ export function TicketFiles({
   const deleteButton = (attachmentId: string) =>
     focusTarget(rowOf(body.current, "attachment-id", attachmentId), "delete-file");
   // After a delete: the next file's delete button, else the one before, else the Files heading.
-  const afterDeleted = (attachmentId: string) =>
+  // Where the file stood is taken before the delete, as the file may have left by then.
+  const afterDeleted = (attachmentId: string, index: number) =>
     afterDeletedRow(
       body.current,
-      { attribute: "attachment-id", id: attachmentId, target: "delete-file" },
+      { attribute: "attachment-id", id: attachmentId, target: "delete-file", index },
       () => body.current?.closest("section")?.querySelector<HTMLElement>("h2, h3, h4"),
     );
 
@@ -103,6 +104,7 @@ export function TicketFiles({
                   focusAfter(() => deleteButton(attachment.id));
                 }}
                 onDelete={() => {
+                  const index = rowIndex(body.current, "attachment-id", attachment.id);
                   void files.confirmDelete(attachment.id).then((deleted) => {
                     if (!deleted) {
                       // The question closed with the refusal: back to the file's delete button.
@@ -110,7 +112,7 @@ export function TicketFiles({
                       return;
                     }
                     announce(`${attachment.original_filename} deleted`);
-                    focusAfter(() => afterDeleted(attachment.id));
+                    focusAfter(() => afterDeleted(attachment.id, index));
                   });
                 }}
               />
