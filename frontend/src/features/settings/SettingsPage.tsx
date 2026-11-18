@@ -20,7 +20,7 @@ const themeChoices: { value: ThemeMode; label: string; description: string }[] =
 const kitSwatches: Record<ThemeKit, { background: string; primary: string; accent: string }> = {
   carenomad: { background: "#0a1628", primary: "#4b8bf5", accent: "#34d399" },
   matchmap: { background: "#0b1326", primary: "#ff7043", accent: "#94ccff" },
-  classic: { background: "#0b0f14", primary: "#4f8cff", accent: "#1d9bf0" },
+  classic: { background: "#0b0f14", primary: "#669bff", accent: "#1d9bf0" },
 };
 
 export function SettingsPage() {
