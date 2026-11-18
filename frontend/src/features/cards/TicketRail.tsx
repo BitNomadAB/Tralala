@@ -35,6 +35,7 @@ export function TicketRail({
   refresh,
   waitOpen,
   onWaitOpenChange,
+  onConfirm,
   checklists,
   onCopyLink,
 }: {
@@ -52,6 +53,8 @@ export function TicketRail({
   refresh: () => void;
   waitOpen: boolean;
   onWaitOpenChange: (open: boolean) => void;
+  /** A person's confirmation of a human-only Ticket. */
+  onConfirm: () => void;
   checklists: ReactNode;
   onCopyLink: () => void;
 }) {
@@ -69,8 +72,12 @@ export function TicketRail({
             label: list.name,
             count: list.card_count,
           }))}
-          disabled={readOnly || actions.pending}
-          onChange={(listId) => void actions.move(listId)}
+          // Not disabled while a change is saved: the menu's button has the focus then, and a
+          // disabled button would drop it. A choice made meanwhile waits for the next one.
+          disabled={readOnly}
+          onChange={(listId) => {
+            if (!actions.pending) void actions.move(listId);
+          }}
         />
         <TicketState
           boardId={boardId}
@@ -80,7 +87,7 @@ export function TicketRail({
           onChanged={refresh}
           waitOpen={waitOpen}
           onWaitOpenChange={onWaitOpenChange}
-          onConfirm={() => void actions.confirm("")}
+          onConfirm={onConfirm}
           confirmBlocked={completeBlocked(card)}
           pending={actions.pending}
         />

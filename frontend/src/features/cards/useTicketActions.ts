@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
@@ -21,7 +22,8 @@ const AT_THE_END = 10_000;
  * completion, a person's confirmation, the workplace and archiving. Each answer is written into
  * the card's query at once, so the next change carries the new version, before `refresh` refetches
  * the rest. A refusal is a toast; a `409 version_conflict` says to reload, and the refetch puts
- * the field back to what the server holds.
+ * the field back to what the server holds. A decision that went through is announced ("Work
+ * started", "Ticket completed"), so a screen reader hears it wherever the focus goes next.
  */
 export function useTicketActions({
   boardId,
@@ -43,6 +45,7 @@ export function useTicketActions({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const announce = useAnnounce();
 
   const mutation = useMutation({
     mutationFn: (run: () => Promise<Card>) => run(),
@@ -69,10 +72,11 @@ export function useTicketActions({
     },
   });
 
-  /** Runs one change; resolves true once the server took it. */
-  async function run(change: () => Promise<Card>): Promise<boolean> {
+  /** Runs one change; resolves true once the server took it, after announcing `done` if given. */
+  async function run(change: () => Promise<Card>, done?: string): Promise<boolean> {
     try {
       await mutation.mutateAsync(change);
+      if (done) announce(done);
       return true;
     } catch {
       return false;
@@ -99,12 +103,14 @@ export function useTicketActions({
     run(() => api.updateCard(boardId, loopId, card.id, { version: card.version, ...change }));
 
   const move = (listId: string) =>
-    run(() =>
-      api.moveCard(boardId, loopId, card.id, {
-        version: card.version,
-        list_id: listId,
-        position: AT_THE_END,
-      }),
+    run(
+      () =>
+        api.moveCard(boardId, loopId, card.id, {
+          version: card.version,
+          list_id: listId,
+          position: AT_THE_END,
+        }),
+      `Moved to ${lists.find((list) => list.id === listId)?.name ?? "another column"}`,
     );
 
   const target = startWorkTarget(card, lists);
@@ -124,7 +130,7 @@ export function useTicketActions({
         list_id: target.id,
         position: AT_THE_END,
       });
-    });
+    }, "Work started");
 
   return {
     pending: mutation.isPending || archive.isPending,
@@ -133,10 +139,17 @@ export function useTicketActions({
     update,
     move,
     startWork,
-    setCompleted: (completed: boolean) => update({ completed }),
+    setCompleted: (completed: boolean) =>
+      run(
+        () => api.updateCard(boardId, loopId, card.id, { version: card.version, completed }),
+        completed ? "Ticket completed" : "Ticket marked incomplete",
+      ),
     /** A human-only Ticket is completed by a person's confirmation. */
     confirm: (note: string) =>
-      run(() => api.confirmHumanTicket(boardId, loopId, card.id, { version: card.version, note })),
+      run(
+        () => api.confirmHumanTicket(boardId, loopId, card.id, { version: card.version, note }),
+        "Human action confirmed",
+      ),
     assign: (actorIdOrNobody: string | null) =>
       actorIdOrNobody === null
         ? update({ clear_assignee: true })

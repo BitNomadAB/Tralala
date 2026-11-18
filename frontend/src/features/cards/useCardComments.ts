@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { api } from "@/lib/api";
 import { activeMention, applyMention, matchingAgents, type MentionToken } from "@/lib/mentions";
 import { keys } from "@/lib/queries";
@@ -7,7 +8,8 @@ import type { AgentDirectoryEntry } from "@/lib/types";
 
 /**
  * The card's comment composer with @-mention suggestions, and the agent mention jobs it starts.
- * Called by the dialog, so an unsent comment lives as long as the dialog does.
+ * Called by the dialog, so an unsent comment lives as long as the dialog does. A posted comment is
+ * announced; the focus stays in the emptied field for the next one.
  */
 export function useCardComments({
   boardId,
@@ -23,6 +25,7 @@ export function useCardComments({
   onError: (error: unknown) => void;
 }) {
   const queryClient = useQueryClient();
+  const announce = useAnnounce();
   const agentsQuery = useQuery({
     queryKey: keys.agentDirectory,
     queryFn: () => api.listAgentDirectory(),
@@ -41,6 +44,7 @@ export function useCardComments({
     onSuccess: () => {
       setComment("");
       setMentionToken(null);
+      announce("Comment posted");
       refresh();
     },
     onError,

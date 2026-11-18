@@ -16,6 +16,7 @@ import { api } from "@/lib/api";
 import { formatSize, isImageType } from "@/lib/api/attachmentRules";
 import type { Attachment } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
+import { PendingButton } from "./PendingButton";
 import { uploaderText, type UploadEntry } from "./useCardAttachments";
 
 /** The icon a file that shows no thumbnail gets, by the type the server stored. */
@@ -40,6 +41,9 @@ function FileTypeIcon({ contentType }: { contentType: string }) {
 /**
  * One attached file: a thumbnail for an image (it opens the file in a new tab) or an icon by
  * type, the name, size, who uploaded it and when, a download link, and a delete that asks once.
+ * The question takes the focus on Keep, the safe answer; both answers stay focusable while the
+ * delete runs. The row carries the file's id and its delete button a focus mark, so the list can
+ * give the focus back to it after Keep, or to the next file after a delete.
  */
 export function AttachmentRow({
   boardId,
@@ -65,7 +69,10 @@ export function AttachmentRow({
   const name = attachment.original_filename;
   const href = api.attachmentDownloadUrl(boardId, attachment.id);
   return (
-    <li className="flex flex-col gap-2 rounded-md bg-[var(--surface-raised)] p-2 text-xs">
+    <li
+      data-attachment-id={attachment.id}
+      className="flex flex-col gap-2 rounded-md bg-[var(--surface-raised)] p-2 text-xs"
+    >
       <div className="flex items-center gap-2">
         {isImageType(attachment.content_type) ? (
           <a
@@ -105,7 +112,13 @@ export function AttachmentRow({
           <Download size={14} aria-hidden="true" /> Download
         </a>
         {readOnly || confirming ? null : (
-          <Button variant="ghost" size="sm" aria-label={`Delete ${name}`} onClick={onAskDelete}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Delete ${name}`}
+            data-focus-target="delete-file"
+            onClick={onAskDelete}
+          >
             <Trash size={14} aria-hidden="true" />
           </Button>
         )}
@@ -113,12 +126,12 @@ export function AttachmentRow({
       {confirming && !readOnly ? (
         <div className="flex flex-wrap items-center gap-2">
           <span>Delete {name}?</span>
-          <Button variant="danger" size="sm" disabled={deleting} onClick={onDelete}>
+          <PendingButton variant="danger" size="sm" pending={deleting} onClick={onDelete}>
             {deleting ? "Deleting…" : "Delete"}
-          </Button>
-          <Button variant="outline" size="sm" disabled={deleting} onClick={onKeep}>
+          </PendingButton>
+          <PendingButton variant="outline" size="sm" autoFocus pending={deleting} onClick={onKeep}>
             Keep
-          </Button>
+          </PendingButton>
         </div>
       ) : null}
     </li>
@@ -143,7 +156,11 @@ function UploadIcon({ status }: { status: UploadEntry["status"] }) {
   return <LoaderCircle size={14} aria-hidden="true" className="motion-safe:animate-spin" />;
 }
 
-/** The files a person added in this dialog, each with its own state and its own result. */
+/**
+ * The files a person added in this dialog, each with its own state and its own result. A screen
+ * reader hears each result as it comes (`useCardAttachments` announces it), so the list itself is
+ * not a live region.
+ */
 export function UploadList({
   uploads,
   busy,
@@ -156,7 +173,7 @@ export function UploadList({
   if (uploads.length === 0) return null;
   return (
     <div className="flex flex-col gap-1">
-      <ul aria-label="Uploads" aria-live="polite" className="flex flex-col gap-1 text-xs">
+      <ul aria-label="Uploads" className="flex flex-col gap-1 text-xs">
         {uploads.map((entry) => (
           <li key={entry.key} className="flex items-start gap-2">
             <span className="mt-0.5">

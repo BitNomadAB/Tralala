@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { Dialog, DialogFrame, DialogTitle } from "@/components/ui/dialog";
 import { DiscussionView } from "@/features/discussions/DiscussionView";
 import type { MarkdownOptions } from "@/lib/markdown";
@@ -11,6 +11,8 @@ import { TicketView } from "./TicketView";
  * `discussionId` (`?discussion=`) the same frame shows that discussion of the Ticket instead,
  * named by its question; "Back to the Ticket" hands the Ticket's id to `onBackToTicket`.
  * `returnFocus` names the element that takes the focus when the dialog closes (the card's title).
+ * Once the frame has swapped one view for the other (Ask, a discussion's row, Back to the Ticket),
+ * the new view's heading takes the focus, since the control that had it went with the old view.
  */
 export function TicketModal({
   boardId,
@@ -34,6 +36,13 @@ export function TicketModal({
   returnFocus?: (() => HTMLElement | null) | undefined;
 }) {
   const titleWrap = (heading: ReactElement) => <DialogTitle asChild>{heading}</DialogTitle>;
+  const view = discussionId ? `discussion:${discussionId}` : `ticket:${cardId ?? ""}`;
+  const [shown, setShown] = useState(view);
+  const [swapped, setSwapped] = useState(false);
+  if (view !== shown) {
+    setShown(view);
+    setSwapped(true);
+  }
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogFrame
@@ -50,6 +59,7 @@ export function TicketModal({
             onBack={onBackToTicket}
             onClose={onClose}
             titleWrap={titleWrap}
+            focusOnOpen={swapped}
           />
         ) : cardId ? (
           <TicketView
@@ -61,6 +71,7 @@ export function TicketModal({
             pageHref={ticketPagePath(boardId, loopId, cardId)}
             titleWrap={titleWrap}
             ticketHref={ticketHref}
+            focusOnOpen={swapped}
           />
         ) : null}
       </DialogFrame>

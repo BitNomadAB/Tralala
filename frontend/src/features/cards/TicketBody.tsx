@@ -1,6 +1,7 @@
-import { useId, useState, type RefObject } from "react";
+import { useId, useRef, useState, type RefObject } from "react";
 import { SectionHeader } from "@/components/ui/section";
 import { Segmented, SegmentedPanel } from "@/components/ui/segmented";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { renderMarkdown, type MarkdownOptions } from "@/lib/markdown";
 import type { ActivityEntry, BoardPerson, CardDetail, LoopReadiness } from "@/lib/types";
 import { TicketActivity, type ActivityTab } from "./TicketActivity";
@@ -12,6 +13,7 @@ import { TicketNotes } from "./TicketNotes";
 import { TicketRaw } from "./TicketRaw";
 import type { useCardComments } from "./useCardComments";
 import { useFaceEdit } from "./useFaceEdit";
+import { useFocusAfter } from "./useFocusAfter";
 import type { TicketDiscussions } from "./useTicketDiscussions";
 
 type View = "you" | "raw";
@@ -28,7 +30,9 @@ const LINK =
  * The Ticket's main column, the owner's template: "What will be done" with For you (the steps,
  * then Why it is needed, If we skip it, Pro and con and Your notes as sections that expand) and
  * Raw text (everything the agent wrote, as it is); then Files and Activity. A Ticket without a
- * face shows its description in For you. The choice of view lasts while the view is open.
+ * face shows its description in For you. The choice of view lasts while the view is open. The
+ * face's editor takes the focus on its first field; Save (announced) and Cancel give it back to
+ * Edit.
  */
 export function TicketBody({
   level,
@@ -83,6 +87,12 @@ export function TicketBody({
   const headingId = useId();
   const [view, setView] = useState<View>("you");
   const edit = useFaceEdit({ boardId, loopId, card, refresh });
+  const announce = useAnnounce();
+  const focusAfter = useFocusAfter();
+  const editButton = useRef<HTMLButtonElement>(null);
+  const backToEdit = () => {
+    focusAfter(() => editButton.current);
+  };
   const face = card.face;
   const names = new Map(people.map((person) => [person.id, person.name]));
 
@@ -98,6 +108,7 @@ export function TicketBody({
             <div className="flex items-center gap-3">
               {view === "you" && !readOnly && !edit.editing ? (
                 <button
+                  ref={editButton}
                   type="button"
                   className={LINK}
                   aria-label="Edit what will be done"
@@ -124,8 +135,17 @@ export function TicketBody({
               errors={edit.errors}
               saving={edit.saving}
               onChange={edit.change}
-              onSave={edit.save}
-              onCancel={edit.cancel}
+              onSave={() => {
+                void edit.save().then((saved) => {
+                  if (!saved) return;
+                  announce("Face saved");
+                  backToEdit();
+                });
+              }}
+              onCancel={() => {
+                edit.cancel();
+                backToEdit();
+              }}
             />
           ) : face ? (
             <TicketFace steps={face.steps} />

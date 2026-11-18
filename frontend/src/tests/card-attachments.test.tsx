@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ToastProvider } from "@/components/ui/toast";
 import { TicketFiles } from "@/features/cards/TicketFiles";
 import {
   attachmentErrorText,
@@ -40,12 +41,14 @@ async function renderSection(
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <TicketFiles
-        boardId={BOARD_ID}
-        cardId={CARD_ID}
-        readOnly={readOnly}
-        currentActorId={currentActorId}
-      />
+      <ToastProvider>
+        <TicketFiles
+          boardId={BOARD_ID}
+          cardId={CARD_ID}
+          readOnly={readOnly}
+          currentActorId={currentActorId}
+        />
+      </ToastProvider>
     </QueryClientProvider>,
   );
   const section = await screen.findByRole("region", { name: /^Files/ });

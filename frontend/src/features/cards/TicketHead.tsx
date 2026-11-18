@@ -1,5 +1,5 @@
 import { Copy, ExternalLink, X } from "lucide-react";
-import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
+import { useEffect, useRef, type ReactElement, type ReactNode, type RefObject } from "react";
 import { Link } from "react-router-dom";
 import type { Card } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -15,12 +15,14 @@ const TITLE =
  * The Ticket's head: the key with its copy button, the Phase, "Open as page" (a link, so it can open
  * in a new tab) and Close when it is a dialog, the title as the view's heading (a click edits it
  * inline), the summary as the lead, and the actions row. `titleWrap` lets the dialog name itself by
- * the heading; while the title is edited a visually hidden heading keeps that name.
+ * the heading; while the title is edited a visually hidden heading keeps that name. The heading
+ * takes the focus (`headingRef`) when an action took away the control that had it.
  */
 export function TicketHead({
   card,
   phase,
   level,
+  headingRef,
   titleWrap = (heading) => heading,
   readOnly,
   onSaveTitle,
@@ -34,6 +36,8 @@ export function TicketHead({
   phase: { number: number; name: string | null } | null;
   /** h1 on the Ticket's page, h2 inside the dialog. */
   level: 1 | 2;
+  /** The title's heading, focusable from code (`tabIndex` -1), not in the tab order. */
+  headingRef?: RefObject<HTMLHeadingElement | null> | undefined;
   titleWrap?: ((heading: ReactElement) => ReactElement) | undefined;
   readOnly: boolean;
   onSaveTitle: (title: string) => void;
@@ -104,7 +108,11 @@ export function TicketHead({
 
       {title.editing ? (
         <>
-          {titleWrap(<Heading className="sr-only">{card.title}</Heading>)}
+          {titleWrap(
+            <Heading ref={headingRef} tabIndex={-1} className="sr-only">
+              {card.title}
+            </Heading>,
+          )}
           <input
             aria-label="Title"
             autoFocus
@@ -122,7 +130,7 @@ export function TicketHead({
         </>
       ) : (
         titleWrap(
-          <Heading className={TITLE}>
+          <Heading ref={headingRef} tabIndex={-1} className={TITLE}>
             {readOnly ? (
               card.title
             ) : (

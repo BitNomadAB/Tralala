@@ -3,7 +3,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
-import { TicketState } from "@/features/cards/TicketState";
+import { ToastProvider } from "@/components/ui/toast";
+import { TicketState, WAIT_REASON_FIRST } from "@/features/cards/TicketState";
 import { TicketCard } from "@/features/loops/TicketCard";
 import { api } from "@/lib/api";
 import { keys } from "@/lib/queries";
@@ -47,7 +48,9 @@ async function renderSection(card: CardDetail) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <Section />
+      <ToastProvider>
+        <Section />
+      </ToastProvider>
     </QueryClientProvider>,
   );
   const section = await screen.findByRole("region", { name: "Status" });
@@ -106,9 +109,12 @@ describe("where a Ticket's work is done and what it waits for", () => {
     const { work, section, user } = await renderSection(ticketCard());
     await user.click(within(section).getByRole("button", { name: "Mark as waiting…" }));
     const save = within(section).getByRole("button", { name: "Save the wait" });
-    expect(save).toBeDisabled();
+    // Focusable, and it says beside it why it cannot be pressed yet.
+    expect(save).toHaveAttribute("aria-disabled", "true");
+    expect(save).toHaveAccessibleDescription(WAIT_REASON_FIRST);
     await user.type(within(section).getByLabelText("Why (required)"), "   ");
-    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(work.state.bodies).toEqual([]);
     await user.selectOptions(within(section).getByLabelText("It waits for"), "information");
     await user.clear(within(section).getByLabelText("Why (required)"));
     await user.type(within(section).getByLabelText("Why (required)"), "  The token's lifetime  ");

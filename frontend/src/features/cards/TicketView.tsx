@@ -25,6 +25,7 @@ export function TicketView({
   pageHref,
   titleWrap,
   ticketHref,
+  focusOnOpen = false,
 }: {
   boardId: string;
   loopId: string;
@@ -37,6 +38,8 @@ export function TicketView({
   /** Wraps the title heading, so the dialog is named by it. */
   titleWrap?: ((heading: ReactElement) => ReactElement) | undefined;
   ticketHref?: MarkdownOptions["ticketHref"];
+  /** Gives the title the focus once the Ticket is shown: the host swapped it in. */
+  focusOnOpen?: boolean | undefined;
 }) {
   const toast = useToast();
   const { actor } = useAuth();
@@ -89,6 +92,7 @@ export function TicketView({
       ticketHref={ticketHref}
       actorId={actor?.id}
       comments={comments}
+      focusOnOpen={focusOnOpen}
       checklists={
         <CardChecklists
           level={sectionLevel}

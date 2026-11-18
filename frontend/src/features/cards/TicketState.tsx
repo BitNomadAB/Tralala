@@ -1,23 +1,32 @@
 import { CircleCheck } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StateChip } from "@/components/ui/chip";
 import { Field, Select, Textarea } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import type { Card, Wait } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { stateReason } from "./ticketRules";
 import { SAVING, WAIT_HINTS, WAIT_LABELS, WAITING_REASON_MAX, WAITS } from "./ticketWork";
 import { useCardWork } from "./useCardWork";
+import { focusTarget, useFocusAfter } from "./useFocusAfter";
 
 const LINK =
   "w-fit rounded text-[13px] text-[var(--primary)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:opacity-50";
+
+/** Why Save the wait cannot be pressed yet. */
+export const WAIT_REASON_FIRST = "Write why it waits first.";
 
 /**
  * Where the Ticket stands, under its column in the rail: the state with what holds it up, the wait
  * that is set (with Clear the wait), "Mark as waiting…" with its form inline, and, for a Ticket only
  * a person can do, the confirmation that completes it. The server computes the state from the wait
  * and the plan; a person sets a wait with its reason and clears it here.
+ *
+ * Each change says what it did ("Wait saved", "Wait cleared") and hands the focus on (WCAG 2.4.3):
+ * a saved wait to its Clear the wait, a cleared one to Mark as waiting…, a cancelled form back to
+ * whatever opened it.
  */
 export function TicketState({
   boardId,
@@ -45,11 +54,32 @@ export function TicketState({
   pending: boolean;
 }) {
   const work = useCardWork({ boardId, loopId, card, onChanged });
+  const announce = useAnnounce();
+  const focusAfter = useFocusAfter();
+  const root = useRef<HTMLDivElement>(null);
   const completed = card.completed_at !== null;
   const waiting = card.waiting_for !== "nothing";
+  const markWaiting = () => focusTarget(root.current, "mark-waiting");
+
+  async function save(value: { waiting_for: Wait; reason: string }): Promise<boolean> {
+    const saved = await work.setWait(value);
+    if (saved) {
+      announce("Wait saved");
+      onWaitOpenChange(false);
+      focusAfter(() => focusTarget(root.current, "clear-wait"));
+    }
+    return saved;
+  }
+
+  async function clear() {
+    if (!(await work.clearWait())) return;
+    announce("Wait cleared");
+    focusAfter(markWaiting);
+  }
 
   return (
-    <>
+    // `contents`: the rail's section lays the parts out; this only gives the focus a place to look.
+    <div ref={root} className="contents">
       {card.state ? (
         <StateChip state={card.state} reason={stateReason(card)} />
       ) : completed ? (
@@ -63,15 +93,23 @@ export function TicketState({
       ) : null}
 
       {waiting ? (
-        <CurrentWait card={card} pending={work.pending} onClear={work.clearWait} />
+        <CurrentWait card={card} pending={work.pending} onClear={() => void clear()} />
       ) : completed || readOnly ? null : waitOpen ? (
         <WaitForm
           pending={work.pending}
-          onSave={work.setWait}
-          onClose={() => onWaitOpenChange(false)}
+          onSave={save}
+          onCancel={(opener) => {
+            onWaitOpenChange(false);
+            focusAfter(() => (opener?.isConnected ? opener : markWaiting()));
+          }}
         />
       ) : (
-        <button type="button" className={LINK} onClick={() => onWaitOpenChange(true)}>
+        <button
+          type="button"
+          className={LINK}
+          data-focus-target="mark-waiting"
+          onClick={() => onWaitOpenChange(true)}
+        >
           Mark as waiting…
         </button>
       )}
@@ -85,6 +123,7 @@ export function TicketState({
             variant="secondary"
             size="sm"
             wrapperClassName="justify-self-start"
+            data-focus-target="confirm"
             disabledReason={confirmBlocked ?? (pending ? SAVING : null)}
             onClick={onConfirm}
           >
@@ -98,7 +137,7 @@ export function TicketState({
           {work.error}
         </p>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -130,39 +169,42 @@ function CurrentWait({
           <p className="m-0 text-xs text-[var(--muted-foreground)]">
             Clear the wait before this Ticket can be completed.
           </p>
-          <Button
+          <ReasonButton
             variant="outline"
             size="sm"
-            className="w-fit"
-            disabled={pending}
+            wrapperClassName="justify-self-start"
+            data-focus-target="clear-wait"
+            disabledReason={pending ? SAVING : null}
             onClick={onClear}
           >
             Clear the wait
-          </Button>
+          </ReasonButton>
         </>
       )}
     </div>
   );
 }
 
-/** "Mark as waiting": the kind and a required reason, saved together. */
+/**
+ * "Mark as waiting": the kind and a required reason, saved together. The kind takes the focus when
+ * the form opens; Cancel hands `onCancel` what had the focus before, so it can go back there.
+ */
 function WaitForm({
   pending,
   onSave,
-  onClose,
+  onCancel,
 }: {
   pending: boolean;
   onSave: (value: { waiting_for: Wait; reason: string }) => Promise<boolean>;
-  onClose: () => void;
+  onCancel: (opener: HTMLElement | null) => void;
 }) {
   const [kind, setKind] = useState<Wait>("decision");
   const [reason, setReason] = useState("");
+  // Read while the form is first drawn, before its field takes the focus: the control that opened it.
+  const [opener] = useState(() =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
   const trimmed = reason.trim();
-
-  async function save() {
-    if (!trimmed) return;
-    if (await onSave({ waiting_for: kind, reason: trimmed })) onClose();
-  }
 
   return (
     <div className="grid gap-2 rounded-md bg-[var(--surface-raised)] p-2.5">
@@ -197,18 +239,18 @@ function WaitForm({
           onChange={(event) => setReason(event.target.value)}
         />
       </Field>
-      <div className="flex gap-2">
-        <Button
+      <div className="flex flex-wrap items-start gap-2">
+        <ReasonButton
           variant="secondary"
           size="sm"
-          disabled={!trimmed || pending}
+          disabledReason={!trimmed ? WAIT_REASON_FIRST : pending ? SAVING : null}
           onClick={() => {
-            void save();
+            void onSave({ waiting_for: kind, reason: trimmed });
           }}
         >
-          {pending ? "Saving…" : "Save the wait"}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onClose}>
+          Save the wait
+        </ReasonButton>
+        <Button variant="ghost" size="sm" onClick={() => onCancel(opener)}>
           Cancel
         </Button>
       </div>

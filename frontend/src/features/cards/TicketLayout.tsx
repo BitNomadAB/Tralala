@@ -17,11 +17,13 @@ import type { useCardComments } from "./useCardComments";
 import { useTicketActions } from "./useTicketActions";
 import type { useTicketData } from "./useTicketData";
 import { useTicketDiscussions } from "./useTicketDiscussions";
+import { useTicketFocus, type Decision } from "./useTicketFocus";
 
 /**
  * The view once the card has loaded: the head, the main column and the rail, and "Ask the agents"
  * (from Activity's header or the actions' More), which opens the new discussion where the Ticket
- * is shown: in the dialog over the Kanban, or as a page of the Ticket.
+ * is shown: in the dialog over the Kanban, or as a page of the Ticket. A decision that takes away
+ * its own button hands the focus on (`useTicketFocus`).
  */
 export function TicketLayout({
   boardId,
@@ -36,6 +38,7 @@ export function TicketLayout({
   actorId,
   comments,
   checklists,
+  focusOnOpen,
 }: {
   boardId: string;
   loopId: string;
@@ -49,6 +52,8 @@ export function TicketLayout({
   actorId: string | undefined;
   comments: ReturnType<typeof useCardComments>;
   checklists: ReactNode;
+  /** Gives the title the focus once shown: the dialog swapped this view in. */
+  focusOnOpen: boolean;
 }) {
   const toast = useToast();
   const navigate = useNavigate();
@@ -75,6 +80,12 @@ export function TicketLayout({
     refresh: data.refresh,
     onArchived: onClose,
   });
+  const { root, heading, afterDecision } = useTicketFocus(focusOnOpen);
+
+  /** Runs a decision; once it went through, the focus goes on from its button. */
+  async function decide(change: () => Promise<boolean>, decision: Decision) {
+    if (await change()) afterDecision(decision);
+  }
 
   function copy(text: string, done: string) {
     const target = clipboard();
@@ -93,19 +104,20 @@ export function TicketLayout({
 
   const completed = card.completed_at !== null;
   const primary: PrimaryAction = actions.startTarget
-    ? { kind: "start", onStart: () => void actions.startWork() }
+    ? { kind: "start", onStart: () => void decide(actions.startWork, "start") }
     : completed || card.human_action_required
       ? null
       : {
           kind: "complete",
-          onComplete: () => void actions.setCompleted(true),
+          onComplete: () => void decide(() => actions.setCompleted(true), "complete"),
           blocked: completeBlocked(card),
         };
 
   return (
-    <div className={cn(modal && "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]")}>
+    <div ref={root} className={cn(modal && "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]")}>
       <TicketHead
         card={card}
+        headingRef={heading}
         phase={
           card.phase_number === null
             ? null
@@ -185,6 +197,7 @@ export function TicketLayout({
             refresh={data.refresh}
             waitOpen={waitOpen}
             onWaitOpenChange={setWaitOpen}
+            onConfirm={() => void decide(() => actions.confirm(""), "confirm")}
             onCopyLink={copyLink}
             checklists={checklists}
           />

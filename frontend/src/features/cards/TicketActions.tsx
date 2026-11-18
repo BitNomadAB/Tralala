@@ -46,13 +46,19 @@ export function TicketActions({
   return (
     <div className="mb-4 mt-[18px] flex flex-wrap gap-2">
       {primary?.kind === "start" && !readOnly ? (
-        <ReasonButton size="sm" disabledReason={pending ? SAVING : null} onClick={primary.onStart}>
+        <ReasonButton
+          size="sm"
+          data-primary-action="start"
+          disabledReason={pending ? SAVING : null}
+          onClick={primary.onStart}
+        >
           <Play size={15} aria-hidden="true" /> Start work
         </ReasonButton>
       ) : null}
       {primary?.kind === "complete" && !readOnly ? (
         <ReasonButton
           size="sm"
+          data-primary-action="complete"
           disabledReason={primary.blocked ?? (pending ? SAVING : null)}
           onClick={primary.onComplete}
         >
@@ -91,7 +97,9 @@ export function TicketActions({
 
 /**
  * The quiet "more" button and the few actions it shows. Escape or a press outside closes it, and
- * Escape inside it never reaches the dialog around it.
+ * Escape inside it never reaches the dialog around it. Choosing an item gives the focus back to
+ * the button before the item runs, so it is not lost with the menu (a dialog the item opens gives
+ * it back to the button too).
  */
 function MoreMenu({ items }: { items: { label: string; onSelect: () => void }[] }) {
   const [open, setOpen] = useState(false);
@@ -110,12 +118,16 @@ function MoreMenu({ items }: { items: { label: string; onSelect: () => void }[] 
     };
   }, [open]);
 
+  function closeToButton() {
+    setOpen(false);
+    root.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }
+
   /** Escape closes the menu and gives the focus back to its button. */
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "Escape" || !open) return;
     event.preventDefault();
-    setOpen(false);
-    root.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    closeToButton();
   }
 
   return (
@@ -144,7 +156,7 @@ function MoreMenu({ items }: { items: { label: string; onSelect: () => void }[] 
                 autoFocus={item === items[0]}
                 onKeyDown={onKeyDown}
                 onClick={() => {
-                  setOpen(false);
+                  closeToButton();
                   item.onSelect();
                 }}
                 className="w-full rounded-md px-2.5 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--surface-raised)] focus-visible:bg-[var(--surface-raised)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]"
