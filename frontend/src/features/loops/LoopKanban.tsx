@@ -144,7 +144,9 @@ export function LoopKanban({
       const overId = overData?.listId ?? over.id;
       const toIndex = lists.findIndex((list) => list.id === overId);
       if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
-      moves.moveColumn(activeData.listId, toIndex);
+      // dnd-kit says where it landed; a keyboard keeps the focus on the column's grip.
+      const byKeyboard = event.activatorEvent instanceof KeyboardEvent;
+      moves.moveColumn(activeData.listId, toIndex, byKeyboard ? { focus: "grip" } : {});
       return;
     }
 
@@ -190,7 +192,7 @@ export function LoopKanban({
                   emptyText={emptyText}
                   readOnly={readOnly}
                   moveItems={columnMoveItems(lists, list.id, readOnly, (to) => {
-                    moves.moveColumn(list.id, to, { announce: true, focus: true });
+                    moves.moveColumn(list.id, to, { announce: true, focus: "menu" });
                   })}
                   cardActions={(card) =>
                     cardMoveItems(state, card, readOnly, (target) => {
@@ -199,8 +201,8 @@ export function LoopKanban({
                   }
                   focusCard={focusCard}
                   onCardFocused={moves.cardFocused}
-                  focusMenu={moves.columnFocus === list.id}
-                  onMenuFocused={moves.columnFocused}
+                  focus={moves.columnFocus?.listId === list.id ? moves.columnFocus.control : null}
+                  onFocused={moves.columnFocused}
                   onOpenCard={(card) => onOpenCard(card.id)}
                   onCreateCard={async (title) => {
                     await createCardMutation.mutateAsync({ listId: list.id, title });

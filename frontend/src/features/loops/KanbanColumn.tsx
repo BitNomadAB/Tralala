@@ -10,14 +10,14 @@ import type { BoardList, Card } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { DragData } from "./dragData";
 import { TicketCard } from "./TicketCard";
-import type { CardControl } from "./useKanbanMoves";
+import type { CardControl, ColumnControl } from "./useKanbanMoves";
 
 /**
  * One column of the Loop's Kanban: its name and count, the cards, and "Add card" at the bottom. A
  * column named Done is a column like any other; only completing a Ticket completes it. Renaming,
  * moving left or right (`moveItems`) and archiving sit in the column's quiet menu; each card's own
- * menu holds `cardActions(card)`. `focusMenu` and `focusCard` hand the focus to this column's menu
- * button or to a card's control after a move (see `useKanbanMoves`).
+ * menu holds `cardActions(card)`. `focus` and `focusCard` hand the focus to this column's grip or
+ * menu button, or to a card's control, after a move (see `useKanbanMoves`).
  */
 export function KanbanColumn({
   list,
@@ -28,8 +28,8 @@ export function KanbanColumn({
   cardActions,
   focusCard,
   onCardFocused,
-  focusMenu,
-  onMenuFocused,
+  focus,
+  onFocused,
   onOpenCard,
   onCreateCard,
   onRename,
@@ -43,8 +43,8 @@ export function KanbanColumn({
   cardActions: (card: Card) => readonly MenuItem[];
   focusCard: { cardId: string; control: CardControl } | null;
   onCardFocused: () => void;
-  focusMenu: boolean;
-  onMenuFocused: () => void;
+  focus: ColumnControl | null;
+  onFocused: () => void;
   onOpenCard: (card: Card) => void;
   onCreateCard: (title: string) => Promise<void>;
   onRename: (name: string) => void;
@@ -82,12 +82,13 @@ export function KanbanColumn({
     button?.focus();
   });
 
-  // After the column moved, its menu button keeps the focus the menu gave back to it.
+  // The column moved (or the one before it went): its grip or menu takes the focus back.
   useEffect(() => {
-    if (!focusMenu) return;
-    header.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
-    onMenuFocused();
-  }, [focusMenu, onMenuFocused]);
+    if (focus === null) return;
+    const selector = focus === "grip" ? "[data-column-grip]" : '[aria-haspopup="menu"]';
+    header.current?.querySelector<HTMLElement>(selector)?.focus();
+    onFocused();
+  }, [focus, onFocused]);
 
   async function submitCard() {
     if (!title.trim()) return;
@@ -101,7 +102,7 @@ export function KanbanColumn({
     setAdding(false);
   }
 
-  /** Saves a changed name; Enter (`refocus`) puts the focus on the menu, leaving the field does not. */
+  /** Saves a changed name; after Enter (`refocusMenu`) the focus is on the menu, after a blur not. */
   function finishRename(refocusMenu: boolean) {
     if (renameCancelled.current) return;
     if (name.trim() && name.trim() !== list.name) onRename(name.trim());
@@ -122,12 +123,14 @@ export function KanbanColumn({
       <header ref={header} className="flex items-center gap-1.5 px-2.5 pt-2.5">
         <button
           type="button"
-          className="cursor-grab text-[var(--foreground-faint)] hover:text-[var(--muted-foreground)]"
+          // 24 px square: the smallest target WCAG 2.5.8 allows.
+          className="inline-flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-[var(--muted-foreground)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]"
+          data-column-grip=""
           aria-label={`Reorder column ${list.name}`}
           {...attributes}
           {...listeners}
         >
-          <GripVertical size={14} />
+          <GripVertical size={14} aria-hidden="true" />
         </button>
         {renaming ? (
           <form

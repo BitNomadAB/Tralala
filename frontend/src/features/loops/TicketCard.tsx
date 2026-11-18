@@ -138,8 +138,10 @@ export function TicketCard({
             <GripVertical size={14} />
           </span>
         ) : (
-          // Above the title's full-card click area, so the grip takes its own pointer and keys.
-          <div ref={controls} className="relative z-10 -mr-1 flex shrink-0 items-center">
+          // Positioned after the title, so it is drawn over the title's full-card click area and
+          // takes its own pointer; no z-index, so an open menu still covers the cards below.
+          // The negative margins keep the card as low as a line of its title.
+          <div ref={controls} className="relative -my-1 -mr-1 flex shrink-0 items-center">
             <button
               type="button"
               ref={setActivatorNodeRef}

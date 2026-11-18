@@ -113,7 +113,9 @@ describe("moving a column from its menu", () => {
       route: `POST ${LOOP_PATH}/lists/list-1/move`,
       body: { position: 1 },
     });
-    expect(announcer()).toHaveTextContent("Column Backlog moved to position 2 of 3.");
+    await waitFor(() => {
+      expect(announcer()).toHaveTextContent("Column Backlog moved to position 2 of 3.");
+    });
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Column actions for Backlog" })).toHaveFocus();
     });

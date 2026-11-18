@@ -13,15 +13,19 @@ import { LIST_LIMIT } from "./loopUi";
 /** Which of a card's controls takes the focus once the card shows at its new place. */
 export type CardControl = "grip" | "actions";
 
+/** Which of a column's controls takes the focus once the column shows at its new place. */
+export type ColumnControl = "grip" | "menu";
+
 /** A card's control to focus, once the card is at `listId`/`index`. */
 interface CardFocus extends CardTarget {
   cardId: string;
   control: CardControl;
 }
 
-/** A column's menu button to focus, once `ready` holds for the columns shown. */
+/** A column's control to focus, once `ready` holds for the columns shown. */
 interface ColumnFocus {
   listId: string;
+  control: ColumnControl;
   ready: (lists: readonly BoardList[]) => boolean;
 }
 
@@ -116,20 +120,21 @@ export function useKanbanMoves({
     moveCardMutation.mutate({ card, listId: target.listId, position: target.index });
   }
 
-  function moveColumn(listId: string, index: number, options: MoveOptions<true> = {}) {
+  function moveColumn(listId: string, index: number, options: MoveOptions<ColumnControl> = {}) {
     const list = lists.find((item) => item.id === listId);
     if (options.announce && list) {
       announce(`Column ${list.name} moved to position ${index + 1} of ${lists.length}.`);
     }
-    if (options.focus) {
-      setColumnFocus({ listId, ready: (shown) => columnIndex(shown, listId) === index });
+    const control = options.focus;
+    if (control) {
+      setColumnFocus({ listId, control, ready: (shown) => columnIndex(shown, listId) === index });
     }
     moveListMutation.mutate({ listId, position: index });
   }
 
   /** Focuses the menu button of column `listId` once `ready` holds for the columns shown. */
   const focusColumn = useCallback((listId: string, ready: ColumnFocus["ready"]) => {
-    setColumnFocus({ listId, ready });
+    setColumnFocus({ listId, control: "menu", ready });
   }, []);
   const cardFocused = useCallback(() => {
     setCardFocus(null);
@@ -148,7 +153,7 @@ export function useKanbanMoves({
     moveColumn,
     focusColumn,
     cardFocus: cardFocusNow,
-    columnFocus: columnFocus?.ready(lists) ? columnFocus.listId : null,
+    columnFocus: columnFocus?.ready(lists) ? columnFocus : null,
     cardFocused,
     columnFocused,
   };
