@@ -1,6 +1,7 @@
 import { KeyRound, Link2, Power } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { Select } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
 import { ROLES, type Role, type UserAccount } from "@/lib/types";
@@ -89,20 +90,18 @@ export function UserRow({
       <Badge tone={user.disabled ? "danger" : "success"}>
         {user.disabled ? "disabled" : "active"}
       </Badge>
-      <Button
+      <HeldButton
         size="icon"
         variant="ghost"
         aria-label={`Create an invitation link for ${user.name}`}
         title="Invitation link"
         disabled={user.disabled}
         // While the link is being made the button stays focusable, so focus is not lost.
-        aria-disabled={inviting ? true : undefined}
-        onClick={() => {
-          if (!inviting) onInvite();
-        }}
+        held={inviting}
+        onClick={onInvite}
       >
         <Link2 size={14} />
-      </Button>
+      </HeldButton>
       <Button
         size="icon"
         variant="ghost"

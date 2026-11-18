@@ -3,13 +3,14 @@ import { Plus, ShieldHalf, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { useRoleTemplates } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
-import { ButtonLink } from "./ButtonLink";
 import { entryControlId, removalFocusTarget, useRemovalFocus } from "./removalFocus";
 
 const HEADING_ID = "settings-role-templates";
@@ -137,13 +138,13 @@ export function RoleTemplatesCard() {
             <Button variant="ghost" onClick={() => setDeleting(null)}>
               Cancel
             </Button>
-            <Button
+            <HeldButton
               variant="danger"
-              disabled={deleteMutation.isPending}
+              held={deleteMutation.isPending}
               onClick={() => deleting && deleteMutation.mutate(deleting)}
             >
               Delete role
-            </Button>
+            </HeldButton>
           </div>
         </DialogContent>
       </Dialog>

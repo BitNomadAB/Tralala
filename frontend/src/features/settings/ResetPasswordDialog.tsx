@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input } from "@/components/ui/input";
 import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { useToast } from "@/components/ui/useToast";
@@ -72,9 +73,9 @@ function ResetPasswordForm({ user, onDone }: { user: UserAccount; onDone: () => 
         <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
-        <Button type="submit" disabled={resetMutation.isPending}>
+        <HeldButton type="submit" held={resetMutation.isPending}>
           Reset password
-        </Button>
+        </HeldButton>
       </div>
     </form>
   );

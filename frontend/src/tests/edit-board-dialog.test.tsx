@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EditBoardDialog, type BoardEditDraft } from "@/features/loops/EditBoardDialog";
 import { apiPath, ok } from "./msw/envelope";
 import { server } from "./msw/server";
@@ -14,7 +15,7 @@ const DRAFT: BoardEditDraft = {
   agentIds: [],
 };
 
-async function renderDialog(saving: boolean) {
+async function renderDialog(saving: boolean, onSave: () => void = () => undefined) {
   // The pickers ask for the repositories and agents to choose from; none is the simplest answer.
   server.use(
     http.get(apiPath("/repositories"), () => ok([])),
@@ -29,7 +30,7 @@ async function renderDialog(saving: boolean) {
         draft={DRAFT}
         onDraftChange={() => undefined}
         saving={saving}
-        onSave={() => undefined}
+        onSave={onSave}
       />
     </QueryClientProvider>,
   );
@@ -38,10 +39,14 @@ async function renderDialog(saving: boolean) {
 
 describe("the Edit board dialog", () => {
   it("says it is saving with an ellipsis, not a question mark, and cannot be sent twice", async () => {
-    await renderDialog(true);
+    const onSave = vi.fn<() => void>();
+    await renderDialog(true, onSave);
 
+    // Held, not disabled: the button that was pressed keeps the focus while the board is saved.
     const button = screen.getByRole("button", { name: "Saving…" });
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    await userEvent.setup().click(button);
+    expect(onSave).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Saving?" })).not.toBeInTheDocument();
   });
 

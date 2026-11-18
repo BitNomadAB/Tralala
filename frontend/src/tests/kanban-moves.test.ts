@@ -6,6 +6,7 @@ import {
   currentTarget,
   dropTarget,
   placeAt,
+  restoreIndex,
   type CardTarget,
   type KanbanState,
 } from "@/features/loops/kanbanMoves";
@@ -179,5 +180,21 @@ describe("the moves in a column's menu", () => {
       "Move left: The Loop is read-only",
       "Move right: The Loop is read-only",
     ]);
+  });
+});
+
+describe("where Undo puts an archived column back", () => {
+  const [backlog, progress, done] = COLUMNS;
+  if (!backlog || !progress || !done) throw new Error("three columns expected");
+
+  it("goes after the column it followed, wherever that one is now", () => {
+    expect(restoreIndex([backlog, done], backlog.id, 1)).toBe(1);
+    expect(restoreIndex([done, backlog], backlog.id, 1)).toBe(2);
+  });
+
+  it("goes first when it was first, and to its old index, at most the end, without its neighbour", () => {
+    expect(restoreIndex([progress, done], null, 0)).toBe(0);
+    expect(restoreIndex([backlog, done], progress.id, 2)).toBe(2);
+    expect(restoreIndex([done], progress.id, 2)).toBe(1);
   });
 });

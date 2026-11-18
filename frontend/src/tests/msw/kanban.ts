@@ -31,7 +31,8 @@ function moveCard(server: KanbanServer, card: Card, listId: string, position: nu
 /**
  * Handlers for the Kanban's reads and writes over `server`: the columns, each column's cards, the
  * search, and the moves, renames, archives, restores and new cards, each recorded in
- * `server.writes`. A restored column comes back last, as the backend places it.
+ * `server.writes`. A card's move checks its version (`409 version_conflict`) and raises it. A
+ * restored column comes back last, as the backend places it.
  */
 export function kanbanHandlers(server: KanbanServer) {
   const record = async (request: Request) => {
@@ -70,6 +71,9 @@ export function kanbanHandlers(server: KanbanServer) {
       const card = server.cards.find((item) => item.id === params.cardId);
       if (!card || !isRecord(body) || typeof body.list_id !== "string") {
         return failure(404, "not_found", "No such card");
+      }
+      if (body.version !== card.version) {
+        return failure(409, "version_conflict", "The card changed since it was read");
       }
       const position = typeof body.position === "number" ? body.position : 0;
       return ok(moveCard(server, card, body.list_id, position));

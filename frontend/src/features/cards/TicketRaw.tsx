@@ -121,6 +121,8 @@ export function TicketRaw({
                 onPreviewChange={setPreview}
                 placeholder="Markdown supported"
                 ticketHref={ticketHref}
+                // The level TicketBody shows the description's headings with.
+                headingLevel={blockLevel}
               />
               <div className="flex gap-2">
                 <HeldButton

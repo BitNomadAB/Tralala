@@ -5,6 +5,12 @@ import type { DragData } from "./dragData";
 /** Why every move is unavailable in a Loop that is completed, cancelled or archived. */
 const READ_ONLY = "The Loop is read-only";
 
+/**
+ * Why a card's moves within its column are unavailable while a filter hides cards: a move up or
+ * down would swap it with a card nobody sees, and its position would count cards not shown.
+ */
+export const FILTERED = "Clear the filter to reorder";
+
 /** The Loop's columns in order and the cards of each, as the Kanban shows them. */
 export interface KanbanState {
   lists: readonly BoardList[];
@@ -80,6 +86,20 @@ export function columnIndex(lists: readonly BoardList[], listId: string): number
   return lists.findIndex((list) => list.id === listId);
 }
 
+/**
+ * Where an archived column goes back once it is restored among `lists` (the columns shown, without
+ * it): after `after`, the column it followed when it was archived, while that one is still there;
+ * else at its old `index`, at most the end. The columns may have changed while Undo was offered.
+ */
+export function restoreIndex(
+  lists: readonly BoardList[],
+  after: string | null,
+  index: number,
+): number {
+  const before = after === null ? -1 : columnIndex(lists, after);
+  return before >= 0 ? before + 1 : Math.min(Math.max(index, 0), lists.length);
+}
+
 /** A menu entry that moves to `target`, or says why it cannot (`reason`). */
 function moveItem(
   label: string,
@@ -102,24 +122,28 @@ function moveItem(
 /**
  * The card's moves without dragging (WCAG 2.5.7), for its "Actions for <title>" menu: up, down, to
  * the top and the bottom of its column, and to the end of each other column. One that would not
- * move it stays in the menu, disabled, with the reason.
+ * move it stays in the menu, disabled, with the reason. While a filter hides cards (`filtered`)
+ * only the moves to another column are offered; the others say to clear the filter.
  */
 export function cardMoveItems(
   state: KanbanState,
   card: Card,
   readOnly: boolean,
   onMove: (target: CardTarget) => void,
+  filtered = false,
 ): MenuItem[] {
   const { listId, index } = currentTarget(state, card);
   const last = (state.cardsByList[listId] ?? []).length - 1;
   const at = (to: number): CardTarget => ({ listId, index: to });
-  const top = "Already at the top";
-  const bottom = "Already at the bottom";
+  const top = filtered ? FILTERED : "Already at the top";
+  const bottom = filtered ? FILTERED : "Already at the bottom";
+  const within = (label: string, target: CardTarget | null, reason: string) =>
+    moveItem(label, filtered ? null : target, reason, readOnly, onMove);
   return [
-    moveItem("Move up", index > 0 ? at(index - 1) : null, top, readOnly, onMove),
-    moveItem("Move down", index < last ? at(index + 1) : null, bottom, readOnly, onMove),
-    moveItem("Move to top", index > 0 ? at(0) : null, top, readOnly, onMove),
-    moveItem("Move to bottom", index < last ? at(last) : null, bottom, readOnly, onMove),
+    within("Move up", index > 0 ? at(index - 1) : null, top),
+    within("Move down", index < last ? at(index + 1) : null, bottom),
+    within("Move to top", index > 0 ? at(0) : null, top),
+    within("Move to bottom", index < last ? at(last) : null, bottom),
     ...state.lists
       .filter((list) => list.id !== listId)
       .map((list) =>

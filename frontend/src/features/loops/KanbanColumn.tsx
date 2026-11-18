@@ -254,6 +254,8 @@ export function KanbanColumn({
             size="sm"
             className="w-full justify-start"
             disabled={readOnly}
+            // The Ticket's dialog hands the focus here once it archived a card of this column.
+            data-focus-target="add-card"
             onClick={() => setAdding(true)}
           >
             <Plus size={14} aria-hidden="true" /> Add card

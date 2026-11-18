@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
@@ -74,9 +75,9 @@ export function NewLoopDialog({
             <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!name.trim() || createLoop.isPending}>
+            <HeldButton type="submit" held={createLoop.isPending} disabled={!name.trim()}>
               {createLoop.isPending ? "Creating…" : "Create Loop"}
-            </Button>
+            </HeldButton>
           </div>
         </form>
       </DialogContent>

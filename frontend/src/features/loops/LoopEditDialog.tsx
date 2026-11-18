@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
@@ -74,9 +75,9 @@ export function LoopEditDialog({
             <Button variant="ghost" type="button" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!name.trim() || save.isPending}>
+            <HeldButton type="submit" held={save.isPending} disabled={!name.trim()}>
               {save.isPending ? "Saving…" : "Save"}
-            </Button>
+            </HeldButton>
           </div>
         </form>
       </DialogContent>

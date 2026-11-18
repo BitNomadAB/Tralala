@@ -4,7 +4,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { usePageTitle } from "@/app/usePageTitle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { ReasonButton } from "@/components/ui/reason-button";
 import { describeError, fieldErrors } from "@/lib/describeError";
 import { fieldProblems } from "@/lib/fieldProblems";
@@ -23,7 +25,6 @@ import {
 } from "./agentForm";
 import { AgentIdentityFields } from "./AgentIdentityFields";
 import { AgentTestResultPanel } from "./AgentTestResultPanel";
-import { ButtonLink } from "./ButtonLink";
 import { useAgentActions } from "./useAgentActions";
 
 export function AgentEditorPage() {
@@ -207,14 +208,14 @@ export function AgentEditorPage() {
             <PlugZap size={14} /> Test connection
           </ReasonButton>
           {!isNew ? (
-            <Button
+            <HeldButton
               type="button"
               variant="outline"
-              disabled={actions.duplicate.isPending}
+              held={actions.duplicate.isPending}
               onClick={() => actions.duplicate.mutate()}
             >
               <Copy size={14} /> Duplicate
-            </Button>
+            </HeldButton>
           ) : null}
           <Button
             type="button"
@@ -225,9 +226,9 @@ export function AgentEditorPage() {
           >
             Cancel
           </Button>
-          <Button type="submit" disabled={!canSave || actions.save.isPending}>
+          <HeldButton type="submit" held={actions.save.isPending} disabled={!canSave}>
             {actions.save.isPending ? "Saving…" : "Save agent"}
-          </Button>
+          </HeldButton>
         </div>
       </form>
 
@@ -243,13 +244,13 @@ export function AgentEditorPage() {
             <Button variant="ghost" onClick={() => setConfirming(false)}>
               Cancel
             </Button>
-            <Button
+            <HeldButton
               variant="danger"
-              disabled={actions.remove.isPending}
+              held={actions.remove.isPending}
               onClick={() => actions.remove.mutate()}
             >
               Delete agent
-            </Button>
+            </HeldButton>
           </div>
         </DialogContent>
       </Dialog>

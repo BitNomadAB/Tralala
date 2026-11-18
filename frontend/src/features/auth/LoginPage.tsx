@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { usePageTitle } from "@/app/usePageTitle";
-import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input } from "@/components/ui/input";
 import { TralalaLogo } from "@/components/ui/tralala-logo";
 import { useFieldErrors } from "@/components/ui/useFieldErrors";
@@ -103,9 +103,9 @@ export function LoginPage() {
             {error}
           </p>
         ) : null}
-        <Button type="submit" aria-disabled={pending ? true : undefined}>
+        <HeldButton type="submit" held={pending}>
           {pending ? "Signing in…" : "Sign in"}
-        </Button>
+        </HeldButton>
         <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">
           First run uses the administrator credentials configured on the server. If none was
           configured, the server generated one and wrote it to

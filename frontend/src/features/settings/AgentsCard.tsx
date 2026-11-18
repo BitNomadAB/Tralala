@@ -3,7 +3,9 @@ import { Bot, Plus, Power, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
@@ -11,7 +13,6 @@ import { providerLabelFor } from "@/lib/providers";
 import { useAgents } from "@/lib/queries";
 import type { Agent } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
-import { ButtonLink } from "./ButtonLink";
 import { entryControlId, removalFocusTarget, useRemovalFocus } from "./removalFocus";
 
 const HEADING_ID = "settings-agents";
@@ -188,13 +189,13 @@ export function AgentsCard() {
             <Button variant="ghost" onClick={() => setDeleting(null)}>
               Cancel
             </Button>
-            <Button
+            <HeldButton
               variant="danger"
-              disabled={deleteMutation.isPending}
+              held={deleteMutation.isPending}
               onClick={() => deleting && deleteMutation.mutate(deleting)}
             >
               Delete agent
-            </Button>
+            </HeldButton>
           </div>
         </DialogContent>
       </Dialog>

@@ -72,6 +72,18 @@ describe("the Ticket's structure", () => {
     const raw = screen.getByRole("tabpanel", { name: "Raw text" });
     expect(within(raw).getByRole("heading", { level: 3, name: "Accepted when" })).toBeVisible();
   });
+
+  it("previews the description's headings at the level the Ticket shows them, never as h1", async () => {
+    const { user } = await renderTicket(ticketCard({ description: "# Rollout\nIn two steps." }));
+    // Shown in the dialog without a face, `#` sits under the section's h3.
+    expect(screen.getByRole("heading", { level: 4, name: "Rollout" })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Raw text" }));
+    await user.click(screen.getByRole("button", { name: "Edit description" }));
+    await user.click(screen.getByRole("tab", { name: "Preview" }));
+    const preview = screen.getByRole("tabpanel", { name: "Preview" });
+    expect(within(preview).getByRole("heading", { level: 4, name: "Rollout" })).toBeVisible();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+  });
 });
 
 describe("the due date", () => {

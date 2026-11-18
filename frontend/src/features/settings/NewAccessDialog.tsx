@@ -3,6 +3,7 @@ import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, FieldMessage, Input } from "@/components/ui/input";
 import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { useToast } from "@/components/ui/useToast";
@@ -162,9 +163,9 @@ function NewAccessForm({
         <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={createMutation.isPending}>
+        <HeldButton type="submit" held={createMutation.isPending}>
           <ShieldCheck size={14} /> Create access
-        </Button>
+        </HeldButton>
       </div>
     </form>
   );

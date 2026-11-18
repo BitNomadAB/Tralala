@@ -7,6 +7,12 @@ export const HEADING_WAIT_MS = 10_000;
 /** An open dialog manages focus itself: it took it on opening and gives it back on closing. */
 const DIALOG = '[role="dialog"], [role="alertdialog"]';
 
+/**
+ * The page's own heading. One marked `data-heading-placeholder` only keeps the outline while the
+ * page loads (the Ticket's "Ticket"); it leaves when the real one comes, so it never takes focus.
+ */
+const PAGE_HEADING = "h1:not([data-heading-placeholder])";
+
 /** A field the new page focused itself (an editor's first input has `autoFocus`). */
 const TEXT_ENTRY = 'input, textarea, select, [contenteditable="true"], [contenteditable=""]';
 
@@ -25,8 +31,9 @@ function pageContainer(doc: Document): HTMLElement {
  * Moves focus to the new page's `<h1>` after a navigation (WCAG 2.4.3), so a screen reader starts
  * reading at the page that opened and the next Tab goes on from there, not from the link that was
  * pressed. Focus is left where it is while a dialog is open, and when the page has focused a field
- * of its own. A page that is still loading gets focus on its main region first; its heading takes
- * focus when it appears, unless the person has moved on by then. Returns what stops that wait.
+ * of its own. A page that is still loading (or shows only a placeholder heading) gets focus on its
+ * main region first; its heading takes focus when it appears, unless the person has moved on by
+ * then. Returns what stops that wait.
  */
 export function focusPageHeading(doc: Document = document): () => void {
   const container = pageContainer(doc);
@@ -35,7 +42,7 @@ export function focusPageHeading(doc: Document = document): () => void {
   if (active && active !== container && container.contains(active) && active.matches(TEXT_ENTRY)) {
     return () => undefined;
   }
-  const heading = container.querySelector("h1");
+  const heading = container.querySelector<HTMLElement>(PAGE_HEADING);
   if (heading) {
     focusElement(heading);
     return () => undefined;
@@ -52,7 +59,7 @@ export function focusPageHeading(doc: Document = document): () => void {
       stop();
       return;
     }
-    const arrived = container.querySelector("h1");
+    const arrived = container.querySelector<HTMLElement>(PAGE_HEADING);
     if (arrived) {
       focusElement(arrived);
       stop();

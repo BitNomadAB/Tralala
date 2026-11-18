@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { useToast } from "@/components/ui/useToast";
@@ -120,9 +121,9 @@ function NewUserForm({ onDone }: { onDone: () => void }) {
         <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
-        <Button type="submit" disabled={createMutation.isPending}>
+        <HeldButton type="submit" held={createMutation.isPending}>
           Create user
-        </Button>
+        </HeldButton>
       </div>
     </form>
   );

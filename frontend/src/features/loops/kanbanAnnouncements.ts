@@ -1,4 +1,5 @@
 import type { Announcements, ScreenReaderInstructions } from "@dnd-kit/core";
+import type { Card } from "@/lib/types";
 import { dragData, type DragData } from "./dragData";
 import {
   columnIndex,
@@ -6,6 +7,7 @@ import {
   dropTarget,
   findCard,
   placeAt,
+  type CardTarget,
   type KanbanState,
   type Place,
 } from "./kanbanMoves";
@@ -16,6 +18,23 @@ export type DragMoment = "start" | "over" | "end" | "cancel";
 /** A place in words: "In Progress, position 2 of 5". */
 export function placeText(place: Place): string {
   return `${place.column}, position ${place.position} of ${place.count}`;
+}
+
+/**
+ * What a move from a card's menu says (WCAG 4.1.3): the card's title and its new place. While a
+ * filter hides cards (`filtered`) the menu only moves it to the end of another column, and a
+ * position would count cards that are not shown, so it names the column alone.
+ */
+export function menuMoveText(
+  state: KanbanState,
+  card: Card,
+  target: CardTarget,
+  filtered: boolean,
+): string {
+  const place = placeAt(state, card, target);
+  return filtered
+    ? `${card.title} moved to the end of ${place.column}.`
+    : `${card.title} moved to ${placeText(place)}.`;
 }
 
 /** What a screen reader hears while a card moves: its title, the column it is over and where. */

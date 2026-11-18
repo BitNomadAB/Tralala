@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Select } from "@/components/ui/input";
 import type { RepositoryProvider } from "@/lib/types";
 import { PROVIDER_LABELS } from "./repositoryLabels";
@@ -149,9 +150,9 @@ export function RepositoryDialog({
             Enabled for analysis
           </label>
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={!draft.url.trim() || saving}>
+            <HeldButton type="submit" size="sm" held={saving} disabled={!draft.url.trim()}>
               Save repository
-            </Button>
+            </HeldButton>
             <Button type="button" size="sm" variant="ghost" onClick={onClose}>
               Cancel
             </Button>

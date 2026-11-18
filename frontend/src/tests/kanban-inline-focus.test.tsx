@@ -21,6 +21,8 @@ describe("the focus after an inline form on the Kanban", () => {
   it("is back on Add card once a card is added, and after Escape or Cancel", async () => {
     const { user, server, backlog } = await renderBoard();
     const add = () => within(backlog).getByRole("button", { name: "Add card" });
+    // The Ticket's dialog finds it by this marker once it archived a card of the column.
+    expect(add()).toHaveAttribute("data-focus-target", "add-card");
     await user.click(add());
     await user.type(within(backlog).getByLabelText("New card in Backlog"), "Audit logins{Enter}");
     await waitFor(() => {
