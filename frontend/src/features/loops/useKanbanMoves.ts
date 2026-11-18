@@ -40,7 +40,8 @@ interface MoveOptions<Control> {
  * the server; a column moves on the server and shows the stored order. A move from a menu says
  * the new place (WCAG 4.1.3). A moved card or column is rendered anew where it lands, so the focus
  * would fall to the page: the request kept here is handed to the card or column (`cardFocus`,
- * `columnFocus`) once it shows at its new place, and the one that took it clears it.
+ * `columnFocus`) once it shows at its new place, and the one that took it clears it. Archiving a
+ * column acts at once and its toast offers Undo, which brings it back where it stood (WCAG 3.3.4).
  */
 export function useKanbanMoves({
   boardId,
@@ -71,6 +72,58 @@ export function useKanbanMoves({
       setColumnFocus(null);
       onListsChanged();
       toast.push({ title: "Could not reorder columns", variant: "error" });
+    },
+  });
+
+  const archiveListMutation = useMutation({
+    mutationFn: ({ list }: { list: BoardList; index: number }) =>
+      api.archiveList(boardId, loopId, list.id),
+    onSuccess: (_archived, { list, index }) => {
+      onListsChanged();
+      onCardsChanged();
+      toast.push({
+        title: "Column archived",
+        description: `${list.name} and its Tickets no longer show.`,
+        variant: "success",
+        action: { label: "Undo", onClick: () => restoreListMutation.mutate({ list, index }) },
+      });
+    },
+    onError: (error) => {
+      setColumnFocus(null);
+      onListsChanged();
+      toast.push({
+        title: "Could not archive column",
+        description: describeError(error, undefined),
+        variant: "error",
+      });
+    },
+  });
+
+  const restoreListMutation = useMutation({
+    mutationFn: async ({ list, index }: { list: BoardList; index: number }) => {
+      await api.restoreList(boardId, loopId, list.id);
+      // Restoring makes it the last column, so it is moved back to where it stood.
+      return api.moveList(boardId, loopId, list.id, index);
+    },
+    onSuccess: (_lists, { list, index }) => {
+      // The Undo button left with its toast; the column's menu takes the focus once it is back.
+      setColumnFocus({
+        listId: list.id,
+        control: "menu",
+        ready: (shown) => columnIndex(shown, list.id) === index,
+      });
+      onListsChanged();
+      onCardsChanged();
+      toast.push({ title: "Column restored", description: list.name, variant: "success" });
+    },
+    onError: (error) => {
+      onListsChanged();
+      onCardsChanged();
+      toast.push({
+        title: "Could not restore the column where it was",
+        description: describeError(error, undefined),
+        variant: "error",
+      });
     },
   });
 
@@ -136,6 +189,18 @@ export function useKanbanMoves({
   const focusColumn = useCallback((listId: string, ready: ColumnFocus["ready"]) => {
     setColumnFocus({ listId, control: "menu", ready });
   }, []);
+
+  /**
+   * Archives column `list`. Focus goes on to the next column's menu (the one before, at the end),
+   * as the column leaves with its own.
+   */
+  function archiveColumn(list: BoardList) {
+    const index = columnIndex(lists, list.id);
+    const next = lists[index + 1] ?? lists[index - 1];
+    if (next) focusColumn(next.id, (shown) => !shown.some((item) => item.id === list.id));
+    archiveListMutation.mutate({ list, index });
+  }
+
   const cardFocused = useCallback(() => {
     setCardFocus(null);
   }, []);
@@ -151,7 +216,7 @@ export function useKanbanMoves({
   return {
     moveCard,
     moveColumn,
-    focusColumn,
+    archiveColumn,
     cardFocus: cardFocusNow,
     columnFocus: columnFocus?.ready(lists) ? columnFocus : null,
     cardFocused,

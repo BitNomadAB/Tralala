@@ -30,7 +30,8 @@ function moveCard(server: KanbanServer, card: Card, listId: string, position: nu
 
 /**
  * Handlers for the Kanban's reads and writes over `server`: the columns, each column's cards, the
- * search, and the moves, renames, archives and new cards, each recorded in `server.writes`.
+ * search, and the moves, renames, archives, restores and new cards, each recorded in
+ * `server.writes`. A restored column comes back last, as the backend places it.
  */
 export function kanbanHandlers(server: KanbanServer) {
   const record = async (request: Request) => {
@@ -38,6 +39,7 @@ export function kanbanHandlers(server: KanbanServer) {
     server.writes.push({ route: `${request.method} ${requestPath(request)}`, body });
     return body;
   };
+  const archived: BoardList[] = [];
   return [
     http.get(apiPath(`${LOOP_PATH}/lists`), () => ok(server.lists)),
     http.get(apiPath(`${LOOP_PATH}/cards`), ({ request }) => {
@@ -104,8 +106,18 @@ export function kanbanHandlers(server: KanbanServer) {
     http.post(apiPath(`${LOOP_PATH}/lists/:listId/archive`), async ({ request, params }) => {
       await record(request);
       const list = server.lists.find((item) => item.id === params.listId);
+      if (list) archived.push(list);
       server.lists = server.lists.filter((item) => item.id !== params.listId);
       return ok(list);
+    }),
+    http.post(apiPath(`${LOOP_PATH}/lists/:listId/restore`), async ({ request, params }) => {
+      await record(request);
+      const list = archived.find((item) => item.id === params.listId);
+      if (!list) return failure(404, "not_found", "No such column");
+      archived.splice(archived.indexOf(list), 1);
+      const restored = { ...list, position: server.lists.length };
+      server.lists = [...server.lists, restored];
+      return ok(restored);
     }),
   ];
 }
