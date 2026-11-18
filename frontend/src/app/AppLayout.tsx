@@ -49,7 +49,7 @@ export function AppLayout() {
       <a
         href="#main"
         onClick={skipToMain}
-        className="sr-only rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-medium text-[var(--foreground)] shadow-lg focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50"
+        className="sr-only rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm font-medium text-[var(--foreground)] shadow-lg focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50 focus:px-3 focus:py-2"
       >
         Skip to main content
       </a>
