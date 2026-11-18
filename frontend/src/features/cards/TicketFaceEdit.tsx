@@ -1,8 +1,8 @@
 import { useEffect, useId } from "react";
+import { HeldButton } from "@/components/ui/held-button";
 import { FieldMessage, Input, Label, Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { FaceCount, FaceDraft, FaceErrors, FaceField } from "./faceLimits";
-import { PendingButton } from "./PendingButton";
 
 /** The fields in the order the face reads: the summary, the steps, then the three expanders. */
 const FIELDS: readonly { field: FaceField; label: string; hint?: string; lines?: boolean }[] = [
@@ -105,12 +105,12 @@ export function TicketFaceEdit({
         </p>
       ))}
       <div className="flex gap-2">
-        <PendingButton type="submit" size="sm" pending={saving}>
+        <HeldButton type="submit" size="sm" held={saving}>
           {saving ? "Saving…" : "Save"}
-        </PendingButton>
-        <PendingButton variant="quiet" size="sm" pending={saving} onClick={onCancel}>
+        </HeldButton>
+        <HeldButton variant="quiet" size="sm" held={saving} onClick={onCancel}>
           Cancel
-        </PendingButton>
+        </HeldButton>
       </div>
     </form>
   );

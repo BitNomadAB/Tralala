@@ -3,40 +3,8 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it } from "vitest";
 import { BriefApprove } from "@/features/loops/BriefApprove";
-import { BusyButton } from "@/features/loops/BusyButton";
 import { InfoEditor } from "@/features/loops/InfoEditor";
 import { ScopeReview } from "@/features/loops/ScopeReview";
-
-describe("a button that keeps the focus through what it started", () => {
-  it("stays focused and does nothing while busy, and is disabled only when told so", async () => {
-    const pressed: string[] = [];
-    const { rerender } = render(
-      <BusyButton busy={false} onClick={() => pressed.push("save")}>
-        Save
-      </BusyButton>,
-    );
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    rerender(
-      <BusyButton busy onClick={() => pressed.push("save")}>
-        Save
-      </BusyButton>,
-    );
-    const button = screen.getByRole("button", { name: "Save" });
-    expect(button).toHaveFocus();
-    expect(button).toHaveAttribute("aria-disabled", "true");
-    expect(button).toBeEnabled();
-    await user.keyboard("{Enter}");
-    expect(pressed).toEqual(["save"]);
-
-    rerender(
-      <BusyButton busy={false} disabled>
-        Save
-      </BusyButton>,
-    );
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-  });
-});
 
 type ReviewProps = ComponentProps<typeof ScopeReview>;
 

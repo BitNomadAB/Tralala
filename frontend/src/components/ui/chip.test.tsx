@@ -79,6 +79,11 @@ describe("CheckChip", () => {
     expect(box).toBeChecked();
     await user.click(screen.getByText("Alpha"));
     expect(box).not.toBeChecked();
+    // The focus ring stands off the chip, so it does not melt into a ticked chip's border.
+    expect(box.closest("label")).toHaveClass(
+      "has-[:focus-visible]:outline-2",
+      "has-[:focus-visible]:outline-offset-2",
+    );
   });
 
   it("does not toggle while disabled", async () => {

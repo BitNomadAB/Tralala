@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { HeldButton } from "@/components/ui/held-button";
 import { Menu } from "@/components/ui/menu";
 import { ReasonButton } from "@/components/ui/reason-button";
 import type { Discussion } from "@/lib/types";
@@ -14,7 +15,6 @@ import {
   type ReviewDecision,
   type RunAction,
 } from "./discussionRules";
-import { HeldButton } from "./HeldButton";
 
 /**
  * The actions row under the sign: the person's decision (Approve as the primary, Request rework,

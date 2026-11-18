@@ -13,6 +13,12 @@ import { FACE_MAX_STEPS } from "./faceLimits";
  * completions of Work. Pure, so each is tested on its own.
  */
 
+/** A note's first six words, so each note's Edit button says which note it edits. */
+export function noteExcerpt(text: string): string {
+  const words = text.trim().split(/\s+/);
+  return words.length > 6 ? `${words.slice(0, 6).join(" ")}…` : words.join(" ");
+}
+
 /** What the foot line under the steps says: how many of five, or why there are no more. */
 export function stepsFoot(count: number): string {
   return count >= FACE_MAX_STEPS

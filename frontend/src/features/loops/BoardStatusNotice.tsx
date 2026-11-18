@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
@@ -41,14 +41,14 @@ export function BoardStatusNotice({ board }: { board: Board }) {
         The last backups and the export archive stay available.
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <Button
+        <HeldButton
           size="sm"
           variant="outline"
           onClick={() => retryMigration.mutate()}
-          disabled={retryMigration.isPending}
+          held={retryMigration.isPending}
         >
           Retry migration
-        </Button>
+        </HeldButton>
         <a className="underline" href={api.exportUrl(board.id)} download={`${board.name}.zip`}>
           Download export archive
         </a>

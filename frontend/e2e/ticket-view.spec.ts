@@ -166,7 +166,7 @@ test.describe("the Ticket view", () => {
       await dialog.getByRole("button", { name: "Save note" }).click();
       const notes = dialog.getByRole("list", { name: "Your notes" });
       await expect(notes).toContainText(tickets.NOTE);
-      await notes.getByRole("button", { name: "Edit" }).click();
+      await notes.getByRole("button", { name: /^Edit note/ }).click();
       await notes.getByLabel("Edit the note").fill(tickets.NOTE_EDITED);
       await notes.getByRole("button", { name: "Save", exact: true }).click();
       await expect(notes.getByText(tickets.NOTE_EDITED)).toBeVisible();

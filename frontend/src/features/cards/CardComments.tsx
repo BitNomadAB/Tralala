@@ -82,7 +82,7 @@ export function CardComments({
                   disabled={retrying}
                   onClick={() => onRetryMention(job.id)}
                 >
-                  Retry
+                  Retry<span className="sr-only"> the mention of {job.agent_name}</span>
                 </Button>
               ) : null}
             </li>

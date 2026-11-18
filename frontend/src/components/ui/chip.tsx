@@ -52,7 +52,7 @@ export function CheckChip({
   return (
     <label
       className={cn(
-        "inline-flex cursor-pointer items-center gap-2 rounded-full border px-2.5 py-1 text-[13px] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--ring)] has-[:disabled]:cursor-default has-[:disabled]:opacity-50",
+        "inline-flex cursor-pointer items-center gap-2 rounded-full border px-2.5 py-1 text-[13px] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--ring)] has-[:disabled]:cursor-default has-[:disabled]:opacity-50",
         checked
           ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]"
           : "border-[var(--border)]",
