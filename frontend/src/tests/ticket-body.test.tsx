@@ -227,12 +227,17 @@ describe("editing the face", () => {
     await user.click(screen.getByRole("button", { name: "Edit what will be done" }));
     const form = screen.getByRole("form", { name: "Edit the face" });
     await user.click(within(form).getByRole("button", { name: "Save" }));
-    const alerts = await within(form).findAllByRole("alert");
-    expect(alerts.map((alert) => alert.textContent)).toEqual([summary, steps]);
     const summaryField = within(form).getByLabelText("Summary");
+    // The first field with a message takes the focus and reads the message with it.
+    await waitFor(() => expect(summaryField).toHaveFocus());
     expect(summaryField).toHaveAttribute("aria-invalid", "true");
+    expect(summaryField).toHaveAccessibleDescription(`Error: ${summary} 7 of 20 words`);
     expect(summaryField.parentElement).toHaveTextContent(summary);
-    expect(within(form).getByLabelText("What will be done").parentElement).toHaveTextContent(steps);
+    const stepsField = within(form).getByLabelText("What will be done");
+    expect(stepsField.parentElement).toHaveTextContent(steps);
+    expect(stepsField).toHaveAccessibleDescription(
+      `Error: ${steps} One step per line. 5 of 5 steps`,
+    );
     // The draft stays open to fix; Cancel puts the face back.
     await user.click(within(form).getByRole("button", { name: "Cancel" }));
     expect(within(panel("For you")).getByRole("list", { name: "Steps" })).toBeInTheDocument();

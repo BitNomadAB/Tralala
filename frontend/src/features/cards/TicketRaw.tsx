@@ -15,12 +15,15 @@ const LINK =
  * evidence and the plan entry. A block with nothing in it is absent.
  */
 export function TicketRaw({
+  level,
   card,
   readiness,
   readOnly,
   onSaveDescription,
   ticketHref,
 }: {
+  /** The level of the section around it; each block's label is one level under it. */
+  level: 2 | 3;
   card: Card;
   readiness: LoopReadiness | undefined;
   readOnly: boolean;
@@ -32,6 +35,7 @@ export function TicketRaw({
   const [draft, setDraft] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const blockLevel = level === 2 ? 3 : 4;
   const item =
     card.plan_item_id === null
       ? undefined
@@ -53,7 +57,7 @@ export function TicketRaw({
         it is, for when you want to dig.
       </p>
       {card.summary ? (
-        <Block label="Summary for AI">
+        <Block level={blockLevel} label="Summary for AI">
           <Raw text={card.summary} />
           {card.summary_source === "agent" ? (
             <p className="m-0 mt-1 text-xs text-[var(--foreground-faint)]">Written by an agent.</p>
@@ -67,6 +71,7 @@ export function TicketRaw({
       ) : null}
       {card.description || !readOnly ? (
         <Block
+          level={blockLevel}
           label="Description"
           action={
             readOnly || draft !== null ? undefined : (
@@ -112,17 +117,17 @@ export function TicketRaw({
         </Block>
       ) : null}
       {card.acceptance_criteria.length > 0 ? (
-        <Block label="Accepted when">
+        <Block level={blockLevel} label="Accepted when">
           <Raw text={card.acceptance_criteria.join("\n")} />
         </Block>
       ) : null}
       {card.expected_evidence.length > 0 ? (
-        <Block label="Evidence">
+        <Block level={blockLevel} label="Evidence">
           <Raw text={card.expected_evidence.join("\n")} />
         </Block>
       ) : null}
       {item ? (
-        <Block label="Plan entry">
+        <Block level={blockLevel} label="Plan entry">
           <Raw text={planEntryText(item, readiness)} />
         </Block>
       ) : null}

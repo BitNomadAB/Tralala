@@ -32,7 +32,8 @@ describe("the Ticket over the Kanban", () => {
     expect(copyKey.parentElement).toHaveTextContent(KEY);
     expect(await within(modal).findByText(PHASE_NAME, { selector: "b" })).toBeInTheDocument();
     expect(modal).toHaveTextContent(`Phase 1 · ${PHASE_NAME}`);
-    for (const name of ["Open as page", "Close dialog", "Start work", "Mark as waiting"]) {
+    expect(within(modal).getByRole("link", { name: "Open as page" })).toBeInTheDocument();
+    for (const name of ["Close dialog", "Start work", "Mark as waiting"]) {
       expect(within(modal).getByRole("button", { name })).toBeInTheDocument();
     }
     for (const name of ["Comment", "More actions"]) {
@@ -188,7 +189,7 @@ describe("the Ticket over the Kanban", () => {
 
   it("opens as a page with the breadcrumb and a way back to the board", async () => {
     const { user } = await renderTicket();
-    await user.click(screen.getByRole("button", { name: "Open as page" }));
+    await user.click(screen.getByRole("link", { name: "Open as page" }));
     expect(await screen.findByRole("heading", { level: 1, name: TITLE })).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Location" })).toHaveTextContent(TICKET_URL);
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -203,7 +204,7 @@ describe("the Ticket over the Kanban", () => {
       "href",
       "/boards/board-1/loops/loop-1",
     );
-    expect(screen.queryByRole("button", { name: "Open as page" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open as page" })).toBeNull();
     expect(screen.getByRole("button", { name: "Start work" })).toBeInTheDocument();
   });
 

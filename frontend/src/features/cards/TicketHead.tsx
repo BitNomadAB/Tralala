@@ -1,5 +1,6 @@
 import { Copy, ExternalLink, X } from "lucide-react";
 import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { Card } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTitleEdit } from "./useTitleEdit";
@@ -11,9 +12,10 @@ const TITLE =
   "m-0 mt-2.5 max-w-[26ch] text-balance text-[26px] font-semibold leading-tight tracking-[-0.01em] text-[var(--foreground)]";
 
 /**
- * The Ticket's head: the key with its copy button, the Phase, "Open as page" and Close when it is a
- * dialog, the title as the view's heading (a click edits it inline), the summary as the lead, and
- * the actions row. `titleWrap` lets the dialog name itself by the heading.
+ * The Ticket's head: the key with its copy button, the Phase, "Open as page" (a link, so it can open
+ * in a new tab) and Close when it is a dialog, the title as the view's heading (a click edits it
+ * inline), the summary as the lead, and the actions row. `titleWrap` lets the dialog name itself by
+ * the heading; while the title is edited a visually hidden heading keeps that name.
  */
 export function TicketHead({
   card,
@@ -23,7 +25,7 @@ export function TicketHead({
   readOnly,
   onSaveTitle,
   onCopyKey,
-  onOpenPage,
+  pageHref,
   onClose,
   page = false,
   actions,
@@ -36,7 +38,8 @@ export function TicketHead({
   readOnly: boolean;
   onSaveTitle: (title: string) => void;
   onCopyKey: (key: string) => void;
-  onOpenPage?: (() => void) | undefined;
+  /** The Ticket's own page, linked from the dialog's head. */
+  pageHref?: string | undefined;
   onClose?: (() => void) | undefined;
   page?: boolean | undefined;
   actions: ReactNode;
@@ -86,11 +89,11 @@ export function TicketHead({
           </span>
         ) : null}
         <span className="flex-1" />
-        {onOpenPage ? (
-          <button type="button" className={ICON_BUTTON} onClick={onOpenPage}>
+        {pageHref ? (
+          <Link to={pageHref} className={ICON_BUTTON}>
             <ExternalLink size={15} aria-hidden="true" />
             <span>Open as page</span>
-          </button>
+          </Link>
         ) : null}
         {onClose ? (
           <button type="button" aria-label="Close dialog" className={ICON_BUTTON} onClick={onClose}>
@@ -100,20 +103,23 @@ export function TicketHead({
       </div>
 
       {title.editing ? (
-        <input
-          aria-label="Title"
-          autoFocus
-          data-keeps-escape=""
-          value={title.draft}
-          maxLength={200}
-          onChange={(event) => title.change(event.target.value)}
-          onKeyDown={title.onKeyDown}
-          onBlur={(event) => title.save(event.currentTarget.value)}
-          className={cn(
-            TITLE,
-            "w-full max-w-none rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 outline-none focus-visible:border-[var(--ring)]",
-          )}
-        />
+        <>
+          {titleWrap(<Heading className="sr-only">{card.title}</Heading>)}
+          <input
+            aria-label="Title"
+            autoFocus
+            data-keeps-escape=""
+            value={title.draft}
+            maxLength={200}
+            onChange={(event) => title.change(event.target.value)}
+            onKeyDown={title.onKeyDown}
+            onBlur={(event) => title.save(event.currentTarget.value)}
+            className={cn(
+              TITLE,
+              "w-full max-w-none rounded-md border border-[var(--field-border)] bg-[var(--surface)] px-2 py-0.5 outline-none focus-visible:border-[var(--ring)]",
+            )}
+          />
+        </>
       ) : (
         titleWrap(
           <Heading className={TITLE}>

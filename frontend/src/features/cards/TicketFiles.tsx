@@ -14,6 +14,7 @@ const LINK =
  * `picker` when given, so the Ticket's own Add file opens the same one.
  */
 export function TicketFiles({
+  level,
   boardId,
   cardId,
   readOnly,
@@ -21,6 +22,8 @@ export function TicketFiles({
   onChanged,
   picker,
 }: {
+  /** The heading level of "Files"; h3 unless the host says otherwise. */
+  level?: 2 | 3 | undefined;
   boardId: string;
   cardId: string;
   readOnly: boolean;
@@ -37,6 +40,7 @@ export function TicketFiles({
   return (
     <Section
       title="Files"
+      level={level}
       count={files.attachments.length}
       trailing={
         readOnly ? undefined : (

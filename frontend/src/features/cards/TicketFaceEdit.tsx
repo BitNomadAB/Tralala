@@ -1,6 +1,6 @@
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { FieldMessage, Input, Label, Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { FaceCount, FaceDraft, FaceErrors, FaceField } from "./faceLimits";
 
@@ -15,9 +15,12 @@ const FIELDS: readonly { field: FaceField; label: string; hint?: string; lines?:
 ];
 
 /**
- * The face as fields, for a person: each with its live counter ("14 of 20 words"), a hint for the
- * lists, and the server's messages under the field they name, as the server words them. The
- * server stays the judge; the counters only say where a limit is.
+ * The face as fields, for a person: each with its live counter ("14 of 20 words", and what is
+ * needed when a field is outside its limits), a hint for the lists, and the server's messages under
+ * the field they name, as the server words them. Each field is described by its messages and its
+ * counter, and a refused save puts the focus on the first field with a message, so a screen reader
+ * reads the field with what is wrong with it. The server stays the judge; the counters only say
+ * where a limit is. The first field takes the focus when the form opens.
  */
 export function TicketFaceEdit({
   draft,
@@ -37,6 +40,13 @@ export function TicketFaceEdit({
   onCancel: () => void;
 }) {
   const base = useId();
+
+  // A new refusal (a new errors object) sends the focus to the first field it names.
+  useEffect(() => {
+    const first = FIELDS.find(({ field }) => (errors.fields[field] ?? []).length > 0);
+    if (first) document.getElementById(`${base}-${first.field}`)?.focus();
+  }, [errors, base]);
+
   return (
     <form
       aria-label="Edit the face"
@@ -46,15 +56,17 @@ export function TicketFaceEdit({
         onSave();
       }}
     >
-      {FIELDS.map(({ field, label, hint, lines }) => {
+      {FIELDS.map(({ field, label, hint, lines }, index) => {
         const id = `${base}-${field}`;
         const count = counts[field];
         const messages = errors.fields[field] ?? [];
-        const described = `${id}-count`;
+        const messageIds = messages.map((_message, place) => `${id}-error-${String(place)}`);
+        const counter = `${id}-count`;
         const props = {
           id,
           value: draft[field],
-          "aria-describedby": described,
+          autoFocus: index === 0,
+          "aria-describedby": [...messageIds, counter].join(" "),
           "aria-invalid": messages.length > 0 || undefined,
           onChange: (event: { target: { value: string } }) => {
             onChange(field, event.target.value);
@@ -68,8 +80,13 @@ export function TicketFaceEdit({
             ) : (
               <Textarea {...props} className={lines ? "min-h-24" : "min-h-16"} />
             )}
+            {messages.map((message, place) => (
+              <FieldMessage key={message} id={messageIds[place] ?? `${id}-error`}>
+                {message}
+              </FieldMessage>
+            ))}
             <p
-              id={described}
+              id={counter}
               className="m-0 flex flex-wrap justify-between gap-2 text-xs text-[var(--foreground-faint)]"
             >
               <span>{hint}</span>
@@ -79,11 +96,6 @@ export function TicketFaceEdit({
                 {count.text}
               </span>
             </p>
-            {messages.map((message) => (
-              <p key={message} role="alert" className="m-0 text-xs text-[var(--destructive)]">
-                {message}
-              </p>
-            ))}
           </div>
         );
       })}

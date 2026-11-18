@@ -45,15 +45,32 @@ export function listItems(text: string): string[] {
     .filter((line) => line !== "");
 }
 
-/** One counter under a field: what it says and whether the text is over the limit. */
+/** One counter under a field: what it says and whether the text is outside the limits. */
 export interface FaceCount {
   text: string;
   over: boolean;
 }
 
-function count(value: number, most: number, unit: string, least = 0): FaceCount {
-  return { text: `${value} of ${most} ${unit}`, over: value > most || value < least };
+/** A unit as one and as many: "word", "words". */
+type Unit = readonly [one: string, many: string];
+
+/**
+ * "14 of 20 words"; outside the limits it also says what is needed in words ("0 of 20 words,
+ * needs at least 1 word", "4 of 3 sentences, 1 too many"), so the colour is never the only sign.
+ */
+function count(value: number, most: number, [one, many]: Unit, least = 0): FaceCount {
+  const text = `${value} of ${most} ${many}`;
+  if (value < least) {
+    return { text: `${text}, needs at least ${least} ${least === 1 ? one : many}`, over: true };
+  }
+  if (value > most) return { text: `${text}, ${value - most} too many`, over: true };
+  return { text, over: false };
 }
+
+const WORDS: Unit = ["word", "words"];
+const SENTENCES: Unit = ["sentence", "sentences"];
+const POINTS: Unit = ["point", "points"];
+const STEPS: Unit = ["step", "steps"];
 
 /** The draft as a person types it: the texts as they are, each list one item per line. */
 export interface FaceDraft {
@@ -68,12 +85,12 @@ export interface FaceDraft {
 /** The counter of every field: "14 of 20 words", "2 of 3 sentences", "4 of 5 steps". */
 export function faceCounts(draft: FaceDraft): Record<FaceField, FaceCount> {
   return {
-    summary: count(wordCount(draft.summary), FACE_MAX_SUMMARY_WORDS, "words", 1),
-    why: count(sentenceCount(draft.why), FACE_MAX_SENTENCES, "sentences", 1),
-    if_skipped: count(sentenceCount(draft.if_skipped), FACE_MAX_SENTENCES, "sentences", 1),
-    pros: count(listItems(draft.pros).length, FACE_MAX_POINTS, "points"),
-    cons: count(listItems(draft.cons).length, FACE_MAX_POINTS, "points"),
-    steps: count(listItems(draft.steps).length, FACE_MAX_STEPS, "steps", FACE_MIN_STEPS),
+    summary: count(wordCount(draft.summary), FACE_MAX_SUMMARY_WORDS, WORDS, 1),
+    why: count(sentenceCount(draft.why), FACE_MAX_SENTENCES, SENTENCES, 1),
+    if_skipped: count(sentenceCount(draft.if_skipped), FACE_MAX_SENTENCES, SENTENCES, 1),
+    pros: count(listItems(draft.pros).length, FACE_MAX_POINTS, POINTS),
+    cons: count(listItems(draft.cons).length, FACE_MAX_POINTS, POINTS),
+    steps: count(listItems(draft.steps).length, FACE_MAX_STEPS, STEPS, FACE_MIN_STEPS),
   };
 }
 

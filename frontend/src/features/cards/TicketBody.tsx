@@ -31,6 +31,7 @@ const LINK =
  * face shows its description in For you. The choice of view lasts while the view is open.
  */
 export function TicketBody({
+  level,
   boardId,
   loopId,
   card,
@@ -52,6 +53,8 @@ export function TicketBody({
   onSaveDescription,
   refresh,
 }: {
+  /** The sections' heading level: 2 under the page's h1, 3 under the dialog's h2. */
+  level: 2 | 3;
   boardId: string;
   loopId: string;
   card: CardDetail;
@@ -88,6 +91,7 @@ export function TicketBody({
       <section aria-labelledby={headingId}>
         <SectionHeader
           id={headingId}
+          level={level}
           size="lg"
           title="What will be done"
           trailing={
@@ -129,7 +133,10 @@ export function TicketBody({
             <div className="grid gap-2">
               {card.description ? (
                 <div className="max-w-[70ch] text-[15px] leading-relaxed">
-                  {renderMarkdown(card.description, { ticketHref, headingLevel: 4 })}
+                  {renderMarkdown(card.description, {
+                    ticketHref,
+                    headingLevel: level === 2 ? 3 : 4,
+                  })}
                 </div>
               ) : null}
               <p className="m-0 text-[13px] text-[var(--foreground-faint)]">
@@ -152,6 +159,7 @@ export function TicketBody({
         </SegmentedPanel>
         <SegmentedPanel idBase={idBase} value="raw" active={view}>
           <TicketRaw
+            level={level}
             card={card}
             readiness={readiness}
             readOnly={readOnly}
@@ -161,6 +169,7 @@ export function TicketBody({
         </SegmentedPanel>
       </section>
       <TicketFiles
+        level={level}
         boardId={boardId}
         cardId={card.id}
         readOnly={readOnly}
@@ -169,6 +178,7 @@ export function TicketBody({
         picker={picker}
       />
       <TicketActivity
+        level={level}
         card={card}
         live={live}
         comments={comments}

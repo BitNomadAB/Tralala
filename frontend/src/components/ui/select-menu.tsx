@@ -132,7 +132,7 @@ export function SelectMenu<T extends string>({
           event.preventDefault();
           setOpen(true);
         }}
-        className="inline-flex w-full cursor-pointer items-center justify-between gap-2.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-[9px] text-sm font-semibold text-[var(--foreground)] transition-colors hover:border-[var(--foreground-faint)] disabled:cursor-default disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+        className="inline-flex w-full cursor-pointer items-center justify-between gap-2.5 rounded-md border border-[var(--field-border)] bg-[var(--surface)] px-3 py-[9px] text-sm font-semibold text-[var(--foreground)] transition-colors hover:border-[var(--foreground-faint)] disabled:cursor-default disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
       >
         <span className="truncate">{current?.label ?? ""}</span>
         <ChevronDown

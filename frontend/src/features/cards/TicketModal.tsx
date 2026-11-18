@@ -1,5 +1,4 @@
 import type { ReactElement } from "react";
-import { useNavigate } from "react-router-dom";
 import { Dialog, DialogFrame, DialogTitle } from "@/components/ui/dialog";
 import { DiscussionView } from "@/features/discussions/DiscussionView";
 import type { MarkdownOptions } from "@/lib/markdown";
@@ -34,7 +33,6 @@ export function TicketModal({
   ticketHref?: MarkdownOptions["ticketHref"];
   returnFocus?: (() => HTMLElement | null) | undefined;
 }) {
-  const navigate = useNavigate();
   const titleWrap = (heading: ReactElement) => <DialogTitle asChild>{heading}</DialogTitle>;
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -60,7 +58,7 @@ export function TicketModal({
             cardId={cardId}
             host="modal"
             onClose={onClose}
-            onOpenPage={() => void navigate(ticketPagePath(boardId, loopId, cardId))}
+            pageHref={ticketPagePath(boardId, loopId, cardId)}
             titleWrap={titleWrap}
             ticketHref={ticketHref}
           />

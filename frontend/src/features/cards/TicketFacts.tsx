@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type FocusEvent } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { LabelChip } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -183,7 +183,11 @@ export function TicketFacts({
   );
 }
 
-/** A date field: Enter or leaving it saves a change, Escape keeps the date, Clear removes it. */
+/**
+ * A date field: Enter or leaving it saves a change, Escape keeps the date, Clear removes it. Focus
+ * that moves between the field and Clear stays in the editor (Tab reaches Clear); focus that leaves
+ * both saves and closes it, and stays where the person moved it.
+ */
 function DueEditor({
   value,
   onSave,
@@ -191,33 +195,49 @@ function DueEditor({
 }: {
   value: string | null;
   onSave: (due: string | null) => void;
-  onDone: () => void;
+  onDone: (returnFocus?: boolean) => void;
 }) {
   const initial = toDateInputValue(value);
   const [draft, setDraft] = useState(initial);
+  const editor = useRef<HTMLSpanElement>(null);
+  // Set once the editor closed, so a blur that follows Enter, Escape or Clear saves nothing twice.
+  const closed = useRef(false);
 
-  function commit() {
+  function close(returnFocus = true) {
+    closed.current = true;
+    onDone(returnFocus);
+  }
+
+  function commit(returnFocus = true) {
+    if (closed.current) return;
     if (draft !== initial) onSave(draft === "" ? null : draft);
-    onDone();
+    close(returnFocus);
+  }
+
+  /** Focus left the field or Clear: within the editor it stays open, out of it it saves. */
+  function leave(event: FocusEvent) {
+    const next = event.relatedTarget;
+    if (next instanceof Node && editor.current?.contains(next)) return;
+    // Focus that went nowhere (a press on the page) comes back to the fact.
+    commit(next === null);
   }
 
   return (
-    <span className="flex flex-wrap items-center gap-2">
+    <span ref={editor} className="flex flex-wrap items-center gap-2" data-keeps-escape="">
       <input
         type="date"
         aria-label="Due date"
         autoFocus
-        data-keeps-escape=""
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
+        onBlur={leave}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
             commit();
           } else if (event.key === "Escape") {
             event.preventDefault();
-            onDone();
+            close();
           }
         }}
         className="h-8 rounded-md border border-[var(--field-border)] bg-[var(--surface)] px-2 text-sm text-[var(--foreground)]"
@@ -226,11 +246,20 @@ function DueEditor({
         <Button
           variant="quiet"
           size="sm"
-          // Keeps the field focused, so its blur does not close the editor before the click lands.
+          // Keeps the field focused where a press does not focus a button (Safari), so its blur
+          // does not close the editor before the click lands.
           onMouseDown={(event) => event.preventDefault()}
+          onBlur={leave}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              close();
+            }
+          }}
           onClick={() => {
+            if (closed.current) return;
             onSave(null);
-            onDone();
+            close();
           }}
         >
           Clear

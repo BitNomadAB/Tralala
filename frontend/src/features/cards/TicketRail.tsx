@@ -16,6 +16,7 @@ const MORE_ITEM =
  * the Details, and More (checklists, Copy link, Move to another Loop, Archive).
  */
 export function TicketRail({
+  level,
   boardId,
   loopId,
   card,
@@ -31,6 +32,8 @@ export function TicketRail({
   checklists,
   onCopyLink,
 }: {
+  /** The heading level of Details: 2 under the page's h1, 3 under the dialog's h2. */
+  level: 2 | 3;
   boardId: string;
   loopId: string;
   card: Card;
@@ -78,7 +81,7 @@ export function TicketRail({
       </section>
 
       <section aria-label="Details">
-        <SectionHeader title="Details" />
+        <SectionHeader title="Details" level={level} />
         <TicketFacts
           card={card}
           readiness={readiness}
