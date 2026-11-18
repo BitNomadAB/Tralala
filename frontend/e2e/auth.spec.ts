@@ -8,7 +8,10 @@ test.describe("authentication", () => {
     await page.getByLabel("Password").fill("definitely-wrong");
     await page.getByRole("button", { name: "Sign in" }).click();
 
-    await expect(page.getByRole("alert")).toContainText(/invalid credentials/i);
+    // Said under the password, which the refusal does not tell apart from the username.
+    await expect(page.getByLabel("Password")).toHaveAccessibleDescription(
+      /username or password is not right/,
+    );
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
     const cookies = await page.context().cookies();
     expect(cookies.some((cookie) => cookie.name === "tralala_session")).toBe(false);

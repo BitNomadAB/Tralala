@@ -12,16 +12,24 @@ export function DialogContent({
   className,
   title,
   description,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
 }: {
   children: ReactNode;
   className?: string;
   title: string;
   description?: string | undefined;
+  /** Where focus goes on opening; without it, the first control (the header's Close). */
+  onOpenAutoFocus?: ((event: Event) => void) | undefined;
+  /** Where focus goes on closing; without it, back to what opened the dialog. */
+  onCloseAutoFocus?: ((event: Event) => void) | undefined;
 }) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
       <DialogPrimitive.Content
+        onOpenAutoFocus={onOpenAutoFocus}
+        onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
           "fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[min(680px,94vw)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl scrollbar-thin",
           className,

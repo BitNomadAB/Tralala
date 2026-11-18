@@ -46,6 +46,9 @@ export function EnrolPage() {
   const { refresh } = useAuth();
   usePageTitle({ page: "enrol" });
   const [token, setToken] = useState(params.get("token") ?? "");
+  // The invitation link names the account, so the person and their password manager see which
+  // username the new password belongs to; a token typed by hand comes without it.
+  const username = params.get("user") ?? "";
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   // A refusal about no field (a disabled account, the server is down) is said above the button.
@@ -63,6 +66,8 @@ export function EnrolPage() {
 
   async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+    // The button stays focusable while the request runs (`aria-disabled`); a second press waits.
+    if (pending) return;
     setError(null);
     const problems = [
       ...problemAt("enrol-token", token.trim() ? null : "Paste the invitation token."),
@@ -118,6 +123,17 @@ export function EnrolPage() {
             required
           />
         </Field>
+        {username ? (
+          <Field label="Username" htmlFor="enrol-username" hint="You sign in with this name.">
+            <Input
+              id="enrol-username"
+              name="username"
+              autoComplete="username"
+              value={username}
+              readOnly
+            />
+          </Field>
+        ) : null}
         <Field
           label="Password"
           htmlFor="enrol-password"
@@ -164,7 +180,7 @@ export function EnrolPage() {
             {error}
           </p>
         ) : null}
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" aria-disabled={pending ? true : undefined}>
           {pending ? "Saving…" : "Set password and sign in"}
         </Button>
         <Link className="text-[11px] underline" to="/login">

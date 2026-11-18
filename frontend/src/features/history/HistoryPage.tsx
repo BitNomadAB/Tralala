@@ -7,10 +7,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/input";
+import { useAnnounceResults } from "@/features/boards/resultAnnouncements";
 import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import { keys, useBoard, useHistory } from "@/lib/queries";
 import type { HistoryDetail, HistorySummary } from "@/lib/types";
+
+/** "1 record", "3 records"; what the list says above it and what a screen reader hears. */
+function recordCountWords(total: number): string {
+  return total === 1 ? "1 record" : `${total} records`;
+}
 
 export function HistoryPage() {
   const { boardId = "" } = useParams();
@@ -27,6 +33,12 @@ export function HistoryPage() {
   });
 
   const items: HistorySummary[] = historyQuery.data?.items ?? [];
+  const total = historyQuery.data?.meta?.total ?? items.length;
+  useAnnounceResults(
+    JSON.stringify([q.trim(), sourceKind, qaStatus]),
+    historyQuery.data !== undefined && !historyQuery.isFetching,
+    total === 0 ? "No historical records match this search." : `${recordCountWords(total)}.`,
+  );
 
   return (
     <section className="flex flex-col gap-4">
@@ -76,7 +88,7 @@ export function HistoryPage() {
       </div>
 
       <p className="text-xs text-[var(--muted-foreground)]">
-        {historyQuery.data?.meta?.total ?? items.length} record(s) ·{" "}
+        {recordCountWords(total)} ·{" "}
         {(historyQuery.data?.meta as { engine?: string } | undefined)?.engine ?? "like"} search
       </p>
 
@@ -187,7 +199,13 @@ function HistoryRecordDialog({
                 <h2 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
                   {document.kind.replace("_", " ")}
                 </h2>
-                <div className="max-h-64 overflow-y-auto rounded-lg border border-[var(--border)] p-2 text-sm scrollbar-thin">
+                {/* A long document scrolls in its box; taking focus lets a keyboard scroll it. */}
+                <div
+                  role="group"
+                  aria-label={`${document.kind.replace("_", " ")} text`}
+                  tabIndex={0}
+                  className="max-h-64 overflow-y-auto rounded-lg border border-[var(--border)] p-2 text-sm scrollbar-thin"
+                >
                   {renderMarkdown(document.content, { headingLevel: 3 })}
                 </div>
               </section>
@@ -197,16 +215,23 @@ function HistoryRecordDialog({
                 <h2 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
                   Notes
                 </h2>
-                <ol className="flex max-h-64 flex-col gap-1.5 overflow-y-auto rounded-lg border border-[var(--border)] p-2 text-sm scrollbar-thin">
-                  {notes.map((note) => (
-                    <li key={note.id}>
-                      <span className="text-[11px] text-[var(--muted-foreground)]">
-                        {note.author_name}
-                      </span>
-                      {renderMarkdown(note.content, { headingLevel: 3 })}
-                    </li>
-                  ))}
-                </ol>
+                <div
+                  role="group"
+                  aria-label="Notes text"
+                  tabIndex={0}
+                  className="max-h-64 overflow-y-auto rounded-lg border border-[var(--border)] p-2 text-sm scrollbar-thin"
+                >
+                  <ol className="flex flex-col gap-1.5">
+                    {notes.map((note) => (
+                      <li key={note.id}>
+                        <span className="text-[11px] text-[var(--muted-foreground)]">
+                          {note.author_name}
+                        </span>
+                        {renderMarkdown(note.content, { headingLevel: 3 })}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
               </section>
             ) : null}
             {record.artifacts.length > 0 ? (

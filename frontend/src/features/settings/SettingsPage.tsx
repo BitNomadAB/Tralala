@@ -2,9 +2,8 @@ import { GitBranch } from "lucide-react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "@/app/usePageTitle";
 import { useAuth } from "@/features/auth/useAuth";
-import { THEME_KITS, type ThemeKit, type ThemeMode } from "@/themes/theme";
-import { useTheme } from "@/themes/useTheme";
 import { AgentsCard } from "./AgentsCard";
+import { AppearanceCard } from "./AppearanceCard";
 import { BoardTemplatesCard } from "./BoardTemplatesCard";
 import { BootstrapPasswordBanner } from "./BootstrapPasswordBanner";
 import { InteractionAccessCard } from "./InteractionAccessCard";
@@ -12,20 +11,7 @@ import { RoleTemplatesCard } from "./RoleTemplatesCard";
 import { SecurityCard } from "./SecurityCard";
 import { UsersCard } from "./UsersCard";
 
-const themeChoices: { value: ThemeMode; label: string; description: string }[] = [
-  { value: "dark", label: "Dark", description: "Night palette of the chosen theme" },
-  { value: "light", label: "Light", description: "Day palette of the chosen theme" },
-  { value: "system", label: "System", description: "Follow the operating system" },
-];
-
-const kitSwatches: Record<ThemeKit, { background: string; primary: string; accent: string }> = {
-  carenomad: { background: "#0a1628", primary: "#4b8bf5", accent: "#34d399" },
-  matchmap: { background: "#0b1326", primary: "#ff7043", accent: "#94ccff" },
-  classic: { background: "#0b0f14", primary: "#669bff", accent: "#1d9bf0" },
-};
-
 export function SettingsPage() {
-  const { mode, kit, setMode, setKit } = useTheme();
   const { actor } = useAuth();
   usePageTitle({ page: "settings" });
   const isAdmin = actor?.role === "admin";
@@ -40,68 +26,7 @@ export function SettingsPage() {
 
       {isAdmin ? <BootstrapPasswordBanner /> : null}
 
-      <div className="card-surface p-5">
-        <h2 className="text-sm font-semibold">Appearance</h2>
-        <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-          Pick a theme kit, then dark, light or follow the system. Saved to your account, so it
-          follows you to any browser.
-        </p>
-        <div role="radiogroup" aria-label="Theme kit" className="mt-3 grid gap-2 sm:grid-cols-3">
-          {THEME_KITS.map((option) => {
-            const swatch = kitSwatches[option.value];
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={kit === option.value}
-                onClick={() => setKit(option.value)}
-                className={`flex items-center gap-3 rounded-lg border p-3 text-left ${
-                  kit === option.value
-                    ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]"
-                    : "border-[var(--border)]"
-                }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className="flex h-9 w-9 flex-none items-center justify-center gap-0.5 rounded-md border border-[var(--border)]"
-                  style={{ background: swatch.background }}
-                >
-                  <span className="h-2 w-2 rounded-full" style={{ background: swatch.primary }} />
-                  <span className="h-2 w-2 rounded-full" style={{ background: swatch.accent }} />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{option.label}</span>
-                  <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
-                    {option.description}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <div role="radiogroup" aria-label="Theme mode" className="mt-3 grid gap-2 sm:grid-cols-3">
-          {themeChoices.map((choice) => (
-            <button
-              key={choice.value}
-              type="button"
-              role="radio"
-              aria-checked={mode === choice.value}
-              onClick={() => setMode(choice.value)}
-              className={`rounded-lg border p-3 text-left ${
-                mode === choice.value
-                  ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]"
-                  : "border-[var(--border)]"
-              }`}
-            >
-              <span className="text-sm font-medium">{choice.label}</span>
-              <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
-                {choice.description}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <AppearanceCard />
 
       {isAdmin ? (
         <div className="card-surface p-5">

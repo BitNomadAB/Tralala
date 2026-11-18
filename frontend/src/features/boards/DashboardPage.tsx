@@ -12,17 +12,20 @@ import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { useBoards, useDiscussionInbox } from "@/lib/queries";
-import type { Board } from "@/lib/types";
 import { useDashboardTools } from "@/webmcp/useWebMcp";
 import { BoardGrid } from "./BoardGrid";
 import { groupBoards, useBoardSummaries, waitingRows } from "./boardSummaries";
 import { DeleteBoardDialog } from "./DeleteBoardDialog";
 import { NewBoardDialog } from "./NewBoardDialog";
+import { boardCountWords, useAnnounceResults } from "./resultAnnouncements";
 import { useBoardLifecycle } from "./useBoardLifecycle";
+import { useFollowMovedBoard } from "./useFollowMovedBoard";
 import { WaitsForYou } from "./WaitsForYou";
 
 /** The boards every request for "Waits for you" starts from: all of them, recent first. */
 const ALL_BOARDS = { sort: "updated_at", order: "desc" } as const;
+
+const BOARDS_HEADING = "dashboard-boards";
 
 export function DashboardPage() {
   useDashboardTools();
@@ -35,18 +38,29 @@ export function DashboardPage() {
   const [sort, setSort] = useState("updated_at");
   const [creating, setCreating] = useState(false);
   const importInput = useRef<HTMLInputElement>(null);
-  const lifecycle = useBoardLifecycle();
 
   const filters = useMemo(
     () => ({ q: query || undefined, status: status || undefined, sort, order: "desc" }),
     [query, status, sort],
   );
-  const { data, isLoading, error } = useBoards(filters);
+  const { data, isLoading, isFetching, error } = useBoards(filters);
+  const followMoved = useFollowMovedBoard(data?.items, isFetching, BOARDS_HEADING);
+  const lifecycle = useBoardLifecycle({
+    onDone: (type, board) => {
+      if (type !== "duplicate") followMoved({ boardId: board.id, archived: type === "archive" });
+    },
+  });
   // Unfiltered, so searching the tiles never hides what waits; with no filter set it is the same
   // query as the tiles', so the dashboard asks for its boards once.
   const everyBoard = useBoards(ALL_BOARDS);
   const boards = data?.items ?? [];
   const { inUse, readOnly } = groupBoards(boards);
+  const filtered = Boolean(query || status);
+  useAnnounceResults(
+    JSON.stringify([query, status]),
+    data !== undefined && !isFetching,
+    boardCountWords(inUse.length, readOnly.length, filtered),
+  );
   const allBoards = everyBoard.data?.items ?? [];
   const summaries = useBoardSummaries([...allBoards, ...boards]);
   const rows = waitingRows(allBoards, summaries);
@@ -59,9 +73,6 @@ export function DashboardPage() {
 
   const tiles = {
     summaries,
-    onOpen: (board: Board) => {
-      void navigate(`/boards/${board.id}`);
-    },
     onLifecycle: lifecycle.run,
     onDelete: lifecycle.askDelete,
   };
@@ -122,8 +133,8 @@ export function DashboardPage() {
         failed={states.filter((entry) => entry.failed).length}
       />
 
-      <section aria-labelledby="dashboard-boards" className="flex flex-col gap-3">
-        <SectionHeader id="dashboard-boards" title="Your boards" level={2} className="mb-0" />
+      <section aria-labelledby={BOARDS_HEADING} className="flex flex-col gap-3">
+        <SectionHeader id={BOARDS_HEADING} title="Your boards" level={2} className="mb-0" />
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
             <Search
@@ -170,8 +181,8 @@ export function DashboardPage() {
         ) : boards.length === 0 ? (
           <EmptyState
             className="card-surface px-4 py-3.5"
-            message={query || status ? "No board matches." : "No boards yet."}
-            detail={query || status ? undefined : "A board holds the Loops of one project."}
+            message={filtered ? "No board matches." : "No boards yet."}
+            detail={filtered ? undefined : "A board holds the Loops of one project."}
           />
         ) : inUse.length === 0 ? (
           // Every board that matches is archived: they are listed under "Archived" below.

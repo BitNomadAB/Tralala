@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LayoutTemplate, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/useToast";
@@ -10,17 +9,30 @@ import { describeError } from "@/lib/describeError";
 import { useTemplates } from "@/lib/queries";
 import type { BoardTemplate } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
+import { ButtonLink } from "./ButtonLink";
+import { entryControlId, removalFocusTarget, useRemovalFocus } from "./removalFocus";
+
+const HEADING_ID = "settings-board-templates";
+const editId = (templateId: string) => entryControlId("template-edit", templateId);
 
 export function BoardTemplatesCard() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
   const { data: templates = [], isLoading } = useTemplates();
   const [deleting, setDeleting] = useState<BoardTemplate | null>(null);
+  const removalFocus = useRemovalFocus();
 
   const deleteMutation = useMutation({
     mutationFn: (template: BoardTemplate) => api.deleteTemplate(template.id),
-    onSuccess: () => {
+    onSuccess: (_result, template) => {
+      removalFocus.remember(
+        removalFocusTarget(
+          templates.map((entry) => entry.id),
+          template.id,
+          editId,
+          HEADING_ID,
+        ),
+      );
       void queryClient.invalidateQueries({ queryKey: ["templates"] });
       setDeleting(null);
       toast.push({ title: "Template deleted", variant: "success" });
@@ -37,16 +49,12 @@ export function BoardTemplatesCard() {
   return (
     <div className="card-surface p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">Board templates</h2>
-        <Button
-          size="sm"
-          className="ml-auto"
-          onClick={() => {
-            void navigate("/settings/templates/new");
-          }}
-        >
+        <h2 id={HEADING_ID} tabIndex={-1} className="text-sm font-semibold">
+          Board templates
+        </h2>
+        <ButtonLink to="/settings/templates/new" size="sm" className="ml-auto">
           <Plus size={14} /> New template
-        </Button>
+        </ButtonLink>
       </div>
       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
         Templates are stored in the registry database. Pick one when creating a board to prefill its
@@ -81,16 +89,15 @@ export function BoardTemplatesCard() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button
+                  <ButtonLink
+                    id={editId(template.id)}
+                    to={`/settings/templates/${template.id}`}
                     size="sm"
                     variant="secondary"
                     aria-label={`Edit ${template.name}`}
-                    onClick={() => {
-                      void navigate(`/settings/templates/${template.id}`);
-                    }}
                   >
                     <Pencil size={14} /> Edit
-                  </Button>
+                  </ButtonLink>
                   <Button
                     size="icon"
                     variant="ghost"
@@ -111,6 +118,7 @@ export function BoardTemplatesCard() {
         <DialogContent
           title="Delete template"
           description="Boards created from it keep their content. This cannot be undone."
+          onCloseAutoFocus={removalFocus.onCloseAutoFocus}
         >
           <p className="text-sm">
             Delete <span className="font-semibold">{deleting?.name}</span>?

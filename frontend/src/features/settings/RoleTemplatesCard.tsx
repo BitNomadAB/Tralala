@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, ShieldHalf, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -10,17 +9,30 @@ import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { useRoleTemplates } from "@/lib/queries";
 import type { RoleTemplate } from "@/lib/types";
+import { ButtonLink } from "./ButtonLink";
+import { entryControlId, removalFocusTarget, useRemovalFocus } from "./removalFocus";
+
+const HEADING_ID = "settings-role-templates";
+const editId = (roleId: string) => entryControlId("role-edit", roleId);
 
 export function RoleTemplatesCard() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
   const { data: roles = [], isLoading } = useRoleTemplates();
   const [deleting, setDeleting] = useState<RoleTemplate | null>(null);
+  const removalFocus = useRemovalFocus();
 
   const deleteMutation = useMutation({
     mutationFn: (role: RoleTemplate) => api.deleteRoleTemplate(role.id),
-    onSuccess: () => {
+    onSuccess: (_result, role) => {
+      removalFocus.remember(
+        removalFocusTarget(
+          roles.map((entry) => entry.id),
+          role.id,
+          editId,
+          HEADING_ID,
+        ),
+      );
       void queryClient.invalidateQueries({ queryKey: ["role-templates"] });
       setDeleting(null);
       toast.push({ title: "Role template deleted", variant: "success" });
@@ -37,20 +49,17 @@ export function RoleTemplatesCard() {
   return (
     <div className="card-surface p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">Role templates</h2>
-        <Button
-          size="sm"
-          className="ml-auto"
-          onClick={() => {
-            void navigate("/settings/roles/new");
-          }}
-        >
+        <h2 id={HEADING_ID} tabIndex={-1} className="text-sm font-semibold">
+          Role templates
+        </h2>
+        <ButtonLink to="/settings/roles/new" size="sm" className="ml-auto">
           <Plus size={14} /> New role
-        </Button>
+        </ButtonLink>
       </div>
       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
         Central role definitions. Agents reference a template; editing it changes future discussions
-        only, because each discussion stores a snapshot of the instructions it used.
+        only, because each discussion stores a snapshot of the instructions it used. Built-in roles
+        cannot be deleted; their factory prompt can be restored instead.
       </p>
 
       <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)]">
@@ -84,26 +93,30 @@ export function RoleTemplatesCard() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button
+                  <ButtonLink
+                    id={editId(role.id)}
+                    to={`/settings/roles/${role.id}`}
                     size="sm"
                     variant="secondary"
                     aria-label={`Edit ${role.name}`}
-                    onClick={() => {
-                      void navigate(`/settings/roles/${role.id}`);
-                    }}
                   >
                     Edit
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    title={role.built_in ? "Built-in roles cannot be deleted" : "Delete role"}
-                    aria-label={`Delete ${role.name}`}
-                    disabled={role.built_in}
-                    onClick={() => setDeleting(role)}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
+                  </ButtonLink>
+                  {/* A built-in role cannot be deleted, which the card says in words; a blank
+                      keeps the Edit links of every row in one column. */}
+                  {role.built_in ? (
+                    <span aria-hidden="true" className="h-8 w-8" />
+                  ) : (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      title="Delete role"
+                      aria-label={`Delete ${role.name}`}
+                      onClick={() => setDeleting(role)}
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  )}
                 </div>
               </li>
             ))}
@@ -115,6 +128,7 @@ export function RoleTemplatesCard() {
         <DialogContent
           title="Delete role template"
           description="Agents keep their history and discussion snapshots. Agents using it must then be given another role or an override."
+          onCloseAutoFocus={removalFocus.onCloseAutoFocus}
         >
           <p className="text-sm">
             Delete <span className="font-semibold">{deleting?.name}</span>?

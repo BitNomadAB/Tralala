@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
 import { AgentsCard } from "@/features/settings/AgentsCard";
+import { removalFocusTarget } from "@/features/settings/removalFocus";
 import type { Agent } from "@/lib/types";
 import { apiPath, ok } from "./msw/envelope";
 import { server } from "./msw/server";
@@ -38,8 +40,18 @@ function agent(overrides: Partial<Agent> & Pick<Agent, "id" | "name">): Agent {
   };
 }
 
+/** The card over `agents`; deleting one removes it from what the server lists. */
 function renderCard(agents: Agent[]) {
-  server.use(http.get(apiPath("/agents"), () => ok(agents)));
+  server.use(
+    http.get(apiPath("/agents"), () => ok(agents)),
+    http.delete(apiPath("/agents/:id"), ({ params }) => {
+      agents.splice(
+        agents.findIndex((entry) => entry.id === params.id),
+        1,
+      );
+      return ok({ deleted: true });
+    }),
+  );
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
@@ -92,5 +104,43 @@ describe("the agent list in Settings", () => {
     expect(untested.getByText("not tested")).toBeInTheDocument();
     expect(untested.queryByText("no tool calling")).not.toBeInTheDocument();
     expect(untested.queryByText("reads repositories with tools")).not.toBeInTheDocument();
+  });
+
+  it("opens New agent and Edit as links, so they can open in a new tab", async () => {
+    renderCard([agent({ id: "reader", name: "Reader" })]);
+
+    expect(await screen.findByRole("link", { name: "Edit Reader" })).toHaveAttribute(
+      "href",
+      "/settings/agents/reader",
+    );
+    expect(screen.getByRole("link", { name: "New agent" })).toHaveAttribute(
+      "href",
+      "/settings/agents/new",
+    );
+  });
+
+  it("moves focus to the next agent once one is deleted, and to the heading after the last", async () => {
+    renderCard([agent({ id: "first", name: "First" }), agent({ id: "second", name: "Second" })]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Delete First" }));
+    await user.click(screen.getByRole("button", { name: "Delete agent" }));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Edit Second" })).toHaveFocus());
+    await waitFor(() => expect(screen.queryByText("First")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Delete Second" }));
+    await user.click(screen.getByRole("button", { name: "Delete agent" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "AI agents" })).toHaveFocus());
+  });
+});
+
+describe("removalFocusTarget", () => {
+  const control = (id: string) => `edit-${id}`;
+
+  it("picks the next entry, else the previous one, else the heading", () => {
+    expect(removalFocusTarget(["a", "b", "c"], "a", control, "heading")).toBe("edit-b");
+    expect(removalFocusTarget(["a", "b", "c"], "c", control, "heading")).toBe("edit-b");
+    expect(removalFocusTarget(["a"], "a", control, "heading")).toBe("heading");
+    expect(removalFocusTarget(["a"], "gone", control, "heading")).toBe("heading");
   });
 });

@@ -6,9 +6,13 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/useAuth";
 import { api } from "@/lib/api";
 import type { Repository } from "@/lib/types";
+import { entryControlId, focusById, removalFocusTarget } from "./removalFocus";
 import { RepositoryDialog, type RepositoryDraft } from "./RepositoryDialog";
 import { RepositoryRow } from "./RepositoryRow";
 import { REPOSITORIES_KEY, useRepositoryActions } from "./useRepositoryActions";
+
+const HEADING_ID = "repositories-heading";
+const checkId = (repositoryId: string) => entryControlId("repository-check", repositoryId);
 
 const EMPTY: RepositoryDraft = {
   id: null,
@@ -46,6 +50,17 @@ export function RepositoriesPage() {
   });
   const repositories = repositoriesQuery.data ?? [];
 
+  // A removed repository's row goes with its buttons, so focus moves to the next row first.
+  function removeRepository(repositoryId: string) {
+    const target = removalFocusTarget(
+      repositories.map((repository) => repository.id),
+      repositoryId,
+      checkId,
+      HEADING_ID,
+    );
+    remove.mutate(repositoryId, { onSuccess: () => focusById(target) });
+  }
+
   if (!isAdmin) {
     return (
       <section className="flex flex-col gap-4">
@@ -61,7 +76,9 @@ export function RepositoriesPage() {
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start gap-3">
         <div>
-          <h1 className="text-lg font-semibold">Repositories</h1>
+          <h1 id={HEADING_ID} tabIndex={-1} className="text-lg font-semibold">
+            Repositories
+          </h1>
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
             Read-only access for the Analytics agent, through the GitHub API or a mirror Tralala
             keeps of any allowed HTTPS Git host. Boards select which repositories they are about;
@@ -85,15 +102,16 @@ export function RepositoriesPage() {
             <RepositoryRow
               key={repository.id}
               repository={repository}
+              checkId={checkId(repository.id)}
               checkText={checks[repository.id]}
               busy={{
-                check: check.isPending,
-                remove: remove.isPending,
-                mirror: mirror.isPending,
+                check: check.isPending && check.variables === repository.id,
+                remove: remove.isPending && remove.variables === repository.id,
+                mirror: mirror.isPending && mirror.variables.repositoryId === repository.id,
               }}
               onCheck={() => check.mutate(repository.id)}
               onEdit={() => setDraft(draftOf(repository))}
-              onRemove={() => remove.mutate(repository.id)}
+              onRemove={() => removeRepository(repository.id)}
               onMirror={(action) => mirror.mutate({ repositoryId: repository.id, action })}
             />
           ))}

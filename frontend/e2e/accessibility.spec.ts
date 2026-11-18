@@ -223,7 +223,7 @@ test.describe("accessibility in each theme", () => {
       await closeDialog(page);
 
       await page.getByRole("link", { name: "Boards" }).click();
-      await expect(page.getByRole("button", { name: boardName, exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: boardName, exact: true })).toBeVisible();
       await expect(page.getByRole("heading", { name: /^Waits for you/, level: 2 })).toBeVisible();
       expect.soft(await blockingViolations(page, testInfo, `${prefix}-dashboard`)).toEqual([]);
 

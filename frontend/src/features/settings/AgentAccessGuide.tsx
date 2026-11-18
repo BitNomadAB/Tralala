@@ -1,12 +1,18 @@
-import { Copy, Laptop } from "lucide-react";
+import { ChevronRight, Copy, Laptop } from "lucide-react";
 import { mcpConfigSnippet } from "@/lib/agentAccess";
 
 /** The placeholder is the installation's own address, so the guide carries no host of its own. */
 const PLACEHOLDER_ORIGIN = "https://<Your URL>";
 
+/** A block to paste; a long line scrolls sideways, so it takes focus for a keyboard to scroll it. */
 function Code({ children }: { children: string }) {
   return (
-    <pre className="mt-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-[11px] leading-relaxed">
+    <pre
+      role="group"
+      aria-label="Code block"
+      tabIndex={0}
+      className="mt-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-[11px] leading-relaxed"
+    >
       <code>{children}</code>
     </pre>
   );
@@ -27,9 +33,15 @@ export function AgentAccessGuide({
 }) {
   const snippet = mcpConfigSnippet(PLACEHOLDER_ORIGIN, token ?? "<your-token>");
   return (
-    <details className="rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs">
-      <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
-        <Laptop size={13} /> How do I connect my computer?
+    <details className="group rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs">
+      {/* A flex summary loses the browser's own triangle, so it draws one that turns when open. */}
+      <summary className="flex cursor-pointer items-center gap-1.5 font-medium [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          size={13}
+          aria-hidden="true"
+          className="shrink-0 group-open:rotate-90 motion-safe:transition-transform"
+        />
+        <Laptop size={13} aria-hidden="true" /> How do I connect my computer?
       </summary>
 
       <div className="mt-2 flex flex-col gap-3 text-[var(--muted-foreground)]">

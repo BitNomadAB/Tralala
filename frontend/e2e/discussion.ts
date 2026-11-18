@@ -7,7 +7,7 @@ export const CLOSED_ENDPOINT = "http://127.0.0.1:8099/v1";
 export async function createAgent(page: Page, name: string, url: string): Promise<void> {
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "AI agents", level: 2 })).toBeVisible();
-  await page.getByRole("button", { name: "New agent" }).click();
+  await page.getByRole("link", { name: "New agent" }).click();
   await expect(page.getByRole("heading", { name: "New AI agent", level: 1 })).toBeVisible();
   await page.getByLabel("Agent name").fill(name);
   await page.getByLabel("Role template").selectOption({ label: "QA Engineer" });

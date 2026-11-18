@@ -134,7 +134,7 @@ export async function dragCardToList(
 export async function openBoardFromDashboard(page: Page, name: string): Promise<void> {
   await page.getByRole("link", { name: "Boards" }).click();
   await expect(page.getByRole("heading", { name: "Boards", level: 1 })).toBeVisible();
-  await page.getByRole("button", { name, exact: true }).click();
+  await page.getByRole("link", { name, exact: true }).click();
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
   await expect(page.getByRole("button", { name: "New Loop" })).toBeVisible();
 }

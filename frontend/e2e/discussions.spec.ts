@@ -173,7 +173,7 @@ test.describe("a discussion on a Ticket", () => {
       await expect(
         page
           .getByRole("list", { name: "Waits for you" })
-          .getByRole("button", { name: `Open discussion: ${question}` }),
+          .getByRole("link", { name: `Open discussion: ${question}` }),
       ).toBeVisible();
     });
 

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http } from "msw";
+import { delay, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
 import { AuthContext } from "@/features/auth/useAuth";
@@ -164,7 +164,9 @@ describe("the Repositories page", () => {
 
   it("keeps the provider of a repository being edited", async () => {
     const { user } = await renderPage([MIRRORED]);
-    await user.click((await row("mirrored app")).getByRole("button", { name: "Edit" }));
+    await user.click(
+      (await row("mirrored app")).getByRole("button", { name: "Edit mirrored app" }),
+    );
     const dialog = within(screen.getByRole("dialog", { name: "Edit repository" }));
     expect(dialog.getByLabelText("Provider")).toHaveValue("git_https");
     expect(dialog.getByLabelText("Provider")).toBeDisabled();
@@ -177,12 +179,14 @@ describe("the Repositories page", () => {
     expect(mirrored.getByText("main")).toBeInTheDocument();
     expect(mirrored.getByText("2026-11-03T09:00:00Z")).toBeInTheDocument();
     expect(mirrored.getByText("1.5 MB")).toBeInTheDocument();
-    expect(mirrored.getByRole("button", { name: "Rebuild mirror" })).toBeInTheDocument();
-    expect(mirrored.queryByRole("button", { name: "Remove now" })).not.toBeInTheDocument();
+    expect(
+      mirrored.getByRole("button", { name: "Rebuild mirror of mirrored app" }),
+    ).toBeInTheDocument();
+    expect(mirrored.queryByRole("button", { name: /^Remove now/ })).not.toBeInTheDocument();
 
     const hub = await row("hub app");
     expect(hub.getByText("GitHub")).toBeInTheDocument();
-    expect(hub.queryByRole("button", { name: "Rebuild mirror" })).not.toBeInTheDocument();
+    expect(hub.queryByRole("button", { name: /^Rebuild mirror/ })).not.toBeInTheDocument();
   });
 
   it("rebuilds a mirror, and offers Remove now when a removal failed", async () => {
@@ -191,9 +195,9 @@ describe("the Repositories page", () => {
     const mirrored = await row("mirrored app");
     expect(mirrored.getByText(/host still holds a file in it/)).toBeInTheDocument();
 
-    await user.click(mirrored.getByRole("button", { name: "Rebuild mirror" }));
+    await user.click(mirrored.getByRole("button", { name: "Rebuild mirror of mirrored app" }));
     expect(await screen.findByText(/next analysis or RoadMap run fetches it again/)).toBeVisible();
-    await user.click(mirrored.getByRole("button", { name: "Remove now" }));
+    await user.click(mirrored.getByRole("button", { name: "Remove now: mirror of mirrored app" }));
     expect(sent.map((entry) => entry.path)).toEqual([
       "POST /repositories/repo-git/mirror/rebuild",
       "POST /repositories/repo-git/mirror/remove",
@@ -208,9 +212,65 @@ describe("the Repositories page", () => {
         failure(409, "mirror_cleanup_failed", "The mirror's directory could not be removed"),
       ),
     );
-    await user.click((await row("mirrored app")).getByRole("button", { name: "Remove now" }));
+    await user.click(
+      (await row("mirrored app")).getByRole("button", {
+        name: "Remove now: mirror of mirrored app",
+      }),
+    );
     expect(await screen.findByText("Could not remove the mirror")).toBeInTheDocument();
     expect(screen.getByText("The mirror's directory could not be removed")).toBeInTheDocument();
+  });
+});
+
+describe("the Repositories page's commands", () => {
+  it("names the repository in every command and blocks only the row under way", async () => {
+    const { user } = await renderPage([GITHUB, MIRRORED]);
+    server.use(
+      http.post(apiPath("/repositories/:id/check"), async () => {
+        await delay("infinite");
+      }),
+    );
+    const hub = await row("hub app");
+    expect(hub.getByRole("button", { name: "Edit hub app" })).toBeInTheDocument();
+    expect(hub.getByRole("button", { name: "Remove hub app" })).toBeInTheDocument();
+
+    const test = hub.getByRole("button", { name: "Test access to hub app" });
+    await user.click(test);
+    // The button stays where the person is, and says what it waits for.
+    expect(await hub.findByText("Testing access…")).toBeInTheDocument();
+    expect(test).toHaveAttribute("aria-disabled", "true");
+    expect(test).toHaveAccessibleDescription("Testing access…");
+    expect(test).toHaveFocus();
+    const other = (await row("mirrored app")).getByRole("button", {
+      name: "Test access to mirrored app",
+    });
+    expect(other).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("moves focus to the next repository once one is removed, and to the heading after the last", async () => {
+    const listed = [GITHUB, MIRRORED];
+    const { user } = await renderPage(listed);
+    server.use(
+      http.get(apiPath("/repositories"), () => ok(listed)),
+      http.delete(apiPath("/repositories/:id"), ({ params }) => {
+        listed.splice(
+          listed.findIndex((entry) => entry.id === params.id),
+          1,
+        );
+        return ok({ deleted: true });
+      }),
+    );
+
+    await user.click((await row("hub app")).getByRole("button", { name: "Remove hub app" }));
+    const next = (await row("mirrored app")).getByRole("button", {
+      name: "Test access to mirrored app",
+    });
+    await waitFor(() => expect(next).toHaveFocus());
+
+    await user.click(screen.getByRole("button", { name: "Remove mirrored app" }));
+    const heading = screen.getByRole("heading", { name: "Repositories", level: 1 });
+    await waitFor(() => expect(heading).toHaveFocus());
+    expect(await screen.findByText(/No repositories yet/)).toBeInTheDocument();
   });
 });
 

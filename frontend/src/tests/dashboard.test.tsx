@@ -98,7 +98,7 @@ describe("the dashboard", () => {
     expect(row.getByText("Waits for you to approve the analysis")).toBeInTheDocument();
 
     const tiles = screen.getByRole("list", { name: "Boards" });
-    const platform = within(tiles).getByRole("button", { name: "Platform" });
+    const platform = within(tiles).getByRole("link", { name: "Platform" });
     const tile = within(platform.closest("li") ?? tiles);
     expect(tile.getByText("The shared services")).toBeInTheDocument();
     expect(tile.getByText("2 Loops in progress · 1 waits for you")).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("the dashboard", () => {
     ]);
 
     // The button opens the Loop page on the tab where the decision is made.
-    await user.click(row.getByRole("button", { name: "Approve analysis: Session expiry" }));
+    await user.click(row.getByRole("link", { name: "Approve analysis: Session expiry" }));
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/boards/board-1/loops/loop-1?tab=plan",
     );
@@ -142,7 +142,7 @@ describe("the dashboard", () => {
     expect(screen.getByRole("heading", { name: "Waits for you 2" })).toBeInTheDocument();
 
     await user.click(
-      row.getByRole("button", { name: "Open discussion: Should the key rotate every week?" }),
+      row.getByRole("link", { name: "Open discussion: Should the key rotate every week?" }),
     );
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/boards/board-1/loops/loop-1/tickets/card-1/discussions/wait-1",
@@ -175,14 +175,14 @@ describe("the dashboard", () => {
 
     expect(await screen.findByText("Nothing waits for you.")).toBeInTheDocument();
     const tiles = screen.getByRole("list", { name: "Boards" });
-    expect(within(tiles).getByRole("button", { name: "Website" })).toBeInTheDocument();
-    expect(within(tiles).queryByRole("button", { name: "Old site" })).toBeNull();
+    expect(within(tiles).getByRole("link", { name: "Website" })).toBeInTheDocument();
+    expect(within(tiles).queryByRole("link", { name: "Old site" })).toBeNull();
     expect(within(tiles).queryByText("Archived")).toBeNull();
 
     expect(screen.getByRole("heading", { name: "Archived 1" })).toBeInTheDocument();
     const readOnly = screen.getByRole("list", { name: "Archived boards" });
     const old = within(
-      within(readOnly).getByRole("button", { name: "Old site" }).closest("li") ?? readOnly,
+      within(readOnly).getByRole("link", { name: "Old site" }).closest("li") ?? readOnly,
     );
     expect(old.getByText("Archived")).toBeInTheDocument();
     expect(await old.findByText("1 Loop in progress")).toBeInTheDocument();
@@ -199,7 +199,7 @@ describe("the dashboard", () => {
     expect(await screen.findByText("No active boards.")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Boards" })).toBeNull();
     const readOnly = screen.getByRole("list", { name: "Archived boards" });
-    expect(within(readOnly).getByRole("button", { name: "Old site" })).toBeInTheDocument();
+    expect(within(readOnly).getByRole("link", { name: "Old site" })).toBeInTheDocument();
 
     // The archived board keeps its way back and its way out.
     await user.click(screen.getByRole("button", { name: "More actions for Old site" }));
@@ -224,7 +224,7 @@ describe("the dashboard", () => {
     ]);
 
     const tiles = await screen.findByRole("list", { name: "Boards" });
-    expect(within(tiles).getByRole("button", { name: "Website" })).toBeVisible();
+    expect(within(tiles).getByRole("link", { name: "Website" })).toBeVisible();
     expect(await within(tiles).findByText("Reading Loops…")).toBeInTheDocument();
     expect(await within(tiles).findByText("Loops could not be read")).toBeInTheDocument();
     expect(screen.getByText("Looking through your boards…")).toBeInTheDocument();

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http } from "msw";
+import { delay, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AuthProvider } from "@/features/auth/AuthProvider";
@@ -9,7 +9,7 @@ import { EnrolPage } from "@/features/auth/EnrolPage";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { apiPath, failure } from "./msw/envelope";
 import { server } from "./msw/server";
-import { MEMBER_PASSWORD, memberSession } from "./msw/session";
+import { MEMBER, MEMBER_PASSWORD, memberSession } from "./msw/session";
 
 let session: ReturnType<typeof memberSession>["state"];
 
@@ -42,9 +42,39 @@ function renderAt(path: string) {
 const sent = (request: string) => session.requests.filter((entry) => entry === request);
 
 describe("the sign-in form", () => {
+  it("starts with both fields empty, so nobody is handed a username", () => {
+    renderAt("/login");
+
+    expect(screen.getByLabelText("Username")).toHaveValue("");
+    expect(screen.getByLabelText("Username")).toHaveAttribute("autocomplete", "username");
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+  });
+
+  it("keeps Sign in focusable while the sign-in runs, and sends it once", async () => {
+    let attempts = 0;
+    server.use(
+      http.post(apiPath("/auth/login"), async () => {
+        attempts += 1;
+        await delay("infinite");
+      }),
+    );
+    const user = renderAt("/login");
+
+    await user.type(screen.getByLabelText("Username"), MEMBER.name);
+    await user.type(screen.getByLabelText("Password"), MEMBER_PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    const button = await screen.findByRole("button", { name: "Signing in…" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveFocus();
+    await user.click(button);
+    expect(attempts).toBe(1);
+  });
+
   it("keeps Sign in enabled and says a missing password under that field", async () => {
     const user = renderAt("/login");
 
+    await user.type(screen.getByLabelText("Username"), MEMBER.name);
     const button = screen.getByRole("button", { name: "Sign in" });
     expect(button).toBeEnabled();
     await user.click(button);
@@ -80,6 +110,7 @@ describe("the sign-in form", () => {
   it("says a refused sign-in under the password and moves focus there", async () => {
     const user = renderAt("/login");
 
+    await user.type(screen.getByLabelText("Username"), MEMBER.name);
     await user.type(screen.getByLabelText("Password"), "not-my-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -100,6 +131,7 @@ describe("the sign-in form", () => {
     );
     const user = renderAt("/login");
 
+    await user.type(screen.getByLabelText("Username"), MEMBER.name);
     await user.type(screen.getByLabelText("Password"), MEMBER_PASSWORD);
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -109,6 +141,21 @@ describe("the sign-in form", () => {
 });
 
 describe("the invitation form", () => {
+  it("shows the username the link names, for the person and their password manager", () => {
+    renderAt("/enrol?token=invite-token&user=ada%20member");
+
+    const username = screen.getByLabelText("Username");
+    expect(username).toHaveValue("ada member");
+    expect(username).toHaveAttribute("readonly");
+    expect(username).toHaveAttribute("autocomplete", "username");
+  });
+
+  it("leaves the username out when the token came without a link", () => {
+    renderAt("/enrol");
+
+    expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
+  });
+
   it("says a mismatch only once the repeat field is left, and drops it when they match", async () => {
     const user = renderAt("/enrol?token=invite-token");
 

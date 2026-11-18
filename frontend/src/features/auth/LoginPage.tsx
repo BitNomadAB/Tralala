@@ -18,7 +18,7 @@ export function LoginPage() {
   usePageTitle({ page: "login" });
   const navigate = useNavigate();
   const location = useLocation();
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   // A refusal that is about no field (the server is down, too many attempts) is said above Sign in.
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +29,8 @@ export function LoginPage() {
 
   async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Sign in stays focusable while a sign-in runs (`aria-disabled`), so a second press waits here.
+    if (pending) return;
     setError(null);
     const missing = [
       ...problemAt("username", username.trim() ? null : "Enter your username."),
@@ -101,7 +103,7 @@ export function LoginPage() {
             {error}
           </p>
         ) : null}
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" aria-disabled={pending ? true : undefined}>
           {pending ? "Signing in…" : "Sign in"}
         </Button>
         <p className="text-[11px] leading-relaxed text-[var(--muted-foreground)]">

@@ -1,4 +1,5 @@
 import { Archive, ArchiveRestore, Copy, Download, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Chip } from "@/components/ui/chip";
 import { Menu, type MenuItem } from "@/components/ui/menu";
 import { api } from "@/lib/api";
@@ -30,19 +31,18 @@ function loopWords(board: Board, summaries: BoardSummaries | undefined): string 
 }
 
 /**
- * One board on the dashboard, a place to go: its name, one line of description, its Loops in small
- * words and the last change. The lifecycle actions sit in the quiet "more" menu.
+ * One board on the dashboard, a place to go: its name (a link, so it opens in a new tab too), one
+ * line of description, its Loops in small words and the last change. The lifecycle actions sit in
+ * the quiet "more" menu.
  */
 export function BoardTile({
   board,
   summaries,
-  onOpen,
   onLifecycle,
   onDelete,
 }: {
   board: Board;
   summaries: BoardSummaries | undefined;
-  onOpen: () => void;
   onLifecycle: (type: BoardLifecycleAction) => void;
   onDelete: () => void;
 }) {
@@ -81,17 +81,16 @@ export function BoardTile({
   const words = loopWords(board, summaries);
 
   return (
-    <li className="card-surface flex flex-col gap-2 p-4">
+    <li className="card-surface flex flex-col gap-2 p-4" data-board-id={board.id}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={onOpen}
-              className="truncate text-left text-[15px] font-semibold text-[var(--foreground)] hover:text-[var(--primary)]"
+            <Link
+              to={`/boards/${board.id}`}
+              className="truncate text-left text-[15px] font-semibold text-[var(--foreground)] hover:text-[var(--primary)] hover:underline"
             >
               {board.name}
-            </button>
+            </Link>
             {board.status === "active" ? null : <Chip>{STATUS_CHIPS[board.status]}</Chip>}
           </div>
           <p className="mt-1 line-clamp-1 text-sm text-[var(--muted-foreground)]">
