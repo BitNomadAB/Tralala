@@ -163,7 +163,7 @@ export function TicketActivity({
             comments={card.comments ?? []}
             comment={comments.comment}
             onCommentChange={comments.changeComment}
-            onCommentBlur={comments.closeSuggestions}
+            onCloseSuggestions={comments.closeSuggestions}
             suggestions={comments.suggestions}
             mentionIndex={comments.mentionIndex}
             onMentionIndexChange={comments.setMentionIndex}
