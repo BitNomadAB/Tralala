@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAnnounce } from "@/components/ui/useAnnounce";
 import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { BoardList, Card } from "@/lib/types";
-import { placeText } from "./kanbanAnnouncements";
-import { columnIndex, placeAt, type CardTarget } from "./kanbanMoves";
+import { menuMoveText } from "./kanbanAnnouncements";
+import { columnIndex, restoreIndex, type CardTarget } from "./kanbanMoves";
 import { LIST_LIMIT } from "./loopUi";
 
 /** Which of a card's controls takes the focus once the card shows at its new place. */
@@ -29,6 +29,13 @@ interface ColumnFocus {
   ready: (lists: readonly BoardList[]) => boolean;
 }
 
+/** An archived column and where it stood: the column before it (null when first) and its index. */
+interface ArchivedColumn {
+  list: BoardList;
+  after: string | null;
+  index: number;
+}
+
 /** How a move tells the person: announce the new place, and which control keeps the focus. */
 interface MoveOptions<Control> {
   announce?: boolean;
@@ -42,12 +49,15 @@ interface MoveOptions<Control> {
  * would fall to the page: the request kept here is handed to the card or column (`cardFocus`,
  * `columnFocus`) once it shows at its new place, and the one that took it clears it. Archiving a
  * column acts at once and its toast offers Undo, which brings it back where it stood (WCAG 3.3.4).
+ * A card's moves are sent one after another, each with the version the server gave the one before,
+ * so a second move from the menu before the board is read again is no version conflict.
  */
 export function useKanbanMoves({
   boardId,
   loopId,
   lists,
   cardsByList,
+  filtered,
   onListsChanged,
   onCardsChanged,
 }: {
@@ -55,6 +65,8 @@ export function useKanbanMoves({
   loopId: string;
   lists: BoardList[];
   cardsByList: Record<string, Card[]>;
+  /** A filter hides cards: a move's announcement names the column alone. */
+  filtered: boolean;
   onListsChanged: () => void;
   onCardsChanged: () => void;
 }) {
@@ -63,6 +75,13 @@ export function useKanbanMoves({
   const announce = useAnnounce();
   const [cardFocus, setCardFocus] = useState<CardFocus | null>(null);
   const [columnFocus, setColumnFocus] = useState<ColumnFocus | null>(null);
+  // The columns shown now, for an Undo pressed after they changed.
+  const shownLists = useRef(lists);
+  useEffect(() => {
+    shownLists.current = lists;
+  });
+  // The version each card's last move returned; a move sends the newer of it and the board's.
+  const movedVersions = useRef(new Map<string, number>());
 
   const moveListMutation = useMutation({
     mutationFn: ({ listId, position }: { listId: string; position: number }) =>
@@ -76,16 +95,16 @@ export function useKanbanMoves({
   });
 
   const archiveListMutation = useMutation({
-    mutationFn: ({ list }: { list: BoardList; index: number }) =>
-      api.archiveList(boardId, loopId, list.id),
-    onSuccess: (_archived, { list, index }) => {
+    mutationFn: ({ list }: ArchivedColumn) => api.archiveList(boardId, loopId, list.id),
+    onSuccess: (_archived, archived) => {
+      const { list } = archived;
       onListsChanged();
       onCardsChanged();
       toast.push({
         title: "Column archived",
         description: `${list.name} and its Tickets no longer show.`,
         variant: "success",
-        action: { label: "Undo", onClick: () => restoreListMutation.mutate({ list, index }) },
+        action: { label: "Undo", onClick: () => restoreListMutation.mutate(archived) },
       });
     },
     onError: (error) => {
@@ -100,17 +119,20 @@ export function useKanbanMoves({
   });
 
   const restoreListMutation = useMutation({
-    mutationFn: async ({ list, index }: { list: BoardList; index: number }) => {
+    mutationFn: async ({ list, after, index }: ArchivedColumn) => {
       await api.restoreList(boardId, loopId, list.id);
       // Restoring makes it the last column, so it is moved back to where it stood.
-      return api.moveList(boardId, loopId, list.id, index);
+      const others = shownLists.current.filter((item) => item.id !== list.id);
+      const position = restoreIndex(others, after, index);
+      await api.moveList(boardId, loopId, list.id, position);
+      return position;
     },
-    onSuccess: (_lists, { list, index }) => {
+    onSuccess: (position, { list }) => {
       // The Undo button left with its toast; the column's menu takes the focus once it is back.
       setColumnFocus({
         listId: list.id,
         control: "menu",
-        ready: (shown) => columnIndex(shown, list.id) === index,
+        ready: (shown) => columnIndex(shown, list.id) === position,
       });
       onListsChanged();
       onCardsChanged();
@@ -128,12 +150,18 @@ export function useKanbanMoves({
   });
 
   const moveCardMutation = useMutation({
+    // One after another: each move reads the version the one before it returned.
+    scope: { id: `card-moves:${loopId}` },
     mutationFn: ({ card, listId, position }: { card: Card; listId: string; position: number }) =>
       api.moveCard(boardId, loopId, card.id, {
-        version: card.version,
+        // Versions only grow: the newer of the board's and the last move's.
+        version: Math.max(card.version, movedVersions.current.get(card.id) ?? 0),
         list_id: listId,
         position,
       }),
+    onSuccess: (moved) => {
+      movedVersions.current.set(moved.id, moved.version);
+    },
     onSettled: onCardsChanged,
     onError: (error) => {
       // The card goes back where the server keeps it; the focus stays where it is now.
@@ -167,7 +195,7 @@ export function useKanbanMoves({
       },
     );
     if (options.announce) {
-      announce(`${card.title} moved to ${placeText(placeAt(state, card, target))}.`);
+      announce(menuMoveText(state, card, target, filtered));
     }
     if (options.focus) setCardFocus({ ...target, cardId: card.id, control: options.focus });
     moveCardMutation.mutate({ card, listId: target.listId, position: target.index });
@@ -198,7 +226,7 @@ export function useKanbanMoves({
     const index = columnIndex(lists, list.id);
     const next = lists[index + 1] ?? lists[index - 1];
     if (next) focusColumn(next.id, (shown) => !shown.some((item) => item.id === list.id));
-    archiveListMutation.mutate({ list, index });
+    archiveListMutation.mutate({ list, after: lists[index - 1]?.id ?? null, index });
   }
 
   const cardFocused = useCallback(() => {

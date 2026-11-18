@@ -91,6 +91,7 @@ export function LoopKanban({
     loopId,
     lists,
     cardsByList,
+    filtered: matchingIds !== null,
     onListsChanged,
     onCardsChanged,
   });
@@ -178,9 +179,15 @@ export function LoopKanban({
                     moves.moveColumn(list.id, to, { announce: true, focus: "menu" });
                   })}
                   cardActions={(card) =>
-                    cardMoveItems(state, card, readOnly, (target) => {
-                      moves.moveCard(card, target, { announce: true, focus: "actions" });
-                    })
+                    cardMoveItems(
+                      state,
+                      card,
+                      readOnly,
+                      (target) => {
+                        moves.moveCard(card, target, { announce: true, focus: "actions" });
+                      },
+                      matchingIds !== null,
+                    )
                   }
                   focusCard={focusCard}
                   onCardFocused={moves.cardFocused}

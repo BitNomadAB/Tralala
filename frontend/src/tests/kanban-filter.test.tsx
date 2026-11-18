@@ -45,3 +45,45 @@ describe("filtering the Kanban", () => {
     expect(within(backlog).queryByText("Expire idle sessions")).not.toBeInTheDocument();
   });
 });
+
+describe("moving a card from its menu while the Kanban is filtered", () => {
+  it("offers only the moves to another column, and says where without hidden cards", async () => {
+    const server = {
+      lists: [...COLUMNS],
+      cards: [
+        ticketCard({ id: "card-1", title: "Rotate the signing key" }),
+        ticketCard({ id: "card-2", title: "Expire idle sessions" }),
+        ticketCard({ id: "card-3", title: "Rotate the backup key" }),
+      ],
+      writes: [],
+    };
+    const { user } = await renderLoopPage("", "in_progress", {}, kanbanHandlers(server));
+    await user.type(screen.getByRole("textbox", { name: "Filter tickets" }), "rotate");
+    expect(await screen.findByText("2 Tickets match")).toBeVisible();
+    const backlog = screen.getByRole("region", { name: "Column Backlog" });
+    await waitFor(() => {
+      expect(within(backlog).queryByText("Expire idle sessions")).not.toBeInTheDocument();
+    });
+
+    await user.click(
+      within(backlog).getByRole("button", { name: "Actions for Rotate the backup key" }),
+    );
+    // Up would swap it with a card the filter hides: the order is changed without the filter.
+    for (const name of ["Move up", "Move down", "Move to top", "Move to bottom"]) {
+      expect(
+        screen.getByRole("menuitem", { name: `${name}: Clear the filter to reorder` }),
+      ).toHaveAttribute("aria-disabled", "true");
+    }
+    await user.click(screen.getByRole("menuitem", { name: "Move to In Progress" }));
+
+    await waitFor(() => {
+      expect(announcer()).toHaveTextContent(
+        "Rotate the backup key moved to the end of In Progress.",
+      );
+    });
+    expect(server.writes).toContainEqual({
+      route: expect.stringContaining("/cards/card-3/move") as unknown,
+      body: { version: 3, list_id: "list-2", position: 0 },
+    });
+  });
+});
