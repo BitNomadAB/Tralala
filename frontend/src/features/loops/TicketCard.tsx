@@ -1,6 +1,7 @@
+import type { DraggableSyntheticListeners } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CalendarClock, Check, Flag } from "lucide-react";
+import { CalendarClock, Check, Flag, GripVertical } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Chip, StateChip } from "@/components/ui/chip";
 import type { Card } from "@/lib/types";
@@ -33,10 +34,27 @@ function heldReason(card: Card): string | undefined {
 }
 
 /**
+ * The pointer half of dnd-kit's listeners. A pointer may drag the card by any part of it, since
+ * the board's pointer sensor waits for 4 px of movement and a click still opens the Ticket; the
+ * keyboard half stays on the grip, because dnd-kit's keyboard sensor takes Enter and Space.
+ */
+function pointerListeners(listeners: DraggableSyntheticListeners): DraggableSyntheticListeners {
+  if (!listeners) return undefined;
+  return Object.fromEntries(
+    Object.entries(listeners).filter(([event]) => event.startsWith("onPointer")),
+  );
+}
+
+const GRIP =
+  "inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--muted-foreground)]";
+
+/**
  * A Ticket on the Kanban, the first line of its face: the title, the plain summary, and a bottom
  * row with the key, the state only when it needs attention (Needs input, Blocked), the priority and
  * due date when set, "done" once completed, "Needs a person" for a person's task, and the owner.
- * The title is the button that opens the Ticket and the drag handle; it covers the whole card.
+ * The title is the button that opens the Ticket (Enter or a click); it covers the whole card, so a
+ * pointer drags the card from anywhere on it. The grip beside the title ("Move <title>") is the
+ * keyboard's drag handle: Space or Enter picks the card up, the arrow keys move it.
  */
 export function TicketCard({
   card,
@@ -47,14 +65,21 @@ export function TicketCard({
   onOpen?: (card: Card) => void;
   overlay?: boolean;
 }) {
-  const sortable = useSortable({
+  // Destructured, so the ref callbacks stay separate from the values read while rendering.
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
     id: card.id,
     data: { type: "card", cardId: card.id, listId: card.list_id } satisfies DragData,
     disabled: overlay,
   });
-  const style = overlay
-    ? undefined
-    : { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
+  const style = overlay ? undefined : { transform: CSS.Transform.toString(transform), transition };
 
   const summary = cardSummary(card);
   const held = card.state === "needs_input" || card.state === "blocked" ? card.state : null;
@@ -65,23 +90,48 @@ export function TicketCard({
 
   return (
     <li
-      ref={overlay ? undefined : sortable.setNodeRef}
+      ref={overlay ? undefined : setNodeRef}
       style={style}
       className={cn(
         "relative grid gap-1 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-raised)] px-2.5 py-2 transition-colors hover:border-[var(--border)]",
-        !overlay && sortable.isDragging && "opacity-40",
+        !overlay && isDragging && "opacity-40",
         overlay && "rotate-2 shadow-xl",
       )}
     >
-      <button
-        type="button"
-        className="line-clamp-2 text-left text-base font-semibold leading-snug text-[var(--foreground)] after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
-        onClick={() => onOpen?.(card)}
-        {...(overlay ? {} : sortable.attributes)}
-        {...(overlay ? {} : sortable.listeners)}
-      >
-        {card.title}
-      </button>
+      <div className="flex items-start gap-1">
+        <button
+          type="button"
+          // The Ticket dialog gives the focus back to this button when it closes.
+          data-ticket-open={card.id}
+          className="line-clamp-2 min-w-0 flex-1 text-left text-base font-semibold leading-snug text-[var(--foreground)] after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+          onClick={() => onOpen?.(card)}
+          {...(overlay ? {} : pointerListeners(listeners))}
+        >
+          {card.title}
+        </button>
+        {overlay ? (
+          <span aria-hidden="true" className={cn(GRIP, "-mr-1")}>
+            <GripVertical size={14} />
+          </span>
+        ) : (
+          // Above the title's full-card click area, so the grip takes its own pointer and keys.
+          <div className="relative z-10 -mr-1 flex shrink-0 items-center">
+            <button
+              type="button"
+              ref={setActivatorNodeRef}
+              aria-label={`Move ${card.title}`}
+              className={cn(
+                GRIP,
+                "cursor-grab hover:bg-[var(--surface)] hover:text-[var(--foreground)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]",
+              )}
+              {...attributes}
+              {...listeners}
+            >
+              <GripVertical size={14} aria-hidden="true" />
+            </button>
+          </div>
+        )}
+      </div>
       {summary ? (
         <p className="line-clamp-2 text-sm leading-snug text-[var(--muted-foreground)]">
           {summary}

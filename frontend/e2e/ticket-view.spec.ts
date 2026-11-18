@@ -24,7 +24,7 @@ import * as plan from "./worker-plan";
 /** A Ticket's tile on the Loop's Kanban, whatever column it sits in. */
 function tile(page: Page, title: string): Locator {
   return page
-    .getByRole("region", { name: /^List / })
+    .getByRole("region", { name: /^Column / })
     .getByRole("listitem")
     .filter({ hasText: title });
 }

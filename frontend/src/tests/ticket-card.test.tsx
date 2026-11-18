@@ -1,6 +1,7 @@
 import { DndContext } from "@dnd-kit/core";
 import { SortableContext } from "@dnd-kit/sortable";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TicketCard } from "@/features/loops/TicketCard";
 import type { Card, TicketFace } from "@/lib/types";
@@ -54,6 +55,29 @@ describe("the Kanban card", () => {
     // A click, not a pointer gesture: the board's pointer sensor waits for 4 px before it drags,
     // which the bare DndContext here does not.
     fireEvent.click(title);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the Ticket with Enter on the title; the grip beside it is the keyboard's drag handle", async () => {
+    const user = userEvent.setup();
+    const { onOpen, item } = renderCard(ticketCard());
+    const title = within(item).getByRole("button", { name: "Rotate the signing key" });
+    const grip = within(item).getByRole("button", { name: "Move Rotate the signing key" });
+    expect(title).not.toHaveAttribute("aria-roledescription");
+    expect(grip).toHaveAttribute("aria-roledescription", "sortable");
+
+    title.focus();
+    await user.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(grip).not.toHaveAttribute("aria-pressed", "true");
+
+    // Tab goes from the title to its grip; Space there picks the card up instead of opening it.
+    await user.tab();
+    expect(grip).toHaveFocus();
+    await user.keyboard(" ");
+    expect(grip).toHaveAttribute("aria-pressed", "true");
+    await user.keyboard("{Escape}");
+    expect(grip).not.toHaveAttribute("aria-pressed", "true");
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 

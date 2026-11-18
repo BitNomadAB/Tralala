@@ -32,7 +32,7 @@ test.describe("drag and drop", () => {
 
     const done = listRegion(page, "Done");
     const target = listRegion(page, "Backlog");
-    const handle = done.getByRole("button", { name: "Reorder list Done" });
+    const handle = done.getByRole("button", { name: "Reorder column Done" });
     const handleBox = await handle.boundingBox();
     const targetBox = await target.boundingBox();
     if (!handleBox || !targetBox) throw new Error("Reorder handles are not visible");
@@ -48,8 +48,46 @@ test.describe("drag and drop", () => {
     }
     await page.mouse.up();
 
-    await expect(page.getByRole("region", { name: /^List / }).first()).toHaveAccessibleName(
-      "List Done",
+    await expect(page.getByRole("region", { name: /^Column / }).first()).toHaveAccessibleName(
+      "Column Done",
     );
+  });
+
+  test("opens a Ticket and moves it with the keyboard alone", async ({ page }) => {
+    await login(page);
+    await boardWithLoop(page, uniqueName("Keyboard board"));
+    const title = uniqueName("Keyboard card");
+    await addCard(page, "Todo", title);
+
+    // Tab from the column's menu reaches the card's title; Enter opens the Ticket.
+    const todo = listRegion(page, "Todo");
+    await todo.getByRole("button", { name: "Column actions for Todo" }).focus();
+    await page.keyboard.press("Tab");
+    const open = cardTile(page, "Todo", title).getByRole("button", { name: title, exact: true });
+    await expect(open).toBeFocused();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: title });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(open).toBeFocused();
+
+    // The next Tab is the card's grip: Space picks it up, ArrowRight carries it to the next
+    // column, Space drops it there.
+    await page.keyboard.press("Tab");
+    const grip = cardTile(page, "Todo", title).getByRole("button", {
+      name: `Move ${title}`,
+      exact: true,
+    });
+    await expect(grip).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(grip).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Space");
+    await expect(cardTile(page, "In Progress", title)).toBeVisible();
+    await expect(todo.getByRole("listitem")).toHaveCount(0);
+
+    await page.reload();
+    await expect(cardTile(page, "In Progress", title)).toBeVisible();
   });
 });

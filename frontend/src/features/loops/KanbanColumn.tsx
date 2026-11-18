@@ -63,7 +63,7 @@ export function KanbanColumn({
     <section
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      aria-label={`List ${list.name}`}
+      aria-label={`Column ${list.name}`}
       className={cn(
         "flex h-full w-[280px] shrink-0 flex-col rounded-[10px] border border-[var(--border-soft)] bg-[var(--surface)]",
         isDragging && "opacity-60",
@@ -73,7 +73,7 @@ export function KanbanColumn({
         <button
           type="button"
           className="cursor-grab text-[var(--foreground-faint)] hover:text-[var(--muted-foreground)]"
-          aria-label={`Reorder list ${list.name}`}
+          aria-label={`Reorder column ${list.name}`}
           {...attributes}
           {...listeners}
         >
@@ -90,7 +90,7 @@ export function KanbanColumn({
             <Input
               value={name}
               autoFocus
-              aria-label={`Rename list ${list.name}`}
+              aria-label={`Rename column ${list.name}`}
               onChange={(event) => setName(event.target.value)}
               onBlur={finishRename}
               className="h-7 text-sm"

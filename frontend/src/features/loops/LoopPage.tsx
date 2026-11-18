@@ -202,6 +202,7 @@ export function LoopPage() {
           onClose={dialog.close}
           onBackToTicket={dialog.backToTicket}
           ticketHref={ticketHref}
+          returnFocus={dialog.returnFocus}
         />
       ) : null}
     </section>

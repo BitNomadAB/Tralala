@@ -22,7 +22,7 @@ import * as plan from "./worker-plan";
 /** A Ticket's tile on the Loop's Kanban, whatever column it sits in. */
 function tile(page: Page, title: string): Locator {
   return page
-    .getByRole("region", { name: /^List / })
+    .getByRole("region", { name: /^Column / })
     .getByRole("listitem")
     .filter({ hasText: title });
 }
@@ -30,9 +30,7 @@ function tile(page: Page, title: string): Locator {
 /** Opens a Ticket's dialog from a freshly loaded Kanban. */
 async function openTicket(page: Page, title: string): Promise<Locator> {
   await page.reload();
-  await tile(page, title)
-    .getByRole("button", { name: new RegExp(title) })
-    .click();
+  await tile(page, title).getByRole("button", { name: title, exact: true }).click();
   const dialog = page.getByRole("dialog", { name: title });
   await expect(dialog.getByRole("region", { name: "Status" })).toBeVisible();
   return dialog;

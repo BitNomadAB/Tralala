@@ -31,7 +31,7 @@ export async function createLoop(page: Page, name: string): Promise<string> {
   await dialog.getByLabel("Name").fill(name);
   await dialog.getByRole("button", { name: "Create Loop" }).click();
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-  await expect(page.getByRole("region", { name: /^List / }).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /^Column / }).first()).toBeVisible();
   return loopIdFromUrl(page);
 }
 
@@ -47,7 +47,7 @@ export async function boardWithLoop(
 }
 
 export function listRegion(page: Page, listName: string): Locator {
-  return page.getByRole("region", { name: `List ${listName}` });
+  return page.getByRole("region", { name: `Column ${listName}` });
 }
 
 export function cardTile(page: Page, listName: string, title: string): Locator {
@@ -87,8 +87,9 @@ export async function loopAction(page: Page, label: string): Promise<void> {
   await page.getByRole("menuitem", { name: label }).click();
 }
 
+/** Opens a Ticket from its card's title; the card's grip and menu carry the title in their names. */
 export async function openCard(page: Page, listName: string, title: string): Promise<Locator> {
-  await listRegion(page, listName).getByRole("button", { name: title }).click();
+  await listRegion(page, listName).getByRole("button", { name: title, exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   return dialog;
@@ -99,21 +100,27 @@ export async function closeDialog(page: Page): Promise<void> {
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
 
-/** dnd-kit needs a real pointer gesture; drop onto the list body, not the header. */
+/**
+ * dnd-kit needs a real pointer gesture; it starts on the card's grip ("Move <title>") and drops
+ * onto the column's body, not its header.
+ */
 export async function dragCardToList(
   page: Page,
   cardTitle: string,
   fromList: string,
   toList: string,
 ): Promise<void> {
-  const card = cardTile(page, fromList, cardTitle);
+  const grip = cardTile(page, fromList, cardTitle).getByRole("button", {
+    name: `Move ${cardTitle}`,
+    exact: true,
+  });
   const targetBody = listRegion(page, toList).locator("> div").nth(1);
-  const cardBox = await card.boundingBox();
+  const gripBox = await grip.boundingBox();
   const targetBox = await targetBody.boundingBox();
-  if (!cardBox || !targetBox) throw new Error("Drag source or target is not visible");
+  if (!gripBox || !targetBox) throw new Error("Drag source or target is not visible");
 
-  const startX = cardBox.x + 24;
-  const startY = cardBox.y + 16;
+  const startX = gripBox.x + gripBox.width / 2;
+  const startY = gripBox.y + gripBox.height / 2;
   const endX = targetBox.x + targetBox.width / 2;
   const endY = targetBox.y + Math.min(targetBox.height / 2, 80);
 

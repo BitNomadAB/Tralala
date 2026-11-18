@@ -11,6 +11,7 @@ import { TicketView } from "./TicketView";
  * named by the Ticket's title. "Open as page" goes to the Ticket's own route. With a
  * `discussionId` (`?discussion=`) the same frame shows that discussion of the Ticket instead,
  * named by its question; "Back to the Ticket" hands the Ticket's id to `onBackToTicket`.
+ * `returnFocus` names the element that takes the focus when the dialog closes (the card's title).
  */
 export function TicketModal({
   boardId,
@@ -20,6 +21,7 @@ export function TicketModal({
   onClose,
   onBackToTicket,
   ticketHref,
+  returnFocus,
 }: {
   boardId: string;
   loopId: string;
@@ -30,12 +32,16 @@ export function TicketModal({
   onBackToTicket?: ((cardId: string) => void) | undefined;
   /** Links a Ticket key in the description to that Ticket; the page knows which exist. */
   ticketHref?: MarkdownOptions["ticketHref"];
+  returnFocus?: (() => HTMLElement | null) | undefined;
 }) {
   const navigate = useNavigate();
   const titleWrap = (heading: ReactElement) => <DialogTitle asChild>{heading}</DialogTitle>;
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogFrame className="inset-x-4 top-[calc(1.5rem+env(safe-area-inset-top,0px))] bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] mx-auto max-w-[1140px] rounded-xl max-[700px]:inset-0 max-[700px]:rounded-none max-[700px]:border-0">
+      <DialogFrame
+        returnFocus={returnFocus}
+        className="inset-x-4 top-[calc(1.5rem+env(safe-area-inset-top,0px))] bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] mx-auto max-w-[1140px] rounded-xl max-[700px]:inset-0 max-[700px]:rounded-none max-[700px]:border-0"
+      >
         {discussionId ? (
           <DiscussionView
             key={discussionId}

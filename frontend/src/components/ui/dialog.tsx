@@ -59,13 +59,30 @@ export const DialogTitle = DialogPrimitive.Title;
  * takes Escape itself (an open listbox, or an element marked `data-keeps-escape`, such as a field
  * being edited inline): Radix listens on the document before the field sees the key, so without
  * this one Escape would close the menu and the whole dialog at once.
+ *
+ * A modal Radix dialog gives the focus back only to its own `DialogTrigger`; one opened by other
+ * means (a card's title, a link) passes `returnFocus`, which names the element to focus on closing.
  */
-export function DialogFrame({ children, className }: { children: ReactNode; className?: string }) {
+export function DialogFrame({
+  children,
+  className,
+  returnFocus,
+}: {
+  children: ReactNode;
+  className?: string;
+  returnFocus?: (() => HTMLElement | null) | undefined;
+}) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
       <DialogPrimitive.Content
         aria-describedby={undefined}
+        onCloseAutoFocus={(event) => {
+          const target = returnFocus?.();
+          if (!target) return;
+          event.preventDefault();
+          target.focus();
+        }}
         onEscapeKeyDown={(event) => {
           if (keepsEscape(event.target)) event.preventDefault();
         }}

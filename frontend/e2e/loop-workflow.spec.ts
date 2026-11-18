@@ -112,13 +112,13 @@ test.describe("loop planning and completion", () => {
     // Publishing materialises the Ticket with its stable key.
     await page.reload();
     const ticket = page
-      .getByRole("region", { name: /^List / })
+      .getByRole("region", { name: /^Column / })
       .getByRole("listitem")
       .filter({ hasText: "Add verification columns" });
     await expect(ticket).toBeVisible();
     await expect(ticket).toContainText(/[A-Z]{2}\d{3}-/);
 
-    await ticket.getByRole("button", { name: /Add verification columns/ }).click();
+    await ticket.getByRole("button", { name: "Add verification columns", exact: true }).click();
     const cardDialog = page.getByRole("dialog", { name: "Add verification columns" });
     // In the first column the decision is Start work; Mark complete takes its place afterwards.
     await cardDialog.getByRole("button", { name: "Start work" }).click();

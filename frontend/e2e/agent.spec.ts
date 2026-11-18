@@ -111,8 +111,8 @@ test.describe("browser safety", () => {
 
     const dialog = page.getByRole("dialog");
     await page
-      .getByRole("region", { name: "List Todo" })
-      .getByRole("button", { name: "Unsafe card" })
+      .getByRole("region", { name: "Column Todo" })
+      .getByRole("button", { name: "Unsafe card", exact: true })
       .click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole("tab", { name: "Raw text" }).click();
