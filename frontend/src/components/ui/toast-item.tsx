@@ -31,14 +31,17 @@ const keepPressFromDialogs = {
 
 /**
  * One toast: its text, its action if it has one, and Dismiss. Its timer stands still while the
- * pointer is on it or focus is in it, and an error has none.
+ * pointer is on it or focus is in it. An error has none, and neither has a toast with an action:
+ * Undo may be the only way back, and a keyboard user reaches it only after the whole page, so it
+ * stays until it is used or dismissed (WCAG 2.2.1).
  */
 export function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   const { id, action } = toast;
   const dismiss = useCallback(() => {
     onDismiss(id);
   }, [onDismiss, id]);
-  const timer = useToastTimer(toast.variant === "error" ? null : TOAST_DURATION_MS, dismiss);
+  const lasts = toast.variant === "error" || action !== undefined;
+  const timer = useToastTimer(lasts ? null : TOAST_DURATION_MS, dismiss);
   const Icon = icons[toast.variant];
 
   return (

@@ -116,6 +116,16 @@ describe("a toast's time", () => {
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
   });
 
+  it("does not run out for a toast with an action, which may be the only way back", () => {
+    renderToasts();
+    press("Archive");
+    expect(list("polite")).toHaveTextContent("Ticket archived");
+
+    later(10 * 60_000);
+    expect(screen.getByText("Ticket archived")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+  });
+
   it("stands still while the pointer is on the toast, then the rest of it runs", () => {
     renderToasts();
     press("Save");
