@@ -78,6 +78,11 @@ describe("RouteErrorBoundary", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload page" })).toBeInTheDocument();
     expect(screen.getByText("Workspace header")).toBeInTheDocument();
+    // The fallback takes focus on its heading, as a new page would, and names itself in the tab.
+    expect(
+      screen.getByRole("heading", { level: 1, name: "This page could not be shown" }),
+    ).toHaveFocus();
+    expect(document.title).toBe("Page could not be shown · Tralala");
     // An unknown error is logged once, although the navigation and the throw were one update.
     expect(consoleError).toHaveBeenCalledTimes(1);
     expect(consoleError.mock.calls[0]?.[0]).toBe(failure);

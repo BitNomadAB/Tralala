@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Copy, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -19,6 +20,7 @@ export function RoleTemplateEditorPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const roleQuery = useRoleTemplate(String(roleId));
+  usePageTitle({ page: "role-template", isNew, role: roleQuery.data?.name });
 
   const [hydratedId, setHydratedId] = useState<string | null>(isNew ? "new" : null);
   const [name, setName] = useState("");

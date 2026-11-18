@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useState } from "react";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/useAuth";
 import { api } from "@/lib/api";
@@ -33,6 +34,7 @@ function draftOf(repository: Repository): RepositoryDraft {
 
 export function RepositoriesPage() {
   const { actor } = useAuth();
+  usePageTitle({ page: "repositories" });
   const isAdmin = actor?.role === "admin";
   const [draft, setDraft] = useState<RepositoryDraft | null>(null);
   const { save, check, remove, mirror, checks } = useRepositoryActions(() => setDraft(null));

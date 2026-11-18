@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Expander } from "@/components/ui/expander";
@@ -30,6 +31,7 @@ export function BoardLoopsPage() {
   const { boardId = "" } = useParams();
   const navigate = useNavigate();
   const boardQuery = useBoard(boardId);
+  usePageTitle({ page: "board", board: boardQuery.data?.name });
   const loopsQuery = useLoops(boardId, true);
   const summariesQuery = useLoopSummaries(
     boardId,

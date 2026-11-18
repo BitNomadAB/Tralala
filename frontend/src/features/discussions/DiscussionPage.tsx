@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Breadcrumb, CRUMB_LINK } from "@/components/ui/breadcrumb";
 import { loopPagePath, ticketPagePath } from "@/features/cards/ticketRules";
 import { api } from "@/lib/api";
@@ -21,6 +22,7 @@ export function DiscussionPage() {
     queryKey: keys.discussion(boardId, discussionId),
     queryFn: () => api.getDiscussion(boardId, discussionId),
   });
+  usePageTitle({ page: "discussion", question: discussion.data?.goal });
 
   const crumbs = [
     <Link key="board" to={`/boards/${encodeURIComponent(boardId)}`} className={CRUMB_LINK}>

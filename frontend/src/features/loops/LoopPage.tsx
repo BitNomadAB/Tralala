@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/useToast";
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
@@ -33,6 +34,7 @@ export function LoopPage() {
   const toast = useToast();
   const boardQuery = useBoard(boardId);
   const loopQuery = useLoop(boardId, loopId);
+  usePageTitle({ page: "loop", loop: loopQuery.data?.name, board: boardQuery.data?.name });
   const listsQuery = useLists(boardId, loopId);
   const summaries = useLoopSummaries(boardId);
   const view = useLoopView(loopQuery.data?.stage ?? "draft");

@@ -144,6 +144,27 @@ test.describe("accessibility", () => {
     expect(await blockingViolations(page, testInfo, "axe-discussion-inbox")).toEqual([]);
   });
 
+  test("the first Tab reaches the skip link, and a new page takes focus on its heading", async ({
+    page,
+  }) => {
+    await login(page);
+    // A fresh load: focus starts at the top of the document, not where the login left it.
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Boards", level: 1 })).toBeVisible();
+    await expect(page).toHaveTitle("Boards · Tralala");
+
+    await page.keyboard.press("Tab");
+    const skip = page.getByRole("link", { name: "Skip to main content" });
+    await expect(skip).toBeFocused();
+    await expect(skip).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("main#main")).toBeFocused();
+
+    await page.getByRole("link", { name: "Settings" }).click();
+    await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeFocused();
+    await expect(page).toHaveTitle("Settings · Tralala");
+  });
+
   test("Settings has no serious or critical axe violations", async ({ page }, testInfo) => {
     await login(page);
     await page.getByRole("link", { name: "Settings" }).click();

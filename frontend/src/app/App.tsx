@@ -8,6 +8,7 @@ import { AmbientBackground } from "./AmbientBackground";
 import { AppLayout } from "./AppLayout";
 import { lazyPage } from "./chunkLoading";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
+import { useRouteFocus } from "./useRouteFocus";
 
 // One chunk per page, loaded when its route first renders; the layouts stay in the main chunk.
 const LoginPage = lazyPage(() => import("@/features/auth/LoginPage"), "LoginPage");
@@ -70,6 +71,12 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Moves focus to each new page's heading; inside the router, beside the routes. */
+function RouteFocus() {
+  useRouteFocus();
+  return null;
+}
+
 function LoginRoute() {
   const { actor, loading } = useAuth();
   if (loading) return null;
@@ -85,6 +92,7 @@ export function App() {
           <AmbientBackground />
           <ToastProvider>
             <BrowserRouter>
+              <RouteFocus />
               <Routes>
                 {/* Each level of routes renders inside an error boundary, so a page that throws
                     shows a fallback inside the layout and a new route cannot be left outside. The

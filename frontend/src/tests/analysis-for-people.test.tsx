@@ -1,10 +1,11 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
 import { viewAuthorship } from "@/features/loops/loopUi";
 import { stageLabel, traceStages } from "@/lib/runTrace";
 import type { DocumentKind, GenerationRun, LoopDocument } from "@/lib/types";
+import { announcer } from "./announcer";
 import { apiPath, ok } from "./msw/envelope";
 import {
   DOCUMENTS,
@@ -125,6 +126,12 @@ describe("the analysis written for people", () => {
     expect(
       await screen.findByText(/A board agent is writing the brief of this analysis for people/),
     ).toBeInTheDocument();
+    // The line appears with its text, so the announcer reads it out as well.
+    await waitFor(() => {
+      expect(announcer()).toHaveTextContent(
+        "A board agent is writing the brief of this analysis for people. It can be approved when that is done.",
+      );
+    });
     expect(screen.getByRole("button", { name: "Approve analysis" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Rewrite for people/ })).toHaveAttribute(
       "aria-disabled",

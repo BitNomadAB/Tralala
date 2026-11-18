@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { usePageTitle } from "@/app/usePageTitle";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/input";
@@ -25,6 +26,7 @@ const ALL_BOARDS = { sort: "updated_at", order: "desc" } as const;
 
 export function DashboardPage() {
   useDashboardTools();
+  usePageTitle({ page: "boards" });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
