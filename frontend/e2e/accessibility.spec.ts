@@ -238,6 +238,8 @@ test.describe("accessibility in each theme", () => {
       await expect(issued.getByLabel("New API token")).toBeVisible();
       expect.soft(await blockingViolations(page, testInfo, `${prefix}-issued-token`)).toEqual([]);
       await issued.getByRole("button", { name: "Done" }).click();
+      // Not copied, so closing asks first; the journey has no use for the token.
+      await issued.getByRole("button", { name: "Close anyway" }).click();
     });
   }
 });

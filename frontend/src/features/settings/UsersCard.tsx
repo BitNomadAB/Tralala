@@ -1,16 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Link2, Plus, Power } from "lucide-react";
+import { KeyRound, Link2, Plus, Power } from "lucide-react";
 import { useId, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { ROLES, type InviteCreated, type Role, type UserAccount } from "@/lib/types";
-import { clipboard, formatDateTime } from "@/lib/utils";
-import { invitationLink } from "./invitation";
+import { formatDateTime } from "@/lib/utils";
+import { InvitationDialog } from "./InvitationDialog";
 import { NewUserDialog } from "./NewUserDialog";
 import { ResetPasswordDialog } from "./ResetPasswordDialog";
 
@@ -57,7 +56,6 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const users = usersQuery.data ?? [];
   const inviting = (userId: string) =>
     inviteMutation.isPending && inviteMutation.variables === userId;
-  const inviteLink = invited ? invitationLink(window.location.origin, invited) : "";
 
   return (
     <div className="card-surface p-5">
@@ -156,39 +154,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
 
       <NewUserDialog open={creating} onOpenChange={setCreating} />
 
-      <Dialog open={Boolean(invited)} onOpenChange={(open) => !open && setInvited(null)}>
-        <DialogContent
-          title={`Invitation link for ${invited?.user_name ?? ""}`}
-          description="Send it once through a channel you already trust. The link sets the password and signs the person in."
-        >
-          <div className="flex flex-col gap-3">
-            <Field label="Link" htmlFor="invite-link" hint="Shown once; a new link replaces it.">
-              <Input
-                id="invite-link"
-                value={inviteLink}
-                readOnly
-                onFocus={(event) => event.currentTarget.select()}
-              />
-            </Field>
-            <p className="text-[11px] text-[var(--muted-foreground)]">
-              Valid until {invited ? formatDateTime(invited.expires_at) : ""}. Anyone with the link
-              can claim the account until it is used or a new link is created.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  void clipboard()?.writeText(inviteLink);
-                  toast.push({ title: "Link copied", variant: "success" });
-                }}
-              >
-                <Copy size={14} /> Copy
-              </Button>
-              <Button onClick={() => setInvited(null)}>Done</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <InvitationDialog invited={invited} onClose={() => setInvited(null)} />
 
       <ResetPasswordDialog user={resetting} onClose={() => setResetting(null)} />
     </div>

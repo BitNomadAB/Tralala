@@ -38,6 +38,8 @@ test("an administrator creates a member who cannot manage accounts", async ({ pa
   const token = await page.getByLabel("New API token").inputValue();
   expect(token.startsWith("trl_")).toBe(true);
   await page.getByRole("button", { name: "Done" }).click();
+  // Not copied, so closing asks first; the journey read the token from the field.
+  await page.getByRole("button", { name: "Close anyway" }).click();
   await expect(card.getByText("member desktop")).toBeVisible();
   await expect(card.getByText("never used")).toBeVisible();
 
@@ -88,6 +90,7 @@ test("disabling a person revokes the agent access they issued", async ({ page, b
   await expect(memberPage.getByRole("dialog", { name: "Copy this token now" })).toBeVisible();
   const token = await memberPage.getByLabel("New API token").inputValue();
   await memberPage.getByRole("button", { name: "Done" }).click();
+  await memberPage.getByRole("button", { name: "Close anyway" }).click();
   await expect(membershipCard.getByText("owner desktop")).toBeVisible();
 
   // The administrator sees the count and revokes it by disabling the account.
@@ -122,6 +125,8 @@ test("an invitation link lets a person set their own password", async ({ page, b
   const link = await inviteDialog.getByLabel("Link").inputValue();
   expect(link).toContain("/enrol?token=");
   await inviteDialog.getByRole("button", { name: "Done" }).click();
+  // Not copied, so closing asks first; the journey read the link from the field.
+  await inviteDialog.getByRole("button", { name: "Close anyway" }).click();
 
   // A fresh context: the administrator must not be signed in on the invited browser.
   const invited = await browser.newContext();

@@ -91,6 +91,8 @@ test.describe("settings", () => {
     const token = await issued.getByLabel("New API token").inputValue();
     expect(token).toMatch(/^trl_[A-Za-z0-9_-]{20,}$/);
     await issued.getByRole("button", { name: "Done" }).click();
+    // Not copied, so closing asks first; the journey read the token from the field.
+    await issued.getByRole("button", { name: "Close anyway" }).click();
 
     const row = page.getByRole("listitem").filter({ hasText: agentName });
     await expect(row).toContainText("boards:read, cards:read, cards:write");
