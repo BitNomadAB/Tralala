@@ -11,14 +11,16 @@ import {
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useToast } from "@/components/ui/useToast";
 import { ApiError, api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { BoardList, Card } from "@/lib/types";
 import { dragData } from "./dragData";
+import { KANBAN_INSTRUCTIONS, kanbanAnnouncements } from "./kanbanAnnouncements";
 import { KanbanColumn } from "./KanbanColumn";
+import { currentTarget, dropTarget, findCard, type CardTarget } from "./kanbanMoves";
 import { LIST_LIMIT } from "./loopUi";
 import { TicketCard } from "./TicketCard";
 
@@ -128,6 +130,15 @@ export function LoopKanban({
     },
   });
 
+  // What a screen reader hears during a drag names the Ticket or the column and where it is.
+  const accessibility = useMemo(
+    () => ({
+      announcements: kanbanAnnouncements({ lists, cardsByList }),
+      screenReaderInstructions: KANBAN_INSTRUCTIONS,
+    }),
+    [lists, cardsByList],
+  );
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -135,12 +146,26 @@ export function LoopKanban({
 
   function handleDragStart(event: DragStartEvent) {
     const data = dragData(event.active.data.current);
-    if (data?.type === "card") {
-      const card = Object.values(cardsByList)
-        .flat()
-        .find((item) => item.id === data.cardId);
-      setActiveCard(card ?? null);
-    }
+    if (data?.type === "card") setActiveCard(findCard({ lists, cardsByList }, data.cardId) ?? null);
+  }
+
+  /** Moves the card at once on screen, then on the server; a refusal reloads the columns. */
+  function moveCard(card: Card, target: CardTarget) {
+    const targetCards = (cardsByList[target.listId] ?? []).filter((item) => item.id !== card.id);
+    const sourceCards = (cardsByList[card.list_id] ?? []).filter((item) => item.id !== card.id);
+    queryClient.setQueryData<Card[]>(
+      keys.listCards(boardId, loopId, card.list_id, LIST_LIMIT),
+      sourceCards,
+    );
+    queryClient.setQueryData<Card[]>(
+      keys.listCards(boardId, loopId, target.listId, LIST_LIMIT),
+      () => {
+        const next = [...targetCards];
+        next.splice(target.index, 0, { ...card, list_id: target.listId });
+        return next;
+      },
+    );
+    moveCardMutation.mutate({ card, listId: target.listId, position: target.index });
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -160,44 +185,21 @@ export function LoopKanban({
     }
 
     if (activeData?.type !== "card") return;
-    const cardId = activeData.cardId;
-    const card = Object.values(cardsByList)
-      .flat()
-      .find((item) => item.id === cardId);
-    if (!card) return;
-
-    const targetListId = overData?.listId;
-    if (!targetListId) return;
-
-    const targetCards = (cardsByList[targetListId] ?? []).filter((item) => item.id !== cardId);
-    let index = targetCards.length;
-    if (overData.type === "card") {
-      const overIndex = targetCards.findIndex((item) => item.id === overData.cardId);
-      if (overIndex >= 0) index = overIndex;
-    }
-
-    const sourceCards = (cardsByList[card.list_id] ?? []).filter((item) => item.id !== cardId);
-
-    queryClient.setQueryData<Card[]>(
-      keys.listCards(boardId, loopId, card.list_id, LIST_LIMIT),
-      sourceCards,
-    );
-    queryClient.setQueryData<Card[]>(
-      keys.listCards(boardId, loopId, targetListId, LIST_LIMIT),
-      () => {
-        const next = [...targetCards];
-        next.splice(index, 0, { ...card, list_id: targetListId });
-        return next;
-      },
-    );
-
-    moveCardMutation.mutate({ card, listId: targetListId, position: index });
+    const state = { lists, cardsByList };
+    const card = findCard(state, activeData.cardId);
+    const target = card ? dropTarget(state, card, overData) : null;
+    if (!card || !target) return;
+    // Dropped where it was: nothing to store.
+    const here = currentTarget(state, card);
+    if (target.listId === here.listId && target.index === here.index) return;
+    moveCard(card, target);
   }
 
   return (
     <div className="flex min-h-0 flex-1 gap-4">
       <DndContext
         sensors={sensors}
+        accessibility={accessibility}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}

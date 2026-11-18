@@ -80,10 +80,15 @@ test.describe("drag and drop", () => {
       exact: true,
     });
     await expect(grip).toBeFocused();
+    // dnd-kit reads every step in its own live region, by the Ticket's title and column.
+    const said = page.locator('[id^="DndLiveRegion"]');
     await page.keyboard.press("Space");
     await expect(grip).toHaveAttribute("aria-pressed", "true");
+    await expect(said).toContainText(title);
     await page.keyboard.press("ArrowRight");
+    await expect(said).toContainText(`${title} is over In Progress`);
     await page.keyboard.press("Space");
+    await expect(said).toContainText(`${title} dropped in In Progress, position 1 of 1.`);
     await expect(cardTile(page, "In Progress", title)).toBeVisible();
     await expect(todo.getByRole("listitem")).toHaveCount(0);
 
