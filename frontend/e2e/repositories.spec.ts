@@ -28,7 +28,7 @@ test.describe("repositories", () => {
     await expect(entry.getByText("https://github.com/BitNomadAB/Tralala")).toBeVisible();
 
     // A second save keeps the same repository: editing must not create a duplicate.
-    await entry.getByRole("button", { name: "Edit" }).click();
+    await entry.getByRole("button", { name: `Edit ${name}` }).click();
     const editor = page.getByRole("dialog", { name: "Edit repository" });
     const renamed = `${name} renamed`;
     await editor.getByLabel("Name").fill(renamed);
@@ -39,7 +39,7 @@ test.describe("repositories", () => {
     await page
       .getByRole("listitem")
       .filter({ hasText: renamed })
-      .getByRole("button", { name: "Remove" })
+      .getByRole("button", { name: `Remove ${renamed}` })
       .click();
     await expect(page.getByRole("listitem").filter({ hasText: renamed })).toHaveCount(0);
   });
@@ -61,10 +61,10 @@ test.describe("repositories", () => {
     const entry = page.getByRole("listitem").filter({ hasText: name });
     await expect(entry.getByText("Git over HTTPS")).toBeVisible();
     await expect(entry.getByText("no mirror")).toBeVisible();
-    await entry.getByRole("button", { name: "Rebuild mirror" }).click();
+    await entry.getByRole("button", { name: `Rebuild mirror of ${name}` }).click();
     await expect(page.getByText("Mirror removed")).toBeVisible();
 
-    await entry.getByRole("button", { name: "Remove", exact: true }).click();
+    await entry.getByRole("button", { name: `Remove ${name}`, exact: true }).click();
     await expect(page.getByRole("listitem").filter({ hasText: name })).toHaveCount(0);
   });
 

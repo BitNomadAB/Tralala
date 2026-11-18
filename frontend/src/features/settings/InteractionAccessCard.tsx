@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/useToast";
@@ -9,9 +9,16 @@ import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import type { Credential } from "@/lib/types";
 import { AgentAccessGuide } from "./AgentAccessGuide";
+import { COPY_BY_HAND, copyText } from "./copyText";
 import { CredentialRow } from "./CredentialRow";
 import { IssuedTokenDialog } from "./IssuedTokenDialog";
 import { NewAccessDialog } from "./NewAccessDialog";
+
+/** What the two buttons of a key do, said under each list and read as the buttons' description. */
+const ROTATE_AND_REVOKE =
+  "Rotate issues a new token with the same scopes and revokes the old one at once. Revoke stops a key for good.";
+
+const NEW_ACCESS_ID = "new-access-key";
 
 interface InteractionAccessCardProps {
   isAdmin: boolean;
@@ -49,6 +56,11 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
 
   const [creating, setCreating] = useState(false);
   const [issued, setIssued] = useState<Credential | null>(null);
+  // A token issued from the New access key dialog gives focus back to that button on closing,
+  // as the dialog that opened it is gone; a rotated one gives it back to the Rotate button.
+  const [returnFocusId, setReturnFocusId] = useState<string | null>(null);
+  const mineHintId = useId();
+  const othersHintId = useId();
 
   const credentials = credentialsQuery.data ?? [];
   const mine = isAdmin
@@ -69,11 +81,19 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
       invalidate();
       toast.push({ title: "Agent access revoked", variant: "success" });
     },
+    onError: (error) => {
+      toast.push({
+        title: "Could not revoke the access",
+        description: describeError(error, undefined),
+        variant: "error",
+      });
+    },
   });
 
   const rotateMutation = useMutation({
     mutationFn: (credential: Credential) => api.rotateCredential(credential.id),
     onSuccess: (credential) => {
+      setReturnFocusId(null);
       setIssued(credential);
       invalidate();
       toast.push({
@@ -91,14 +111,15 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
   });
 
   async function copySnippet(snippet: string) {
-    await navigator.clipboard.writeText(snippet);
-    toast.push({ title: "MCP configuration copied", variant: "success" });
-  }
-
-  async function copyToken() {
-    if (!issued?.token) return;
-    await navigator.clipboard.writeText(issued.token);
-    toast.push({ title: "Token copied", variant: "success" });
+    if (await copyText(snippet)) {
+      toast.push({ title: "MCP configuration copied", variant: "success" });
+      return;
+    }
+    toast.push({
+      title: "The browser did not copy the configuration",
+      description: COPY_BY_HAND,
+      variant: "error",
+    });
   }
 
   function renderRow(credential: Credential, showOwner: boolean) {
@@ -108,6 +129,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         credential={credential}
         showOwner={showOwner}
         rotating={rotateMutation.isPending}
+        revoking={revokeMutation.isPending && revokeMutation.variables.id === credential.id}
+        hintId={showOwner ? othersHintId : mineHintId}
         onRotate={() => rotateMutation.mutate(credential)}
         onRevoke={() => revokeMutation.mutate(credential)}
       />
@@ -120,7 +143,12 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold">Interaction agent access</h2>
           <Badge tone="brand">you</Badge>
-          <Button size="sm" className="ml-auto" onClick={() => setCreating(true)}>
+          <Button
+            id={NEW_ACCESS_ID}
+            size="sm"
+            className="ml-auto"
+            onClick={() => setCreating(true)}
+          >
             <KeyRound size={14} /> New access key
           </Button>
         </div>
@@ -148,6 +176,9 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
             <li className="py-2.5 text-xs text-[var(--muted-foreground)]">No agent access yet.</li>
           ) : null}
         </ul>
+        <p id={mineHintId} className="mt-2 text-[11px] text-[var(--muted-foreground)]">
+          {ROTATE_AND_REVOKE}
+        </p>
       </div>
 
       {isAdmin ? (
@@ -165,6 +196,9 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
               </li>
             ) : null}
           </ul>
+          <p id={othersHintId} className="mt-2 text-[11px] text-[var(--muted-foreground)]">
+            {ROTATE_AND_REVOKE}
+          </p>
           <p className="mt-3 text-[11px] text-[var(--muted-foreground)]">
             Yours may hold any grantable scope: <code>{scopeChoices.join(", ")}</code>
           </p>
@@ -179,6 +213,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         defaultExpiry={defaultExpiry}
         expiryHint={expiryHint}
         onIssued={(credential) => {
+          setReturnFocusId(NEW_ACCESS_ID);
           setIssued(credential);
           setCreating(false);
           invalidate();
@@ -187,10 +222,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
 
       <IssuedTokenDialog
         issued={issued}
+        returnFocusId={returnFocusId}
         onClose={() => setIssued(null)}
-        onCopy={() => {
-          void copyToken();
-        }}
       />
     </>
   );

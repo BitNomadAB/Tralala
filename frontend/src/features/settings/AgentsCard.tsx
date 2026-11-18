@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, Plus, Power, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -12,6 +11,11 @@ import { providerLabelFor } from "@/lib/providers";
 import { useAgents } from "@/lib/queries";
 import type { Agent } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
+import { ButtonLink } from "./ButtonLink";
+import { entryControlId, removalFocusTarget, useRemovalFocus } from "./removalFocus";
+
+const HEADING_ID = "settings-agents";
+const editId = (agentId: string) => entryControlId("agent-edit", agentId);
 
 function testTone(agent: Agent): "success" | "danger" | "neutral" {
   if (!agent.last_test_status) return "neutral";
@@ -33,11 +37,11 @@ function ToolCalling({ agent }: { agent: Agent }) {
 }
 
 export function AgentsCard() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
   const { data: agents = [], isLoading } = useAgents();
   const [deleting, setDeleting] = useState<Agent | null>(null);
+  const removalFocus = useRemovalFocus();
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["agents"] });
 
@@ -61,7 +65,15 @@ export function AgentsCard() {
 
   const deleteMutation = useMutation({
     mutationFn: (agent: Agent) => api.deleteAgent(agent.id),
-    onSuccess: () => {
+    onSuccess: (_result, agent) => {
+      removalFocus.remember(
+        removalFocusTarget(
+          agents.map((entry) => entry.id),
+          agent.id,
+          editId,
+          HEADING_ID,
+        ),
+      );
       void invalidate();
       setDeleting(null);
       toast.push({ title: "Agent deleted", variant: "success" });
@@ -78,16 +90,12 @@ export function AgentsCard() {
   return (
     <div className="card-surface p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">AI agents</h2>
-        <Button
-          size="sm"
-          className="ml-auto"
-          onClick={() => {
-            void navigate("/settings/agents/new");
-          }}
-        >
+        <h2 id={HEADING_ID} tabIndex={-1} className="text-sm font-semibold">
+          AI agents
+        </h2>
+        <ButtonLink to="/settings/agents/new" size="sm" className="ml-auto">
           <Plus size={14} /> New agent
-        </Button>
+        </ButtonLink>
       </div>
       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
         Agent identities with their own model connection and role assignment. Credentials are
@@ -133,16 +141,15 @@ export function AgentsCard() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button
+                  <ButtonLink
+                    id={editId(agent.id)}
+                    to={`/settings/agents/${agent.id}`}
                     size="sm"
                     variant="secondary"
                     aria-label={`Edit ${agent.name}`}
-                    onClick={() => {
-                      void navigate(`/settings/agents/${agent.id}`);
-                    }}
                   >
                     Edit
-                  </Button>
+                  </ButtonLink>
                   <Button
                     size="icon"
                     variant="ghost"
@@ -172,6 +179,7 @@ export function AgentsCard() {
         <DialogContent
           title="Delete agent"
           description="Past discussions keep their role snapshots and messages."
+          onCloseAutoFocus={removalFocus.onCloseAutoFocus}
         >
           <p className="text-sm">
             Delete <span className="font-semibold">{deleting?.name}</span>?

@@ -5,6 +5,7 @@ import { usePageTitle } from "@/app/usePageTitle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { ReasonButton } from "@/components/ui/reason-button";
 import { describeError, fieldErrors } from "@/lib/describeError";
 import { fieldProblems } from "@/lib/fieldProblems";
 import { presetById, presetRequirements } from "@/lib/providers";
@@ -22,6 +23,7 @@ import {
 } from "./agentForm";
 import { AgentIdentityFields } from "./AgentIdentityFields";
 import { AgentTestResultPanel } from "./AgentTestResultPanel";
+import { ButtonLink } from "./ButtonLink";
 import { useAgentActions } from "./useAgentActions";
 
 export function AgentEditorPage() {
@@ -108,6 +110,13 @@ export function AgentEditorPage() {
   // A preset that documents its cap refuses a longer answer here, before the provider does.
   const lengthProblem =
     form.connectionType === "openai_compatible" ? answerLengthProblem(form, preset) : null;
+  const testBlocked = actions.test.isPending
+    ? "Testing…"
+    : keyMissing
+      ? "This provider needs a key before it can be tested."
+      : !form.baseUrl.trim()
+        ? "Fill in the endpoint first."
+        : null;
   const canSave = Boolean(
     form.name.trim() &&
     form.baseUrl.trim() &&
@@ -120,15 +129,9 @@ export function AgentEditorPage() {
   return (
     <section className="flex max-w-3xl flex-col gap-6">
       <div>
-        <button
-          type="button"
-          onClick={() => {
-            void navigate("/settings");
-          }}
-          className="inline-flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-        >
-          <ArrowLeft size={14} /> Settings
-        </button>
+        <ButtonLink to="/settings" variant="back" size="none">
+          <ArrowLeft size={14} aria-hidden="true" /> Settings
+        </ButtonLink>
         <h1 className="mt-1 flex items-center gap-2 text-xl font-semibold">
           {isNew ? "New AI agent" : `Edit ${form.name || "agent"}`}
           {stored ? (
@@ -193,21 +196,16 @@ export function AgentEditorPage() {
               <Trash2 size={14} /> Delete
             </Button>
           ) : null}
-          <Button
+          {/* Stays focusable while it cannot run, and says why beside it: a test under way, a
+              missing key or endpoint. */}
+          <ReasonButton
             type="button"
             variant="outline"
-            disabled={actions.test.isPending || !form.baseUrl.trim() || keyMissing}
-            title={
-              keyMissing
-                ? "This provider needs a key before it can be tested"
-                : !form.baseUrl.trim()
-                  ? "Fill in the endpoint first"
-                  : undefined
-            }
+            disabledReason={testBlocked}
             onClick={() => actions.test.mutate()}
           >
-            <PlugZap size={14} /> {actions.test.isPending ? "Testing…" : "Test connection"}
-          </Button>
+            <PlugZap size={14} /> Test connection
+          </ReasonButton>
           {!isNew ? (
             <Button
               type="button"

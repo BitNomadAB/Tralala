@@ -21,7 +21,7 @@ test.describe("role templates and agents", () => {
     await openSettings(page);
 
     await roleRow(page, "Lead Developer")
-      .getByRole("button", { name: "Edit Lead Developer" })
+      .getByRole("link", { name: "Edit Lead Developer" })
       .click();
     await expect(
       page.getByRole("heading", { name: /Edit Lead Developer/, level: 1 }),
@@ -34,7 +34,7 @@ test.describe("role templates and agents", () => {
     await expect(roleRow(page, "Lead Developer")).toContainText("customized");
 
     await roleRow(page, "Lead Developer")
-      .getByRole("button", { name: "Edit Lead Developer" })
+      .getByRole("link", { name: "Edit Lead Developer" })
       .click();
     await page.getByRole("button", { name: "Restore factory prompt" }).click();
     await expect(page.getByLabel("System prompt")).toHaveValue(/Lead Developer/);
@@ -47,14 +47,14 @@ test.describe("role templates and agents", () => {
     await openSettings(page);
 
     const source = uniqueName("Dup Source");
-    await page.getByRole("button", { name: "New role" }).click();
+    await page.getByRole("link", { name: "New role" }).click();
     await page.getByLabel("Name").fill(source);
     await page.getByLabel("System prompt").fill("Source prompt for duplication.");
     await page.getByRole("button", { name: "Save role" }).click();
     await expect(roleRow(page, source)).toBeVisible();
 
     await roleRow(page, source)
-      .getByRole("button", { name: `Edit ${source}` })
+      .getByRole("link", { name: `Edit ${source}` })
       .click();
     await page.getByRole("button", { name: "Duplicate" }).click();
     const copyName = `${source} (copy)`;
@@ -85,7 +85,7 @@ test.describe("role templates and agents", () => {
     await login(page);
     await openSettings(page);
 
-    await page.getByRole("button", { name: "New agent" }).click();
+    await page.getByRole("link", { name: "New agent" }).click();
     await expect(page.getByRole("heading", { name: "New AI agent", level: 1 })).toBeVisible();
     const generated = await page.getByLabel("Agent name").inputValue();
     expect(generated.trim().length).toBeGreaterThan(2);

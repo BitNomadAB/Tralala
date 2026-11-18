@@ -87,6 +87,7 @@ describe("signing out in the app", () => {
 
     // The session is still observed, so signing in with the new password opens the workspace. The
     // server took the new password from the JSON body the client sent.
+    await user.type(screen.getByLabelText("Username"), MEMBER.name);
     await user.type(screen.getByLabelText("Password"), "new-password-2");
     await clickAndAwaitServer("Sign in");
     expect(await screen.findByRole("button", { name: "Sign out" })).toBeInTheDocument();

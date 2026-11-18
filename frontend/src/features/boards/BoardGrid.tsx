@@ -10,7 +10,6 @@ export function BoardGrid({
   label,
   boards,
   summaries,
-  onOpen,
   onLifecycle,
   onDelete,
 }: {
@@ -18,7 +17,6 @@ export function BoardGrid({
   label: string;
   boards: readonly Board[];
   summaries: ReadonlyMap<string, BoardSummaries>;
-  onOpen: (board: Board) => void;
   onLifecycle: (type: BoardLifecycleAction, board: Board) => void;
   onDelete: (board: Board) => void;
 }) {
@@ -29,7 +27,6 @@ export function BoardGrid({
           key={board.id}
           board={board}
           summaries={summaries.get(board.id)}
-          onOpen={() => onOpen(board)}
           onLifecycle={(type) => onLifecycle(type, board)}
           onDelete={() => onDelete(board)}
         />

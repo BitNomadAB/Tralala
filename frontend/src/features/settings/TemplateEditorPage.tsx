@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import type { BoardTemplate } from "@/lib/types";
+import { ButtonLink } from "./ButtonLink";
 import { TemplateLabelsField, type LabelDraft } from "./TemplateLabelsField";
 import { TemplateListsField } from "./TemplateListsField";
 
@@ -106,15 +107,9 @@ export function TemplateEditorPage() {
   return (
     <section className="flex max-w-3xl flex-col gap-6">
       <div>
-        <button
-          type="button"
-          onClick={() => {
-            void navigate("/settings");
-          }}
-          className="inline-flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-        >
-          <ArrowLeft size={14} /> Settings
-        </button>
+        <ButtonLink to="/settings" variant="back" size="none">
+          <ArrowLeft size={14} aria-hidden="true" /> Settings
+        </ButtonLink>
         <h1 className="mt-1 text-xl font-semibold">
           {isNew ? "New board template" : `Edit ${name || "template"}`}
         </h1>

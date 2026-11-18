@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Link2, Plus, Power } from "lucide-react";
-import { useState } from "react";
+import { KeyRound, Link2, Plus, Power } from "lucide-react";
+import { useId, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { ROLES, type InviteCreated, type Role, type UserAccount } from "@/lib/types";
-import { clipboard, formatDateTime } from "@/lib/utils";
+import { formatDateTime } from "@/lib/utils";
+import { InvitationDialog } from "./InvitationDialog";
 import { NewUserDialog } from "./NewUserDialog";
 import { ResetPasswordDialog } from "./ResetPasswordDialog";
 
@@ -20,6 +20,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<UserAccount | null>(null);
   const [invited, setInvited] = useState<InviteCreated | null>(null);
+  const disableHintId = useId();
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["users"] });
 
@@ -53,7 +54,8 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
   });
 
   const users = usersQuery.data ?? [];
-  const inviteLink = invited ? `${window.location.origin}${invited.path}` : "";
+  const inviting = (userId: string) =>
+    inviteMutation.isPending && inviteMutation.variables === userId;
 
   return (
     <div className="card-surface p-5">
@@ -67,6 +69,10 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
         Everyone who signs in can work with boards, agents and discussions, and manage their own
         agent access. Only administrators manage accounts; disabling somebody also revokes the agent
         access they issued.
+      </p>
+      <p id={disableHintId} className="mt-1 text-xs text-[var(--muted-foreground)]">
+        Disable signs the person out and revokes their agent access. Enable lets them sign in again;
+        access that was revoked stays revoked.
       </p>
 
       <ul className="mt-3 divide-y divide-[var(--border)]">
@@ -112,8 +118,12 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
               variant="ghost"
               aria-label={`Create an invitation link for ${user.name}`}
               title="Invitation link"
-              disabled={user.disabled || inviteMutation.isPending}
-              onClick={() => inviteMutation.mutate(user.id)}
+              disabled={user.disabled}
+              // While the link is being made the button stays focusable, so focus is not lost.
+              aria-disabled={inviting(user.id) ? true : undefined}
+              onClick={() => {
+                if (!inviting(user.id)) inviteMutation.mutate(user.id);
+              }}
             >
               <Link2 size={14} />
             </Button>
@@ -130,11 +140,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
               size="icon"
               variant="ghost"
               aria-label={`${user.disabled ? "Enable" : "Disable"} ${user.name}`}
-              title={
-                user.disabled
-                  ? "Enable: the person can sign in again; revoked agent access stays revoked"
-                  : "Disable: signs the person out and revokes their agent access"
-              }
+              aria-describedby={disableHintId}
               onClick={() => updateMutation.mutate({ userId: user.id, disabled: !user.disabled })}
             >
               <Power size={14} />
@@ -148,39 +154,7 @@ export function UsersCard({ currentUserId }: { currentUserId: string }) {
 
       <NewUserDialog open={creating} onOpenChange={setCreating} />
 
-      <Dialog open={Boolean(invited)} onOpenChange={(open) => !open && setInvited(null)}>
-        <DialogContent
-          title={`Invitation link for ${invited?.user_name ?? ""}`}
-          description="Send it once through a channel you already trust. The link sets the password and signs the person in."
-        >
-          <div className="flex flex-col gap-3">
-            <Field label="Link" htmlFor="invite-link" hint="Shown once; a new link replaces it.">
-              <Input
-                id="invite-link"
-                value={inviteLink}
-                readOnly
-                onFocus={(event) => event.currentTarget.select()}
-              />
-            </Field>
-            <p className="text-[11px] text-[var(--muted-foreground)]">
-              Valid until {invited ? formatDateTime(invited.expires_at) : ""}. Anyone with the link
-              can claim the account until it is used or a new link is created.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  void clipboard()?.writeText(inviteLink);
-                  toast.push({ title: "Link copied", variant: "success" });
-                }}
-              >
-                <Copy size={14} /> Copy
-              </Button>
-              <Button onClick={() => setInvited(null)}>Done</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <InvitationDialog invited={invited} onClose={() => setInvited(null)} />
 
       <ResetPasswordDialog user={resetting} onClose={() => setResetting(null)} />
     </div>

@@ -25,7 +25,7 @@ async function createTemplate(
   lists: string[],
   description: string,
 ): Promise<void> {
-  await page.getByRole("button", { name: "New template" }).click();
+  await page.getByRole("link", { name: "New template" }).click();
   await expect(page.getByRole("heading", { name: "New board template", level: 1 })).toBeVisible();
   await page.getByLabel("Name").fill(name);
   await page.getByLabel("Description").fill(description);
@@ -52,7 +52,7 @@ test.describe("board templates", () => {
     await expect(row).toContainText("Ideas · Doing · Done");
     await expect(row).toContainText("Two week delivery board");
 
-    await row.getByRole("button", { name: `Edit ${templateName}` }).click();
+    await row.getByRole("link", { name: `Edit ${templateName}` }).click();
     await expect(
       page.getByRole("heading", { name: `Edit ${templateName}`, level: 1 }),
     ).toBeVisible();

@@ -1,16 +1,15 @@
-import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Section } from "@/components/ui/section";
 import { inboxPath, WAITS_ON_DISCUSSION } from "@/features/discussions/inboxRules";
 import { loopHref } from "@/features/loops/loopNextAction";
+import { ButtonLink } from "@/features/settings/ButtonLink";
 import type { DiscussionInboxRow } from "@/lib/types";
 import type { WaitingRow } from "./boardSummaries";
 
 /**
  * What waits for the person, first: one row per Loop, across their boards, whose next step is a
  * decision only a person makes. Each row names the board and the Loop, says what it waits for and
- * offers the button that opens the Loop page where the decision is made. After the Loops come the
+ * offers the link that opens the Loop page where the decision is made. After the Loops come the
  * discussions that wait for the person's decision, each opening the discussion on its Ticket. Rows
  * appear as each board answers; `pending` says some have not answered yet.
  */
@@ -26,7 +25,6 @@ export function WaitsForYou({
   pending: boolean;
   failed: number;
 }) {
-  const navigate = useNavigate();
   const count = rows.length + discussions.length;
   return (
     <Section title="Waits for you" count={count > 0 ? count : undefined} size="lg" level={2}>
@@ -52,16 +50,14 @@ export function WaitsForYou({
                 </p>
                 <p className="m-0 text-sm text-[var(--muted-foreground)]">{action.waiting}</p>
               </div>
-              <Button
+              <ButtonLink
+                to={loopHref(board.id, loop.id, action.tab)}
                 size="sm"
                 variant="secondary"
                 aria-label={`${action.label ?? "Open Loop"}: ${loop.name}`}
-                onClick={() => {
-                  void navigate(loopHref(board.id, loop.id, action.tab));
-                }}
               >
                 {action.label ?? "Open Loop"}
-              </Button>
+              </ButtonLink>
             </li>
           ))}
           {discussions.map((discussion) => (
@@ -81,16 +77,14 @@ export function WaitsForYou({
                 </p>
                 <p className="m-0 text-sm text-[var(--muted-foreground)]">{WAITS_ON_DISCUSSION}</p>
               </div>
-              <Button
+              <ButtonLink
+                to={inboxPath(discussion)}
                 size="sm"
                 variant="secondary"
                 aria-label={`Open discussion: ${discussion.question}`}
-                onClick={() => {
-                  void navigate(inboxPath(discussion));
-                }}
               >
                 Open discussion
-              </Button>
+              </ButtonLink>
             </li>
           ))}
         </ul>

@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, GitBranch, KeyRound, RefreshCw, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ReasonButton } from "@/components/ui/reason-button";
 import type { Repository } from "@/lib/types";
 import { formatBytes, PROVIDER_LABELS } from "./repositoryLabels";
 import type { MirrorAction } from "./useRepositoryActions";
@@ -24,6 +25,7 @@ function MirrorDetails({
   busy: boolean;
   onMirror: (action: MirrorAction) => void;
 }) {
+  const busyReason = busy ? "Removing the mirror…" : null;
   const cleanupFailed = repository.mirror_error === "mirror_cleanup_failed";
   const bytes = repository.mirror_bytes;
   return (
@@ -42,13 +44,25 @@ function MirrorDetails({
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={() => onMirror("rebuild")} disabled={busy}>
+        <ReasonButton
+          size="sm"
+          variant="outline"
+          aria-label={`Rebuild mirror of ${repository.name}`}
+          onClick={() => onMirror("rebuild")}
+          disabledReason={busyReason}
+        >
           <RefreshCw size={13} /> Rebuild mirror
-        </Button>
+        </ReasonButton>
         {cleanupFailed ? (
-          <Button size="sm" variant="outline" onClick={() => onMirror("remove")} disabled={busy}>
+          <ReasonButton
+            size="sm"
+            variant="outline"
+            aria-label={`Remove now: mirror of ${repository.name}`}
+            onClick={() => onMirror("remove")}
+            disabledReason={busyReason}
+          >
             <Trash2 size={13} /> Remove now
-          </Button>
+          </ReasonButton>
         ) : null}
       </div>
     </div>
@@ -58,6 +72,7 @@ function MirrorDetails({
 /** One repository in the list: what it is, who uses it, its last check and its commands. */
 export function RepositoryRow({
   repository,
+  checkId,
   checkText,
   busy,
   onCheck,
@@ -66,7 +81,10 @@ export function RepositoryRow({
   onMirror,
 }: {
   repository: Repository;
+  /** The id of the row's Test access button, where focus goes when a neighbour is removed. */
+  checkId: string;
   checkText: string | undefined;
+  /** What is under way for this repository; the other rows stay usable meanwhile. */
   busy: { check: boolean; remove: boolean; mirror: boolean };
   onCheck: () => void;
   onEdit: () => void;
@@ -114,15 +132,29 @@ export function RepositoryRow({
         <MirrorDetails repository={repository} busy={busy.mirror} onMirror={onMirror} />
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={onCheck} disabled={busy.check}>
+        {/* Each name says which repository, as every row has the same three. */}
+        <ReasonButton
+          id={checkId}
+          size="sm"
+          variant="outline"
+          aria-label={`Test access to ${repository.name}`}
+          onClick={onCheck}
+          disabledReason={busy.check ? "Testing access…" : null}
+        >
           Test access
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onEdit}>
+        </ReasonButton>
+        <Button size="sm" variant="ghost" aria-label={`Edit ${repository.name}`} onClick={onEdit}>
           Edit
         </Button>
-        <Button size="sm" variant="ghost" onClick={onRemove} disabled={busy.remove}>
+        <ReasonButton
+          size="sm"
+          variant="ghost"
+          aria-label={`Remove ${repository.name}`}
+          onClick={onRemove}
+          disabledReason={busy.remove ? "Removing…" : null}
+        >
           <Trash2 size={13} /> Remove
-        </Button>
+        </ReasonButton>
       </div>
     </li>
   );

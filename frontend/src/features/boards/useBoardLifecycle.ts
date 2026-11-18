@@ -15,10 +15,17 @@ const DONE: Record<BoardLifecycleAction, string> = {
 
 /**
  * Archive, restore, duplicate and delete a board, as the dashboard's tiles and the board page's
- * menu offer them: each refreshes the board lists and says what happened. Deleting asks for the
- * board's name first (`deleting`, `confirmName`), as `DeleteBoardDialog` shows it.
+ * menu offer them: each refreshes the board lists and says what happened, in a toast a screen
+ * reader reads too; `onDone` hears of each that succeeded. Deleting asks for the board's name
+ * first (`deleting`, `confirmName`), as `DeleteBoardDialog` shows it.
  */
-export function useBoardLifecycle({ onDeleted }: { onDeleted?: () => void } = {}) {
+export function useBoardLifecycle({
+  onDeleted,
+  onDone,
+}: {
+  onDeleted?: () => void;
+  onDone?: (type: BoardLifecycleAction, board: Board) => void;
+} = {}) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [deleting, setDeleting] = useState<Board | null>(null);
@@ -38,6 +45,7 @@ export function useBoardLifecycle({ onDeleted }: { onDeleted?: () => void } = {}
     onSuccess: (_result, action) => {
       refresh(action.board);
       toast.push({ title: DONE[action.type], variant: "success" });
+      onDone?.(action.type, action.board);
     },
     onError: (error) => {
       toast.push({

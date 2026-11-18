@@ -71,7 +71,7 @@ test.describe("agent connection test", () => {
     const before = (await (await page.request.get("/api/v1/agents")).json()).data.length;
 
     const agentName = uniqueName("Stub agent");
-    await page.getByRole("button", { name: "New agent" }).click();
+    await page.getByRole("link", { name: "New agent" }).click();
     await expect(page.getByRole("heading", { name: "New AI agent", level: 1 })).toBeVisible();
     await page.getByLabel("Agent name").fill(agentName);
     await page.getByLabel("Role template").selectOption({ label: "QA Engineer" });
@@ -88,7 +88,9 @@ test.describe("agent connection test", () => {
     await expect(status).toContainText("Model Not Exist");
     await expect(status).toContainText("http_400");
     // The raw JSON is shown, so the answer reads the same whatever shape the provider used.
-    await expect(status.locator("pre")).toContainText('"status": "http_400"');
+    await expect(page.getByRole("group", { name: "Raw test result" })).toContainText(
+      '"status": "http_400"',
+    );
     expect(lastAuthorization).toBeUndefined();
     await expect(page.getByText(/2 model\(s\) reported by the endpoint/)).toBeVisible();
 
@@ -113,7 +115,7 @@ test.describe("agent connection test", () => {
   test("the preset decides which fields the provider needs", async ({ page }) => {
     await login(page);
     await openSettings(page);
-    await page.getByRole("button", { name: "New agent" }).click();
+    await page.getByRole("link", { name: "New agent" }).click();
     await expect(page.getByRole("heading", { name: "New AI agent", level: 1 })).toBeVisible();
 
     // A hosted provider: fixed endpoint, key and model required, so saving is blocked without them.

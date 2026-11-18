@@ -30,7 +30,7 @@ function refusalProblems(error: unknown): FieldProblem[] {
 }
 
 export function SecurityCard() {
-  const { signOutLocally } = useAuth();
+  const { actor, signOutLocally } = useAuth();
   const toast = useToast();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -72,6 +72,8 @@ export function SecurityCard() {
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
+        // The button stays focusable while the change runs (`aria-disabled`); a second press waits.
+        if (mutation.isPending) return;
         const problems = [
           ...problemAt("current-password", current ? null : "Enter your current password."),
           ...problemAt("new-password", passwordProblem(next)),
@@ -80,6 +82,16 @@ export function SecurityCard() {
         if (!fields.report(problems)) mutation.mutate();
       }}
     >
+      {/* Not shown and not read out: it tells a password manager whose password changes, so it
+          stores the new one under the right username (WCAG 1.3.5). */}
+      <input
+        type="text"
+        name="username"
+        autoComplete="username"
+        value={actor?.name ?? ""}
+        readOnly
+        hidden
+      />
       <h2 className="text-sm font-semibold">Your password</h2>
       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
         Changing it signs out every device, including this one.
@@ -142,7 +154,7 @@ export function SecurityCard() {
         </Field>
       </div>
       <div className="mt-3 flex justify-end">
-        <Button type="submit" size="sm" disabled={mutation.isPending}>
+        <Button type="submit" size="sm" aria-disabled={mutation.isPending ? true : undefined}>
           <ShieldCheck size={14} /> Change password
         </Button>
       </div>
