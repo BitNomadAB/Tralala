@@ -61,7 +61,10 @@ function InShort({
   );
 }
 
-/** The plan as the agent wrote it: the payload as indented JSON, wrapped, never interpreted. */
+/**
+ * The plan as the agent wrote it: the payload as indented JSON, wrapped, never interpreted. A named
+ * group, since a label on a plain `pre` is not read, and focusable, so a keyboard scrolls it.
+ */
 function RawPlan({ technical }: { technical: LoopDocument }) {
   const shown =
     technical.current_payload === null
@@ -69,7 +72,9 @@ function RawPlan({ technical }: { technical: LoopDocument }) {
       : payloadText(technical.current_payload);
   return (
     <pre
+      role="group"
       aria-label="The plan as JSON"
+      tabIndex={0}
       className="m-0 max-h-[32rem] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-[var(--border-soft)] bg-[var(--surface)] px-3.5 py-3 font-mono text-[13px] leading-relaxed text-[var(--muted-foreground)] scrollbar-thin"
     >
       {shown}

@@ -89,7 +89,12 @@ export function BoardLoopsPage() {
 
       <BoardStatusNotice board={board} />
 
-      <Section title="Current Loops" count={loopsQuery.isSuccess ? active.length : undefined}>
+      {/* Under the board's h1, so an h2: a heading level is never skipped. */}
+      <Section
+        title="Current Loops"
+        count={loopsQuery.isSuccess ? active.length : undefined}
+        level={2}
+      >
         {loopsQuery.isLoading ? (
           <p className="text-sm text-[var(--muted-foreground)]">Loading Loops…</p>
         ) : loopsQuery.error ? (

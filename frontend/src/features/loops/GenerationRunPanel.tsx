@@ -1,12 +1,8 @@
 import { describeRunCost, describeRunRepositories } from "@/lib/loopRuns";
 import type { GenerationRun } from "@/lib/types";
-import type { PlanScope, RunPurpose } from "./loopUi";
+import type { PlanScope } from "./loopUi";
 import { RunPhases } from "./RunPhases";
-
-/** The brief for people has stages of its own; any other run is its scope's. */
-function runPurpose(scope: PlanScope, run: GenerationRun): RunPurpose {
-  return run.purpose === "analysis_human" || run.purpose === "roadmap_human" ? run.purpose : scope;
-}
+import { runPurpose } from "./runStatus";
 
 interface RunPanelProps {
   scope: PlanScope;
@@ -35,7 +31,11 @@ export function GenerationRunAside({ scope, run, onDismiss }: RunPanelProps) {
   );
 }
 
-/** One line on the scope's last run: its outcome, when, by whom and from which repositories. */
+/**
+ * One line on the scope's last run: its outcome, when, by whom and from which repositories. Not a
+ * live region: a working run is announced once per stage (`useRunAnnouncement`) and its end by a
+ * toast, so this line changing with every poll would only say it all again.
+ */
 export function LastRunStatus({
   scope,
   lastRun,
@@ -47,7 +47,6 @@ export function LastRunStatus({
 }) {
   return (
     <p
-      role="status"
       className={`mt-2 text-[11px] ${
         lastRun?.status === "failed"
           ? "text-[var(--destructive)]"

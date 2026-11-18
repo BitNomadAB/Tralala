@@ -69,7 +69,8 @@ function TicketRow({ ticket }: { ticket: ReviewTicket }) {
 
 /**
  * The plan for a person who decides on it: one Section per Phase (number and name, the objective
- * in one muted line, the count of Tickets), a row per Ticket.
+ * in muted text, the count of Tickets), a row per Ticket. The objective wraps: it is part of what
+ * the person approves, so none of it is cut off.
  */
 export function RoadmapPhases({ phases }: { phases: readonly ReviewPhase[] }) {
   return (
@@ -82,7 +83,7 @@ export function RoadmapPhases({ phases }: { phases: readonly ReviewPhase[] }) {
           size="lg"
         >
           {phase.objective ? (
-            <p className="-mt-1 mb-3 truncate text-sm text-[var(--muted-foreground)]">
+            <p className="-mt-1 mb-3 break-words text-sm text-[var(--muted-foreground)]">
               {phase.objective}
             </p>
           ) : null}

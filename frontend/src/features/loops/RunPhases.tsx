@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Loader2, Minus, X } from "lucide-react";
+import { X } from "lucide-react";
 import {
   failedStepKey,
   repositoryOutcome,
@@ -9,7 +9,8 @@ import {
 import { hasTree } from "@/lib/runTrace";
 import type { GenerationRun } from "@/lib/types";
 import type { RunPurpose } from "./loopUi";
-import { RunTree } from "./RunTree";
+import { STATE_TONE } from "./runStatus";
+import { FailureJson, RunTree, StageIcon, StateText } from "./RunTree";
 import { UnreadRepositories } from "./UnreadRepositories";
 
 /** What the step achieved, not what it was supposed to do: a skipped step says so. */
@@ -29,6 +30,8 @@ function stepCaption(step: RunStep): string {
  * process tree step by step (`RunTree`): every file the model read, every repair and every limit, in
  * plain words. A run recorded before the tree existed shows the step it reached, the ones before it
  * as done, and — when it failed — the step it died on carrying the provider's answer verbatim.
+ * The section is not a live region: it grows every poll, and a screen reader would read each new
+ * line. The page announces one line per stage instead (`useRunAnnouncement`).
  */
 export function RunPhases({
   purpose,
@@ -47,7 +50,6 @@ export function RunPhases({
   return (
     <section
       aria-label="Generation progress"
-      aria-live="polite"
       className={
         compact
           ? "flex flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-2"
@@ -101,36 +103,15 @@ function PhaseList({
       }
     >
       {steps.map((step, index) => {
-        const tone =
-          step.state === "failed"
-            ? "text-[var(--destructive)]"
-            : step.state === "warning"
-              ? "text-[var(--warning)]"
-              : step.state === "active"
-                ? "text-[var(--primary)]"
-                : step.state === "done"
-                  ? "text-[var(--success)]"
-                  : "text-[var(--muted-foreground)]";
         return (
           <li key={step.key} className="flex flex-col gap-1">
-            <div className={`flex items-start gap-2 ${tone}`}>
-              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px]">
-                {step.state === "done" ? (
-                  <Check size={10} />
-                ) : step.state === "failed" ? (
-                  <X size={10} />
-                ) : step.state === "warning" ? (
-                  <AlertTriangle size={10} />
-                ) : step.state === "skipped" ? (
-                  <Minus size={10} />
-                ) : step.state === "active" ? (
-                  <Loader2 size={10} className="motion-safe:animate-spin" />
-                ) : (
-                  index + 1
-                )}
-              </span>
+            <div className={`flex items-start gap-2 ${STATE_TONE[step.state]}`}>
+              <StageIcon state={step.state} number={index + 1} />
               <div className="flex flex-col">
-                <span className="font-medium">{step.label}</span>
+                <span className="font-medium">
+                  {step.label}
+                  <StateText state={step.state} />
+                </span>
                 {compact ? null : (
                   <span className="text-[11px] text-[var(--muted-foreground)]">
                     {stepCaption(step)}
@@ -153,9 +134,9 @@ function PhaseList({
               </p>
             ) : null}
             {failureJson && step.key === failedKey ? (
-              <pre className="ml-6 overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin">
-                {failureJson}
-              </pre>
+              <div className="ml-6">
+                <FailureJson json={failureJson} />
+              </div>
             ) : null}
           </li>
         );

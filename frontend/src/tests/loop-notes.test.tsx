@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
 import { LoopNotesPanel } from "@/features/loops/LoopNotesPanel";
 import type { LoopNote } from "@/lib/types";
+import { announcer } from "./announcer";
 import { apiPath, ok } from "./msw/envelope";
 import { BOARD_ID, LOOP, LOOP_ID, LOOP_PATH, NOW } from "./msw/loops";
 import { server } from "./msw/server";
@@ -66,17 +67,24 @@ describe("the Loop's notes", () => {
     expect(items[1]).toHaveTextContent("Worker (agent)");
   });
 
-  it("adds a note and shows it", async () => {
+  it("adds a note, shows it, says so and puts the focus back in the box", async () => {
     const posted = answerNotes([]);
     openPanel();
     expect(await screen.findByText("No notes yet.")).toBeInTheDocument();
     const user = userEvent.setup();
     expect(screen.getByRole("button", { name: "Add note" })).toBeDisabled();
-    await user.type(screen.getByRole("textbox", { name: "New note" }), "Deployed to staging");
+    // A visible label names the box, not only its placeholder.
+    expect(screen.getByText("New note", { selector: "label" })).toBeVisible();
+    const box = screen.getByRole("textbox", { name: "New note" });
+    await user.type(box, "Deployed to staging");
     await user.click(screen.getByRole("button", { name: "Add note" }));
     expect(await screen.findByText("Deployed to staging")).toBeInTheDocument();
     expect(posted).toEqual([{ content: "Deployed to staging" }]);
-    expect(screen.getByRole("textbox", { name: "New note" })).toHaveValue("");
+    expect(box).toHaveValue("");
+    expect(box).toHaveFocus();
+    await waitFor(() => {
+      expect(announcer()).toHaveTextContent("Note added");
+    });
   });
 
   it("offers no box on a read-only Loop", async () => {

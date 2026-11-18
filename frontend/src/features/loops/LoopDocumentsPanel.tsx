@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useAnnounceWhen } from "@/components/ui/useAnnounce";
 import { generationAgents } from "@/lib/boardAgents";
 import { keys, useAgents, useBoard, useLoopAgents, useLoopDocuments } from "@/lib/queries";
@@ -14,7 +14,9 @@ import { FOR_PEOPLE_PURPOSE, rewriteBlockedReason, type PlanScope, type PlanTab 
 import { PlanDocumentPanel } from "./PlanDocumentPanel";
 import { approvalLine, approveRoadmapLabel, reviewPlan, ticketCount } from "./roadmapPlan";
 import { RoadmapReview } from "./RoadmapReview";
+import { useRunAnnouncement } from "./runStatus";
 import { ScopeReview } from "./ScopeReview";
+import { useFocusBack } from "./useFocusBack";
 import { useGenerationRun } from "./useGenerationRun";
 import { usePlanReview } from "./usePlanReview";
 
@@ -119,7 +121,15 @@ export function LoopDocumentsPanel({
     tab === "analysis" && !technical && !!documents && showsAnalysisBrief(documents.analysis);
   const { generating, visibleRun, activeRunId } = generation;
   const dismissRun = generating ? undefined : generation.dismissFailure;
-  const generateDisabled = readOnly || generation.generate.isPending || generating;
+  const generateBusy = generation.generate.isPending || generating;
+  const generateDisabled = readOnly || generateBusy;
+  // The Generate button is where the focus goes once a run panel is dismissed or a scope reset:
+  // it is always there on a scope, and it starts what the person does next (WCAG 2.4.3).
+  const generateId = useId();
+  const generateButton = () => document.getElementById(generateId);
+  useFocusBack(Boolean(visibleRun), generateButton);
+  // Once per page, though the run shows in two panels (one of them hidden by the breakpoint).
+  useRunAnnouncement(scope, visibleRun);
 
   // A save while a run is in flight asks first; the question goes away by itself once the run ends,
   // so a later run cannot bring back a question nobody asked again.
@@ -156,11 +166,13 @@ export function LoopDocumentsPanel({
           onToggleTechnical={() => setTechnical((value) => !value)}
           agentId={agentId}
           onAgentChange={setAgentId}
+          generateId={generateId}
           candidates={candidates}
           savedAgentName={savedAgentName}
           agentLocked={readOnly || generation.following}
           generating={generating}
           generateDisabled={generateDisabled}
+          generateBusy={generateBusy}
           onGenerate={(purpose) => generation.generate.mutate(purpose)}
           onRewrite={
             readOnly || tab === "info"
@@ -194,7 +206,11 @@ export function LoopDocumentsPanel({
               run={generation.lastRun}
               scopeLabel={scopeLabel}
               regenerateDisabled={generateDisabled}
-              onRegenerate={() => generation.generate.mutate(scope)}
+              regenerateBusy={generation.generate.isPending}
+              // The kept result goes once the new run is listed, so the focus moves to Generate.
+              onRegenerate={() =>
+                generation.generate.mutate(scope, { onSuccess: () => generateButton()?.focus() })
+              }
             />
           </>
         ) : null}
@@ -211,7 +227,8 @@ export function LoopDocumentsPanel({
                     revisionNumber: document.current_revision_number,
                     technicalRevisionNumber: documents.analysis_ai.current_revision_number,
                     approved: approvedForScope,
-                    disabled: readOnly || !canReviewScope || planReview.review.isPending,
+                    disabled: readOnly || !canReviewScope,
+                    pending: planReview.review.isPending,
                     onApprove: () => {
                       planReview.review.mutate({ scope, decision: "approved" });
                     },
@@ -234,12 +251,8 @@ export function LoopDocumentsPanel({
               onChange={planReview.setInfoDraft}
               isHuman={isHuman}
               readOnly={readOnly}
-              canSave={
-                !readOnly &&
-                isHuman &&
-                !planReview.saveInfo.isPending &&
-                planReview.infoDraft !== null
-              }
+              saving={planReview.saveInfo.isPending}
+              changed={planReview.infoDraft !== null}
               onSave={requestInfoSave}
               saveGuard={
                 confirmInfoSave && activeRunId !== null ? (
@@ -263,7 +276,9 @@ export function LoopDocumentsPanel({
               confirmReset={planReview.confirmWithdraw}
               onConfirmResetChange={setConfirmWithdraw}
               resetPending={planReview.resetScope.isPending}
-              onReset={() => planReview.resetScope.mutate(scope)}
+              onReset={() =>
+                planReview.resetScope.mutate(scope, { onSuccess: () => generateButton()?.focus() })
+              }
               resetTickets={planInForce ? (loop.plan?.ticket_total ?? 0) : 0}
               canReview={canReviewScope}
               approveInBrief={briefApproves}
@@ -280,8 +295,8 @@ export function LoopDocumentsPanel({
                         { purpose: "roadmap", instructions: planReview.feedback.trim() },
                         { onSuccess: () => planReview.setFeedback("") },
                       ),
-                    regenerateDisabled:
-                      generateDisabled || documents?.analysis.state !== "approved",
+                    regenerateDisabled: readOnly || documents?.analysis.state !== "approved",
+                    regenerateBusy: generateBusy,
                   }
                 : {})}
             />

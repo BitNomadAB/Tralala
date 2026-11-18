@@ -1,9 +1,9 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Expander } from "@/components/ui/expander";
 import { candidateMarkdown, staleCandidate } from "@/lib/keptCandidate";
 import { renderMarkdown } from "@/lib/markdown";
 import type { GenerationRun } from "@/lib/types";
+import { BusyButton } from "./BusyButton";
 import { RoadmapPhases } from "./RoadmapPhases";
 import { reviewPlan } from "./roadmapPlan";
 
@@ -19,18 +19,27 @@ export function KeptCandidate({
   run,
   scopeLabel,
   regenerateDisabled,
+  regenerateBusy = false,
   onRegenerate,
 }: {
   run: GenerationRun | undefined;
   scopeLabel: string;
   regenerateDisabled: boolean;
+  /** The new run is starting; the button keeps the focus until the caller moves it. */
+  regenerateBusy?: boolean | undefined;
   onRegenerate: () => void;
 }) {
   const candidate = staleCandidate(run);
   if (!candidate) return null;
   const phases = reviewPlan(candidate);
+  // The box scrolls; taking the focus lets a keyboard scroll it (WCAG 2.1.1).
   const raw = (
-    <div className="max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
+    <div
+      role="group"
+      aria-label={`Kept ${scopeLabel} text`}
+      tabIndex={0}
+      className="max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin"
+    >
       {renderMarkdown(candidateMarkdown(candidate), { headingLevel: 3 })}
     </div>
   );
@@ -57,9 +66,15 @@ export function KeptCandidate({
         raw
       )}
       <div className="flex justify-end">
-        <Button size="sm" variant="outline" disabled={regenerateDisabled} onClick={onRegenerate}>
+        <BusyButton
+          size="sm"
+          variant="outline"
+          busy={regenerateBusy}
+          disabled={regenerateDisabled}
+          onClick={onRegenerate}
+        >
           Regenerate from the current Info
-        </Button>
+        </BusyButton>
       </div>
     </section>
   );

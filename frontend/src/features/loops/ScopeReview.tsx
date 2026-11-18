@@ -1,9 +1,16 @@
 import { RefreshCw } from "lucide-react";
+import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { BusyButton } from "./BusyButton";
 import { ticketsText } from "./roadmapPlan";
+import { useFocusBack } from "./useFocusBack";
 
-/** Feedback, reset and the human decision on the open Analysis or RoadMap. */
+/**
+ * Feedback, reset and the human decision on the open Analysis or RoadMap. "Reset" asks first: the
+ * warning is read out and describes "Reset and clear", the focus waits on Cancel, and Cancel gives
+ * it back to "Reset" (WCAG 2.4.3, 4.1.3). Where it goes after a reset is the caller's (`onReset`).
+ */
 export function ScopeReview({
   scopeLabel,
   isHuman,
@@ -25,6 +32,7 @@ export function ScopeReview({
   approveNote,
   onRegenerate,
   regenerateDisabled = false,
+  regenerateBusy = false,
 }: {
   scopeLabel: string;
   isHuman: boolean;
@@ -51,8 +59,13 @@ export function ScopeReview({
   /** Writes the scope again from its approved input and the feedback above (the RoadMap review). */
   onRegenerate?: (() => void) | undefined;
   regenerateDisabled?: boolean | undefined;
+  /** A run is starting or being followed; Regenerate keeps the focus it may have. */
+  regenerateBusy?: boolean | undefined;
 }) {
   const label = approveLabel ?? `Approve ${scopeLabel}`;
+  const resetId = useId();
+  const warningId = useId();
+  useFocusBack(confirmReset, () => document.getElementById(resetId));
   return (
     <div className="flex flex-col gap-2 border-t border-[var(--border)] pt-3">
       {!isHuman ? (
@@ -74,22 +87,35 @@ export function ScopeReview({
           {canReset ? (
             confirmReset ? (
               <>
-                <span className="text-[11px] text-[var(--destructive)]">
+                <span id={warningId} role="alert" className="text-[11px] text-[var(--destructive)]">
                   Resetting clears the {scopeLabel} and any approval behind it. It has to be
                   generated again.
                   {resetTickets > 0
                     ? ` Its ${ticketsText(resetTickets)} ${resetTickets === 1 ? "leaves" : "leave"} the Kanban: those nobody touched are deleted, the others archived.`
                     : null}
                 </span>
-                <Button size="sm" variant="danger" disabled={resetPending} onClick={onReset}>
+                <BusyButton
+                  size="sm"
+                  variant="danger"
+                  busy={resetPending}
+                  aria-describedby={warningId}
+                  onClick={onReset}
+                >
                   Reset and clear
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => onConfirmResetChange(false)}>
+                </BusyButton>
+                {/* The safe choice takes the focus, as the question before an Info save does. */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  autoFocus
+                  onClick={() => onConfirmResetChange(false)}
+                >
                   Cancel
                 </Button>
               </>
             ) : (
               <Button
+                id={resetId}
                 size="sm"
                 variant="danger"
                 disabled={resetPending}
@@ -102,28 +128,32 @@ export function ScopeReview({
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {onRegenerate ? (
-            <Button
+            <BusyButton
               variant="outline"
-              disabled={readOnly || !isHuman || regenerateDisabled}
+              busy={regenerateBusy && !readOnly && isHuman && !regenerateDisabled}
+              disabled={readOnly || !isHuman || regenerateDisabled || regenerateBusy}
               onClick={onRegenerate}
             >
               <RefreshCw size={14} /> Regenerate {scopeLabel}
-            </Button>
+            </BusyButton>
           ) : null}
-          <Button
+          {/* Pressed, a decision keeps the focus on its button: busy, then "Approved". */}
+          <BusyButton
             variant="outline"
-            disabled={readOnly || !isHuman || reviewPending}
+            busy={reviewPending}
+            disabled={readOnly || !isHuman}
             onClick={() => onDecision("changes_requested")}
           >
             Request changes
-          </Button>
+          </BusyButton>
           {approveInBrief ? null : (
-            <Button
-              disabled={readOnly || !canReview || reviewPending || approved}
+            <BusyButton
+              busy={reviewPending || approved}
+              disabled={readOnly || !canReview}
               onClick={() => onDecision("approved")}
             >
               {approved ? "Approved" : label}
-            </Button>
+            </BusyButton>
           )}
         </div>
       </div>

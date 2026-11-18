@@ -15,19 +15,18 @@ import type { RunStepState } from "@/lib/runPhases";
 import { traceStages, type TraceStage } from "@/lib/runTrace";
 import type { GenerationRun, RunTraceStep } from "@/lib/types";
 import type { RunPurpose } from "./loopUi";
+import { nearBottom, STATE_TONE, STATE_WORDS } from "./runStatus";
 
-const TONE: Record<RunStepState, string> = {
-  failed: "text-[var(--destructive)]",
-  warning: "text-[var(--warning)]",
-  active: "text-[var(--primary)]",
-  done: "text-[var(--success)]",
-  skipped: "text-[var(--muted-foreground)]",
-  pending: "text-[var(--muted-foreground)]",
-};
-
-function StageIcon({ state, number }: { state: RunStepState; number: number }) {
+/**
+ * The mark before a stage or step: its state as a shape, or its number while it waits. A screen
+ * reader skips it and hears `StateText` after the label instead.
+ */
+export function StageIcon({ state, number }: { state: RunStepState; number: number }) {
   return (
-    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px]">
+    <span
+      aria-hidden="true"
+      className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px]"
+    >
       {state === "done" ? (
         <Check size={10} />
       ) : state === "failed" ? (
@@ -43,6 +42,11 @@ function StageIcon({ state, number }: { state: RunStepState; number: number }) {
       )}
     </span>
   );
+}
+
+/** A stage's state in words after its label, so it is not only a mark and a colour (WCAG 1.3.1). */
+export function StateText({ state }: { state: RunStepState }) {
+  return <span className="sr-only">, {STATE_WORDS[state]}</span>;
 }
 
 /** The small mark before a step: which tool it called, or what kind of step it is. */
@@ -79,9 +83,12 @@ function StepLine({ step }: { step: RunTraceStep }) {
 
 function Stage({ stage, number }: { stage: TraceStage; number: number }) {
   const heading = (
-    <span className={`flex items-start gap-2 ${TONE[stage.state]}`}>
+    <span className={`flex items-start gap-2 ${STATE_TONE[stage.state]}`}>
       <StageIcon state={stage.state} number={number} />
-      <span className="font-medium">{stage.label}</span>
+      <span className="font-medium">
+        {stage.label}
+        <StateText state={stage.state} />
+      </span>
       {stage.steps.length > 3 ? (
         <span className="ml-auto shrink-0 text-[10px] text-[var(--muted-foreground)]">
           {stage.steps.length} steps
@@ -109,7 +116,9 @@ function Stage({ stage, number }: { stage: TraceStage; number: number }) {
  * The run's process tree: every stage it passes through, and under each the steps it took, in plain
  * words — which file the model read, what it searched for, which rule an answer broke, which limit
  * the run reached. It grows while the run works (the run is polled) and stays after it, so a person
- * can read how the answer was made. Compact, it is the stages in a row and the latest step.
+ * can read how the answer was made. Compact, it is the stages in a row and the latest step. The
+ * list follows the newest step only while the person is at its end: scrolled up to read an earlier
+ * step, it stays where they are.
  */
 export function RunTree({
   purpose,
@@ -127,11 +136,13 @@ export function RunTree({
   const latest = steps.at(-1);
   const list = useRef<HTMLOListElement>(null);
   const running = run.status === "queued" || run.status === "running";
+  // Whether the list shows its end; a person who scrolls up turns this off until they come back.
+  const atEnd = useRef(true);
 
-  // While the run works, keep its newest step in view.
+  // While the run works, keep its newest step in view, unless the person is reading further up.
   useEffect(() => {
     const element = list.current;
-    if (running && element) element.scrollTop = element.scrollHeight;
+    if (running && element && atEnd.current) element.scrollTop = element.scrollHeight;
   }, [running, steps.length]);
 
   if (compact) {
@@ -139,9 +150,12 @@ export function RunTree({
       <div className="flex flex-col gap-1 text-[11px]">
         <ol className="flex flex-row flex-wrap gap-2">
           {stages.map((stage, index) => (
-            <li key={stage.stage} className={`flex items-center gap-1 ${TONE[stage.state]}`}>
+            <li key={stage.stage} className={`flex items-center gap-1 ${STATE_TONE[stage.state]}`}>
               <StageIcon state={stage.state} number={index + 1} />
-              <span className="font-medium">{stage.label}</span>
+              <span className="font-medium">
+                {stage.label}
+                <StateText state={stage.state} />
+              </span>
             </li>
           ))}
         </ol>
@@ -153,6 +167,9 @@ export function RunTree({
   return (
     <ol
       ref={list}
+      onScroll={(event) => {
+        atEnd.current = nearBottom(event.currentTarget);
+      }}
       className="flex max-h-[70vh] flex-col gap-2 overflow-y-auto pr-1 text-xs scrollbar-thin"
     >
       {stages.map((stage, index) => (
@@ -167,9 +184,15 @@ export function RunTree({
   );
 }
 
-function FailureJson({ json }: { json: string }) {
+/** The failing step's JSON; a long line scrolls, so the box takes the focus for a keyboard. */
+export function FailureJson({ json }: { json: string }) {
   return (
-    <pre className="overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin">
+    <pre
+      role="group"
+      aria-label="The run's error as JSON"
+      tabIndex={0}
+      className="overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin"
+    >
       {json}
     </pre>
   );

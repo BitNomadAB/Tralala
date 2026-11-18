@@ -54,7 +54,7 @@ async function openDocuments(initialTab: PlanTab, runs: GenerationRun[]) {
   await waitFor(() => {
     expect(queryClient.getQueryData(keys.generationRuns(BOARD_ID, LOOP_ID))).toBeDefined();
   });
-  return { state, startedPurposes, user: userEvent.setup() };
+  return { state, startedPurposes, queryClient, user: userEvent.setup() };
 }
 
 /** Types a new Info and presses "Save as new revision". */
@@ -72,6 +72,12 @@ describe("saving Info while a generation run is in flight", () => {
       expect(state.requests).toContain(SAVE_INFO);
     });
     expect(screen.queryByRole("button", { name: "Save anyway" })).not.toBeInTheDocument();
+    // Saved, the button has nothing left to save and says so, and it keeps the focus.
+    const save = await screen.findByRole("button", {
+      name: "Save as new revision",
+      description: "No changes to save",
+    });
+    expect(save).toHaveFocus();
   });
 
   it("asks first, and Save anyway saves without touching the run", async () => {
@@ -106,16 +112,33 @@ describe("saving Info while a generation run is in flight", () => {
     expect(await screen.findByRole("button", { name: "Save as new revision" })).toBeInTheDocument();
   });
 
-  it("Back keeps the draft unsaved", async () => {
+  it("Back keeps the draft unsaved and gives the focus back to the save button", async () => {
     const { state, user } = await openDocuments("info", [generationRun("running", "generating")]);
     await saveInfo(user);
 
-    await user.click(await screen.findByRole("button", { name: "Back" }));
+    // The safe choice has the focus while the question is asked.
+    expect(await screen.findByRole("button", { name: "Cancel the run first" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Back" }));
     expect(screen.getByRole("button", { name: "Save as new revision" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save as new revision" })).toHaveFocus();
     expect(screen.getByLabelText("Write or revise Info")).toHaveValue(
       "Sessions expire after 30 min.",
     );
     expect(state.requests).not.toContain(SAVE_INFO);
+  });
+
+  it("gives the focus back to the save button when the run ends while the question is open", async () => {
+    const running = [generationRun("running", "generating")];
+    const { state, queryClient, user } = await openDocuments("info", running);
+    await saveInfo(user);
+    expect(await screen.findByRole("button", { name: "Cancel the run first" })).toHaveFocus();
+
+    state.runs = [generationRun("completed", "generating")];
+    await queryClient.invalidateQueries({ queryKey: keys.generationRuns(BOARD_ID, LOOP_ID) });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save as new revision" })).toHaveFocus();
+    });
+    expect(screen.queryByRole("button", { name: "Save anyway" })).not.toBeInTheDocument();
   });
 });
 
@@ -146,7 +169,12 @@ describe("a run whose input changed while it worked", () => {
       expect(state.requests).toContain(START_RUN);
     });
     expect(startedPurposes).toEqual(["analysis"]);
-    expect(await screen.findByRole("button", { name: /Generating…/ })).toBeDisabled();
+    // The kept result goes with the new run, so the focus waits on the Generate button.
+    const generating = await screen.findByRole("button", { name: /Generating…/ });
+    expect(generating).toHaveAttribute("aria-disabled", "true");
+    await waitFor(() => {
+      expect(generating).toHaveFocus();
+    });
   });
 
   it("shows nothing kept for a run that failed for another reason", async () => {

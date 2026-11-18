@@ -3,11 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
 import type { GenerationCandidates } from "@/lib/boardAgents";
+import { BusyButton } from "./BusyButton";
 import type { PlanScope, PlanTab } from "./loopUi";
 
 /**
- * The Info / Analysis / RoadMap tabs, with the switch between the analysis brief for people and the
- * technical version for AI, and the generation controls.
+ * The Info / Analysis / RoadMap switch, with the switch between the analysis brief for people and
+ * the technical version for AI, and the generation controls. Each switch is a group of toggle
+ * buttons (`aria-pressed`), so a screen reader hears which document is open, not only a colour
+ * (WCAG 4.1.2). `generateId` names the Generate button, where the focus goes after a reset.
+ * While `generateBusy` (a run starting or followed) Generate is unavailable but keeps the focus.
  */
 export function LoopPlanTabs({
   tab,
@@ -21,9 +25,11 @@ export function LoopPlanTabs({
   agentLocked,
   generating,
   generateDisabled,
+  generateBusy = false,
   onGenerate,
   onRewrite,
   rewriteBlocked = null,
+  generateId,
 }: {
   tab: PlanTab;
   onTabChange: (tab: PlanTab) => void;
@@ -36,24 +42,29 @@ export function LoopPlanTabs({
   agentLocked: boolean;
   generating: boolean;
   generateDisabled: boolean;
+  generateBusy?: boolean | undefined;
   onGenerate: (scope: PlanScope) => void;
   /** Have a board agent write the brief for people again; absent for a reader. */
   onRewrite?: (() => void) | undefined;
   /** Why the rewrite cannot start, shown beside the button; null when it can. */
   rewriteBlocked?: string | null;
+  generateId?: string | undefined;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-2">
-      {(["info", "analysis", "roadmap"] as PlanTab[]).map((entry) => (
-        <Button
-          key={entry}
-          size="sm"
-          variant={tab === entry ? "primary" : "ghost"}
-          onClick={() => onTabChange(entry)}
-        >
-          {entry === "info" ? "Info" : entry === "analysis" ? "Analysis" : "RoadMap"}
-        </Button>
-      ))}
+      <div role="group" aria-label="Planning document" className="flex flex-wrap gap-2">
+        {(["info", "analysis", "roadmap"] as PlanTab[]).map((entry) => (
+          <Button
+            key={entry}
+            size="sm"
+            variant={tab === entry ? "primary" : "ghost"}
+            aria-pressed={tab === entry}
+            onClick={() => onTabChange(entry)}
+          >
+            {entry === "info" ? "Info" : entry === "analysis" ? "Analysis" : "RoadMap"}
+          </Button>
+        ))}
+      </div>
       {/* The RoadMap's review has its own For you | Raw text switch. */}
       {tab === "analysis" ? (
         <div role="group" aria-label="Version" className="flex gap-1">
@@ -111,16 +122,18 @@ export function LoopPlanTabs({
         </label>
       ) : null}
       {tab !== "info" ? (
-        <Button
+        <BusyButton
+          id={generateId}
           size="sm"
           variant="outline"
+          busy={generateBusy}
           aria-busy={generating}
           data-generating={generating ? "true" : undefined}
           // The pulse and its glow only where motion is welcome (WCAG 2.2.2); under reduced motion
           // the running state is the steady ring and the "Generating…" text.
           className={
             generating
-              ? "motion-safe:animate-pulse border-[var(--primary)] text-[var(--primary)] motion-safe:shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100"
+              ? "motion-safe:animate-pulse border-[var(--primary)] text-[var(--primary)] motion-safe:shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100 aria-disabled:opacity-100"
               : undefined
           }
           disabled={generateDisabled}
@@ -128,7 +141,7 @@ export function LoopPlanTabs({
         >
           {generating ? <Lock size={14} /> : <Sparkles size={14} />}{" "}
           {generating ? "Generating…" : `Generate ${tab === "analysis" ? "analysis" : "RoadMap"}`}
-        </Button>
+        </BusyButton>
       ) : null}
     </div>
   );

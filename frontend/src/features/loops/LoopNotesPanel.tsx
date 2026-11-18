@@ -1,16 +1,20 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/input";
+import { useId, useRef, useState } from "react";
+import { Field, Textarea } from "@/components/ui/input";
 import { Section } from "@/components/ui/section";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { renderMarkdown } from "@/lib/markdown";
 import { keys, useLoopNotes } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
+import { BusyButton } from "./BusyButton";
 
-/** The Notes tab: the Loop's log of notes, oldest first, and a box for a person to add one. */
+/**
+ * The Notes tab: the Loop's log of notes, oldest first, and a box for a person to add one. A note
+ * added is announced and the focus is back in the emptied box, ready for the next one.
+ */
 export function LoopNotesPanel({
   boardId,
   loop,
@@ -22,14 +26,20 @@ export function LoopNotesPanel({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const announce = useAnnounce();
   const notes = useLoopNotes(boardId, loop.id);
   const [draft, setDraft] = useState("");
+  const boxId = useId();
+  const box = useRef<HTMLTextAreaElement>(null);
 
   const add = useMutation({
     mutationFn: () => api.addNote(boardId, loop.id, draft.trim()),
     onSuccess: () => {
       setDraft("");
       void queryClient.invalidateQueries({ queryKey: keys.notes(boardId, loop.id) });
+      announce("Note added");
+      // The button turns unavailable with the box empty, so the focus goes back into the box.
+      box.current?.focus();
     },
     onError: (error) => {
       toast.push({
@@ -80,17 +90,20 @@ export function LoopNotesPanel({
             if (draft.trim()) add.mutate();
           }}
         >
-          <Textarea
-            aria-label="New note"
-            value={draft}
-            maxLength={20000}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Markdown"
-          />
+          <Field label="New note" htmlFor={boxId}>
+            <Textarea
+              id={boxId}
+              ref={box}
+              value={draft}
+              maxLength={20000}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Markdown"
+            />
+          </Field>
           <div className="flex justify-end">
-            <Button type="submit" size="sm" disabled={!draft.trim() || add.isPending}>
+            <BusyButton type="submit" size="sm" busy={add.isPending} disabled={!draft.trim()}>
               Add note
-            </Button>
+            </BusyButton>
           </div>
         </form>
       )}

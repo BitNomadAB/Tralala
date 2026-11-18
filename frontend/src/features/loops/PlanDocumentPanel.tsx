@@ -97,13 +97,17 @@ export function PlanDocumentPanel({
       ) : null}
       {document.current_content && body !== undefined ? (
         body
+      ) : document.current_content && showsAnalysisBrief(document) ? (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-sm">
+          <CurrentText document={document} technical={technical} approval={approval} />
+        </div>
       ) : document.current_content ? (
+        // A long text scrolls in its box; taking the focus lets a keyboard scroll it (WCAG 2.1.1).
         <div
-          className={
-            showsAnalysisBrief(document)
-              ? "rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-sm"
-              : "max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin"
-          }
+          role="group"
+          aria-label={`${DOCUMENT_LABELS[kind]} text`}
+          tabIndex={0}
+          className="max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin"
         >
           <CurrentText document={document} technical={technical} approval={approval} />
         </div>
@@ -117,7 +121,12 @@ export function PlanDocumentPanel({
       document.approved_revision_number !== document.current_revision_number ? (
         <details className="text-xs text-[var(--muted-foreground)]">
           <summary>Show the approved baseline (r{document.approved_revision_number})</summary>
-          <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-[var(--border)] p-2 scrollbar-thin">
+          <div
+            role="group"
+            aria-label={`Approved baseline r${document.approved_revision_number ?? ""}`}
+            tabIndex={0}
+            className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-[var(--border)] p-2 scrollbar-thin"
+          >
             {renderMarkdown(document.approved_content, { headingLevel: DOCUMENT_HEADINGS })}
           </div>
         </details>
