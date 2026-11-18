@@ -32,6 +32,7 @@ export function ScopeReview({
   approveNote,
   onRegenerate,
   regenerateDisabled = false,
+  regenerateBusy = false,
 }: {
   scopeLabel: string;
   isHuman: boolean;
@@ -58,6 +59,8 @@ export function ScopeReview({
   /** Writes the scope again from its approved input and the feedback above (the RoadMap review). */
   onRegenerate?: (() => void) | undefined;
   regenerateDisabled?: boolean | undefined;
+  /** A run is starting or being followed; Regenerate keeps the focus it may have. */
+  regenerateBusy?: boolean | undefined;
 }) {
   const label = approveLabel ?? `Approve ${scopeLabel}`;
   const resetId = useId();
@@ -125,28 +128,32 @@ export function ScopeReview({
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {onRegenerate ? (
-            <Button
+            <BusyButton
               variant="outline"
-              disabled={readOnly || !isHuman || regenerateDisabled}
+              busy={regenerateBusy && !readOnly && isHuman && !regenerateDisabled}
+              disabled={readOnly || !isHuman || regenerateDisabled || regenerateBusy}
               onClick={onRegenerate}
             >
               <RefreshCw size={14} /> Regenerate {scopeLabel}
-            </Button>
+            </BusyButton>
           ) : null}
-          <Button
+          {/* Pressed, a decision keeps the focus on its button: busy, then "Approved". */}
+          <BusyButton
             variant="outline"
-            disabled={readOnly || !isHuman || reviewPending}
+            busy={reviewPending}
+            disabled={readOnly || !isHuman}
             onClick={() => onDecision("changes_requested")}
           >
             Request changes
-          </Button>
+          </BusyButton>
           {approveInBrief ? null : (
-            <Button
-              disabled={readOnly || !canReview || reviewPending || approved}
+            <BusyButton
+              busy={reviewPending || approved}
+              disabled={readOnly || !canReview}
               onClick={() => onDecision("approved")}
             >
               {approved ? "Approved" : label}
-            </Button>
+            </BusyButton>
           )}
         </div>
       </div>

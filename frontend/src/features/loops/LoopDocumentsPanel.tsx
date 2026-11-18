@@ -121,7 +121,8 @@ export function LoopDocumentsPanel({
     tab === "analysis" && !technical && !!documents && showsAnalysisBrief(documents.analysis);
   const { generating, visibleRun, activeRunId } = generation;
   const dismissRun = generating ? undefined : generation.dismissFailure;
-  const generateDisabled = readOnly || generation.generate.isPending || generating;
+  const generateBusy = generation.generate.isPending || generating;
+  const generateDisabled = readOnly || generateBusy;
   // The Generate button is where the focus goes once a run panel is dismissed or a scope reset:
   // it is always there on a scope, and it starts what the person does next (WCAG 2.4.3).
   const generateId = useId();
@@ -171,6 +172,7 @@ export function LoopDocumentsPanel({
           agentLocked={readOnly || generation.following}
           generating={generating}
           generateDisabled={generateDisabled}
+          generateBusy={generateBusy}
           onGenerate={(purpose) => generation.generate.mutate(purpose)}
           onRewrite={
             readOnly || tab === "info"
@@ -204,7 +206,11 @@ export function LoopDocumentsPanel({
               run={generation.lastRun}
               scopeLabel={scopeLabel}
               regenerateDisabled={generateDisabled}
-              onRegenerate={() => generation.generate.mutate(scope)}
+              regenerateBusy={generation.generate.isPending}
+              // The kept result goes once the new run is listed, so the focus moves to Generate.
+              onRegenerate={() =>
+                generation.generate.mutate(scope, { onSuccess: () => generateButton()?.focus() })
+              }
             />
           </>
         ) : null}
@@ -221,7 +227,8 @@ export function LoopDocumentsPanel({
                     revisionNumber: document.current_revision_number,
                     technicalRevisionNumber: documents.analysis_ai.current_revision_number,
                     approved: approvedForScope,
-                    disabled: readOnly || !canReviewScope || planReview.review.isPending,
+                    disabled: readOnly || !canReviewScope,
+                    pending: planReview.review.isPending,
                     onApprove: () => {
                       planReview.review.mutate({ scope, decision: "approved" });
                     },
@@ -244,12 +251,8 @@ export function LoopDocumentsPanel({
               onChange={planReview.setInfoDraft}
               isHuman={isHuman}
               readOnly={readOnly}
-              canSave={
-                !readOnly &&
-                isHuman &&
-                !planReview.saveInfo.isPending &&
-                planReview.infoDraft !== null
-              }
+              saving={planReview.saveInfo.isPending}
+              changed={planReview.infoDraft !== null}
               onSave={requestInfoSave}
               saveGuard={
                 confirmInfoSave && activeRunId !== null ? (
@@ -292,8 +295,8 @@ export function LoopDocumentsPanel({
                         { purpose: "roadmap", instructions: planReview.feedback.trim() },
                         { onSuccess: () => planReview.setFeedback("") },
                       ),
-                    regenerateDisabled:
-                      generateDisabled || documents?.analysis.state !== "approved",
+                    regenerateDisabled: readOnly || documents?.analysis.state !== "approved",
+                    regenerateBusy: generateBusy,
                   }
                 : {})}
             />

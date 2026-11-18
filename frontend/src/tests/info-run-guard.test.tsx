@@ -72,6 +72,12 @@ describe("saving Info while a generation run is in flight", () => {
       expect(state.requests).toContain(SAVE_INFO);
     });
     expect(screen.queryByRole("button", { name: "Save anyway" })).not.toBeInTheDocument();
+    // Saved, the button has nothing left to save and says so, and it keeps the focus.
+    const save = await screen.findByRole("button", {
+      name: "Save as new revision",
+      description: "No changes to save",
+    });
+    expect(save).toHaveFocus();
   });
 
   it("asks first, and Save anyway saves without touching the run", async () => {
@@ -163,7 +169,12 @@ describe("a run whose input changed while it worked", () => {
       expect(state.requests).toContain(START_RUN);
     });
     expect(startedPurposes).toEqual(["analysis"]);
-    expect(await screen.findByRole("button", { name: /Generating…/ })).toBeDisabled();
+    // The kept result goes with the new run, so the focus waits on the Generate button.
+    const generating = await screen.findByRole("button", { name: /Generating…/ });
+    expect(generating).toHaveAttribute("aria-disabled", "true");
+    await waitFor(() => {
+      expect(generating).toHaveFocus();
+    });
   });
 
   it("shows nothing kept for a run that failed for another reason", async () => {

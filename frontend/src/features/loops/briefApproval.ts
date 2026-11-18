@@ -9,7 +9,10 @@ export interface BriefApproval {
   /** The technical revision the brief was written from, bound with it. */
   technicalRevisionNumber: number | null;
   approved: boolean;
+  /** The approval cannot be given (a read-only Loop, a document not ready for review). */
   disabled: boolean;
+  /** The decision is being recorded; the button keeps the focus meanwhile. */
+  pending?: boolean | undefined;
   onApprove: () => void;
 }
 

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
 import type { GenerationCandidates } from "@/lib/boardAgents";
+import { BusyButton } from "./BusyButton";
 import type { PlanScope, PlanTab } from "./loopUi";
 
 /**
@@ -10,6 +11,7 @@ import type { PlanScope, PlanTab } from "./loopUi";
  * the technical version for AI, and the generation controls. Each switch is a group of toggle
  * buttons (`aria-pressed`), so a screen reader hears which document is open, not only a colour
  * (WCAG 4.1.2). `generateId` names the Generate button, where the focus goes after a reset.
+ * While `generateBusy` (a run starting or followed) Generate is unavailable but keeps the focus.
  */
 export function LoopPlanTabs({
   tab,
@@ -23,6 +25,7 @@ export function LoopPlanTabs({
   agentLocked,
   generating,
   generateDisabled,
+  generateBusy = false,
   onGenerate,
   onRewrite,
   rewriteBlocked = null,
@@ -39,6 +42,7 @@ export function LoopPlanTabs({
   agentLocked: boolean;
   generating: boolean;
   generateDisabled: boolean;
+  generateBusy?: boolean | undefined;
   onGenerate: (scope: PlanScope) => void;
   /** Have a board agent write the brief for people again; absent for a reader. */
   onRewrite?: (() => void) | undefined;
@@ -118,17 +122,18 @@ export function LoopPlanTabs({
         </label>
       ) : null}
       {tab !== "info" ? (
-        <Button
+        <BusyButton
           id={generateId}
           size="sm"
           variant="outline"
+          busy={generateBusy}
           aria-busy={generating}
           data-generating={generating ? "true" : undefined}
           // The pulse and its glow only where motion is welcome (WCAG 2.2.2); under reduced motion
           // the running state is the steady ring and the "Generating…" text.
           className={
             generating
-              ? "motion-safe:animate-pulse border-[var(--primary)] text-[var(--primary)] motion-safe:shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100"
+              ? "motion-safe:animate-pulse border-[var(--primary)] text-[var(--primary)] motion-safe:shadow-[0_0_22px_3px_var(--primary)] ring-2 ring-[var(--primary)] disabled:opacity-100 aria-disabled:opacity-100"
               : undefined
           }
           disabled={generateDisabled}
@@ -136,7 +141,7 @@ export function LoopPlanTabs({
         >
           {generating ? <Lock size={14} /> : <Sparkles size={14} />}{" "}
           {generating ? "Generating…" : `Generate ${tab === "analysis" ? "analysis" : "RoadMap"}`}
-        </Button>
+        </BusyButton>
       ) : null}
     </div>
   );

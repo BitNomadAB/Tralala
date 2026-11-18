@@ -9,7 +9,8 @@ function renderEditor(isHuman: boolean) {
       onChange={() => undefined}
       isHuman={isHuman}
       readOnly={false}
-      canSave={isHuman}
+      saving={false}
+      changed={isHuman}
       onSave={() => undefined}
     />,
   );

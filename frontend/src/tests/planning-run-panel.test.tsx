@@ -23,7 +23,10 @@ async function startAnalysis() {
   renderDocuments("analysis");
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /Generate analysis/ }));
-  expect(await screen.findByRole("button", { name: /Generating…/ })).toBeDisabled();
+  // Unavailable while the run works, yet still focused: a disabled button would drop the focus.
+  const generating = await screen.findByRole("button", { name: /Generating…/ });
+  expect(generating).toHaveAttribute("aria-disabled", "true");
+  expect(generating).toHaveFocus();
 }
 
 /** Every run panel on the page; jsdom applies no CSS, so the breakpoint is read from the class. */
