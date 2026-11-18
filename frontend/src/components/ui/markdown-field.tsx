@@ -81,7 +81,7 @@ function MarkdownTabs({
 
 /**
  * A Markdown text field: Write (the textarea, with Ctrl/Cmd+B, I and K and paste-a-link), Preview
- * (the same renderer the text is shown with) and "How to format" under both. Markdown is what is
+ * (the same renderer and heading level the text is shown with) and "How to format" under both. Markdown is what is
  * stored; nothing here produces HTML.
  */
 export function MarkdownField({
@@ -94,6 +94,7 @@ export function MarkdownField({
   onPreviewChange,
   placeholder,
   ticketHref,
+  headingLevel,
 }: {
   /** The textarea's id; the tabs and panels derive theirs from it. */
   id: string;
@@ -107,10 +108,12 @@ export function MarkdownField({
   onPreviewChange: (preview: boolean) => void;
   placeholder?: string | undefined;
   ticketHref?: MarkdownOptions["ticketHref"];
+  /** The level a `#` heading takes in the preview: the one the text is shown with. */
+  headingLevel?: MarkdownOptions["headingLevel"];
 }) {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const editing = useMarkdownEditing(fieldRef, value, onChange);
-  const rendered = preview ? renderMarkdown(value, { ticketHref }) : null;
+  const rendered = preview ? renderMarkdown(value, { ticketHref, headingLevel }) : null;
 
   return (
     <div className="flex flex-col gap-2">
