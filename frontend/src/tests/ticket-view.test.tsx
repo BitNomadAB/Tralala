@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CARD_PATH, ticketCard } from "./msw/cards";
 import { MEMBER } from "./msw/session";
 import { PHASE_NAME } from "./msw/ticketView";
@@ -170,6 +170,27 @@ describe("the Ticket over the Kanban", () => {
     await user.click(screen.getByRole("button", { name: `Copy key ${KEY}` }));
     expect(await screen.findByText("Copied")).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe(KEY);
+  });
+
+  it("says so when the browser refuses to copy, or has no clipboard here", async () => {
+    const { user } = await renderTicket();
+    const write = vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("no"));
+    await user.click(screen.getByRole("button", { name: `Copy key ${KEY}` }));
+    expect(await screen.findByText("Could not copy")).toBeInTheDocument();
+    write.mockRestore();
+
+    // Plain HTTP on a private network: the browser offers no clipboard at all.
+    const own = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    if (!own) throw new Error("user-event's clipboard is expected on navigator");
+    Reflect.deleteProperty(navigator, "clipboard");
+    try {
+      await user.click(screen.getByRole("button", { name: `Copy key ${KEY}` }));
+      expect(
+        await screen.findByText("This browser does not allow copying here"),
+      ).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(navigator, "clipboard", own);
+    }
   });
 
   it("copies the Ticket's page link from the quiet menu", async () => {

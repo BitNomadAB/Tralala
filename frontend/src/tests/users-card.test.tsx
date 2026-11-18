@@ -135,3 +135,47 @@ describe("disabling and enabling a person", () => {
     expect(writes).toEqual([{ userId: "user-3", body: { disabled: false } }]);
   });
 });
+
+describe("a person's invitation link and password", () => {
+  it("keeps the focus on the link button while the link is made, then shows it", async () => {
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    server.use(
+      http.post(apiPath("/users/user-2/invite"), async () => {
+        await answered;
+        return ok({
+          user_id: "user-2",
+          user_name: "bob",
+          token: "invite-token",
+          path: "/enrol?token=invite-token",
+          expires_at: "2026-11-20T09:00:00Z",
+          warning: "",
+        });
+      }),
+    );
+    const { user } = await renderUsers();
+    const invite = screen.getByRole("button", { name: "Create an invitation link for bob" });
+    await user.click(invite);
+    expect(invite).toHaveFocus();
+    expect(invite).toHaveAttribute("aria-disabled", "true");
+    // A disabled account gets no link at all.
+    expect(
+      screen.getByRole("button", { name: "Create an invitation link for carl" }),
+    ).toBeDisabled();
+
+    answer();
+    expect(await screen.findByRole("dialog", { name: "Invitation link for bob" })).toBeVisible();
+  });
+
+  it("opens the password reset for that person", async () => {
+    const { user } = await renderUsers();
+    await user.click(screen.getByRole("button", { name: "Reset password for bob" }));
+    const dialog = screen.getByRole("dialog", { name: "Reset password for bob" });
+    expect(within(dialog).getByLabelText(/New password/)).toHaveValue("");
+    expect(dialog).toContainElement(
+      document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    );
+  });
+});

@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { ApiError } from "@/lib/api";
 import {
   confirmationProblem,
@@ -126,5 +127,56 @@ describe("the field problems", () => {
       { id: "credential-expiry", message: "Must be at most 3650" },
     ]);
     expect(fieldProblems(new Error("offline"), { name: "credential-name" })).toEqual([]);
+  });
+});
+
+/** A form whose Save reports `problems`, and whose Check sets the name's error in place. */
+function ErrorsForm({ problems }: { problems: { id: string; message: string }[] }) {
+  const fields = useFieldErrors();
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        fields.report(problems);
+      }}
+    >
+      <Field label="Name" htmlFor="name" error={fields.errorOf("name")}>
+        <Input id="name" />
+      </Field>
+      <button type="button" onClick={() => fields.set("name", "Name is taken")}>
+        Check
+      </button>
+      <button type="submit">Save</button>
+      <output aria-label="Has errors">{String(fields.hasErrors)}</output>
+    </form>
+  );
+}
+
+describe("a form's field errors", () => {
+  it("moves focus to the first problem each time it is reported, the same field again too", () => {
+    render(<ErrorsForm problems={[{ id: "name", message: "Name is needed" }]} />);
+    const save = screen.getByRole("button", { name: "Save" });
+    fireEvent.click(save);
+    expect(screen.getByLabelText("Name")).toHaveFocus();
+    expect(screen.getByLabelText("Name")).toHaveAccessibleDescription(/Name is needed/);
+
+    save.focus();
+    fireEvent.click(save);
+    expect(screen.getByLabelText("Name")).toHaveFocus();
+  });
+
+  it("changes one error without moving focus, and clears them all with a report of none", () => {
+    const { rerender } = render(<ErrorsForm problems={[]} />);
+    const check = screen.getByRole("button", { name: "Check" });
+    check.focus();
+    fireEvent.click(check);
+    expect(check).toHaveFocus();
+    expect(screen.getByLabelText("Name")).toHaveAccessibleDescription(/Name is taken/);
+    expect(screen.getByRole("status", { name: "Has errors" })).toHaveTextContent("true");
+
+    rerender(<ErrorsForm problems={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByLabelText("Name")).not.toHaveAccessibleDescription(/Name is taken/);
+    expect(screen.getByRole("status", { name: "Has errors" })).toHaveTextContent("false");
   });
 });
