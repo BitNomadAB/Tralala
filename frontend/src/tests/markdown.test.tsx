@@ -107,8 +107,9 @@ describe("renderMarkdown bare URLs", () => {
     expect(anchors.every((anchor) => anchor.getAttribute("rel") === "noreferrer noopener")).toBe(
       true,
     );
+    // Each link says, to a screen reader, that it opens a new tab.
     expect(container.textContent).toBe(
-      "See https://example.com/a?b=1. Or (http://example.org/x), and https://en.example.com/T_(1)!",
+      "See https://example.com/a?b=1 (opens in a new tab). Or (http://example.org/x (opens in a new tab)), and https://en.example.com/T_(1) (opens in a new tab)!",
     );
   });
 
@@ -191,5 +192,60 @@ describe("renderMarkdown Ticket keys", () => {
       expect(container.textContent).toBe("AN001-RA02-001");
       unmount();
     }
+  });
+});
+
+describe("renderMarkdown for a page", () => {
+  it("puts the whole text in one prose container, and nothing for empty text", () => {
+    const { container } = render(<div>{renderMarkdown("One.\n\n- two\n\n# three")}</div>);
+    const root = container.firstElementChild;
+    expect(root?.children).toHaveLength(1);
+    const prose = root?.firstElementChild;
+    expect(prose).toHaveClass("prose-card");
+    expect([...(prose?.children ?? [])].map((node) => node.tagName)).toEqual(["P", "UL", "H1"]);
+    expect(renderMarkdown("  \n ")).toBeNull();
+  });
+
+  it("starts the headings at the level it is given and stops at h6", () => {
+    const { container } = render(
+      <div>{renderMarkdown("# a\n## b\n### c\n#### d", { headingLevel: 4 })}</div>,
+    );
+    const headings = [...container.querySelectorAll("h1, h2, h3, h4, h5, h6")];
+    expect(headings.map((node) => node.tagName)).toEqual(["H4", "H5", "H6", "H6"]);
+    // The size follows the hashes, so the text keeps its own order of sizes.
+    expect(headings.map((node) => node.className)).toEqual([
+      "md-heading md-h1",
+      "md-heading md-h2",
+      "md-heading md-h3",
+      "md-heading md-h4",
+    ]);
+  });
+
+  it("draws headings without putting them in the outline under none", () => {
+    render(<div>{renderMarkdown("## Next steps", { headingLevel: "none" })}</div>);
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(screen.getByText("Next steps")).toHaveClass("md-heading", "md-h2");
+  });
+
+  it("says that a link to another site opens a new tab, with an icon hidden from readers", () => {
+    render(
+      <div>
+        {renderMarkdown("[Example](https://example.com) and AN001-RA02-001", {
+          ticketHref: () => "/boards/b-1/loops/l-1?card=c-1",
+        })}
+      </div>,
+    );
+    const external = screen.getByRole("link", { name: "Example (opens in a new tab)" });
+    expect(external).toHaveAttribute("target", "_blank");
+    expect(external.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    // A Ticket on this site opens in the same tab and says nothing more.
+    expect(screen.getByRole("link", { name: "AN001-RA02-001" })).not.toHaveAttribute("target");
+  });
+
+  it("lets a keyboard reach a code block, which is a named group", () => {
+    render(<div>{renderMarkdown("```\na very long line\n```")}</div>);
+    const block = screen.getByRole("group", { name: "Code block" });
+    expect(block.tagName).toBe("PRE");
+    expect(block).toHaveAttribute("tabindex", "0");
   });
 });

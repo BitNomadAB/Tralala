@@ -68,7 +68,7 @@ export function LoopNotesPanel({
               {note.author_actor_type === "agent" ? " (agent)" : ""} ·{" "}
               <time dateTime={note.created_at}>{new Date(note.created_at).toLocaleString()}</time>
             </p>
-            <div className="mt-1 text-sm">{renderMarkdown(note.content)}</div>
+            <div className="mt-1 text-sm">{renderMarkdown(note.content, { headingLevel: 3 })}</div>
           </li>
         ))}
       </ol>

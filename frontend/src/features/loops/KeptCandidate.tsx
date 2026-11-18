@@ -30,8 +30,8 @@ export function KeptCandidate({
   if (!candidate) return null;
   const phases = reviewPlan(candidate);
   const raw = (
-    <div className="prose-sm max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
-      {renderMarkdown(candidateMarkdown(candidate))}
+    <div className="max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin">
+      {renderMarkdown(candidateMarkdown(candidate), { headingLevel: 3 })}
     </div>
   );
   return (

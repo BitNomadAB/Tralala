@@ -186,7 +186,7 @@ function HistoryRecordDialog({
                   {document.kind.replace("_", " ")}
                 </h2>
                 <div className="max-h-64 overflow-y-auto rounded-lg border border-[var(--border)] p-2 text-sm scrollbar-thin">
-                  {renderMarkdown(document.content)}
+                  {renderMarkdown(document.content, { headingLevel: 3 })}
                 </div>
               </section>
             ))}
@@ -201,7 +201,7 @@ function HistoryRecordDialog({
                       <span className="text-[11px] text-[var(--muted-foreground)]">
                         {note.author_name}
                       </span>
-                      {renderMarkdown(note.content)}
+                      {renderMarkdown(note.content, { headingLevel: 3 })}
                     </li>
                   ))}
                 </ol>

@@ -1,3 +1,4 @@
+import { ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
 
 /**
@@ -7,7 +8,14 @@ import type { ReactNode } from "react";
  * React text node, so `<script>` or inline handlers stay visible text instead of executing.
  * Only http(s) links are turned into anchors to other sites, and they open in a new tab; a Ticket
  * key becomes a link only when the page resolves it, and then only to a path on this site.
+ *
+ * The output sits in one `.prose-card` container, which gives links their underline, lists their
+ * markers and headings their size (Tailwind's reset takes all three away), so no page can show the
+ * text without them.
  */
+
+/** The HTML level a `#` heading becomes, or `"none"` for headings that stay out of the outline. */
+export type MarkdownHeadingLevel = 1 | 2 | 3 | 4 | 5 | 6 | "none";
 
 export interface MarkdownOptions {
   /**
@@ -16,6 +24,13 @@ export interface MarkdownOptions {
    * decides; without a resolver every key stays text.
    */
   ticketHref?: ((key: string) => string | null) | undefined;
+  /**
+   * The level a `#` heading takes, so the text's headings sit under the heading of the section
+   * that shows it: with 4, `#` is an h4, `##` an h5, and anything deeper an h6. `"none"` draws the
+   * headings as headings without making them part of the page's outline (the formatting help).
+   * Without it `#` is an h1, as Markdown means it.
+   */
+  headingLevel?: MarkdownHeadingLevel | undefined;
 }
 
 /**
@@ -60,10 +75,13 @@ function trimUrl(candidate: string): string {
   return url;
 }
 
+/** A link to another site; it opens in a new tab, and says so in words and with an icon. */
 function externalLink(key: string, href: string, label: string): ReactNode {
   return (
     <a key={key} href={href} rel="noreferrer noopener" target="_blank">
       {label}
+      <span className="sr-only"> (opens in a new tab)</span>
+      <ExternalLink aria-hidden="true" size={12} className="md-external" />
     </a>
   );
 }
@@ -115,18 +133,32 @@ function renderInline(text: string, keyPrefix: string, options: MarkdownOptions)
   return nodes;
 }
 
-/** `#` to `####` become h1 to h4; the heading pattern admits nothing longer. */
-function headingTag(hashes: string): "h1" | "h2" | "h3" | "h4" {
-  switch (hashes.length) {
-    case 1:
-      return "h1";
-    case 2:
-      return "h2";
-    case 3:
-      return "h3";
-    default:
-      return "h4";
+const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
+
+/** The tag of a heading `depth` hashes deep when `#` is an h`top`, never deeper than h6. */
+function headingTag(depth: number, top: Exclude<MarkdownHeadingLevel, "none">) {
+  return HEADING_TAGS[Math.min(top + depth - 1, HEADING_TAGS.length) - 1] ?? "h6";
+}
+
+/**
+ * A heading. Its look follows the number of hashes, not the tag, so a text keeps its own order of
+ * sizes wherever its levels start; under `"none"` it is a paragraph that looks like a heading.
+ */
+function heading(depth: number, content: ReactNode[], key: string, options: MarkdownOptions) {
+  const className = `md-heading md-h${depth}`;
+  if (options.headingLevel === "none") {
+    return (
+      <p key={key} className={className}>
+        {content}
+      </p>
+    );
   }
+  const Tag = headingTag(depth, options.headingLevel ?? 1);
+  return (
+    <Tag key={key} className={className}>
+      {content}
+    </Tag>
+  );
 }
 
 export function renderMarkdown(source: string, options: MarkdownOptions = {}): ReactNode {
@@ -151,8 +183,10 @@ export function renderMarkdown(source: string, options: MarkdownOptions = {}): R
       index += 1;
       const code = takeWhile((next) => !next.trim().startsWith("```"));
       index += 1;
+      // A long line scrolls sideways; taking focus lets a keyboard scroll it. A named group, not a
+      // region: a page with several code blocks would otherwise list each one as a landmark.
       blocks.push(
-        <pre key={`code-${key++}`}>
+        <pre key={`code-${key++}`} role="group" aria-label="Code block" tabIndex={0}>
           <code>{code.join("\n")}</code>
         </pre>,
       );
@@ -162,8 +196,7 @@ export function renderMarkdown(source: string, options: MarkdownOptions = {}): R
     const [, hashes, text] = /^(#{1,4})\s+(.*)$/.exec(line) ?? [];
     if (hashes !== undefined && text !== undefined) {
       const content = renderInline(text, `h-${key}`, options);
-      const Tag = headingTag(hashes);
-      blocks.push(<Tag key={`heading-${key++}`}>{content}</Tag>);
+      blocks.push(heading(hashes.length, content, `heading-${key++}`, options));
       index += 1;
       continue;
     }
@@ -211,5 +244,5 @@ export function renderMarkdown(source: string, options: MarkdownOptions = {}): R
     blocks.push(<p key={`p-${key++}`}>{renderInline(paragraph.join(" "), `p-${key}`, options)}</p>);
   }
 
-  return <>{blocks}</>;
+  return <div className="prose-card">{blocks}</div>;
 }

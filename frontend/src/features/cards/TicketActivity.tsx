@@ -66,7 +66,9 @@ function TicketWork({
           <span className="text-xs text-[var(--foreground-faint)]">
             {comment.actor_name ?? "Unknown"} · {formatDateTime(comment.created_at)}
           </span>
-          <div className="text-sm">{renderMarkdown(comment.content, { ticketHref })}</div>
+          <div className="text-sm">
+            {renderMarkdown(comment.content, { ticketHref, headingLevel: 4 })}
+          </div>
         </li>
       ))}
     </ul>

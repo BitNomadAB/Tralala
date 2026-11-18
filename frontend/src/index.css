@@ -458,26 +458,25 @@ body {
   box-shadow: var(--card-shadow);
 }
 
-.prose-card {
-  line-height: 1.6;
-  font-size: 0.875rem;
-}
+/*
+ * Rendered Markdown (`lib/markdown.tsx` wraps all of it in this class). It takes the size and the
+ * line height of where it is shown and only gives back what Tailwind's reset removes: space
+ * between blocks, heading sizes, list markers and underlined links.
+ */
 
-.prose-card h1,
-.prose-card h2,
-.prose-card h3,
-.prose-card h4 {
+/* Sized by the number of hashes, not by the tag: the tag follows the page's outline. */
+.prose-card .md-heading {
   font-weight: 600;
   margin: 1rem 0 0.35rem;
 }
 
-.prose-card h1 {
+.prose-card .md-h1 {
   font-size: 1.125rem;
 }
-.prose-card h2 {
+.prose-card .md-h2 {
   font-size: 1.05rem;
 }
-.prose-card h3 {
+.prose-card .md-h3 {
   font-size: 0.95rem;
 }
 
@@ -508,12 +507,36 @@ body {
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   padding: 0.6rem;
+  margin: 0.4rem 0;
   overflow-x: auto;
 }
 
+.prose-card pre code {
+  background-color: transparent;
+  border: 0;
+  padding: 0;
+}
+
+/* Not by colour alone (WCAG 1.4.1): a link in text is always underlined. */
 .prose-card a {
   color: var(--accent);
   text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.prose-card a .md-external {
+  display: inline;
+  margin-left: 0.15em;
+  vertical-align: -0.1em;
+}
+
+/* Last, so they win over the margins above: the text starts and ends flush with its box. */
+.prose-card > :first-child {
+  margin-top: 0;
+}
+
+.prose-card > :last-child {
+  margin-bottom: 0;
 }
 
 .scrollbar-thin::-webkit-scrollbar {

@@ -53,7 +53,12 @@ function InShort({
       />
     );
   }
-  return <div className="prose-sm text-sm">{renderMarkdown(roadmap.current_content ?? "")}</div>;
+  // Under the "In short" heading (an h3).
+  return (
+    <div className="text-sm">
+      {renderMarkdown(roadmap.current_content ?? "", { headingLevel: 4 })}
+    </div>
+  );
 }
 
 /** The plan as the agent wrote it: the payload as indented JSON, wrapped, never interpreted. */

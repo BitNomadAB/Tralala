@@ -142,7 +142,7 @@ export function MarkdownField({
         id={`${id}-panel-preview`}
         aria-labelledby={`${id}-tab-preview`}
         hidden={!preview}
-        className="prose-card min-h-24 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3"
+        className="min-h-24 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm leading-relaxed"
       >
         {rendered ?? (
           <span className="text-xs text-[var(--muted-foreground)]">Nothing to preview yet</span>

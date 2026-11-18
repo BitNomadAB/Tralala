@@ -172,7 +172,11 @@ const RENDERS_TO: Record<FormattingExampleName, (cell: HTMLElement) => void> = {
   bold: (cell) => expect(cell.querySelector("strong")).toHaveTextContent("important"),
   italic: (cell) => expect(cell.querySelector("em")).toHaveTextContent("a little emphasis"),
   inlineCode: (cell) => expect(cell.querySelector("p code")).toHaveTextContent("settings.json"),
-  heading: (cell) => expect(cell.querySelector("h2")).toHaveTextContent("Next steps"),
+  // Drawn as a heading, but outside the page's outline.
+  heading: (cell) => {
+    expect(cell.querySelector(".md-heading.md-h2")).toHaveTextContent("Next steps");
+    expect(within(cell).queryByRole("heading")).toBeNull();
+  },
   bulletList: (cell) => expect(cell.querySelectorAll("ul li")).toHaveLength(2),
   numberedList: (cell) => expect(cell.querySelectorAll("ol li")).toHaveLength(2),
   link: (cell) => {

@@ -31,8 +31,9 @@ export function MarkdownHelp() {
                 <code className="block whitespace-pre-wrap font-mono">{example.syntax}</code>
               </td>
               <td className="py-2">
-                <div className="prose-card" data-rendered>
-                  {renderMarkdown(example.syntax)}
+                {/* Its heading is drawn, not a heading: the help is not part of the page's outline. */}
+                <div className="text-sm leading-relaxed" data-rendered>
+                  {renderMarkdown(example.syntax, { headingLevel: "none" })}
                 </div>
                 {example.note ? (
                   <p className="mt-1 text-[var(--muted-foreground)]">{example.note}</p>

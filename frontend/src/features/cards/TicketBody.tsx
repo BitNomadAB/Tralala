@@ -129,7 +129,7 @@ export function TicketBody({
             <div className="grid gap-2">
               {card.description ? (
                 <div className="max-w-[70ch] text-[15px] leading-relaxed">
-                  {renderMarkdown(card.description, { ticketHref })}
+                  {renderMarkdown(card.description, { ticketHref, headingLevel: 4 })}
                 </div>
               ) : null}
               <p className="m-0 text-[13px] text-[var(--foreground-faint)]">

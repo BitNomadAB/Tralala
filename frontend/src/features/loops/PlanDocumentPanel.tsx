@@ -8,6 +8,12 @@ import { AnalysisBriefView } from "./BriefView";
 import { DOCUMENT_LABELS, isEarlierFormat, staleReasonText, viewAuthorship } from "./loopUi";
 
 /**
+ * The level a document's `#` takes: the Loop page's title is the h1 and its tab the h2, and the
+ * document's label is not a heading, so the text's own headings start under them.
+ */
+const DOCUMENT_HEADINGS = 3;
+
+/**
  * The current text: the analysis brief's sections, Markdown for everything else. The RoadMap's brief
  * is shown by RoadmapReview, which passes it as `body`.
  */
@@ -24,7 +30,7 @@ function CurrentText({
   if (showsAnalysisBrief(document) && isHumanBrief(payload)) {
     return <AnalysisBriefView brief={payload} technical={technical} approval={approval} />;
   }
-  return renderMarkdown(document.current_content ?? "");
+  return renderMarkdown(document.current_content ?? "", { headingLevel: DOCUMENT_HEADINGS });
 }
 
 /** One planning document: its state, current text, approved baseline and revision list. */
@@ -96,7 +102,7 @@ export function PlanDocumentPanel({
           className={
             showsAnalysisBrief(document)
               ? "rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-sm"
-              : "prose-sm max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin"
+              : "max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm scrollbar-thin"
           }
         >
           <CurrentText document={document} technical={technical} approval={approval} />
@@ -112,7 +118,7 @@ export function PlanDocumentPanel({
         <details className="text-xs text-[var(--muted-foreground)]">
           <summary>Show the approved baseline (r{document.approved_revision_number})</summary>
           <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-[var(--border)] p-2 scrollbar-thin">
-            {renderMarkdown(document.approved_content)}
+            {renderMarkdown(document.approved_content, { headingLevel: DOCUMENT_HEADINGS })}
           </div>
         </details>
       ) : null}
