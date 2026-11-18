@@ -75,7 +75,9 @@ describe("Your notes", () => {
     expect(screen.getByText("1 note")).toBeInTheDocument();
   });
 
-  it("edits the author's note with its version, then deletes it", async () => {
+  // Types a note, saves it, then deletes it through the confirm step: about 1.4 s alone, past the
+  // default 5 s now and then when the whole suite runs in parallel.
+  it("edits the author's note with its version, then deletes it", { timeout: 15_000 }, async () => {
     const { view, user } = await renderTicket(ticketCard(), undefined, { notes: [MINE] });
     await screen.findByText(MINE.text);
     await user.click(within(row(MINE.text)).getByRole("button", { name: /^Edit note/ }));
