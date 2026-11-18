@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { Discussion, DiscussionEvent } from "@/lib/types";
+import { REPLY_SENT } from "./discussionNotices";
 import { replyNeedsRound, reviewedText, type ReviewDecision } from "./discussionRules";
 import { runView } from "./runEvents";
 import { useDiscussionEvents } from "./useDiscussionEvents";
@@ -58,6 +60,7 @@ function replyNotice(discussion: Discussion) {
 export function useDiscussionView(boardId: string, discussionId: string) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const announce = useAnnounce();
   const [reviewing, setReviewing] = useState<ReviewDecision | null>(null);
   const [reply, setReply] = useState("");
 
@@ -107,6 +110,7 @@ export function useDiscussionView(boardId: string, discussionId: string) {
     onSuccess: (discussion) => {
       setReply("");
       invalidate();
+      announce(REPLY_SENT);
       if (replyNeedsRound(discussion)) runs.askRound();
       const notice = replyNotice(discussion);
       if (notice) toast.push(notice);
@@ -123,6 +127,8 @@ export function useDiscussionView(boardId: string, discussionId: string) {
   return {
     query,
     run: query.data ? runView(query.data, events.data ?? []) : null,
+    /** The stored events are in, so the run's counts are what the server holds. */
+    eventsReady: events.data !== undefined,
     runs,
     live,
     invalidate,

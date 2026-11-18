@@ -8,23 +8,29 @@ import { confidenceText, failedLine, positionLabel, positionTone } from "./discu
 const TOGGLE =
   "rounded border-0 bg-transparent p-0 text-[13px] text-[var(--muted-foreground)] hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)]";
 
+/** The level of the headings For, Against, Conditions and Open questions: under "Who stands where". */
+export type PointLevel = 3 | 4;
+
 /** One of the four lists of an answer, each item with its mark, or a faint "None.". */
 function Points({
   label,
   items,
   mark,
   tone,
+  level,
 }: {
   label: string;
   items: readonly string[];
   mark: string;
   tone: string;
+  level: PointLevel;
 }) {
+  const Heading = level === 3 ? "h3" : "h4";
   return (
     <div className="grid content-start gap-1.5">
-      <h4 className="m-0 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[var(--foreground-faint)]">
+      <Heading className="m-0 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[var(--foreground-faint)]">
         {label}
-      </h4>
+      </Heading>
       {items.length === 0 ? (
         <p className="m-0 text-[13px] text-[var(--foreground-faint)]">None.</p>
       ) : (
@@ -48,10 +54,12 @@ function AnswerDetails({
   id,
   answer,
   open,
+  level,
 }: {
   id: string;
   answer: DiscussionAnswer;
   open: boolean;
+  level: PointLevel;
 }) {
   return (
     <div
@@ -59,25 +67,33 @@ function AnswerDetails({
       hidden={!open}
       className="mt-3 grid grid-cols-1 gap-x-7 gap-y-4 border-t border-[var(--border-soft)] pt-3 sm:grid-cols-2"
     >
-      <Points label="For" items={answer.pros} mark="+" tone="text-[var(--success)]" />
-      <Points label="Against" items={answer.cons} mark="–" tone="text-[var(--warning)]" />
+      <Points label="For" items={answer.pros} mark="+" tone="text-[var(--success)]" level={level} />
+      <Points
+        label="Against"
+        items={answer.cons}
+        mark="–"
+        tone="text-[var(--warning)]"
+        level={level}
+      />
       <Points
         label="Conditions"
         items={answer.conditions}
         mark="·"
         tone="text-[var(--muted-foreground)]"
+        level={level}
       />
       <Points
         label="Open questions"
         items={answer.open_questions}
         mark="?"
         tone="text-[var(--muted-foreground)]"
+        level={level}
       />
     </div>
   );
 }
 
-function Stance({ row, failed }: { row: StanceRow; failed: boolean }) {
+function Stance({ row, failed, level }: { row: StanceRow; failed: boolean; level: PointLevel }) {
   const detailsId = useId();
   const [open, setOpen] = useState(false);
   const { stance, answer } = row;
@@ -135,7 +151,7 @@ function Stance({ row, failed }: { row: StanceRow; failed: boolean }) {
         </p>
       ) : null}
       {row.kind === "answer" && answer ? (
-        <AnswerDetails id={detailsId} answer={answer} open={open} />
+        <AnswerDetails id={detailsId} answer={answer} open={open} level={level} />
       ) : null}
     </li>
   );
@@ -150,9 +166,11 @@ function Stance({ row, failed }: { row: StanceRow; failed: boolean }) {
 export function StanceRows({
   rows,
   failed,
+  level,
 }: {
   rows: readonly StanceRow[];
   failed: ReadonlyMap<string, string>;
+  level: PointLevel;
 }) {
   if (rows.length === 0) {
     return (
@@ -162,7 +180,7 @@ export function StanceRows({
   return (
     <ul aria-label="Answers" className="m-0 grid list-none p-0">
       {rows.map((row) => (
-        <Stance key={row.id} row={row} failed={failed.has(row.participantId)} />
+        <Stance key={row.id} row={row} failed={failed.has(row.participantId)} level={level} />
       ))}
     </ul>
   );

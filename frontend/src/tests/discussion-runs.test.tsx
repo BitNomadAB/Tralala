@@ -33,8 +33,8 @@ describe("the runs: idle", () => {
     );
     await user.click(summary("Options"));
     const rounds = within(dialog).getByLabelText("Rounds");
-    expect(rounds).toHaveValue(2);
-    expect(rounds).toHaveAttribute("max", "2");
+    expect(rounds).toHaveValue("2");
+    expect(rounds).toHaveAccessibleDescription("From 1 to 2.");
     expect(dialog).toHaveTextContent("Empty means the server's default.");
     await user.clear(rounds);
     await user.type(rounds, "1");
@@ -65,37 +65,62 @@ describe("the runs: idle", () => {
     expect(api.state.bodies[0]?.body).toStrictEqual({ autonomous: true, rounds: 2 });
   });
 
-  it("is disabled with the reason when no round is left or the discussion is decided", async () => {
+  it("is held with the reason when no round is left or the discussion is decided", async () => {
     await renderDiscussion(discussion({ round_count: 4 }));
-    const talk = screen.getByRole("button", { name: "Let them talk it out" });
-    expect(talk).toBeDisabled();
-    expect(talk).toHaveAttribute("title", "No round is left: the discussion has had all 4");
+    const talk = screen.getByRole("button", {
+      name: "Let them talk it out",
+      description: "No round is left: the discussion has had all 4",
+    });
+    expect(talk).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("stays disabled once decided, beside More only", async () => {
+  it("stays held once decided, beside More only", async () => {
     await renderDiscussion(discussion({ status: "approved" }));
-    const talk = screen.getByRole("button", { name: "Let them talk it out" });
-    expect(talk).toBeDisabled();
-    expect(talk).toHaveAttribute("title", "The discussion is decided");
+    const talk = screen.getByRole("button", {
+      name: "Let them talk it out",
+      description: "The discussion is decided",
+    });
+    expect(talk).toHaveAttribute("aria-disabled", "true");
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 });
 
 describe("the runs: while the agents talk", () => {
-  it("says where they are, gives Stop in place of the decision and holds the reply", async () => {
+  it("says where they are, puts Stop first and holds the decision and the reply", async () => {
     await renderDiscussion(talking(), MODAL_URL, talkEvents());
     expect(sign()).toHaveTextContent("Agents are answering· round 3 of 4");
     expect(await within(sign()).findByText("1 of 4 agents have answered this round")).toBeVisible();
-    for (const name of ["Approve", "Request rework", "Veto", "Let them talk it out"]) {
-      expect(screen.queryByRole("button", { name })).toBeNull();
+    // Held, not gone: a button that had focus keeps it, and says why it waits.
+    for (const name of ["Approve", "Request rework", "Veto"]) {
+      const button = screen.getByRole("button", {
+        name,
+        description: "The agents are still answering",
+      });
+      expect(button).toHaveAttribute("aria-disabled", "true");
     }
-    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
-    expect(screen.getByRole("textbox", { name: "Reply" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAccessibleDescription(
+    expect(
+      screen.getByRole("button", {
+        name: "Let them talk it out",
+        description: "The agents are already answering",
+      }),
+    ).toHaveAttribute("aria-disabled", "true");
+    const stop = screen.getByRole("button", { name: "Stop" });
+    expect(stop).not.toHaveAttribute("aria-disabled");
+    const approve = screen.getByRole("button", { name: "Approve" });
+    expect(stop.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const reply = screen.getByRole("textbox", { name: "Reply" });
+    expect(reply).toHaveAttribute("aria-disabled", "true");
+    expect(reply).toHaveAttribute("readonly");
+    expect(reply).toHaveAccessibleDescription(
       "The agents are answering. Reply once they are done.",
     );
-    expect(screen.getByRole("button", { name: "Ask again" })).toBeDisabled();
-    expect(screen.getByRole("region", { name: "Status" })).toHaveTextContent(
+    expect(
+      screen.getByRole("button", {
+        name: "Ask again",
+        description: "The agents are answering. Reply once they are done.",
+      }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("group", { name: "Status" })).toHaveTextContent(
       "Agents are answering· round 3 of 4",
     );
   });
@@ -125,7 +150,7 @@ describe("the runs: while the agents talk", () => {
       expect(api.state.bodies).toEqual([{ route: `runs/${RUN_ID}/stop`, body: {}, csrf: CSRF }]),
     );
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Status" })).toHaveTextContent(
+      expect(screen.getByRole("group", { name: "Status" })).toHaveTextContent(
         "Stopped by Ada Member",
       ),
     );
@@ -141,11 +166,11 @@ describe("the runs: while the agents talk", () => {
     await user.click(screen.getByRole("button", { name: "More actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Pause while they talk" }));
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Status" })).toHaveTextContent("Paused"),
+      expect(screen.getByRole("group", { name: "Status" })).toHaveTextContent("Paused"),
     );
     expect(within(sign()).queryByText(/have answered this round/)).toBeNull();
-    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
-    expect(screen.getByRole("textbox", { name: "Reply" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop" })).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("aria-disabled", "true");
 
     api.state.next.resume = talking();
     await user.click(screen.getByRole("button", { name: "More actions" }));
@@ -157,7 +182,7 @@ describe("the runs: while the agents talk", () => {
       ]),
     );
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Status" })).toHaveTextContent(
+      expect(screen.getByRole("group", { name: "Status" })).toHaveTextContent(
         "Agents are answering",
       ),
     );

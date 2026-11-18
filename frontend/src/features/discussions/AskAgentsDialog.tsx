@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CheckChip } from "@/components/ui/chip";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Textarea } from "@/components/ui/input";
+import { ReasonButton } from "@/components/ui/reason-button";
 import { describeError } from "@/lib/describeError";
 import { useAskableAgents } from "@/lib/queries";
 import { ASK_SENTENCE, askBlocked, NO_ASKABLE_AGENT } from "./inboxRules";
@@ -15,8 +16,8 @@ const LEGEND = "text-xs font-medium uppercase tracking-wide text-[var(--muted-fo
  * "Ask the agents" from a Ticket: the question and the agents as checkable chips with their
  * roles, the board's askable agents, all chosen to begin with. Ask creates the discussion, starts
  * one round and hands its id to `onAsked`, which opens it. A board where no agent can answer says
- * so, with the way to Settings, and Ask stays disabled. Mount it with a `key` per opening so the
- * question and the choice start fresh.
+ * so, with the way to Settings. Until Ask can be pressed it says why beside it, and stays
+ * focusable. Mount it with a `key` per opening so the question and the choice start fresh.
  */
 export function AskAgentsDialog({
   open,
@@ -40,6 +41,11 @@ export function AskAgentsDialog({
   const all = agents.data ?? [];
   const chosen = all.filter((agent) => !left.has(agent.id)).map((agent) => agent.id);
   const blocked = agents.data ? askBlocked(question, chosen.length, all.length) : null;
+  const reason = agents.data
+    ? (blocked ?? (ask.isPending ? "Asking the agents…" : null))
+    : agents.error
+      ? "The agents could not be read"
+      : "Reading the agents…";
 
   function toggle(agentId: string, checked: boolean) {
     const next = new Set(left);
@@ -55,7 +61,7 @@ export function AskAgentsDialog({
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            if (blocked === null && agents.data) {
+            if (reason === null) {
               ask.mutate({ question, participantIds: chosen });
             }
           }}
@@ -106,13 +112,9 @@ export function AskAgentsDialog({
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              disabled={blocked !== null || !agents.data || ask.isPending}
-              title={blocked ?? undefined}
-            >
+            <ReasonButton type="submit" disabledReason={reason}>
               Ask
-            </Button>
+            </ReasonButton>
           </div>
         </form>
       </DialogContent>

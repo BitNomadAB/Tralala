@@ -1,4 +1,4 @@
-import { useId, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import { SectionHeader } from "@/components/ui/section";
 import { Segmented, SegmentedPanel } from "@/components/ui/segmented";
@@ -32,7 +32,9 @@ import { DiscussionSign } from "./DiscussionSign";
 import { ReviewDiscussionDialog } from "./ReviewDiscussionDialog";
 import { StanceRows } from "./StanceRows";
 import { TalkItOutDialog } from "./TalkItOutDialog";
+import { useDiscussionNotices } from "./useDiscussionNotices";
 import { useDiscussionView, type DiscussionViewState } from "./useDiscussionView";
+import { useFocusRescue } from "./useFocusRescue";
 
 type View = "you" | "raw";
 
@@ -47,7 +49,11 @@ export type DiscussionHost = "modal" | "page";
 /**
  * One discussion, the Ticket view's shape: the head with the question, the sign and the
  * decision, then "Who stands where" (For you: a row per agent, the expanders, your reply; Raw
- * text: everything the agents wrote) beside the rail with the status and the facts.
+ * text: everything the agents wrote) beside the rail with the status and the facts. A screen
+ * reader hears what changes as the agents answer (`useDiscussionNotices`); an action that takes
+ * away its own control gives focus to the heading (`useFocusRescue`). With `focusOnOpen` the
+ * heading takes focus once the thread is shown, for a host that swaps the view in under the
+ * keyboard (the Ticket's dialog).
  */
 export function DiscussionView({
   boardId,
@@ -57,6 +63,7 @@ export function DiscussionView({
   onBack,
   onClose,
   titleWrap,
+  focusOnOpen = false,
 }: {
   boardId: string;
   discussionId: string;
@@ -67,6 +74,7 @@ export function DiscussionView({
   onBack?: ((cardId: string) => void) | undefined;
   onClose?: (() => void) | undefined;
   titleWrap?: ((heading: ReactElement) => ReactElement) | undefined;
+  focusOnOpen?: boolean | undefined;
 }) {
   const view = useDiscussionView(boardId, discussionId);
   const discussion = view.query.data;
@@ -81,9 +89,11 @@ export function DiscussionView({
     );
   }
   if (!discussion) {
+    // On the page this is what the page shows, so it is the page's h1.
+    const Heading = host === "page" ? "h1" : "h2";
     return (
       <div className="p-7">
-        {wrap(<h2 className="sr-only">Discussion</h2>)}
+        {wrap(<Heading className="sr-only">Discussion</Heading>)}
         <p role="alert" className="text-sm text-[var(--destructive)]">
           {describeError(view.query.error, "Discussion unavailable.")}
         </p>
@@ -100,6 +110,7 @@ export function DiscussionView({
       onBack={onBack}
       onClose={onClose}
       titleWrap={titleWrap}
+      focusOnOpen={focusOnOpen}
     />
   );
 }
@@ -114,6 +125,7 @@ function DiscussionLayout({
   onBack,
   onClose,
   titleWrap,
+  focusOnOpen,
 }: {
   boardId: string;
   loopId: string | null;
@@ -123,6 +135,7 @@ function DiscussionLayout({
   onBack: ((cardId: string) => void) | undefined;
   onClose: (() => void) | undefined;
   titleWrap: ((heading: ReactElement) => ReactElement) | undefined;
+  focusOnOpen: boolean;
 }) {
   const navigate = useNavigate();
   const toast = useToast();
@@ -130,7 +143,16 @@ function DiscussionLayout({
   const idBase = useId();
   const headingId = useId();
   const [tab, setTab] = useState<View>("you");
+  const root = useRef<HTMLDivElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useFocusRescue(root, heading);
+  useDiscussionNotices(discussion, view.run, view.eventsReady);
+  useEffect(() => {
+    if (focusOnOpen) heading.current?.focus();
+  }, [focusOnOpen]);
   const modal = host === "modal";
+  // The sections under the question: h2 under the page's h1, h3 under the dialog's h2.
+  const level = host === "page" ? 2 : 3;
   const cardId = discussion.card_id;
   const pagePath = loopId ? discussionPagePath(boardId, loopId, cardId, discussion.id) : null;
 
@@ -178,10 +200,11 @@ function DiscussionLayout({
       }
     : null;
   return (
-    <div className={cn(modal && "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]")}>
+    <div ref={root} className={cn(modal && "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]")}>
       <DiscussionHead
         discussion={discussion}
         level={host === "page" ? 1 : 2}
+        headingRef={heading}
         titleWrap={titleWrap}
         page={host === "page"}
         onBack={back}
@@ -210,6 +233,7 @@ function DiscussionLayout({
             <SectionHeader
               id={headingId}
               size="lg"
+              level={level}
               title="Who stands where"
               trailing={
                 <Segmented
@@ -222,7 +246,11 @@ function DiscussionLayout({
               }
             />
             <SegmentedPanel idBase={idBase} value="you" active={tab} className="grid gap-6">
-              <StanceRows rows={stanceRows(discussion)} failed={run?.failed ?? new Map()} />
+              <StanceRows
+                rows={stanceRows(discussion)}
+                failed={run?.failed ?? new Map()}
+                level={level === 2 ? 3 : 4}
+              />
               <DiscussionExpanders
                 conditions={synthesis?.conditions ?? []}
                 openQuestions={synthesis?.open_questions ?? []}
@@ -252,6 +280,7 @@ function DiscussionLayout({
             onControl={control}
             busy={busy}
             onCopyLink={copyLink}
+            level={level}
           />
         </div>
       </div>

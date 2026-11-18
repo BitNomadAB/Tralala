@@ -131,8 +131,11 @@ describe("Ask the agents", () => {
       "Charlie",
     ]);
     boxes.forEach((box) => expect(box).toBeChecked());
-    const ask = within(dialog).getByRole("button", { name: "Ask" });
-    expect(ask).toBeDisabled();
+    const ask = within(dialog).getByRole("button", {
+      name: "Ask",
+      description: "Write the question first",
+    });
+    expect(ask).toHaveAttribute("aria-disabled", "true");
     await user.type(within(dialog).getByLabelText("Question"), `  ${QUESTION}  `);
     await user.click(within(dialog).getByRole("checkbox", { name: "Bravo Backend Developer" }));
     await user.click(ask);
@@ -167,7 +170,11 @@ describe("Ask the agents", () => {
       "/settings",
     );
     await user.type(within(dialog).getByLabelText("Question"), QUESTION);
-    expect(within(dialog).getByRole("button", { name: "Ask" })).toBeDisabled();
+    const ask = within(dialog).getByRole("button", {
+      name: "Ask",
+      description: "No agent can answer on this board",
+    });
+    expect(ask).toHaveAttribute("aria-disabled", "true");
     expect(within(dialog).queryByRole("checkbox")).toBeNull();
   });
 });

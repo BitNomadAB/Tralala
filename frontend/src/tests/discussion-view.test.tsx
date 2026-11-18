@@ -43,12 +43,14 @@ describe("the discussion view", () => {
     const sign = screen.getByRole("region", { name: "Tralala's suggestion" });
     expect(sign).toHaveTextContent("No answer yet");
     expect(screen.getByText(/· no round yet$/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Approve" })).toHaveAttribute(
-      "title",
-      "There is no answer to decide on yet",
-    );
-    const status = screen.getByRole("region", { name: "Status" });
+    const approve = screen.getByRole("button", {
+      name: "Approve",
+      description: "There is no answer to decide on yet",
+    });
+    expect(approve).toHaveAttribute("aria-disabled", "true");
+    // The three share one visible reason under the row.
+    expect(screen.getAllByText("There is no answer to decide on yet")).toHaveLength(1);
+    const status = screen.getByRole("group", { name: "Status" });
     expect(status).toHaveTextContent("No answer yet");
   });
 
@@ -165,9 +167,9 @@ describe("the discussion view", () => {
 
   it("puts the status in words and the facts in the rail", async () => {
     await renderDiscussion();
-    const status = screen.getByRole("region", { name: "Status" });
+    const status = screen.getByRole("group", { name: "Status" });
     expect(status).toHaveTextContent("Waits for your decision· after round 2");
-    const facts = screen.getByRole("region", { name: "Facts" });
+    const facts = screen.getByRole("group", { name: "Facts" });
     expect(within(facts).getByRole("link", { name: TICKET_KEY })).toHaveAttribute(
       "href",
       "/boards/board-1/loops/loop-1?card=card-1",
@@ -190,7 +192,7 @@ describe("the discussion view", () => {
     );
     expect(await screen.findByText("Discussion approved")).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Status" })).toHaveTextContent(
+      expect(screen.getByRole("group", { name: "Status" })).toHaveTextContent(
         "Approved by Ada Member",
       ),
     );

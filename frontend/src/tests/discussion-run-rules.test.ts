@@ -12,11 +12,11 @@ import {
   runControls,
   stateOf,
   talkBlocked,
-  talkRequest,
   talkRounds,
   talkSentence,
 } from "@/features/discussions/discussionRules";
 import { eventsByRun, runView } from "@/features/discussions/runEvents";
+import { talkProblems, talkRequest } from "@/features/discussions/talkFields";
 import { ended, event, RUN_ID, talkEvents, talking, talkRun } from "./msw/discussionRuns";
 import { discussion } from "./msw/discussions";
 import { MEMBER } from "./msw/session";
@@ -175,6 +175,33 @@ describe("Let them talk it out", () => {
     expect(talkRequest({ rounds: "", tokens: "", seconds: "" }, 2)).toBeNull();
     expect(talkRequest({ rounds: "2", tokens: "1.5", seconds: "" }, 2)).toBeNull();
     expect(talkRequest({ rounds: "2", tokens: "", seconds: "3601" }, 2)).toBeNull();
+  });
+
+  it("says under each field what is wrong with it, and nothing for a field that is fine", () => {
+    expect(talkProblems({ rounds: "2", tokens: "", seconds: "" }, 2)).toEqual({
+      rounds: null,
+      tokens: null,
+      seconds: null,
+    });
+    const wrong = talkProblems({ rounds: "3", tokens: "1.5", seconds: "3601" }, 2);
+    expect(wrong).toEqual({
+      rounds: "Use a whole number from 1 to 2.",
+      tokens: "Use a whole number up to 5 000 000, or leave it empty.",
+      seconds: "Use a whole number of seconds up to 3600, or leave it empty.",
+    });
+    for (const rounds of ["", "0", "two", " "]) {
+      expect(talkProblems({ rounds, tokens: "", seconds: "" }, 4).rounds).toBe(
+        "Use a whole number from 1 to 4.",
+      );
+    }
+    expect(talkProblems({ rounds: "2", tokens: "", seconds: "" }, 1).rounds).toBe(
+      "Use 1: one round is left.",
+    );
+    expect(talkProblems({ rounds: "2", tokens: "5000000", seconds: "3600" }, 2)).toEqual({
+      rounds: null,
+      tokens: null,
+      seconds: null,
+    });
   });
 });
 

@@ -5,6 +5,9 @@ import {
   inboxMark,
   inboxMeta,
   inboxPath,
+  inboxRowId,
+  inboxSection,
+  inboxSections,
   WAITS_ON_DISCUSSION,
 } from "@/features/discussions/inboxRules";
 import { formatDate } from "@/lib/utils";
@@ -78,5 +81,19 @@ describe("the inbox's words", () => {
       "/boards/board-1/loops/loop-1/tickets/card-1/discussions/d%201",
     );
     expect(inboxPath(inboxRow("d", { loop_id: null }))).toBe("/boards/board-1");
+  });
+});
+
+describe("the inbox's sections", () => {
+  it("lists a row where it stands, or where it stood while focus is in the lists", () => {
+    const waiting = inboxRow("a");
+    const decided = { ...waiting, waits_for: "nobody" as const, status: "approved" };
+    expect(inboxRowId(waiting)).toBe("board-1/a");
+    expect(inboxSection(decided, null)).toBe("nobody");
+    const held = inboxSections([waiting]);
+    expect(held).toEqual(new Map([["board-1/a", "your_decision"]]));
+    expect(inboxSection(decided, held)).toBe("your_decision");
+    // A row that came in since goes where it stands.
+    expect(inboxSection(inboxRow("b", { waits_for: "agents" }), held)).toBe("agents");
   });
 });

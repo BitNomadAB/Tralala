@@ -1,8 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import { useAnnounce } from "@/components/ui/useAnnounce";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
+import { talkStartedNotice } from "./discussionNotices";
 import { controlledText, type RunAction, type TalkRequest } from "./discussionRules";
 
 /** One round, as "Ask again" starts it, or the rounds "Let them talk it out" asks for. */
@@ -15,13 +17,16 @@ type StartRequest = { rounds: 1; background: true } | TalkRequest;
  */
 export function useDiscussionRuns(boardId: string, discussionId: string, refresh: () => void) {
   const toast = useToast();
+  const announce = useAnnounce();
   const [talkOpen, setTalkOpen] = useState(false);
 
   const start = useMutation({
     mutationFn: (input: StartRequest) => api.startDiscussion(boardId, discussionId, input),
-    onSuccess: () => {
+    onSuccess: (_summary, input) => {
       setTalkOpen(false);
       refresh();
+      // The round a reply asks for is confirmed by "Reply sent"; a talk says it started.
+      if ("autonomous" in input) announce(talkStartedNotice(input.rounds));
     },
     onError: (error, input) => {
       refresh();
