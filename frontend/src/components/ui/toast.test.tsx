@@ -6,8 +6,24 @@ import { Dialog, DialogContent } from "./dialog";
 import { ToastProvider } from "./toast";
 import { TOAST_DURATION_MS, useToast, type ToastInput } from "./useToast";
 
+/** Four buttons that each push an error of its own. */
+function NumberedFailures() {
+  const toast = useToast();
+  return [1, 2, 3, 4].map((number) => (
+    <button
+      key={number}
+      type="button"
+      onClick={() => {
+        toast.push({ title: `Could not save ${String(number)}`, variant: "error" });
+      }}
+    >
+      Fail {number}
+    </button>
+  ));
+}
+
 /** Buttons that push the toasts a test needs, and a dialog to push one from. */
-function Pusher({ onUndo }: { onUndo: () => void }) {
+function Pusher({ onUndo, numbered }: { onUndo: () => void; numbered: boolean }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const push = (input: ToastInput) => () => {
@@ -24,6 +40,7 @@ function Pusher({ onUndo }: { onUndo: () => void }) {
       <button type="button" onClick={push({ title: "Saved", variant: "success" })}>
         Save
       </button>
+      {numbered ? <NumberedFailures /> : null}
       <button
         type="button"
         onClick={push({ title: "Ticket archived", action: { label: "Undo", onClick: onUndo } })}
@@ -44,11 +61,11 @@ function Pusher({ onUndo }: { onUndo: () => void }) {
   );
 }
 
-function renderToasts() {
+function renderToasts(numbered = false) {
   const onUndo = vi.fn<() => void>();
   render(
     <ToastProvider>
-      <Pusher onUndo={onUndo} />
+      <Pusher onUndo={onUndo} numbered={numbered} />
     </ToastProvider>,
   );
   return { onUndo };
@@ -196,5 +213,47 @@ describe("a toast's buttons", () => {
     await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
     expect(screen.queryByText("Could not save")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Edit Ticket" })).toBeInTheDocument();
+  });
+});
+
+describe("a pile of toasts", () => {
+  /** The titles of the toasts shown, errors first, oldest first. */
+  const shown = () =>
+    Array.from(document.querySelectorAll("[data-toast] p:first-child")).map(
+      (title) => title.textContent,
+    );
+
+  it("shows at most three, the oldest leaving for a new one, so Dismiss stays in reach", () => {
+    renderToasts(true);
+    press("Fail 1");
+    press("Fail 2");
+    press("Fail 3");
+    press("Fail 4");
+    expect(shown()).toEqual(["Could not save 2", "Could not save 3", "Could not save 4"]);
+  });
+
+  it("lets a toast that leaves by itself make room before an error", () => {
+    renderToasts(true);
+    press("Save");
+    press("Fail 1");
+    press("Fail 2");
+    press("Fail 3");
+    expect(shown()).toEqual(["Could not save 1", "Could not save 2", "Could not save 3"]);
+  });
+
+  it("shows a toast again in place of the same one, instead of stacking it", () => {
+    renderToasts();
+    press("Fail");
+    press("Save");
+    press("Fail");
+    expect(shown()).toEqual(["Could not save", "Saved"]);
+    expect(screen.getAllByText("Busy")).toHaveLength(1);
+  });
+
+  it("keeps toasts with an action apart, as each Undo belongs to its own change", () => {
+    renderToasts();
+    press("Archive");
+    press("Archive");
+    expect(screen.getAllByRole("button", { name: "Undo" })).toHaveLength(2);
   });
 });

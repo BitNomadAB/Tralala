@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { AnnouncerProvider } from "./announcer";
 import { ToastItem } from "./toast-item";
-import { ToastContext, type Toast, type ToastInput } from "./useToast";
+import { ToastContext, withToast, type Toast, type ToastInput } from "./useToast";
 
 /**
  * A live list of toasts: in the page from the first render, so a screen reader reads each toast
@@ -29,7 +29,8 @@ function ToastList({
 /**
  * The toasts at the bottom right, and the announcer that comes with them, so every view under the
  * provider can also announce. An error is read at once and stays until it is dismissed; any other
- * toast is read after what the screen reader is reading and leaves by itself.
+ * toast is read after what the screen reader is reading and leaves by itself. At most three show,
+ * and the same message again replaces the one shown (`withToast`).
  */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -42,7 +43,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const push = useCallback(({ title, description, variant = "info", action }: ToastInput) => {
     lastId.current += 1;
     const toast: Toast = { id: lastId.current, title, description, variant, action };
-    setToasts((current) => [...current, toast]);
+    setToasts((current) => withToast(current, toast));
   }, []);
 
   const value = useMemo(() => ({ push }), [push]);

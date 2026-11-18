@@ -2,7 +2,7 @@ import { CheckCircle2, Info, TriangleAlert, X, XCircle } from "lucide-react";
 import { useCallback, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
-import { TOAST_DURATION_MS, type Toast, type ToastVariant } from "./useToast";
+import { TOAST_DURATION_MS, toastExpires, type Toast, type ToastVariant } from "./useToast";
 import { useToastTimer } from "./useToastTimer";
 
 const icons = {
@@ -33,15 +33,14 @@ const keepPressFromDialogs = {
  * One toast: its text, its action if it has one, and Dismiss. Its timer stands still while the
  * pointer is on it or focus is in it. An error has none, and neither has a toast with an action:
  * Undo may be the only way back, and a keyboard user reaches it only after the whole page, so it
- * stays until it is used or dismissed (WCAG 2.2.1).
+ * stays until it is used or dismissed (WCAG 2.2.1); the provider keeps such toasts from piling up.
  */
 export function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   const { id, action } = toast;
   const dismiss = useCallback(() => {
     onDismiss(id);
   }, [onDismiss, id]);
-  const lasts = toast.variant === "error" || action !== undefined;
-  const timer = useToastTimer(lasts ? null : TOAST_DURATION_MS, dismiss);
+  const timer = useToastTimer(toastExpires(toast) ? TOAST_DURATION_MS : null, dismiss);
   const Icon = icons[toast.variant];
 
   return (
