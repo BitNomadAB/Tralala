@@ -1,10 +1,10 @@
 import { useRef, useState } from "react";
+import { HeldButton } from "@/components/ui/held-button";
 import { MarkdownField } from "@/components/ui/markdown-field";
 import { RawBlock as Block, RawText as Raw } from "@/components/ui/raw-text";
 import { useAnnounce } from "@/components/ui/useAnnounce";
 import type { MarkdownOptions } from "@/lib/markdown";
 import type { Card, LoopReadiness } from "@/lib/types";
-import { PendingButton } from "./PendingButton";
 import { planEntryText } from "./ticketText";
 import { useFocusAfter } from "./useFocusAfter";
 
@@ -123,25 +123,25 @@ export function TicketRaw({
                 ticketHref={ticketHref}
               />
               <div className="flex gap-2">
-                <PendingButton
+                <HeldButton
                   size="sm"
-                  pending={saving}
+                  held={saving}
                   disabled={draft === card.description}
                   onClick={() => void save(draft)}
                 >
                   {saving ? "Saving…" : "Save description"}
-                </PendingButton>
-                <PendingButton
+                </HeldButton>
+                <HeldButton
                   variant="quiet"
                   size="sm"
-                  pending={saving}
+                  held={saving}
                   onClick={() => {
                     setDraft(null);
                     backToEdit();
                   }}
                 >
                   Cancel
-                </PendingButton>
+                </HeldButton>
               </div>
             </div>
           )}

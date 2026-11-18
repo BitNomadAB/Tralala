@@ -1,10 +1,10 @@
 import { useId, useRef } from "react";
 import { Expander } from "@/components/ui/expander";
+import { HeldButton } from "@/components/ui/held-button";
 import { Textarea } from "@/components/ui/input";
 import { useAnnounce } from "@/components/ui/useAnnounce";
 import { afterDeletedRow, rowOf } from "./afterDelete";
 import { NoteRow } from "./NoteRow";
-import { PendingButton } from "./PendingButton";
 import { notesHint } from "./ticketText";
 import { focusTarget, useFocusAfter } from "./useFocusAfter";
 import { useTicketNotes } from "./useTicketNotes";
@@ -125,15 +125,15 @@ export function TicketNotes({
               <small id={helper} className="text-[12.5px] text-[var(--foreground-faint)]">
                 Your notes stay with the Ticket and your coding agent can read them.
               </small>
-              <PendingButton
+              <HeldButton
                 type="submit"
                 variant="outline"
                 size="sm"
-                pending={notes.pending}
+                held={notes.pending}
                 disabled={!notes.text.trim()}
               >
                 Save note
-              </PendingButton>
+              </HeldButton>
             </div>
           </form>
         )}

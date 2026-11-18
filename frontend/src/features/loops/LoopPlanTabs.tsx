@@ -1,9 +1,9 @@
 import { Lock, PenLine, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { Select } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
 import type { GenerationCandidates } from "@/lib/boardAgents";
-import { BusyButton } from "./BusyButton";
 import type { PlanScope, PlanTab } from "./loopUi";
 
 /**
@@ -92,7 +92,7 @@ export function LoopPlanTabs({
         </ReasonButton>
       ) : null}
       {tab !== "info" ? (
-        <label className="ml-auto flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
+        <label className="ml-auto flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
           Agent
           <Select
             aria-label="Generation agent"
@@ -122,11 +122,11 @@ export function LoopPlanTabs({
         </label>
       ) : null}
       {tab !== "info" ? (
-        <BusyButton
+        <HeldButton
           id={generateId}
           size="sm"
           variant="outline"
-          busy={generateBusy}
+          held={generateBusy}
           aria-busy={generating}
           data-generating={generating ? "true" : undefined}
           // The pulse and its glow only where motion is welcome (WCAG 2.2.2); under reduced motion
@@ -141,7 +141,7 @@ export function LoopPlanTabs({
         >
           {generating ? <Lock size={14} /> : <Sparkles size={14} />}{" "}
           {generating ? "Generating…" : `Generate ${tab === "analysis" ? "analysis" : "RoadMap"}`}
-        </BusyButton>
+        </HeldButton>
       ) : null}
     </div>
   );

@@ -125,7 +125,12 @@ export default allErrors(
         "jsx-a11y-x/no-autofocus": "off",
         // Option: a named group may take focus, so a keyboard can scroll a box that overflows (a
         // wide code block); WCAG 2.1.1 asks for it and axe checks it (scrollable-region-focusable).
-        "jsx-a11y-x/no-noninteractive-tabindex": ["error", { tags: [], roles: ["group"] }],
+        // A tab panel may too, as the WAI-ARIA tabs pattern asks, so Tab reaches a panel with
+        // nothing in it to focus (a Markdown preview).
+        "jsx-a11y-x/no-noninteractive-tabindex": [
+          "error",
+          { tags: [], roles: ["group", "tabpanel"] },
+        ],
         // On: the browser console is not the app's log; the one reporter is allowed below.
         "no-console": "error",
         // On: one sign-out path, AuthProvider's signOutLocally(), with no file exempt. Clearing the

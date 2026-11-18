@@ -1,8 +1,8 @@
 import { RefreshCw } from "lucide-react";
 import { useId } from "react";
 import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input } from "@/components/ui/input";
-import { BusyButton } from "./BusyButton";
 import { ticketsText } from "./roadmapPlan";
 import { useFocusBack } from "./useFocusBack";
 
@@ -69,7 +69,7 @@ export function ScopeReview({
   return (
     <div className="flex flex-col gap-2 border-t border-[var(--border)] pt-3">
       {!isHuman ? (
-        <p className="text-[11px] text-[var(--warning)]">
+        <p className="text-xs text-[var(--warning)]">
           Approving is a human decision; agents can generate and comment only.
         </p>
       ) : null}
@@ -87,22 +87,22 @@ export function ScopeReview({
           {canReset ? (
             confirmReset ? (
               <>
-                <span id={warningId} role="alert" className="text-[11px] text-[var(--destructive)]">
+                <span id={warningId} role="alert" className="text-xs text-[var(--destructive)]">
                   Resetting clears the {scopeLabel} and any approval behind it. It has to be
                   generated again.
                   {resetTickets > 0
                     ? ` Its ${ticketsText(resetTickets)} ${resetTickets === 1 ? "leaves" : "leave"} the Kanban: those nobody touched are deleted, the others archived.`
                     : null}
                 </span>
-                <BusyButton
+                <HeldButton
                   size="sm"
                   variant="danger"
-                  busy={resetPending}
+                  held={resetPending}
                   aria-describedby={warningId}
                   onClick={onReset}
                 >
                   Reset and clear
-                </BusyButton>
+                </HeldButton>
                 {/* The safe choice takes the focus, as the question before an Info save does. */}
                 <Button
                   size="sm"
@@ -128,32 +128,32 @@ export function ScopeReview({
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {onRegenerate ? (
-            <BusyButton
+            <HeldButton
               variant="outline"
-              busy={regenerateBusy && !readOnly && isHuman && !regenerateDisabled}
+              held={regenerateBusy && !readOnly && isHuman && !regenerateDisabled}
               disabled={readOnly || !isHuman || regenerateDisabled || regenerateBusy}
               onClick={onRegenerate}
             >
               <RefreshCw size={14} /> Regenerate {scopeLabel}
-            </BusyButton>
+            </HeldButton>
           ) : null}
           {/* Pressed, a decision keeps the focus on its button: busy, then "Approved". */}
-          <BusyButton
+          <HeldButton
             variant="outline"
-            busy={reviewPending}
+            held={reviewPending}
             disabled={readOnly || !isHuman}
             onClick={() => onDecision("changes_requested")}
           >
             Request changes
-          </BusyButton>
+          </HeldButton>
           {approveInBrief ? null : (
-            <BusyButton
-              busy={reviewPending || approved}
+            <HeldButton
+              held={reviewPending || approved}
               disabled={readOnly || !canReview}
               onClick={() => onDecision("approved")}
             >
               {approved ? "Approved" : label}
-            </BusyButton>
+            </HeldButton>
           )}
         </div>
       </div>

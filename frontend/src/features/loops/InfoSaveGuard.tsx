@@ -1,4 +1,4 @@
-import { BusyButton } from "./BusyButton";
+import { HeldButton } from "@/components/ui/held-button";
 
 /**
  * Asked instead of saving Info while a generation run is in flight.
@@ -21,19 +21,19 @@ export function InfoSaveGuard({
 }) {
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      <span role="alert" className="text-[11px] text-[var(--warning)]">
+      <span role="alert" className="text-xs text-[var(--warning)]">
         A generation run is in progress; saving now discards its result, which is only kept for
         inspection.
       </span>
-      <BusyButton size="sm" busy={pending} onClick={onCancelRunFirst} autoFocus>
+      <HeldButton size="sm" held={pending} onClick={onCancelRunFirst} autoFocus>
         Cancel the run first
-      </BusyButton>
-      <BusyButton size="sm" variant="outline" busy={pending} onClick={onSaveAnyway}>
+      </HeldButton>
+      <HeldButton size="sm" variant="outline" held={pending} onClick={onSaveAnyway}>
         Save anyway
-      </BusyButton>
-      <BusyButton size="sm" variant="ghost" busy={pending} onClick={onBack}>
+      </HeldButton>
+      <HeldButton size="sm" variant="ghost" held={pending} onClick={onBack}>
         Back
-      </BusyButton>
+      </HeldButton>
     </div>
   );
 }

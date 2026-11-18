@@ -1,9 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { Expander } from "@/components/ui/expander";
+import { HeldButton } from "@/components/ui/held-button";
 import { candidateMarkdown, staleCandidate } from "@/lib/keptCandidate";
 import { renderMarkdown } from "@/lib/markdown";
 import type { GenerationRun } from "@/lib/types";
-import { BusyButton } from "./BusyButton";
 import { RoadmapPhases } from "./RoadmapPhases";
 import { reviewPlan } from "./roadmapPlan";
 
@@ -52,7 +52,7 @@ export function KeptCandidate({
         <span className="font-medium text-[var(--foreground)]">Kept result</span>
         <Badge tone="warning">not promoted</Badge>
       </div>
-      <p className="text-[11px] text-[var(--muted-foreground)]">
+      <p className="text-xs text-[var(--muted-foreground)]">
         The planning documents changed while the model was working, so this {scopeLabel} was kept
         for inspection and not used. It was written from the documents as they were when the run
         started.
@@ -66,15 +66,15 @@ export function KeptCandidate({
         raw
       )}
       <div className="flex justify-end">
-        <BusyButton
+        <HeldButton
           size="sm"
           variant="outline"
-          busy={regenerateBusy}
+          held={regenerateBusy}
           disabled={regenerateDisabled}
           onClick={onRegenerate}
         >
           Regenerate from the current Info
-        </BusyButton>
+        </HeldButton>
       </div>
     </section>
   );

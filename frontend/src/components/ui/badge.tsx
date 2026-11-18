@@ -26,7 +26,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
         tones[tone],
         className,
       )}
@@ -56,7 +56,7 @@ export function LabelChip({
     : { borderColor: color };
   return (
     <span
-      className="label-ink inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      className="label-ink inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium"
       style={style}
     >
       {selected ? <Check size={12} aria-hidden="true" /> : null}

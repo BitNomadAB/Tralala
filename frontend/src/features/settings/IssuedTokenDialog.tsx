@@ -22,7 +22,7 @@ export function IssuedTokenDialog({
       returnFocusId={returnFocusId}
       onClose={onClose}
     >
-      <p className="text-[11px] text-[var(--muted-foreground)]">
+      <p className="text-xs text-[var(--muted-foreground)]">
         Paste it into your MCP client as <code>Authorization: Bearer &lt;token&gt;</code>. The card
         above now shows the config with this token filled in.
       </p>

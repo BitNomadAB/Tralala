@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
+import { HeldButton } from "@/components/ui/held-button";
 import { Field, Textarea } from "@/components/ui/input";
 import { Section } from "@/components/ui/section";
 import { useAnnounce } from "@/components/ui/useAnnounce";
@@ -9,7 +10,6 @@ import { describeError } from "@/lib/describeError";
 import { renderMarkdown } from "@/lib/markdown";
 import { keys, useLoopNotes } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
-import { BusyButton } from "./BusyButton";
 
 /**
  * The Notes tab: the Loop's log of notes, oldest first, and a box for a person to add one. A note
@@ -73,7 +73,7 @@ export function LoopNotesPanel({
             key={note.id}
             className="rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-2.5"
           >
-            <p className="text-[11px] text-[var(--muted-foreground)]">
+            <p className="text-xs text-[var(--muted-foreground)]">
               {note.author_name}
               {note.author_actor_type === "agent" ? " (agent)" : ""} ·{" "}
               <time dateTime={note.created_at}>{new Date(note.created_at).toLocaleString()}</time>
@@ -101,9 +101,9 @@ export function LoopNotesPanel({
             />
           </Field>
           <div className="flex justify-end">
-            <BusyButton type="submit" size="sm" busy={add.isPending} disabled={!draft.trim()}>
+            <HeldButton type="submit" size="sm" held={add.isPending} disabled={!draft.trim()}>
               Add note
-            </BusyButton>
+            </HeldButton>
           </div>
         </form>
       )}

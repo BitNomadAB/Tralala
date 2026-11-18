@@ -75,20 +75,20 @@ describe("the focus around the notes", () => {
   it("starts in the note's field; Cancel and Save give it back to its Edit", async () => {
     const { user } = await renderTicket(ticketCard(), undefined, { notes: [MINE] });
     await screen.findByText(MINE.text);
-    await user.click(within(noteRow(MINE.text)).getByRole("button", { name: "Edit" }));
+    await user.click(within(noteRow(MINE.text)).getByRole("button", { name: /^Edit note/ }));
     expect(screen.getByRole("textbox", { name: "Edit the note" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() =>
-      expect(within(noteRow(MINE.text)).getByRole("button", { name: "Edit" })).toHaveFocus(),
+      expect(within(noteRow(MINE.text)).getByRole("button", { name: /^Edit note/ })).toHaveFocus(),
     );
 
-    await user.click(within(noteRow(MINE.text)).getByRole("button", { name: "Edit" }));
+    await user.click(within(noteRow(MINE.text)).getByRole("button", { name: /^Edit note/ }));
     await user.type(screen.getByRole("textbox", { name: "Edit the note" }), " Today.");
     await user.click(screen.getByRole("button", { name: "Save" }));
     const edited = `${MINE.text} Today.`;
     await screen.findByText(edited);
     await waitFor(() =>
-      expect(within(noteRow(edited)).getByRole("button", { name: "Edit" })).toHaveFocus(),
+      expect(within(noteRow(edited)).getByRole("button", { name: /^Edit note/ })).toHaveFocus(),
     );
     await waitFor(() => expect(announcer()).toHaveTextContent("Note saved"));
   });
@@ -96,16 +96,18 @@ describe("the focus around the notes", () => {
   it("hands the focus to the next note after a delete, then to Your notes", async () => {
     const { user } = await renderTicket(ticketCard(), undefined, { notes: [MINE, SECOND] });
     await screen.findByText(SECOND.text);
-    await user.click(within(noteRow(MINE.text)).getByRole("button", { name: "Edit" }));
+    await user.click(within(noteRow(MINE.text)).getByRole("button", { name: /^Edit note/ }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByText(MINE.text)).toBeNull());
     await waitFor(() =>
-      expect(within(noteRow(SECOND.text)).getByRole("button", { name: "Edit" })).toHaveFocus(),
+      expect(
+        within(noteRow(SECOND.text)).getByRole("button", { name: /^Edit note/ }),
+      ).toHaveFocus(),
     );
     await waitFor(() => expect(announcer()).toHaveTextContent("Note deleted"));
 
-    await user.click(within(noteRow(SECOND.text)).getByRole("button", { name: "Edit" }));
+    await user.click(within(noteRow(SECOND.text)).getByRole("button", { name: /^Edit note/ }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByText(SECOND.text)).toBeNull());

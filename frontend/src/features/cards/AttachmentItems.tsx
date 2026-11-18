@@ -12,11 +12,11 @@ import {
   Trash,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { api } from "@/lib/api";
 import { formatSize, isImageType } from "@/lib/api/attachmentRules";
 import type { Attachment } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
-import { PendingButton } from "./PendingButton";
 import { uploaderText, type UploadEntry } from "./useCardAttachments";
 
 /** The icon a file that shows no thumbnail gets, by the type the server stored. */
@@ -94,9 +94,7 @@ export function AttachmentRow({
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate font-medium" title={name}>
-            {name}
-          </p>
+          <p className="break-words font-medium">{name}</p>
           <p className="text-[var(--muted-foreground)]">
             {formatSize(attachment.size_bytes)} · Uploaded by{" "}
             {uploaderText(attachment.uploaded_by_actor_id, currentActorId)} ·{" "}
@@ -126,12 +124,12 @@ export function AttachmentRow({
       {confirming && !readOnly ? (
         <div className="flex flex-wrap items-center gap-2">
           <span>Delete {name}?</span>
-          <PendingButton variant="danger" size="sm" pending={deleting} onClick={onDelete}>
+          <HeldButton variant="danger" size="sm" held={deleting} onClick={onDelete}>
             {deleting ? "Deleting…" : "Delete"}
-          </PendingButton>
-          <PendingButton variant="outline" size="sm" autoFocus pending={deleting} onClick={onKeep}>
+          </HeldButton>
+          <HeldButton variant="outline" size="sm" autoFocus held={deleting} onClick={onKeep}>
             Keep
-          </PendingButton>
+          </HeldButton>
         </div>
       ) : null}
     </li>

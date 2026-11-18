@@ -75,14 +75,14 @@ export function BoardTemplatesCard() {
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 text-sm font-medium">
                     <LayoutTemplate size={14} className="shrink-0 text-[var(--muted-foreground)]" />
-                    <span className="truncate">{template.name}</span>
+                    <span className="min-w-0 break-words">{template.name}</span>
                   </p>
                   {template.description ? (
                     <p className="mt-0.5 line-clamp-2 text-xs text-[var(--muted-foreground)]">
                       {template.description}
                     </p>
                   ) : null}
-                  <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                     {template.list_count > 0 ? template.lists.join(" · ") : "Default lists"} ·{" "}
                     {template.labels.length} label{template.labels.length === 1 ? "" : "s"} ·
                     updated {formatDateTime(template.updated_at)}

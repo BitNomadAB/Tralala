@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
+import { HeldButton } from "@/components/ui/held-button";
 import { Textarea } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
 import type { CardNote } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
-import { PendingButton } from "./PendingButton";
+import { noteExcerpt } from "./ticketText";
 import { SAVING } from "./ticketWork";
 import { focusTarget, useFocusAfter } from "./useFocusAfter";
 
@@ -64,6 +65,7 @@ export function NoteRow({
                   type="button"
                   className={LINK}
                   data-focus-target="edit-note"
+                  aria-label={`Edit note “${noteExcerpt(note.text)}”`}
                   onClick={onEdit}
                 >
                   Edit
@@ -85,21 +87,21 @@ export function NoteRow({
             // Keyed apart from the buttons, so Keep mounts anew and takes the focus.
             <div key="confirm" className="flex flex-wrap items-center gap-2 text-[13px]">
               <span>Delete this note?</span>
-              <PendingButton variant="danger" size="sm" pending={pending} onClick={onDelete}>
+              <HeldButton variant="danger" size="sm" held={pending} onClick={onDelete}>
                 {pending ? "Deleting…" : "Delete"}
-              </PendingButton>
-              <PendingButton
+              </HeldButton>
+              <HeldButton
                 variant="outline"
                 size="sm"
                 autoFocus
-                pending={pending}
+                held={pending}
                 onClick={() => {
                   setConfirming(false);
                   focusAfter(() => focusTarget(row.current, "delete-note"));
                 }}
               >
                 Keep
-              </PendingButton>
+              </HeldButton>
             </div>
           ) : (
             <div key="buttons" className="flex flex-wrap items-start gap-2">
@@ -110,18 +112,18 @@ export function NoteRow({
               >
                 Save
               </ReasonButton>
-              <PendingButton
+              <HeldButton
                 variant="outline"
                 size="sm"
                 data-focus-target="delete-note"
-                pending={pending}
+                held={pending}
                 onClick={() => setConfirming(true)}
               >
                 Delete
-              </PendingButton>
-              <PendingButton variant="quiet" size="sm" pending={pending} onClick={onCancel}>
+              </HeldButton>
+              <HeldButton variant="quiet" size="sm" held={pending} onClick={onCancel}>
                 Cancel
-              </PendingButton>
+              </HeldButton>
             </div>
           )}
         </div>

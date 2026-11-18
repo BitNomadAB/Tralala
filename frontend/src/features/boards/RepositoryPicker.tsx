@@ -69,11 +69,11 @@ export function RepositoryPicker({
                 />
                 <GitBranch size={13} className="text-[var(--muted-foreground)]" />
                 <span className="font-medium">{repository.name}</span>
-                <span className="truncate text-[11px] text-[var(--muted-foreground)]">
+                <span className="min-w-0 break-all text-xs text-[var(--muted-foreground)]">
                   {repository.url}
                 </span>
                 {repository.has_token ? null : (
-                  <span className="text-[11px] text-[var(--muted-foreground)]">(no token)</span>
+                  <span className="text-xs text-[var(--muted-foreground)]">(no token)</span>
                 )}
               </label>
               {isSelected && paths && onPathsChange ? (

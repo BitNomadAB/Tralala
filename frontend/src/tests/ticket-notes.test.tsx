@@ -1,6 +1,6 @@
 import { renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { notesHint } from "@/features/cards/ticketText";
+import { noteExcerpt, notesHint } from "@/features/cards/ticketText";
 import { CARD_EVENT_TYPES, useCardEvents } from "@/features/cards/useCardEvents";
 import { noteErrorText } from "@/features/cards/useTicketNotes";
 import { ApiError } from "@/lib/api";
@@ -36,10 +36,14 @@ describe("Your notes", () => {
     expect(mine).toHaveTextContent(
       /^AMTry it on this Loop's analysis first\.Ada Member · .+ · Edit$/,
     );
-    expect(within(mine).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    // Each Edit says which note it edits, by its first words.
+    expect(
+      within(mine).getByRole("button", { name: "Edit note “Try it on this Loop's analysis…”" }),
+    ).toBeInTheDocument();
+    expect(noteExcerpt("  Ask the owner\nfirst. ")).toBe("Ask the owner first.");
     const theirs = row(THEIRS.text);
     expect(theirs).toHaveTextContent("Grace Hopper · ");
-    expect(within(theirs).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(theirs).queryByRole("button", { name: /^Edit note/ })).toBeNull();
     // A note is there: the section is open from the start, though the Ticket has a face or not.
     expect(
       screen.getByText("Your notes", { selector: "summary" }).closest("details"),
@@ -74,14 +78,14 @@ describe("Your notes", () => {
   it("edits the author's note with its version, then deletes it", async () => {
     const { view, user } = await renderTicket(ticketCard(), undefined, { notes: [MINE] });
     await screen.findByText(MINE.text);
-    await user.click(within(row(MINE.text)).getByRole("button", { name: "Edit" }));
+    await user.click(within(row(MINE.text)).getByRole("button", { name: /^Edit note/ }));
     const field = screen.getByRole("textbox", { name: "Edit the note" });
     await user.clear(field);
     await user.type(field, "Try it on the next Loop instead.");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.getByText("Try it on the next Loop instead.")).toBeVisible());
     await user.click(
-      within(row("Try it on the next Loop instead.")).getByRole("button", { name: "Edit" }),
+      within(row("Try it on the next Loop instead.")).getByRole("button", { name: /^Edit note/ }),
     );
     await user.click(screen.getByRole("button", { name: "Delete" }));
     // It asks first, with the focus on Keep; Keep sends nothing and goes back to Delete.
@@ -107,7 +111,7 @@ describe("Your notes", () => {
   it("says so when the note changed since it was read", async () => {
     const { view, user } = await renderTicket(ticketCard(), undefined, { notes: [MINE] });
     await screen.findByText(MINE.text);
-    await user.click(within(row(MINE.text)).getByRole("button", { name: "Edit" }));
+    await user.click(within(row(MINE.text)).getByRole("button", { name: /^Edit note/ }));
     view.notes.notes = [{ ...MINE, version: 4 }];
     await user.type(screen.getByRole("textbox", { name: "Edit the note" }), " Now.");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -121,7 +125,7 @@ describe("Your notes", () => {
     expect(await screen.findByText("This Loop is completed; notes are read-only.")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Add a note" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Save note" })).toBeNull();
-    expect(within(row(MINE.text)).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(row(MINE.text)).queryByRole("button", { name: /^Edit note/ })).toBeNull();
   });
 
   it("words the server's refusals and counts the notes", () => {

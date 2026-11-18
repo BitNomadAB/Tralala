@@ -1,9 +1,9 @@
 import { useId } from "react";
 import { Avatar } from "@/components/ui/avatar";
+import { HeldButton } from "@/components/ui/held-button";
 import { FieldMessage, Textarea } from "@/components/ui/input";
 import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { EMPTY_REPLY } from "./discussionRules";
-import { HeldButton } from "./HeldButton";
 
 /**
  * Your reply: one message, which the agents answer in a new round ("Ask again"); the hint under

@@ -82,7 +82,7 @@ function RadioCards<T extends string>({
             {option.preview}
             <span className="min-w-0">
               <span className="block text-sm font-medium">{option.label}</span>
-              <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
+              <span className="mt-0.5 block text-xs text-[var(--muted-foreground)]">
                 {option.description}
               </span>
             </span>

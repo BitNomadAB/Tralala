@@ -38,7 +38,7 @@ export function AgentTestResultPanel({ result }: { result: AgentTestResult }) {
         role="group"
         aria-label="Raw test result"
         tabIndex={0}
-        className="mt-2 max-h-64 overflow-auto rounded border border-[var(--border)] bg-[var(--surface-raised)] p-2 text-[11px] leading-snug"
+        className="mt-2 max-h-64 overflow-auto rounded border border-[var(--border)] bg-[var(--surface-raised)] p-2 text-xs leading-snug"
       >
         {JSON.stringify(result, null, 2)}
       </pre>

@@ -163,7 +163,7 @@ export function SelectMenu<T extends string>({
               onKeyDown={(event) => onOptionKeyDown(event, option.value)}
               className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2.5 py-2 text-sm text-[var(--foreground)] outline-none hover:bg-[var(--surface-raised)] focus-visible:bg-[var(--surface-raised)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] aria-selected:font-semibold"
             >
-              <span className="truncate">{option.label}</span>
+              <span className="min-w-0 break-words">{option.label}</span>
               {option.count === undefined ? null : (
                 <small className="text-xs font-normal tabular-nums text-[var(--foreground-faint)]">
                   {option.count}

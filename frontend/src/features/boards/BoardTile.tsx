@@ -87,13 +87,14 @@ export function BoardTile({
           <div className="flex flex-wrap items-center gap-2">
             <Link
               to={`/boards/${board.id}`}
-              className="truncate text-left text-[15px] font-semibold text-[var(--foreground)] hover:text-[var(--primary)] hover:underline"
+              className="min-w-0 break-words text-left text-[15px] font-semibold text-[var(--foreground)] hover:text-[var(--primary)] hover:underline"
             >
               {board.name}
             </Link>
             {board.status === "active" ? null : <Chip>{STATUS_CHIPS[board.status]}</Chip>}
           </div>
-          <p className="mt-1 line-clamp-1 text-sm text-[var(--muted-foreground)]">
+          {/* Three lines at most; the board page the name links to shows all of it. */}
+          <p className="mt-1 line-clamp-3 break-words text-sm text-[var(--muted-foreground)]">
             {board.description || "No description"}
           </p>
         </div>

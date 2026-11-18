@@ -8,7 +8,7 @@ function Code({ children }: { children: string }) {
       role="group"
       aria-label="Code block"
       tabIndex={0}
-      className="mt-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-[11px] leading-relaxed"
+      className="mt-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-xs leading-relaxed"
     >
       <code>{children}</code>
     </pre>
@@ -38,7 +38,7 @@ export function RepositoryTokenGuide({ url }: { url: string }) {
           <strong>read-only access token</strong>. It is never a password, and a token cannot be
           generated on your machine — GitHub issues it, you paste it here once.
         </p>
-        <p className="text-[11px] italic">
+        <p className="text-xs italic">
           {hasRepository ? (
             <>
               The steps name the repository in the URL field (
@@ -156,7 +156,7 @@ GIT_SSH_COMMAND="ssh -i ~/.ssh/${keyName} -o IdentitiesOnly=yes" \\
           </p>
         </div>
 
-        <p className="border-t border-[var(--border)] pt-2 text-[11px]">
+        <p className="border-t border-[var(--border)] pt-2 text-xs">
           A token inherits the rights of the account that created it. Use a dedicated bot account or
           the smallest scope that works, never commit the value anywhere, and remove the token in
           GitHub when the installation no longer needs it.

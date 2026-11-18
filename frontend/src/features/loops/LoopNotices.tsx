@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
+import { HeldButton } from "@/components/ui/held-button";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
@@ -37,14 +37,14 @@ export function LoopNotices({
       {board.status === "migration_failed" ? (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--warning)] p-2 text-xs text-[var(--warning)]">
           <span>This board needs an explicit development reset before it can be used.</span>
-          <Button
+          <HeldButton
             size="sm"
             variant="outline"
-            disabled={retry.isPending}
+            held={retry.isPending}
             onClick={() => retry.mutate()}
           >
             {retry.isPending ? "Migrating…" : "Retry migration"}
-          </Button>
+          </HeldButton>
         </div>
       ) : null}
 

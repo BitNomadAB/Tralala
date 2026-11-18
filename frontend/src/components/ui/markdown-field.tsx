@@ -142,7 +142,9 @@ export function MarkdownField({
         id={`${id}-panel-preview`}
         aria-labelledby={`${id}-tab-preview`}
         hidden={!preview}
-        className="min-h-24 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm leading-relaxed"
+        // Reachable by Tab after its tab even when the preview holds nothing to focus.
+        tabIndex={0}
+        className="min-h-24 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm leading-relaxed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
       >
         {rendered ?? (
           <span className="text-xs text-[var(--muted-foreground)]">Nothing to preview yet</span>

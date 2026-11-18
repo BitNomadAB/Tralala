@@ -41,20 +41,20 @@ export function CredentialRow({
   return (
     <li className="flex flex-wrap items-center gap-2 py-2.5">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">
+        <p className="break-words text-sm font-medium">
           {credential.name}
           {showOwner && credential.owner_name ? (
-            <span className="ml-2 text-[11px] font-normal text-[var(--muted-foreground)]">
+            <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
               owner {credential.owner_name}
             </span>
           ) : null}
           {showOwner && !credential.owner_name ? (
-            <span className="ml-2 text-[11px] font-normal text-[var(--muted-foreground)]">
+            <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
               installation-wide
             </span>
           ) : null}
         </p>
-        <p className="text-[11px] text-[var(--muted-foreground)]">
+        <p className="text-xs text-[var(--muted-foreground)]">
           {credential.scopes.join(", ")} · created {formatDateTime(credential.created_at)}
           {credential.last_used_at
             ? ` · last used ${formatDateTime(credential.last_used_at)}`

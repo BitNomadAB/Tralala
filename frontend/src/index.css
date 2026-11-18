@@ -523,7 +523,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 0.25rem;
   padding: 0.05rem 0.3rem;
-  font-size: 0.8em;
+  /* Smaller than the text around it, never below the app's 12px floor. */
+  font-size: max(12px, 0.8em);
 }
 
 .prose-card pre {

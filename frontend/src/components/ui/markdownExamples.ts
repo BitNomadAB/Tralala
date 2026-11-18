@@ -10,11 +10,13 @@ export interface FormattingExample {
   syntax: string;
   /** A sentence under the result, when the syntax needs one. */
   note?: string | undefined;
+  /** The letter that makes it from selected text with Ctrl (Cmd on a Mac), as `shortcutEdit` does. */
+  shortcut?: string | undefined;
 }
 
 export const FORMATTING_EXAMPLES = {
-  bold: { title: "Bold", syntax: "**important**" },
-  italic: { title: "Italic", syntax: "*a little emphasis*" },
+  bold: { title: "Bold", syntax: "**important**", shortcut: "B" },
+  italic: { title: "Italic", syntax: "*a little emphasis*", shortcut: "I" },
   inlineCode: { title: "Code in a sentence", syntax: "Open `settings.json` first." },
   heading: {
     title: "A heading",
@@ -27,6 +29,7 @@ export const FORMATTING_EXAMPLES = {
     title: "A link",
     syntax: "[Example](https://example.com)",
     note: "Links to other sites open in a new tab; only http(s) links become links.",
+    shortcut: "K",
   },
   webAddress: {
     title: "A web address",

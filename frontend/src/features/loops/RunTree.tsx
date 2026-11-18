@@ -25,18 +25,18 @@ export function StageIcon({ state, number }: { state: RunStepState; number: numb
   return (
     <span
       aria-hidden="true"
-      className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px]"
+      className="flex size-[18px] shrink-0 items-center justify-center rounded-full border border-current text-xs leading-none"
     >
       {state === "done" ? (
-        <Check size={10} />
+        <Check size={12} />
       ) : state === "failed" ? (
-        <X size={10} />
+        <X size={12} />
       ) : state === "warning" ? (
-        <AlertTriangle size={10} />
+        <AlertTriangle size={12} />
       ) : state === "skipped" ? (
-        <Minus size={10} />
+        <Minus size={12} />
       ) : state === "active" ? (
-        <Loader2 size={10} className="motion-safe:animate-spin" />
+        <Loader2 size={12} className="motion-safe:animate-spin" />
       ) : (
         number
       )}
@@ -90,7 +90,7 @@ function Stage({ stage, number }: { stage: TraceStage; number: number }) {
         <StateText state={stage.state} />
       </span>
       {stage.steps.length > 3 ? (
-        <span className="ml-auto shrink-0 text-[10px] text-[var(--muted-foreground)]">
+        <span className="ml-auto shrink-0 text-xs text-[var(--muted-foreground)]">
           {stage.steps.length} steps
         </span>
       ) : null}
@@ -102,7 +102,7 @@ function Stage({ stage, number }: { stage: TraceStage; number: number }) {
       {/* Open by default; a person can fold a long stage, and a re-render keeps that choice. */}
       <details open className="group">
         <summary className="cursor-pointer list-none">{heading}</summary>
-        <ol className="ml-6 mt-1 flex flex-col gap-1 text-[11px] text-[var(--muted-foreground)]">
+        <ol className="ml-6 mt-1 flex flex-col gap-1 text-xs text-[var(--muted-foreground)]">
           {stage.steps.map((step, index) => (
             <StepLine key={`${step.at}-${index}`} step={step} />
           ))}
@@ -147,7 +147,7 @@ export function RunTree({
 
   if (compact) {
     return (
-      <div className="flex flex-col gap-1 text-[11px]">
+      <div className="flex flex-col gap-1 text-xs">
         <ol className="flex flex-row flex-wrap gap-2">
           {stages.map((stage, index) => (
             <li key={stage.stage} className={`flex items-center gap-1 ${STATE_TONE[stage.state]}`}>
@@ -191,7 +191,7 @@ export function FailureJson({ json }: { json: string }) {
       role="group"
       aria-label="The run's error as JSON"
       tabIndex={0}
-      className="overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-[10px] leading-relaxed text-[var(--foreground)] scrollbar-thin"
+      className="overflow-x-auto rounded-md border border-[var(--destructive)] bg-[var(--surface-raised)] p-2 text-xs leading-relaxed text-[var(--foreground)] scrollbar-thin"
     >
       {json}
     </pre>

@@ -9,11 +9,11 @@ import { CardComments } from "@/features/cards/CardComments";
 import { mentionAnnouncement } from "@/features/cards/ticketText";
 import { useCardComments } from "@/features/cards/useCardComments";
 import { keys } from "@/lib/queries";
-import type { AgentDirectoryEntry } from "@/lib/types";
+import type { AgentDirectoryEntry, MentionJob } from "@/lib/types";
 import { announcer } from "./announcer";
 import { CARD_ID, CARD_PATH, ticketCard } from "./msw/cards";
 import { apiPath, ok } from "./msw/envelope";
-import { BOARD_ID, LOOP_ID } from "./msw/loops";
+import { BOARD_ID, LOOP_ID, NOW } from "./msw/loops";
 import { server } from "./msw/server";
 
 function agent(name: string, role: string | null): AgentDirectoryEntry {
@@ -149,6 +149,64 @@ describe("mentioning an agent in a comment", () => {
     await user.click(screen.getByRole("option", { name: /Charlie/ }));
     await waitFor(() => expect(field).toHaveValue("@[Charlie] "));
     expect(field).toHaveFocus();
+  });
+
+  it("names each failed mention's error in full and its Retry after the agent", () => {
+    const failed = (name: string): MentionJob => ({
+      id: `job-${name}`,
+      card_id: CARD_ID,
+      comment_id: "comment-1",
+      agent_id: `agent-${name}`,
+      agent_name: name,
+      status: "failed",
+      attempts: 1,
+      error: `${name} could not be reached at its endpoint after three attempts.`,
+      response_comment_id: null,
+      tokens_used: 0,
+      role_template_id: null,
+      role_template_name: null,
+      role_source: null,
+      system_prompt_sha256: null,
+      requested_by_actor_id: "actor-ada",
+      requested_by_type: "user",
+      requested_by_name: "Ada",
+      created_at: NOW,
+      started_at: NOW,
+      finished_at: NOW,
+      can_retry: true,
+    });
+    render(
+      <ToastProvider>
+        <CardComments
+          live={false}
+          mentions={[failed("Alpha"), failed("Bravo")]}
+          retrying={false}
+          onRetryMention={() => undefined}
+          comments={[]}
+          comment=""
+          onCommentChange={() => undefined}
+          onCloseSuggestions={() => undefined}
+          suggestions={[]}
+          mentionIndex={0}
+          onMentionIndexChange={() => undefined}
+          onChooseAgent={() => undefined}
+          commentField={{ current: null }}
+          onSubmitComment={() => undefined}
+        />
+      </ToastProvider>,
+    );
+    const mentions = screen.getByRole("list", { name: "Agent mentions" });
+    expect(
+      within(mentions).getByRole("button", { name: "Retry the mention of Alpha" }),
+    ).toBeVisible();
+    expect(
+      within(mentions).getByRole("button", { name: "Retry the mention of Bravo" }),
+    ).toBeVisible();
+    // The error wraps instead of being cut off behind a hover.
+    const error = within(mentions).getByText(/^Alpha could not be reached/);
+    expect(error).not.toHaveClass("truncate");
+    expect(error).toHaveClass("break-words");
+    expect(error).not.toHaveAttribute("title");
   });
 
   it("words the announcement for one agent and for none highlighted", () => {

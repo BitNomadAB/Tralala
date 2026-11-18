@@ -29,7 +29,7 @@ function MirrorDetails({
   const cleanupFailed = repository.mirror_error === "mirror_cleanup_failed";
   const bytes = repository.mirror_bytes;
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-2 text-[11px]">
+    <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-2 text-xs">
       <dl className="flex flex-wrap gap-x-4 gap-y-1">
         <Detail label="Default branch" value={repository.default_branch ?? "not known yet"} />
         <Detail label="Fetched" value={repository.fetched_at ?? "not yet"} />
@@ -121,9 +121,9 @@ export function RepositoryRow({
         )}
         {!repository.enabled ? <Badge tone="neutral">disabled</Badge> : null}
       </div>
-      <p className="break-all text-[11px] text-[var(--muted-foreground)]">{repository.url}</p>
+      <p className="break-all text-xs text-[var(--muted-foreground)]">{repository.url}</p>
       {lastCheck ? (
-        <p className="flex items-center gap-1.5 text-[11px]">
+        <p className="flex items-center gap-1.5 text-xs">
           <CheckCircle2 size={12} className="text-[var(--muted-foreground)]" />
           {lastCheck}
         </p>

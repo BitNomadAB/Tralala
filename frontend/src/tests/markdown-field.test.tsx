@@ -4,6 +4,7 @@ import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { MarkdownField } from "@/components/ui/markdown-field";
 import { MarkdownHelp } from "@/components/ui/markdown-help";
+import { shortcutEdit } from "@/components/ui/markdownEditing";
 import { FORMATTING_EXAMPLES, type FormattingExampleName } from "@/components/ui/markdownExamples";
 import { ticketHrefResolver } from "@/features/loops/ticketLinks";
 
@@ -58,6 +59,8 @@ describe("MarkdownField tabs", () => {
     expect(field()).not.toBeVisible();
     const panel = screen.getByRole("tabpanel", { name: "Preview" });
     expect(within(panel).getByText("bold").tagName).toBe("STRONG");
+    // A keyboard reaches the preview, even one with nothing in it to focus.
+    expect(panel).toHaveAttribute("tabindex", "0");
 
     await user.keyboard("{ArrowLeft}");
     expect(write).toHaveAttribute("aria-selected", "true");
@@ -192,6 +195,27 @@ const RENDERS_TO: Record<FormattingExampleName, (cell: HTMLElement) => void> = {
 };
 
 describe("How to format", () => {
+  it("names the field's shortcuts, Ctrl and Cmd alike, and only ones the field has", () => {
+    const { container } = render(<MarkdownHelp />);
+    const shortcuts = Object.entries(FORMATTING_EXAMPLES).flatMap(([name, example]) =>
+      "shortcut" in example ? [{ name, key: example.shortcut }] : [],
+    );
+    expect(shortcuts.map(({ name }) => name)).toEqual(["bold", "italic", "link"]);
+    for (const { name, key } of shortcuts) {
+      const row = container.querySelector(`tr[data-example="${name}"]`);
+      expect(row).toHaveTextContent(
+        `Or select the text and press Ctrl+${key} (Cmd+${key} on a Mac).`,
+      );
+      const press = { key: key.toLowerCase(), shiftKey: false, altKey: false };
+      expect(
+        shortcutEdit({ ...press, ctrlKey: true, metaKey: false }, "word", 0, 4),
+      ).not.toBeNull();
+      expect(
+        shortcutEdit({ ...press, ctrlKey: false, metaKey: true }, "word", 0, 4),
+      ).not.toBeNull();
+    }
+  });
+
   it("is closed by default and renders every example to its element", () => {
     const { container } = render(<MarkdownHelp />);
     const details = container.querySelector("details");

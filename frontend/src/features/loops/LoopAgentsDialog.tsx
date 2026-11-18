@@ -123,7 +123,7 @@ export function LoopAgentsDialog({
               This board lists no agent that can generate. Pick agents on the board first.
             </p>
           ) : (
-            <p className="flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
+            <p className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
               <Bot size={11} /> Only agents selected on the board are offered here.
             </p>
           )}

@@ -74,7 +74,7 @@ export function RoleTemplatesCard() {
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                     <ShieldHalf size={14} className="shrink-0 text-[var(--muted-foreground)]" />
-                    <span className="truncate">{role.name}</span>
+                    <span className="min-w-0 break-words">{role.name}</span>
                     {role.built_in ? <Badge tone="neutral">built-in</Badge> : null}
                     {role.scope === "organisation" ? (
                       <Badge tone="success">organisation</Badge>
@@ -86,7 +86,7 @@ export function RoleTemplatesCard() {
                       {role.description}
                     </p>
                   ) : null}
-                  <p className="mt-1 truncate text-[11px] text-[var(--muted-foreground)]">
+                  <p className="mt-1 break-words text-xs text-[var(--muted-foreground)]">
                     {role.agent_count} agent{role.agent_count === 1 ? "" : "s"} ·{" "}
                     {role.system_prompt.slice(0, 90)}
                     {role.system_prompt.length > 90 ? "…" : ""}

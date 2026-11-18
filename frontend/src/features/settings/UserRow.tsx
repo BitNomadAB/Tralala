@@ -45,11 +45,11 @@ export function UserRow({
   return (
     <li className="flex flex-wrap items-center gap-2 py-2.5">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">
+        <p className="break-words text-sm font-medium">
           {user.name}
           {isSelf ? " (you)" : ""}
         </p>
-        <p className="text-[11px] text-[var(--muted-foreground)]">
+        <p className="text-xs text-[var(--muted-foreground)]">
           Created {formatDateTime(user.created_at)} ·{" "}
           {user.agent_access_count === 1
             ? "1 agent access"
