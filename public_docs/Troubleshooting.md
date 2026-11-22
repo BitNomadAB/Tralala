@@ -6,8 +6,8 @@ facts that explain most surprises:
 1. **One backend process per data directory.** A second process refuses to start because a lock file
    is held. That is deliberate: the rate limiter, the per-board locks and the session secret live
    inside that process.
-2. **The administrator password is generated, not published.** It is in `<data>/.bootstrap-password`
-   until you change it.
+2. **The administrator password is your own or generated, never published.** With Docker it is the
+   one in `.env`; a generated one is in `<data>/.bootstrap-password` until you change it.
 3. **A board is a directory.** `<data>/boards/<uuid>/` holds the database and the uploaded files; if
    one is removed without the other, the board is broken. Use the API, never `rm`.
 

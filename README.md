@@ -55,8 +55,20 @@ cd frontend && pnpm dev              # UI on http://localhost:5173
 
 Windows uses `.venv\Scripts` paths; the installation guide lists the differences for each shell.
 
-Either way you sign in as `admin` with the generated password in `<data>/.bootstrap-password`: there
-is no shared password. See [the first sign-in](public_docs/Installation.md#first-sign-in).
+### Your first sign-in
+
+There is no ready-made password. Every installation gets its own, and you sign in as `admin`.
+
+- **Docker:** before the first start, open `.env` and write a password of your own after
+  `TRALALA_BOOTSTRAP_PASSWORD=`. That is the password you sign in with.
+- **From source:** leave `TRALALA_BOOTSTRAP_PASSWORD` empty. On the first start Tralala makes up a
+  password and saves it in the file `backend/data/.bootstrap-password`. Open the file and sign in
+  with what it says.
+
+Don't use `admin` or `password`: Tralala ignores well-known passwords and makes up its own instead.
+The password is set only on the very first start, so changing `.env` afterwards does nothing.
+Change it under **Settings → Your password**. More in
+[the first sign-in](public_docs/Installation.md#first-sign-in).
 
 ## Features
 

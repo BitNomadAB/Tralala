@@ -254,15 +254,23 @@ The backend log shows the registry migration, the board migration batch and
 
 ## First sign-in
 
-There is no shared password. On first start the backend creates `admin` with a unique generated
-password and writes it to `<data>/.bootstrap-password` with owner-only permissions:
+There is no shared password. On first start the backend creates the account `admin`, and its
+password is one of two:
+
+- **The one you wrote in `.env`** as `TRALALA_BOOTSTRAP_PASSWORD`. Docker requires one, so with
+  Docker this is your password.
+- **A generated one** when the value was empty or a well-known placeholder (`admin`, `password`,
+  `change-me`, `changeme`, `tralala-dev-1`). The backend writes it to `<data>/.bootstrap-password`
+  with owner-only permissions, where `<data>` is the data folder:
 
 ```bash
-cat data/.bootstrap-password          # Windows: Get-Content data\.bootstrap-password
+cat data/.bootstrap-password    # from source, in the repository root; Windows: Get-Content data\.bootstrap-password
+docker compose exec backend cat /data/.bootstrap-password    # Docker with a placeholder
 ```
 
-Sign in as `admin` with that value, change it under **Settings → Your password**, then delete the
-file. A password change revokes every session, including your own.
+The password is set only while no account exists, so changing `.env` later changes nothing. Sign in
+as `admin`, then change the password under **Settings → Your password**; that deletes the file. A
+password change revokes every session, including your own.
 
 To bring other people in, create the account under **Settings → Users** and hand over the
 **invitation link** (`/enrol?token=…`) once. Tralala sends no e-mail. Details and the rules around
