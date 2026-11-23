@@ -111,6 +111,7 @@ export const READINESS: LoopReadiness = {
     },
   ],
   unplanned: [],
+  open_delivery: [],
 };
 
 function strings(value: unknown): string[] {

@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Chip, StateChip } from "@/components/ui/chip";
 import { Menu, type MenuItem } from "@/components/ui/menu";
+import { NOT_DONE_REASON } from "@/features/cards/ticketWork";
 import type { Card } from "@/lib/types";
 import { cn, isOverdue } from "@/lib/utils";
 import type { DragData } from "./dragData";
@@ -33,8 +34,12 @@ function cardSummary(card: Pick<Card, "face" | "summary">): string {
   return (card.face?.summary ?? "").trim() || card.summary.trim();
 }
 
-/** Why a held Ticket is held, on hover and for a screen reader: what blocks it, else its wait. */
+/**
+ * Why a held Ticket is held, on hover and for a screen reader: what blocks it, else its wait; for
+ * one left undone, that its Loop was closed.
+ */
 function heldReason(card: Card): string | undefined {
+  if (card.state === "not_done") return NOT_DONE_REASON;
   const blockers = card.blockers.map((blocker) => blocker.key ?? blocker.reason).join(", ");
   return (card.state === "blocked" && blockers) || card.waiting_reason || undefined;
 }
@@ -56,8 +61,9 @@ const GRIP =
 
 /**
  * A Ticket on the Kanban, the first line of its face: the title, the plain summary, and a bottom
- * row with the key, the state only when it needs attention (Needs input, Blocked), the priority and
- * due date when set, "done" once completed, "Needs a person" for a person's task, and the owner.
+ * row with the key, the state unless it is Ready (Needs input, Blocked, or Not done once its Loop
+ * was closed without it), the priority and due date when set, "done" once completed, "Needs a
+ * person" for a person's task that can still be done, and the owner.
  * The title is the button that opens the Ticket (Enter or a click); it covers the whole card, so a
  * pointer drags the card from anywhere on it. The grip beside the title ("Move <title>") is the
  * keyboard's drag handle: Space or Enter picks the card up, the arrow keys move it. `actions`, the
@@ -105,8 +111,10 @@ export function TicketCard({
   }, [focus, onFocused]);
 
   const summary = cardSummary(card);
-  const held = card.state === "needs_input" || card.state === "blocked" ? card.state : null;
+  // Ready is the quiet case; every other state is shown.
+  const held = card.state === "ready" ? null : card.state;
   const done = card.completed_at !== null;
+  const notDone = card.state === "not_done";
   // A manual Ticket with a key was added while the Loop's plan executes: outside the plan.
   const unplanned = card.kind === "manual" && card.ticket_key !== null;
   const priority = card.priority === "none" ? null : card.priority;
@@ -173,7 +181,7 @@ export function TicketCard({
           </span>
         ) : null}
         {held && !done ? <StateChip state={held} compact title={heldReason(card)} /> : null}
-        {card.human_action_required && !done ? (
+        {card.human_action_required && !done && !notDone ? (
           <Chip className="px-1.5 py-px text-xs">Needs a person</Chip>
         ) : null}
         {unplanned ? (

@@ -59,8 +59,11 @@ def phase_views(
     phases: list[LoopPhasesRow],
     grouped: dict[str, list[PlannedItem]],
     edges: Dependencies,
+    *,
+    loop_closed: bool,
 ) -> list[PhaseView]:
-    """Each Phase's state and entry blockers and each planned Ticket's readiness."""
+    """Each Phase's state and entry blockers and each planned Ticket's readiness; ``loop_closed``
+    says the Loop was completed or cancelled, which leaves what is not done ``not_done``."""
     phase_by_id = {phase.id: phase for phase in phases}
     item_lookup = {entry.item.id: entry for entries in grouped.values() for entry in entries}
     completed_items = {
@@ -204,6 +207,7 @@ def phase_views(
                         completed=entry.completed_at is not None,
                         waiting_for=entry.waiting_for if entry.card_id else item.waiting_for,
                         blocked=bool(blockers),
+                        loop_closed=loop_closed,
                     ),
                 }
             )

@@ -116,6 +116,23 @@ describe("the Kanban card", () => {
     expect(screen.queryByText("Blocked")).not.toBeInTheDocument();
   });
 
+  it("shows Not done on a Ticket its Loop was closed without, and asks no person for it", () => {
+    renderCard(
+      ticketCard({
+        state: "not_done",
+        human_action_required: true,
+        waiting_for: "decision",
+        waiting_reason: "Which TTL?",
+      }),
+    );
+    const left = screen.getByText("Not done").parentElement;
+    expect(left).toHaveClass("rounded-full", "border");
+    // The reason is that the Loop was closed, not the wait it had then.
+    expect(left).toHaveTextContent("Not done: The Loop was closed before this Ticket was done.");
+    expect(screen.queryByText("Needs a person")).not.toBeInTheDocument();
+    expect(screen.queryByText("done", { exact: true })).not.toBeInTheDocument();
+  });
+
   it("says what Unplanned means in its text, not only on hover", () => {
     renderCard(ticketCard({ kind: "manual", ticket_key: "SES-1-UNP-001" }));
     const unplanned = screen.getByText("Unplanned").parentElement;

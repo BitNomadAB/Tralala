@@ -64,6 +64,7 @@ from .loop_plans_validation import validate_plan
 from .loops import EXECUTION_STAGES
 from .plan_views import BlockedReason, PhaseView, PlanView, PlanViews, Readiness
 from .ticket_face import face_to_text, make_face
+from .ticket_state import loop_closed
 from .ticket_summaries import summary_basis
 
 
@@ -374,7 +375,7 @@ class LoopPlanService(PlanViews):
             "status": plan.status,
             "activated_at": plan.activated_at,
             "approved_at": plan.activated_at,
-            "phases": _phases(repos, loop.id),
+            "phases": _phases(repos, loop),
             "warnings": [],
         }
 
@@ -391,7 +392,7 @@ class LoopPlanService(PlanViews):
                 "items": [],
                 "phases": [],
             }
-        phases = _phases(repos, loop.id)
+        phases = _phases(repos, loop)
         execution_allowed = loop.stage in EXECUTION_STAGES
         blocked_reason: BlockedReason | None = None
         if not execution_allowed:
@@ -615,11 +616,12 @@ def _planned_card(
     )
 
 
-def _phases(repos: BoardRepositories, loop_id: str) -> list[PhaseView]:
+def _phases(repos: BoardRepositories, loop: LoopsRow) -> list[PhaseView]:
     return phase_views(
-        repos.phases.of_active_plan(loop_id),
-        items_by_phase(repos.plan_items.active_with_cards(loop_id)),
-        dependencies(repos.dependencies.for_loop(loop_id)),
+        repos.phases.of_active_plan(loop.id),
+        items_by_phase(repos.plan_items.active_with_cards(loop.id)),
+        dependencies(repos.dependencies.for_loop(loop.id)),
+        loop_closed=loop_closed(loop),
     )
 
 

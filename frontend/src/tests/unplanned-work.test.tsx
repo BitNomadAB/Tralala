@@ -44,6 +44,7 @@ function answerReadiness(tickets: UnplannedTicket[]) {
     items: [],
     phases: [],
     unplanned: tickets,
+    open_delivery: [],
   };
   server.use(http.get(apiPath(`${LOOP_PATH}/readiness`), () => ok(readiness)));
 }

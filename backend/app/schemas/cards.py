@@ -220,7 +220,10 @@ class CardOut(OutModel):
     waiting_set_by: str | None = None
     state: str | None = Field(
         default=None,
-        description="ready, needs_input or blocked, computed on every read; null once completed",
+        description=(
+            "ready, needs_input or blocked, or not_done when the Loop was completed or cancelled "
+            "before the Ticket was done; computed on every read, null once completed"
+        ),
     )
     needs_person: bool = Field(
         default=False, description="needs_input, or ready with human_action_required"

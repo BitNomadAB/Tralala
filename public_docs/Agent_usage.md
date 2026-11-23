@@ -99,7 +99,7 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | --- | --- | --- |
 | `whoami` | `boards:read` | your key, when it expires, what your scopes open, what you lack and what only a person decides |
 | `list_boards` | `boards:read` | the boards you may read, by name, with status and Loop count: the way in |
-| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked) |
+| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked, not done) |
 | `read_board` | `boards:read`, `loops:read` | a board's Loops by id and key, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | a Loop's overview (by id or key): documents' state and size, Phases, columns, unplanned Tickets, newest notes |
 | `read_document` | `loops:read` | one document's text a page at a time, or the technical analysis and RoadMap as an outline |
@@ -330,7 +330,8 @@ person's own words beside the plan, which no key can write, edit or delete. A Ti
 A Ticket says where its work is done (`workplace`: `codebase`, `outside` or `unknown`) and what it
 waits for (`waiting_for`, with a reason), and its `state` follows on every read: `needs_input` (it
 waits for a decision, information or access), `blocked` (earlier work in the plan, or a third
-party) or `ready`. Two lists come up most:
+party) or `ready`. A Ticket that was never completed before its Loop was completed or cancelled
+is `not_done`: the Loop is read-only, so it is nobody's to start. Two lists come up most:
 
 ```text
 list_tickets(workplace: codebase, state: ready, human_action_required: false)

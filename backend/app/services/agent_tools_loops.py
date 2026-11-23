@@ -52,14 +52,15 @@ class LoopSummarising(Protocol):
 @dataclass(frozen=True, slots=True)
 class TicketCounts:
     """A Loop's Tickets by state (``ticket_state``): open ones are ready, need input or are
-    blocked; ``needs_person`` counts what waits for a person now (needs input, or ready and a
-    person's task)."""
+    blocked, and in a closed Loop what was never done is not done; ``needs_person`` counts what
+    waits for a person now (needs input, or ready and a person's task)."""
 
     total: int = 0
     completed: int = 0
     ready: int = 0
     needs_input: int = 0
     blocked: int = 0
+    not_done: int = 0
     needs_person: int = 0
 
 
@@ -79,6 +80,7 @@ def ticket_counts(readiness: LoopReadiness) -> TicketCounts:
         ready=states.count("ready"),
         needs_input=needs_input,
         blocked=states.count("blocked"),
+        not_done=states.count("not_done"),
         needs_person=needs_input + person_tasks,
     )
 
@@ -182,6 +184,7 @@ def loop_row(entry: LoopEntry, readiness: LoopReadiness, columns: list[ListEntry
             "ready": counts.ready,
             "needs_input": counts.needs_input,
             "blocked": counts.blocked,
+            "not_done": counts.not_done,
             "completed": counts.completed,
             "total": counts.total,
             "needs_person": counts.needs_person,
@@ -232,9 +235,9 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
             description=(
                 "Say where each Loop of a board stands, one row a Loop: its goal and stage, what "
                 "has to happen next and who it waits for (a person, an agent for a document, "
-                "anyone or nobody), its Tickets by state (ready, needs_input, blocked, completed, "
-                "total, needs_person) and by column, and each document's state. Open Loops unless "
-                "include_completed is true."
+                "anyone or nobody), its Tickets by state (ready, needs_input, blocked, not_done, "
+                "completed, total, needs_person) and by column, and each document's state. Open "
+                "Loops unless include_completed is true."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(

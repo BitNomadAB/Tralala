@@ -1,9 +1,11 @@
 import { expect, test } from "playwright/test";
+import { approvedAnalysis, approveRoadmap, roadmap, ticketRow } from "./published-plan";
 import {
   boardIdFromUrl,
   boardWithLoop,
   csrfToken,
   login,
+  loopAction,
   openPlanDocument,
   showTab,
   uniqueName,
@@ -147,6 +149,55 @@ test.describe("loop planning and completion", () => {
     await expect(record).toBeVisible();
     await record.getByRole("button").click();
     await expect(page.getByRole("dialog", { name: "Email verification" })).toBeVisible();
+  });
+
+  test("closes a Loop without the Tickets that are not done, and marks them Not done", async ({
+    page,
+  }) => {
+    await login(page);
+    const { candidates, headers } = await approvedAnalysis(page, "Unfinished journey");
+    const plan = await page.request.post(candidates, {
+      headers,
+      data: roadmap(["Write the mail", "Send the link"]),
+    });
+    expect(plan.status()).toBe(201);
+    await approveRoadmap(page, "Write the mail");
+
+    // One Ticket is done, the other is never started.
+    await ticketRow(page, "Write the mail")
+      .getByRole("button", { name: "Write the mail", exact: true })
+      .click();
+    const cardDialog = page.getByRole("dialog", { name: "Write the mail" });
+    await cardDialog.getByRole("button", { name: "Start work" }).click();
+    await cardDialog.getByRole("button", { name: "Mark complete" }).click();
+    await expect(cardDialog.getByRole("region", { name: "Status" })).toContainText("Completed");
+    await page.getByRole("button", { name: "Close dialog" }).click();
+
+    // The dialog names the Ticket that is not done and holds the acceptance up.
+    await loopAction(page, "Finalize Loop");
+    const completion = page.getByRole("dialog", { name: /completion and QA/ });
+    await expect(completion.getByText("1 delivery Ticket is not done.")).toBeVisible();
+    await expect(
+      completion.getByRole("listitem").filter({ hasText: "Send the link" }),
+    ).toBeVisible();
+    await completion.getByLabel("QA status").selectOption("passed");
+    await completion.getByLabel("What was tested").fill("Manual smoke test");
+    await completion.getByLabel("Results").fill("All checks passed");
+    const accept = completion.getByRole("button", { name: "Accept and complete the Loop" });
+    await expect(accept).toHaveAttribute("aria-disabled", "true");
+
+    // The person accepts without it, and the Loop is completed.
+    await completion.getByRole("button", { name: "Accept without it" }).click();
+    await expect(completion.getByText("Accepting without 1 delivery Ticket.")).toBeVisible();
+    await accept.click();
+    await expect(page.getByRole("dialog")).toContainText("is completed");
+    await page.getByRole("button", { name: "Close dialog" }).click();
+    await expect(page.getByText(/Read-only: this Loop is completed/)).toBeVisible();
+
+    // The Ticket was not completed by that: it says Not done, and the other one says done.
+    await expect(ticketRow(page, "Send the link")).toContainText("Not done");
+    await expect(ticketRow(page, "Write the mail")).toContainText("done");
+    await expect(ticketRow(page, "Write the mail")).not.toContainText("Not done");
   });
 
   test("resets a scope, cleared draft or approved, so it can be generated again", async ({

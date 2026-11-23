@@ -13,6 +13,8 @@ export type WaitingFor = "nothing" | Wait;
 
 /**
  * Computed by the server on every read: `needs_input` when a person can answer a wait now,
- * `blocked` by earlier work or a third party, `ready` otherwise. A completed Ticket has none.
+ * `blocked` by earlier work or a third party, `ready` otherwise. `not_done` when the Loop was
+ * completed or cancelled before the Ticket was done: nothing in it goes on. A completed Ticket has
+ * none.
  */
-export type TicketState = "ready" | "needs_input" | "blocked";
+export type TicketState = "ready" | "needs_input" | "blocked" | "not_done";

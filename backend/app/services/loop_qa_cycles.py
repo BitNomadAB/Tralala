@@ -18,6 +18,7 @@ from ..repositories.board import BoardRepositories
 from .activity import activity_entry
 from .loop_identifiers import format_ticket_key
 from .loops import QA_OPEN_STATUSES
+from .plan_views import delivery_tickets
 
 QA_PHASE_NAME = "Verification"
 # The instruction and attestation columns are answered parsed, under names without ``_json``.
@@ -191,10 +192,6 @@ def ensure_qa_cycle(
         new_id=new_id,
     )
     return cycle
-
-
-def delivery_tickets(repos: BoardRepositories, loop_id: str) -> list[CardsRow]:
-    return [card for card in repos.archive.tickets(loop_id) if card.kind == "ticket"]
 
 
 def delivery_baseline(repos: BoardRepositories, loop_id: str) -> str:

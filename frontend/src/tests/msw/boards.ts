@@ -61,6 +61,7 @@ export function summary(
       ready: 0,
       needs_input: 0,
       blocked: 0,
+      not_done: 0,
       completed: 0,
       total: 0,
       needs_person: 0,

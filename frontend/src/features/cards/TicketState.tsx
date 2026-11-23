@@ -164,7 +164,8 @@ function CurrentWait({
       <p className="m-0 text-xs text-[var(--muted-foreground)]">
         Set by {card.waiting_set_by ?? "unknown"} · {formatDateTime(card.waiting_set_at)}
       </p>
-      {card.completed_at ? null : (
+      {/* A Ticket left undone in a closed Loop keeps its wait as it was; nobody clears it. */}
+      {card.completed_at || card.state === "not_done" ? null : (
         <>
           <p className="m-0 text-xs text-[var(--muted-foreground)]">
             Clear the wait before this Ticket can be completed.

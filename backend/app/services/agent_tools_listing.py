@@ -373,7 +373,8 @@ def listing_tools(board_id: ArgumentSchema) -> list[AgentTool]:
             name="list_tickets",
             description=(
                 "List which Tickets there are and where each stands, never what they say: id, "
-                "key, title, Loop, column, Phase, state (ready, needs_input or blocked), "
+                "key, title, Loop, column, Phase, state (ready, needs_input or blocked; not_done "
+                "when its Loop was closed before it was done), "
                 "workplace (codebase, outside or unknown), whether the task is a person's, and "
                 "who has it. Work for a coding session: workplace codebase, state ready, "
                 "human_action_required false. What needs a person: needs_person true. Choose "
@@ -399,8 +400,9 @@ def listing_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                         "items": {"type": "string"},
                         "description": (
                             "Optional states: ready (may start now), needs_input (waits for a "
-                            "decision, information or access) or blocked (earlier work, or a "
-                            "third party)"
+                            "decision, information or access), blocked (earlier work, or a "
+                            "third party) or not_done (its Loop was completed or cancelled "
+                            "before it was done; with include_completed)"
                         ),
                     },
                     "workplace": string_argument("Optional: " + ", ".join(WORKPLACES)),

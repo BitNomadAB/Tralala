@@ -195,6 +195,8 @@ export const loopWorkflowApi = {
       qa_status: "not_tested" | "tested_with_issues" | "passed";
       attestation?: Record<string, string>;
       note?: string;
+      /** Accept although delivery Tickets are not completed; each then reads `not_done`. */
+      accept_unfinished?: boolean;
     },
   ): Promise<Record<string, unknown>> {
     return json(

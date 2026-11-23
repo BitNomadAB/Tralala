@@ -193,6 +193,7 @@ def test_a_loop_in_delivery_counts_its_tickets_by_state(settings: Settings) -> N
         "ready": 2,
         "needs_input": 1,
         "blocked": 2,
+        "not_done": 0,
         "completed": 1,
         "total": 6,
         "needs_person": 2,
@@ -213,6 +214,37 @@ def test_a_loop_in_delivery_counts_its_tickets_by_state(settings: Settings) -> N
     finished = loop_world(settings, [loop("run", "ready", 1)], items=items[4:])
     (row,) = rows(loop_summaries(finished, READER, ask()))
     assert (row["waiting_on"], "accepts the implementation" in str(row["next"])) == ("person", True)
+
+
+def test_a_completed_loop_counts_what_was_never_done_as_not_done(settings: Settings) -> None:
+    state = BoardState()
+    state.cards = {
+        # Left open when the Loop was completed, one of them waiting for an answer then.
+        "u": card_row("u", "doing-run", "run").__replace__(
+            kind="manual", ticket_key="L-1-UNP-001", waiting_for="decision"
+        ),
+        "v": card_row("v", "doing-run", "run").__replace__(
+            kind="manual", ticket_key="L-1-UNP-002", completed_at=CREATED
+        ),
+    }
+    world = loop_world(
+        settings,
+        [loop("run", "completed", 1).__replace__(current_plan_id="plan-1")],
+        state=state,
+    )
+    (row,) = rows(loop_summaries(world, READER, ask(include_completed=True)))
+    assert row["waiting_on"] == "nobody"
+    # Nothing in a completed Loop waits for a person, and nothing in it is ready to start.
+    assert row["tickets"] == {
+        "ready": 0,
+        "needs_input": 0,
+        "blocked": 0,
+        "not_done": 1,
+        "completed": 1,
+        "total": 2,
+        "needs_person": 0,
+        "by_column": {"Todo": 0, "Doing": 2},
+    }
 
 
 def test_no_ticket_count_or_ticket_sentence_names_an_agent(settings: Settings) -> None:

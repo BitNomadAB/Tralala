@@ -94,6 +94,8 @@ const STATES: Record<TicketState, { word: string; tone: MarkTone }> = {
   ready: { word: "Ready", tone: "success" },
   needs_input: { word: "Needs input", tone: "warning" },
   blocked: { word: "Blocked", tone: "danger" },
+  // Asks nothing of anyone: its Loop was closed, so it stays as it was left.
+  not_done: { word: "Not done", tone: "neutral" },
 };
 
 /**
@@ -144,9 +146,10 @@ export function ToneMark({
 }
 
 /**
- * Where a Ticket stands, in words with a coloured dot: Ready, Needs input or Blocked. The dot only
- * repeats the word, so it is hidden from a screen reader; `reason` follows muted ("nothing holds
- * it up"). `compact` is the bordered pill a Kanban card carries in its bottom row.
+ * Where a Ticket stands, in words with a coloured dot: Ready, Needs input, Blocked, or Not done
+ * once its Loop was closed without it. The dot only repeats the word, so it is hidden from a screen
+ * reader; `reason` follows muted ("nothing holds it up"). `compact` is the bordered pill a Kanban
+ * card carries in its bottom row.
  */
 export function StateChip({
   state,

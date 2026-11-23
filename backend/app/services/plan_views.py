@@ -11,9 +11,9 @@ from typing import NotRequired, Protocol, TypedDict
 
 from pydantic import JsonValue
 
-from ..db.generated.board import LoopsRow
+from ..db.generated.board import CardsRow, LoopsRow
 from ..repositories.board import BoardRepositories
-from .ticket_state import TicketState, ticket_state
+from .ticket_state import TicketState, loop_closed, ticket_state
 
 
 class Blocker(TypedDict):
@@ -55,7 +55,8 @@ class ReadinessItem(TypedDict):
     workplace: str
     waiting_for: str
     state: TicketState | None
-    """ready, needs_input or blocked from the card's wait and the blockers (``ticket_state``)."""
+    """ready, needs_input or blocked from the card's wait and the blockers, or not_done once the
+    Loop is closed (``ticket_state``)."""
 
 
 class PhaseView(TypedDict):
@@ -105,13 +106,49 @@ class UnplannedTicket(TypedDict):
     workplace: str
     waiting_for: str
     state: TicketState | None
-    """Outside the plan nothing blocks it: only its own wait can (``ticket_state``)."""
+    """Outside the plan nothing blocks it: only its own wait can, until the Loop is closed
+    (``ticket_state``)."""
+
+
+class OpenDeliveryTicket(TypedDict):
+    """A Ticket a plan published that is not completed. Accepting the implementation is refused
+    while there is one, unless the person accepts it without them."""
+
+    id: str
+    ticket_key: str | None
+    title: str
+    completed_at: str | None
+    archived_at: str | None
 
 
 class LoopReadiness(Readiness):
-    """Readiness as the Loop answers it: the plan's Tickets and the work outside the plan."""
+    """Readiness as the Loop answers it: the plan's Tickets, the work outside the plan and the
+    delivery Tickets that are not completed."""
 
     unplanned: list[UnplannedTicket]
+    open_delivery: list[OpenDeliveryTicket]
+
+
+def delivery_tickets(repos: BoardRepositories, loop_id: str) -> list[CardsRow]:
+    """The Loop's delivery Tickets by key: every card a plan published, an archived one and one
+    an earlier plan left behind included. A QA Task and a Ticket outside the plan are not
+    delivery."""
+    return [card for card in repos.archive.tickets(loop_id) if card.kind == "ticket"]
+
+
+def open_delivery(repos: BoardRepositories, loop_id: str) -> list[OpenDeliveryTicket]:
+    """The delivery Tickets that are not completed: work the Loop planned and has not finished."""
+    return [
+        {
+            "id": card.id,
+            "ticket_key": card.ticket_key,
+            "title": card.title,
+            "completed_at": card.completed_at,
+            "archived_at": card.archived_at,
+        }
+        for card in delivery_tickets(repos, loop_id)
+        if card.completed_at is None
+    ]
 
 
 def unplanned_tickets(repos: BoardRepositories, loop: LoopsRow) -> list[UnplannedTicket]:
@@ -119,6 +156,7 @@ def unplanned_tickets(repos: BoardRepositories, loop: LoopsRow) -> list[Unplanne
     a plan has nothing outside it."""
     if not loop.current_plan_id:
         return []
+    closed = loop_closed(loop)
     return [
         {
             "id": card.id,
@@ -132,6 +170,7 @@ def unplanned_tickets(repos: BoardRepositories, loop: LoopsRow) -> list[Unplanne
                 completed=card.completed_at is not None,
                 waiting_for=card.waiting_for,
                 blocked=False,
+                loop_closed=closed,
             ),
         }
         for card in repos.cards.manual(loop.id)

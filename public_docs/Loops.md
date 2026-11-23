@@ -152,7 +152,8 @@ waits for it.
 Once the plan executes (`ready`, `in_progress`, `awaiting_qa`), a person or a worker may still add
 a Ticket *outside the plan*: it is keyed `<LoopKey>-UNP-<nnn>`, carries an **Unplanned** badge, is
 listed in readiness (`unplanned`), and never blocks
-a Phase or the Loop's completion; accepting the implementation names the ones still open. A Loop
+a Phase or the Loop's completion; accepting the implementation names the ones still open, and in
+the completed Loop they read **Not done**. A Loop
 whose plan is not executing refuses a new Ticket with
 `409 plan_change_required`; a Loop without a plan yet takes one without a key.
 
@@ -196,7 +197,9 @@ Three questions stay apart, and a fourth answer is computed from them:
 - **Its state**, never stored or set by hand: `needs_input` when it waits for a decision,
   information or access; `blocked` when an earlier Ticket, Phase or pre-Phase gate is unfinished or
   it waits for a third party; `ready` otherwise. `needs_input` wins over `blocked`, because a person
-  can answer now. A completed Ticket has none.
+  can answer now. A completed Ticket has none. A Ticket that was never completed before its Loop
+  was completed or cancelled is `not_done` (**Not done** on its card): it stays as it was left, it
+  never counts as done, and it waits for nobody.
 
 `human_action_required` stays apart: it says the task itself is a person's, and such a Ticket can
 be ready. Two lists follow: work for a coding session (`workplace` codebase, `state` ready, not a
@@ -523,6 +526,13 @@ works without a deadlock. Moving a Ticket into a column called `Done` completes 
 `completed_at` is only set by an explicit completion that passes the same readiness rules.
 
 ## QA handover
+
+Accepting implementation is refused while a delivery Ticket is not completed. The dialog (**Loop
+actions**, **Finalize Loop**) names each of them: every Ticket a plan published that is not done,
+an archived one and one an earlier plan left on the Kanban included. A person either completes
+them first or chooses **Accept without them**. Nothing is changed on those Tickets by that; the
+decision and the Loop's activity record which they were, and once the Loop is completed each one
+that is still not done reads **Not done**. A token can never make this choice.
 
 Accepting implementation records the decision and asks whether QA was performed. If it passed
 outside Tralala, a human attestation is captured and the Loop is finalized in the same transaction.

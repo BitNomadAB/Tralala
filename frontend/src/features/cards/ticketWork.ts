@@ -40,16 +40,21 @@ export const WAIT_HINTS: Record<Wait, string> = {
   third_party: "A supplier, a customer, a lawyer or someone else outside the team.",
 };
 
+/** Why a Ticket is Not done: its Loop was completed or cancelled first, and takes no more work. */
+export const NOT_DONE_REASON = "The Loop was closed before this Ticket was done.";
+
 export const STATE_LABELS: Record<TicketState, string> = {
   ready: "Ready",
   needs_input: "Needs input",
   blocked: "Blocked",
+  not_done: "Not done",
 };
 
 export const STATE_TONES: Record<TicketState, BadgeTone> = {
   ready: "success",
   needs_input: "warning",
   blocked: "neutral",
+  not_done: "neutral",
 };
 
 /** One sentence on what the state means for the person who owns the Ticket. */
@@ -57,4 +62,5 @@ export const STATE_HINTS: Record<TicketState, string> = {
   ready: "Nothing holds it up.",
   needs_input: "It waits for an answer a person can give now.",
   blocked: "It waits for earlier work or a third party.",
+  not_done: NOT_DONE_REASON,
 };

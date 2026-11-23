@@ -27,6 +27,8 @@ describe("StateChip", () => {
     ["ready", "Ready", "--success"],
     ["needs_input", "Needs input", "--warning"],
     ["blocked", "Blocked", "--destructive"],
+    // Asks nothing of anyone, so it carries the quiet dot.
+    ["not_done", "Not done", "--foreground-faint"],
   ] as const)("shows %s as %s with a dot in its colour", (state, word, colour) => {
     const { container } = render(<StateChip state={state} />);
     expect(screen.getByText(word)).toBeInTheDocument();

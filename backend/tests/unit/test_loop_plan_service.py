@@ -1300,7 +1300,7 @@ def test_a_reference_to_a_row_that_is_gone_still_blocks() -> None:
         ]
     )
     grouped = items_by_phase([PlannedItem(item=item, card_id=None, completed_at=None)])
-    (view,) = phase_views([plan_phase], grouped, edges)
+    (view,) = phase_views([plan_phase], grouped, edges, loop_closed=False)
     assert view["blocked_by"] == [
         {
             "type": "phase",
@@ -1326,16 +1326,20 @@ def test_an_item_with_two_cards_counts_each_and_completes_only_with_both() -> No
         PlannedItem(item=item, card_id="c1", completed_at=STAMP),
         PlannedItem(item=item, card_id="c2", completed_at=None),
     ]
-    (view,) = phase_views([plan_phase], items_by_phase(entries), {})
+    (view,) = phase_views([plan_phase], items_by_phase(entries), {}, loop_closed=False)
     assert view["state"] == "active"
     assert [entry["card_id"] for entry in view["tickets"]] == ["c1", "c2"]
+    assert [entry["state"] for entry in view["tickets"]] == [None, "ready"]
+    # Once the Loop is closed, the card that was not done reads so; the done one has no state.
+    (closed,) = phase_views([plan_phase], items_by_phase(entries), {}, loop_closed=True)
+    assert [entry["state"] for entry in closed["tickets"]] == [None, "not_done"]
 
 
 def test_an_empty_criteria_column_reads_as_no_entries() -> None:
     plan_phase = phase_row(P1, LOOP, "plan", 1).__replace__(entry_conditions_json="")
     item = plan_item_row(T1, LOOP, "plan", P1).__replace__(acceptance_criteria_json="")
     grouped = items_by_phase([PlannedItem(item=item, card_id=None, completed_at=None)])
-    (view,) = phase_views([plan_phase], grouped, {})
+    (view,) = phase_views([plan_phase], grouped, {}, loop_closed=False)
     assert view["entry_conditions"] == []
     assert view["tickets"][0]["acceptance_criteria"] == []
 

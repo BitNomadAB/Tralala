@@ -43,6 +43,15 @@ SCOPES = frozenset({"loops:review", "loops:write", "loops:generate"})
 ADA = ActorContext(actor_id="actor-1", actor_type="user", actor_name="Ada", scopes=SCOPES)
 BOT = ActorContext(actor_id="bot", actor_type="agent", actor_name="Bot", scopes=SCOPES)
 
+UNFINISHED = {
+    "id": "t-1",
+    "ticket_key": "L-1-P01-001",
+    "title": "Card t-1",
+    "completed_at": None,
+    "archived_at": None,
+}
+"""The delivery Ticket ``make(open_ticket=True)`` leaves open, as the service names it."""
+
 INSTRUCTIONS = QaInstructions.model_validate(
     {
         "summary": "Check the export",
@@ -181,19 +190,95 @@ def test_open_delivery_tickets_block_acceptance(tmp_path: Path) -> None:
     with pytest.raises(Conflict) as refused:
         accept(service)
     assert refused.value.code == "ticket_blocked"
-    assert refused.value.details == {
-        "open": [
-            {
-                "ticket_key": "L-1-P01-001",
-                "title": "Card t-1",
-                "completed_at": None,
-                "archived_at": None,
-            }
-        ]
-    }
+    assert refused.value.details == {"open": [UNFINISHED]}
     assert state.qa_cycles == {}
     assert state.approvals == []
     assert generation.started == []
+
+
+def test_a_person_may_accept_the_implementation_without_the_unfinished_tickets(
+    tmp_path: Path,
+) -> None:
+    service, state, generation = make(tmp_path, open_ticket=True)
+    result = accept(service, accept_unfinished=True, note="the rest is dropped")
+    # The Ticket is left as it was: accepting never completes it.
+    assert state.cards["t-1"].completed_at is None
+    (cycle,) = state.qa_cycles.values()
+    (decision,) = state.approvals
+    assert (decision.scope, decision.decision) == ("implementation", "approved")
+    # The decision and the Loop's activity name what was left unfinished.
+    assert json.loads(decision.revisions_json) == {
+        "qa_status": "not_tested",
+        "attestation": {},
+        "unfinished": ["L-1-P01-001"],
+    }
+    assert actions(state) == [
+        "loop.accepted_unfinished",
+        "loop.qa_cycle_created",
+        "loop.implementation_accepted",
+    ]
+    named = state.activity[0]
+    assert (named.actor_id, json.loads(named.changes_json)) == (
+        "actor-1",
+        {"tickets": ["L-1-P01-001"]},
+    )
+    assert json.loads(cycle.delivery_baseline) == [
+        {"completed_at": None, "ticket_key": "L-1-P01-001"}
+    ]
+    assert generation.started == [("actor-1", BOARD_ID, LOOP, "qa")]
+    assert (result["finalized"], result["unfinished"]) == (False, [UNFINISHED])
+
+
+def test_accepting_without_unfinished_tickets_names_none_when_all_are_done(
+    tmp_path: Path,
+) -> None:
+    service, state, _ = make(tmp_path)
+    result = accept(service, accept_unfinished=True)
+    (decision,) = state.approvals
+    assert json.loads(decision.revisions_json) == {"qa_status": "not_tested", "attestation": {}}
+    assert actions(state) == ["loop.qa_cycle_created", "loop.implementation_accepted"]
+    assert result["unfinished"] == []
+
+
+def test_leaving_tickets_unfinished_is_a_persons_decision(tmp_path: Path) -> None:
+    service, state, _ = make(tmp_path, open_ticket=True)
+    payload = ImplementationAcceptance(version=1, accept_unfinished=True)
+    with pytest.raises(Forbidden) as refused:
+        service.accept_implementation(BOT, BOARD_ID, LOOP, payload)
+    assert refused.value.code == "human_action_required"
+    assert state.approvals == []
+    assert state.activity == []
+
+
+def test_an_external_qa_pass_completes_the_loop_past_its_unfinished_tickets(
+    tmp_path: Path,
+) -> None:
+    service, state, _ = make(tmp_path, open_ticket=True)
+    state.cards["t-2"] = card_row("t-2", "list-a", LOOP).__replace__(
+        kind="ticket", ticket_key="L-1-P01-002", completed_at=NOW
+    )
+    attestation = {"scope": "the export", "results": "all passed"}
+    record = accept(service, qa_status="passed", attestation=attestation, accept_unfinished=True)
+    loop = state.loops[LOOP]
+    assert loop.completed_at == NOW
+    assert record["unfinished"] == [UNFINISHED]
+    # Completing the Loop does not complete the Ticket: it stays not done, and so reads not_done.
+    assert state.cards["t-1"].completed_at is None
+    (stored,) = state.history.values()
+    envelope = json.loads(stored.envelope_json)
+    assert {
+        ticket["key"]: ticket["disposition"] for ticket in envelope["delivery"]["tickets"]
+    } == {"L-1-P01-001": "open", "L-1-P01-002": "completed"}
+    # The snapshot holds the decision that left it, and the activity that names it.
+    implementation = next(
+        entry for entry in envelope["human_decisions"] if entry["scope"] == "implementation"
+    )
+    assert implementation["revisions"]["unfinished"] == ["L-1-P01-001"]
+    assert [
+        entry["changes"]
+        for entry in envelope["activity"]
+        if entry["action"] == "loop.accepted_unfinished"
+    ] == [{"tickets": ["L-1-P01-001"]}]
 
 
 def test_unplanned_work_never_blocks_acceptance_and_the_answer_names_what_is_open(

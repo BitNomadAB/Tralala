@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, XCircle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { HeldButton } from "@/components/ui/held-button";
@@ -8,8 +8,9 @@ import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
-import { keys, useQaCycle } from "@/lib/queries";
+import { keys, useQaCycle, useReadiness } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
+import { OpenDelivery } from "./OpenDelivery";
 import { QaScenarioResults, type ResultStatus } from "./QaScenarioResults";
 import { UnplannedWarning } from "./Unplanned";
 
@@ -39,6 +40,11 @@ export function LoopCompletionDialog({
   const [note, setNote] = useState("");
   const [draftResults, setDraftResults] = useState<Record<string, ResultStatus>>({});
   const [notApplicable, setNotApplicable] = useState<string[]>([]);
+  // Delivery Tickets that are not done hold the acceptance up until the person accepts without them.
+  const unfinished = useReadiness(boardId, loop.id).data?.open_delivery ?? [];
+  const [acceptUnfinished, setAcceptUnfinished] = useState(false);
+  const heldByUnfinished = isHuman && unfinished.length > 0 && !acceptUnfinished;
+  const unfinishedId = useId();
 
   const scenarios = useMemo(() => {
     const instructions = qaQuery.data?.human_instructions as
@@ -63,12 +69,15 @@ export function LoopCompletionDialog({
         attestation:
           qaStatus === "passed" ? { scope, results, environment: "", evidence: note } : {},
         note,
+        accept_unfinished: acceptUnfinished && unfinished.length > 0,
       }),
     onSuccess: () => {
       invalidate();
       toast.push({ title: "Implementation accepted", variant: "success" });
     },
     onError: (error) => {
+      // A refusal for Tickets this dialog did not know were open shows them.
+      void queryClient.invalidateQueries({ queryKey: keys.readiness(boardId, loop.id) });
       toast.push({
         title: "Could not accept",
         description: describeError(error),
@@ -140,12 +149,13 @@ export function LoopCompletionDialog({
           <div className="flex flex-col gap-4">
             <section className="flex flex-col gap-2">
               <h2 className="text-sm font-medium">1. Accept the implementation</h2>
-              {loop.progress.ticket_completed < loop.progress.ticket_total ? (
-                <p className="text-xs text-[var(--warning)]">
-                  {loop.progress.ticket_total - loop.progress.ticket_completed} delivery ticket(s)
-                  are still open; acceptance will be rejected until they are completed.
-                </p>
-              ) : null}
+              <OpenDelivery
+                tickets={unfinished}
+                accepted={acceptUnfinished}
+                onAcceptedChange={setAcceptUnfinished}
+                reasonId={unfinishedId}
+                disabled={!isHuman}
+              />
               <UnplannedWarning boardId={boardId} loopId={loop.id} />
               <fieldset className="flex flex-col gap-2">
                 <legend className="text-xs text-[var(--muted-foreground)]">
@@ -193,7 +203,8 @@ export function LoopCompletionDialog({
               </Field>
               <div className="flex justify-end">
                 <HeldButton
-                  held={accept.isPending}
+                  held={accept.isPending || heldByUnfinished}
+                  reasonId={heldByUnfinished ? unfinishedId : undefined}
                   disabled={!isHuman}
                   onClick={() => accept.mutate()}
                 >

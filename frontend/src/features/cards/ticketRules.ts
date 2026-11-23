@@ -67,9 +67,11 @@ export function dependencies(card: Card, readiness: LoopReadiness | undefined): 
 /**
  * What follows the state word: "nothing holds it up", or what it waits for. A set wait names only
  * its kind here; the wait block under the state line shows the reason, who set it and the way to
- * clear it, so the reason is on screen once.
+ * clear it, so the reason is on screen once. A Ticket left undone in a closed Loop waits for
+ * nothing any more, so it says that the Loop was closed.
  */
 export function stateReason(card: Card): string {
+  if (card.state === "not_done") return "the Loop was closed before it was done";
   const kind = WAITS.find((wait) => wait === card.waiting_for);
   if (kind) return `waits for ${WAIT_LABELS[kind].toLowerCase()}`;
   if (!card.ready && card.blockers.length > 0) {

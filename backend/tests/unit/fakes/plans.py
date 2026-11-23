@@ -45,7 +45,9 @@ def readiness_item(
         "downstream_phase_numbers": [2],
         "workplace": "unknown",
         "waiting_for": waiting_for,
-        "state": ticket_state(completed=False, waiting_for=waiting_for, blocked=not ready),
+        "state": ticket_state(
+            completed=False, waiting_for=waiting_for, blocked=not ready, loop_closed=False
+        ),
     }
 
 

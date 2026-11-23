@@ -28,6 +28,11 @@ Worth knowing when you look at the dashboard:
 - **The web tier is Caddy**, not nginx: TLS, HTTP/2 and the body limit come from
   `frontend/Caddyfile`, and `TRALALA_SITE_ADDRESS` decides whether Caddy serves plain HTTP on `:80`
   or gets a certificate.
+- **A Loop can be closed without the Tickets that are not done.** Accepting the implementation
+  was refused while a delivery Ticket was open, with no way past it. The dialog now names those
+  Tickets and a person may choose **Accept without them**; in the completed Loop each one reads
+  **Not done** (`state: not_done`) and never counts as done. The same state now shows on every
+  Ticket that was not completed before its Loop was completed or cancelled, where it read Ready.
 - **An open tab reloads itself once after an upgrade.** Each page is downloaded when it is first
   opened, so a tab left open across an upgrade asks for files the new version no longer has. It
   reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it

@@ -10,7 +10,7 @@ export function UnplannedWarning({ boardId, loopId }: { boardId: string; loopId:
     <p className="text-xs text-[var(--warning)]">
       {open.length} Ticket(s) outside the plan are still open (
       {open.map((ticket) => ticket.key ?? ticket.title).join(", ")}). They do not block acceptance;
-      they stay open in the completed Loop.
+      once the Loop is completed, what is left of them is marked Not done.
     </p>
   );
 }

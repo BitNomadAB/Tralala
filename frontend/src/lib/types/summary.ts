@@ -21,6 +21,8 @@ export interface LoopSummary {
     ready: number;
     needs_input: number;
     blocked: number;
+    /** Never completed before the Loop was completed or cancelled. */
+    not_done: number;
     completed: number;
     total: number;
     /** Needs input, or ready and a person's task. */

@@ -148,6 +148,18 @@ export interface UnplannedTicket {
   state: TicketState | null;
 }
 
+/**
+ * A Ticket a plan published that is not completed. Accepting the implementation is refused while
+ * there is one, unless the person accepts without them.
+ */
+export interface OpenDeliveryTicket {
+  id: string;
+  ticket_key: string | null;
+  title: string;
+  completed_at: string | null;
+  archived_at: string | null;
+}
+
 /** A note in a Loop's log: what belongs to the Loop and to no single Ticket. */
 export interface LoopNote {
   id: string;
@@ -173,6 +185,7 @@ export interface LoopReadiness {
   items: PlanTicketView[];
   phases: PlanPhaseView[];
   unplanned: UnplannedTicket[];
+  open_delivery: OpenDeliveryTicket[];
 }
 
 export interface QaCycle {

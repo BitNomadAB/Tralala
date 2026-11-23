@@ -158,8 +158,11 @@ def card_entry(
     labels: list[LabelsRow],
     counts: CardCounts,
     item: ReadinessItem | None,
+    *,
+    loop_closed: bool,
 ) -> CardEntry:
-    """A Ticket's JSON; ``item`` is its planned Ticket's readiness, if the plan has one."""
+    """A Ticket's JSON; ``item`` is its planned Ticket's readiness, if the plan has one, and
+    ``loop_closed`` whether its Loop was completed or cancelled."""
     if item is not None:
         human_action_required = bool(item["human_action_required"])
     else:
@@ -169,6 +172,7 @@ def card_entry(
         completed=row.completed_at is not None,
         waiting_for=row.waiting_for,
         blocked=item is not None and not item["ready"],
+        loop_closed=loop_closed,
     )
     return {
         **card_record(row),

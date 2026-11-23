@@ -55,7 +55,7 @@ from .lists import BoardChecks
 from .loops import EXECUTION_STAGES, ensure_execution_allowed, readiness_item, require_loop
 from .plan_views import PlanViews, ReadinessItem
 from .subresources import label_entries
-from .ticket_state import ensure_not_waiting
+from .ticket_state import ensure_not_waiting, loop_closed
 
 __all__ = [
     "NEW_LABEL_COLOR",
@@ -139,8 +139,16 @@ class CardService:
             for item in self.plans.readiness(repos, loop)["items"]:
                 if item["card_id"]:
                     readiness[item["card_id"]] = item
+        closed = loop_closed(loop)
         return [
-            card_entry(board_id, row, labels[row.id], counts[row.id], readiness.get(row.id))
+            card_entry(
+                board_id,
+                row,
+                labels[row.id],
+                counts[row.id],
+                readiness.get(row.id),
+                loop_closed=closed,
+            )
             for row in rows
         ]
 

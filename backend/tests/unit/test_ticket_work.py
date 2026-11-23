@@ -33,7 +33,7 @@ from app.services.agent_tools import (
     set_ticket_wait,
     tool_catalog,
 )
-from app.services.cards import CardService, card_entry
+from app.services.cards import CardEntry, CardService, card_entry
 from app.services.lists import ListService
 from app.services.loop_generation_prompts import (
     PURPOSE_PROMPTS,
@@ -43,8 +43,9 @@ from app.services.loop_generation_prompts import (
 )
 from app.services.loop_plans import LoopPlanService
 from app.services.loops import LoopService
+from app.services.plan_views import ReadinessItem
 from app.services.subresources import CommentService
-from app.services.ticket_state import needs_person, ticket_state
+from app.services.ticket_state import loop_closed, needs_person, ticket_state
 from app.services.ticket_work import TicketWorkService
 from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
@@ -94,9 +95,27 @@ def test_the_state_of_every_wait_with_and_without_blockers(waiting_for: str, blo
         if blocked or waiting_for == "third_party"
         else "ready"
     )
-    assert ticket_state(completed=False, waiting_for=waiting_for, blocked=blocked) == expected
+    assert (
+        ticket_state(
+            completed=False, waiting_for=waiting_for, blocked=blocked, loop_closed=False
+        )
+        == expected
+    )
     # A completed Ticket has no state.
-    assert ticket_state(completed=True, waiting_for=waiting_for, blocked=blocked) is None
+    assert (
+        ticket_state(completed=True, waiting_for=waiting_for, blocked=blocked, loop_closed=False)
+        is None
+    )
+    # In a closed Loop nothing goes on: what was not done is not done, whatever it waited for,
+    # and what was done stays done.
+    assert (
+        ticket_state(completed=False, waiting_for=waiting_for, blocked=blocked, loop_closed=True)
+        == "not_done"
+    )
+    assert (
+        ticket_state(completed=True, waiting_for=waiting_for, blocked=blocked, loop_closed=True)
+        is None
+    )
 
 
 def test_what_needs_a_person_is_an_answer_or_a_persons_task_that_may_start() -> None:
@@ -106,6 +125,19 @@ def test_what_needs_a_person_is_an_answer_or_a_persons_task_that_may_start() -> 
     assert not needs_person("ready", human_action_required=False)
     assert not needs_person("blocked", human_action_required=True)
     assert not needs_person(None, human_action_required=True)
+    # A Ticket left undone in a closed Loop waits for nobody, a person's task included.
+    assert not needs_person("not_done", human_action_required=True)
+
+
+def test_a_loop_is_closed_once_it_is_completed_or_cancelled() -> None:
+    loop = loop_row(LOOP, stage="in_progress")
+    assert not loop_closed(loop)
+    assert loop_closed(loop.__replace__(completed_at=STAMP))
+    assert loop_closed(loop.__replace__(stage="completed"))
+    assert loop_closed(loop.__replace__(cancelled_at=STAMP))
+    assert loop_closed(loop.__replace__(stage="cancelled"))
+    # Archiving alone closes nothing: the Loop was neither completed nor cancelled.
+    assert not loop_closed(loop.__replace__(archived_at=STAMP))
 
 
 def test_a_ticket_from_before_the_revision_reads_unknown_and_waits_for_nothing() -> None:
@@ -131,7 +163,7 @@ def test_a_ticket_from_before_the_revision_reads_unknown_and_waits_for_nothing()
     assert set(mapping) == set(CARDS_COLUMNS)
     row = CardsRow.from_mapping(mapping)
     counts = CardCounts(checklist_total=0, checklist_completed=0, comment_count=0)
-    entry = card_entry(BOARD_ID, row, [], counts, None)
+    entry = card_entry(BOARD_ID, row, [], counts, None, loop_closed=False)
     assert (entry["workplace"], entry["waiting_for"], entry["waiting_reason"]) == (
         "unknown",
         "nothing",
@@ -144,13 +176,19 @@ def test_a_ticket_entry_carries_its_state_from_its_wait_and_its_plan() -> None:
     blocked = readiness_item("c", ready=False)
     row = card_row("c", "todo", LOOP)
     counts = CardCounts(checklist_total=0, checklist_completed=0, comment_count=0)
-    assert card_entry(BOARD_ID, row, [], counts, blocked)["state"] == "blocked"
+    def entry(card: CardsRow, item: ReadinessItem | None, *, closed: bool = False) -> CardEntry:
+        return card_entry(BOARD_ID, card, [], counts, item, loop_closed=closed)
+
+    assert entry(row, blocked)["state"] == "blocked"
     asked = row.__replace__(waiting_for="decision", waiting_reason="Which one?")
-    assert card_entry(BOARD_ID, asked, [], counts, blocked)["state"] == "needs_input"
-    assert card_entry(BOARD_ID, asked, [], counts, blocked)["needs_person"] is True
-    assert (
-        card_entry(BOARD_ID, row.__replace__(completed_at=STAMP), [], counts, None)["state"] is None
-    )
+    assert entry(asked, blocked)["state"] == "needs_input"
+    assert entry(asked, blocked)["needs_person"] is True
+    done = row.__replace__(completed_at=STAMP)
+    assert entry(done, None)["state"] is None
+    # Its Loop closed before it was done: not done, and no longer waiting for a person's answer.
+    left = entry(asked, blocked, closed=True)
+    assert (left["state"], left["needs_person"]) == ("not_done", False)
+    assert entry(done, None, closed=True)["state"] is None
 
 
 # --- the writes ----------------------------------------------------------------------------------

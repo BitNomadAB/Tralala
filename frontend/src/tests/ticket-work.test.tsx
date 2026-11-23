@@ -93,6 +93,18 @@ describe("where a Ticket's work is done and what it waits for", () => {
     expect(section).toHaveTextContent("Waits for: A third party");
   });
 
+  it("shows a Ticket its Loop was closed without as Not done, its wait kept and not cleared", async () => {
+    const { section } = await renderSection(
+      ticketCard({ ...DECISION, state: "not_done", needs_person: false }),
+    );
+    expect(within(section).getByText("Not done")).toBeInTheDocument();
+    expect(section).toHaveTextContent("· the Loop was closed before it was done");
+    // What it waited for stays on record, but nobody answers it in a closed Loop.
+    expect(section).toHaveTextContent("Waits for: A decision");
+    expect(within(section).queryByRole("button", { name: "Clear the wait" })).toBeNull();
+    expect(section).not.toHaveTextContent("Clear the wait before");
+  });
+
   it("shows no state on a completed Ticket and offers no change", async () => {
     const { section } = await renderSection(ticketCard({ completed_at: NOW, state: null }));
     expect(within(section).queryByText(/^(Ready|Needs input|Blocked)$/)).not.toBeInTheDocument();

@@ -330,7 +330,11 @@ class PlanItemOut(OutModel):
     workplace: str = "unknown"
     waiting_for: str = "nothing"
     state: str | None = Field(
-        default=None, description="ready, needs_input or blocked; null once completed"
+        default=None,
+        description=(
+            "ready, needs_input or blocked, or not_done once the Loop is closed; null once "
+            "completed"
+        ),
     )
 
 
@@ -370,6 +374,14 @@ class UnplannedTicketOut(OutModel):
     state: str | None = None
 
 
+class OpenDeliveryTicketOut(OutModel):
+    id: str
+    ticket_key: str | None = None
+    title: str
+    completed_at: str | None = None
+    archived_at: str | None = None
+
+
 class ReadinessOut(OutModel):
     loop_id: str
     stage: LoopStage
@@ -380,6 +392,13 @@ class ReadinessOut(OutModel):
     unplanned: list[UnplannedTicketOut] = Field(
         default_factory=list["UnplannedTicketOut"],
         description="Tickets added outside the plan while it executes; they never block",
+    )
+    open_delivery: list[OpenDeliveryTicketOut] = Field(
+        default_factory=list["OpenDeliveryTicketOut"],
+        description=(
+            "Tickets a plan published that are not completed; accepting the implementation is "
+            "refused while there is one, unless a person accepts it without them"
+        ),
     )
 
 
@@ -463,6 +482,13 @@ class ImplementationAcceptance(StrictModel):
     qa_status: Literal["not_tested", "tested_with_issues", "passed"] = "not_tested"
     attestation: dict[str, object] = Field(default_factory=dict)
     note: LongText = ""
+    accept_unfinished: bool = Field(
+        default=False,
+        description=(
+            "Accept although delivery Tickets are not completed. They stay as they are and read "
+            "not_done once the Loop is completed"
+        ),
+    )
 
 
 QaResultStatus = Literal["passed", "failed", "blocked", "not_run", "not_applicable"]

@@ -16,7 +16,12 @@ import pytest
 from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
-from app.db.generated.board import BoardLoopDefaultsRow, IdempotencyRecordsRow, LoopsRow
+from app.db.generated.board import (
+    BoardLoopDefaultsRow,
+    CardsRow,
+    IdempotencyRecordsRow,
+    LoopsRow,
+)
 from app.schemas.loops import HumanConfirmation, LoopCancel, LoopCreate, LoopUpdate
 from app.services.cards import CardService
 from app.services.loops import (
@@ -666,6 +671,48 @@ def test_plan_and_readiness_come_from_the_plan_views_for_the_loop_row(settings: 
     with pytest.raises(NotFound):
         w.service.readiness(BOARD_ID, "elsewhere")
     assert ("require_row", BOARD_ID) in w.checks.calls
+
+
+def test_readiness_names_the_delivery_tickets_that_are_not_completed(settings: Settings) -> None:
+    w = world(settings, loop_row(LOOP, stage="in_progress").__replace__(current_plan_id="plan-1"))
+    w.state.lists["todo"] = list_row("todo", LOOP, 1)
+
+    def card(card_id: str, kind: str, key: str) -> CardsRow:
+        return card_row(card_id, "todo", LOOP).__replace__(kind=kind, ticket_key=key)
+
+    w.state.cards = {
+        "done": card("done", "ticket", "L-1-P01-001").__replace__(completed_at=STAMP),
+        "open": card("open", "ticket", "L-1-P01-002"),
+        # Archived without being completed: still work the plan did not finish.
+        "shelved": card("shelved", "ticket", "L-1-P01-003").__replace__(archived_at=STAMP),
+        # A QA Task and a Ticket outside the plan are not delivery.
+        "qa": card("qa", "qa", "L-1-QA02-001"),
+        "extra": card("extra", "manual", "L-1-UNP-001"),
+    }
+    readiness = w.service.readiness(BOARD_ID, LOOP)
+    assert readiness["open_delivery"] == [
+        {
+            "id": "open",
+            "ticket_key": "L-1-P01-002",
+            "title": "Card open",
+            "completed_at": None,
+            "archived_at": None,
+        },
+        {
+            "id": "shelved",
+            "ticket_key": "L-1-P01-003",
+            "title": "Card shelved",
+            "completed_at": None,
+            "archived_at": STAMP,
+        },
+    ]
+    (extra,) = readiness["unplanned"]
+    assert (extra["key"], extra["state"]) == ("L-1-UNP-001", "ready")
+    # Once the Loop is completed the same Tickets are still listed, and what is open is not done.
+    w.state.loops[LOOP] = w.state.loops[LOOP].__replace__(stage="completed", completed_at=STAMP)
+    closed = w.service.readiness(BOARD_ID, LOOP)
+    assert [ticket["id"] for ticket in closed["open_delivery"]] == ["open", "shelved"]
+    assert closed["unplanned"][0]["state"] == "not_done"
 
 
 # --- create ---------------------------------------------------------------------------------------

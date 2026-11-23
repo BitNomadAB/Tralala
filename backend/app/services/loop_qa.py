@@ -41,7 +41,6 @@ from .loop_qa_cycles import (
     active_cycle,
     cycle_by_id,
     delivery_baseline,
-    delivery_tickets,
     ensure_qa_cycle,
     log_loop_activity,
     serialize_cycle,
@@ -60,7 +59,7 @@ from .loops import (
     refresh_stage,
     require_loop,
 )
-from .plan_views import unplanned_tickets
+from .plan_views import open_delivery, unplanned_tickets
 
 
 def _now() -> datetime:
@@ -121,22 +120,9 @@ class LoopQaService:
         """One active QA cycle per Loop; repeated attempts reuse it."""
         return ensure_qa_cycle(repos, loop, actor, new_id=self._new_id, timestamp=self._now)
 
-    _delivery_tickets = staticmethod(delivery_tickets)
     _delivery_baseline = staticmethod(delivery_baseline)
 
     # --- implementation acceptance ---------------------------------------------
-
-    def open_delivery(self, repos: BoardRepositories, loop_id: str) -> list[dict[str, str | None]]:
-        return [
-            {
-                "ticket_key": card.ticket_key,
-                "title": card.title,
-                "completed_at": card.completed_at,
-                "archived_at": card.archived_at,
-            }
-            for card in self._delivery_tickets(repos, loop_id)
-            if card.completed_at is None
-        ]
 
     def accept_implementation(
         self,
@@ -145,6 +131,10 @@ class LoopQaService:
         loop_id: str,
         payload: ImplementationAcceptance,
     ) -> Entry:
+        """A person accepts the implementation. Delivery Tickets that are not completed refuse it
+        (``409 ticket_blocked``, naming them) unless the person accepts it without them
+        (``accept_unfinished``): they stay as they are, the decision and the activity name them,
+        and once the Loop is completed each one reads ``not_done`` (``ticket_state``)."""
         actor.require_human("Accepting implementation as complete")
         actor.require("loops:review")
         if not payload.accepted:
@@ -155,12 +145,12 @@ class LoopQaService:
             ensure_writable(loop)
             _check_version(loop, payload.version)
             ensure_execution_allowed(loop)
-            open_work = self.open_delivery(repos, loop_id)
-            if open_work:
+            unfinished = open_delivery(repos, loop_id)
+            if unfinished and not payload.accept_unfinished:
                 raise Conflict(
                     "Delivery Tickets are still open",
                     code="ticket_blocked",
-                    details={"open": open_work},
+                    details={"open": unfinished},
                 )
             # Work outside the plan never blocks; the answer names what is still open of it.
             unplanned_open = [
@@ -168,6 +158,14 @@ class LoopQaService:
                 for ticket in unplanned_tickets(repos, loop)
                 if ticket["completed_at"] is None and ticket["archived_at"] is None
             ]
+            unfinished_keys = [ticket["ticket_key"] or ticket["id"] for ticket in unfinished]
+            extra: dict[str, object] = {
+                "qa_status": payload.qa_status,
+                "attestation": payload.attestation,
+            }
+            if unfinished_keys:
+                # The decision names what it left unfinished, so the history snapshot holds it.
+                extra["unfinished"] = unfinished_keys
             approval_id = self._record_decision(
                 repos,
                 loop,
@@ -175,8 +173,17 @@ class LoopQaService:
                 scope="implementation",
                 decision="approved",
                 feedback=payload.note,
-                extra={"qa_status": payload.qa_status, "attestation": payload.attestation},
+                extra=extra,
             )
+            if unfinished_keys:
+                self._log(
+                    repos,
+                    actor,
+                    "loop.accepted_unfinished",
+                    loop_id,
+                    {"tickets": unfinished_keys},
+                    self._now(),
+                )
             if payload.qa_status == "passed":
                 self._validate_attestation(payload.attestation)
                 qa_approval_id = self._record_decision(
@@ -203,6 +210,7 @@ class LoopQaService:
                     attestation=payload.attestation,
                 )
                 finalized["unplanned_open"] = unplanned_open
+                finalized["unfinished"] = unfinished
                 return finalized
             cycle = self.ensure_cycle(repos, loop, actor)
             now = self._now()
@@ -225,6 +233,7 @@ class LoopQaService:
             result["finalized"] = False
             result["stage"] = loop.stage
             result["unplanned_open"] = unplanned_open
+            result["unfinished"] = unfinished
         return result
 
     def _request_instructions(self, actor: ActorContext, board_id: str, loop_id: str) -> None:
