@@ -28,7 +28,11 @@ describe("the Ticket over the Kanban", () => {
     const forYou = within(modal).getByRole("tabpanel", { name: "For you" });
     expect(within(forYou).queryByText("Old keys stop working after a day.")).toBeNull();
     const copyKey = within(modal).getByRole("button", { name: `Copy key ${KEY}` });
-    expect(copyKey.parentElement).toHaveClass("font-mono");
+    expect(copyKey.parentElement).toHaveClass(
+      "font-mono",
+      "font-semibold",
+      "text-[var(--foreground)]",
+    );
     expect(copyKey.parentElement).toHaveTextContent(KEY);
     expect(await within(modal).findByText(PHASE_NAME, { selector: "b" })).toBeInTheDocument();
     expect(modal).toHaveTextContent(`Phase 1 · ${PHASE_NAME}`);

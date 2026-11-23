@@ -68,7 +68,7 @@ export function TicketHead({
     >
       <div className="flex flex-wrap items-center gap-2.5 text-[13px]">
         {card.ticket_key ? (
-          <span className="inline-flex items-center gap-1.5 font-mono text-[12.5px] text-[var(--muted-foreground)]">
+          <span className="inline-flex items-center gap-1.5 font-mono text-[12.5px] font-semibold text-[var(--foreground)]">
             {card.ticket_key}
             <button
               type="button"

@@ -167,7 +167,8 @@ export function TicketCard({
       ) : null}
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--muted-foreground)]">
         {card.ticket_key ? (
-          <span className="font-mono text-xs text-[var(--foreground-faint)]">
+          // The key is what people say and search for, so it reads as strongly as the title.
+          <span className="font-mono text-xs font-semibold text-[var(--foreground)]">
             {card.ticket_key}
           </span>
         ) : null}

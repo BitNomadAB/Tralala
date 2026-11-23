@@ -47,7 +47,12 @@ describe("the Kanban card", () => {
     const summary = within(item).getByText(FACE.summary);
     expect(summary).toHaveClass("line-clamp-2");
     expect(within(item).queryByText("The stored summary.")).not.toBeInTheDocument();
-    expect(within(item).getByText("SES-1-PH01-001")).toHaveClass("font-mono");
+    // The key stands out from the quiet row it sits in: bold, in the text's own colour.
+    expect(within(item).getByText("SES-1-PH01-001")).toHaveClass(
+      "font-mono",
+      "font-semibold",
+      "text-[var(--foreground)]",
+    );
     expect(within(item).getByRole("img", { name: "Owner: Ada Lovelace" })).toHaveTextContent("AL");
     for (const word of ["Ready", "Needs input", "Blocked", "done", "Needs a person"]) {
       expect(within(item).queryByText(word)).not.toBeInTheDocument();
