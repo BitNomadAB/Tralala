@@ -236,6 +236,25 @@ with no cache, 15 ms once the counters are known, 13 ms with the flag.
   creating the board, and a retry afterwards replays its response. The worker tools reuse the same
   idea per tool (identical content within five minutes is a retry, not a second write).
 
+## Changes made elsewhere
+
+A page of a board follows the board for what an agent, another person or another tab changed. Every
+write adds a row to the board's activity log and none is removed, so the number of rows and the
+newest row's id are a change marker; a count is needed because timestamps have second precision, so
+two writes in one second can leave the newest row the same. The frontend asks
+`GET /boards/{id}/activity?limit=1` for the marker every five seconds while the tab is visible, and
+at once when the tab is shown again. A marker that differs invalidates the board's listings (the
+board and its Loops, a Loop's columns, cards, readiness and notes, the activity and the discussion
+lists), which refetch the authoritative state. A change waits while a dialog is open or a change of
+the person's own is on its way, and a later answer takes it up.
+
+What a draft or a decision is checked against is not followed: a Ticket's own view carries the
+version its changes send, and the planning documents the revisions an approval binds to. The Plan
+tab compares the revisions on screen with the Loop's summary instead: a document handed in while the
+page showed none is read at once, and a text on screen that is no longer the current one gets a
+line that says so, with **Show the latest**. **Refresh** in the header reads everything a page
+shows again, on any page, without loading the page anew.
+
 ## Discussion runs
 
 A discussion is steered through *runs*. `RunService` writes a `discussion_runs` row, then either

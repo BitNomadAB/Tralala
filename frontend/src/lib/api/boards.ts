@@ -1,4 +1,5 @@
 import type {
+  ActivityEntry,
   AskableAgent,
   Board,
   BoardPerson,
@@ -33,6 +34,16 @@ export const boardsApi = {
 
   async getBoard(boardId: string): Promise<Board> {
     return json(await request<Board>(`/boards/${boardId}`));
+  },
+
+  /**
+   * The board's change marker: how many entries its activity log holds, and the newest one's id.
+   * Every write to a board adds an entry and none is ever removed, so a marker that differs from
+   * the last one means the board changed, whoever changed it.
+   */
+  async boardChangeMarker(boardId: string): Promise<string> {
+    const result = await request<ActivityEntry[]>(`/boards/${boardId}/activity?limit=1`);
+    return `${String(result.meta?.total ?? 0)}:${result.data[0]?.id ?? ""}`;
   },
 
   async createBoard(payload: {

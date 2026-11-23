@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { AppLayout } from "@/app/AppLayout";
 import { useRouteFocus } from "@/app/useRouteFocus";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { AuthContext } from "@/features/auth/useAuth";
 import { ThemeProvider } from "@/themes/ThemeProvider";
 import { MEMBER } from "./msw/session";
@@ -76,27 +77,29 @@ function renderLayout(path: string, loaded: Promise<void> = Promise.resolve()) {
     <QueryClientProvider client={new QueryClient()}>
       <AuthContext.Provider value={auth}>
         <ThemeProvider>
-          <MemoryRouter initialEntries={[path]}>
-            <RouteFocus />
-            <Routes>
-              <Route element={<AppLayout />}>
-                <Route path="/" element={<Home />} />
-                <Route path="/old" element={<Navigate to="/" replace />} />
-                <Route path="/settings" element={<h1>Settings page</h1>} />
-                <Route path="/slow" element={<SlowPage loaded={loaded} />} />
-                <Route
-                  path="/editor"
-                  element={
-                    <>
-                      <h1>New board template</h1>
-                      <input aria-label="Name" autoFocus />
-                    </>
-                  }
-                />
-              </Route>
-            </Routes>
-            <OpenDialog />
-          </MemoryRouter>
+          <ToastProvider>
+            <MemoryRouter initialEntries={[path]}>
+              <RouteFocus />
+              <Routes>
+                <Route element={<AppLayout />}>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/old" element={<Navigate to="/" replace />} />
+                  <Route path="/settings" element={<h1>Settings page</h1>} />
+                  <Route path="/slow" element={<SlowPage loaded={loaded} />} />
+                  <Route
+                    path="/editor"
+                    element={
+                      <>
+                        <h1>New board template</h1>
+                        <input aria-label="Name" autoFocus />
+                      </>
+                    }
+                  />
+                </Route>
+              </Routes>
+              <OpenDialog />
+            </MemoryRouter>
+          </ToastProvider>
         </ThemeProvider>
       </AuthContext.Provider>
     </QueryClientProvider>,

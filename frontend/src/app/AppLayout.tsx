@@ -14,6 +14,7 @@ import { useAuth } from "@/features/auth/useAuth";
 import { cn } from "@/lib/utils";
 import type { ThemeMode } from "@/themes/theme";
 import { useTheme } from "@/themes/useTheme";
+import { RefreshButton } from "./RefreshButton";
 
 /** Each mode's label and icon, and the mode the toggle switches to next. */
 const themeOptions: Record<ThemeMode, { label: string; Icon: typeof Sun; next: ThemeMode }> = {
@@ -101,6 +102,7 @@ export function AppLayout() {
             <span className="hidden text-xs text-[var(--muted-foreground)] sm:inline">
               {actor?.name}
             </span>
+            <RefreshButton />
             <Button
               variant="ghost"
               size="icon"

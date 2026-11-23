@@ -45,6 +45,15 @@ the plan, *QA*, the priority and the due date when set (red when overdue), *done
 it is completed, and the owner's initials on the right. Labels, checklists and comment counts are
 in the Ticket, not on the card.
 
+The page follows its board: what an agent or another person changes shows within five seconds on
+the Kanban, in the header and in Notes while the tab is visible, and at once when you come back to
+the tab. A change waits while a dialog is open. What you may be deciding on is not replaced under
+you: an open Ticket stays as you opened it, and when a planning document on screen is no longer the
+current one the Plan tab says "The planning documents have changed since this page read them."
+with **Show the latest** (a document handed in while the tab showed none appears by itself).
+**Refresh**, the round-arrow button in the top bar of every page, reads everything the page shows
+again without loading the page anew, so a draft and an open Ticket stay.
+
 ## The five documents
 
 | Slot | Author | Purpose |

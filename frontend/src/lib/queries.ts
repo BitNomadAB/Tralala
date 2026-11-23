@@ -5,6 +5,8 @@ export const keys = {
   me: ["me"] as const,
   boards: (filters: Record<string, string | number | undefined>) => ["boards", filters] as const,
   board: (boardId: string) => ["board", boardId] as const,
+  /** The board's change marker, which `useBoardChanges` asks for while a page of the board is open. */
+  boardChanges: (boardId: string) => ["board-changes", boardId] as const,
   loops: (boardId: string, includeCompleted = false) =>
     ["loops", boardId, includeCompleted] as const,
   /** Under `["loops", boardId]`, so every invalidation of a board's Loops refreshes it too. */

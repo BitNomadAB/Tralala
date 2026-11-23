@@ -33,6 +33,11 @@ Worth knowing when you look at the dashboard:
   Tickets and a person may choose **Accept without them**; in the completed Loop each one reads
   **Not done** (`state: not_done`) and never counts as done. The same state now shows on every
   Ticket that was not completed before its Loop was completed or cancelled, where it read Ready.
+- **A page of a board updates itself.** What an agent or another person changes shows within five
+  seconds on the Kanban, in the Loop's header and in the Loop lists while the tab is visible.
+  **Refresh** in the top bar reads any page again without reloading it. An open Ticket and the
+  planning documents are not replaced under you; the Plan tab says when its documents have changed
+  and shows the latest when asked.
 - **An open tab reloads itself once after an upgrade.** Each page is downloaded when it is first
   opened, so a tab left open across an upgrade asks for files the new version no longer has. It
   reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it
