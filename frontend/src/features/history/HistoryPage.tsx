@@ -18,6 +18,11 @@ function recordCountWords(total: number): string {
   return total === 1 ? "1 record" : `${total} records`;
 }
 
+/** What a record of a Loop closed without a plan says in place of a QA result: it had no QA. */
+function ClosedWithoutPlan() {
+  return <Badge tone="brand">Closed without a plan</Badge>;
+}
+
 export function HistoryPage() {
   const { boardId = "" } = useParams();
   const boardQuery = useBoard(boardId);
@@ -114,9 +119,13 @@ export function HistoryPage() {
                 <Badge tone={record.source_kind === "native" ? "success" : "warning"}>
                   {record.source_kind === "native" ? "completed" : "imported legacy"}
                 </Badge>
-                <Badge tone={record.qa_status === "accepted" ? "success" : "neutral"}>
-                  QA {record.qa_status}
-                </Badge>
+                {record.without_plan ? (
+                  <ClosedWithoutPlan />
+                ) : (
+                  <Badge tone={record.qa_status === "accepted" ? "success" : "neutral"}>
+                    QA {record.qa_status}
+                  </Badge>
+                )}
                 <span className="ml-auto text-xs text-[var(--muted-foreground)]">
                   {new Date(
                     record.completed_at ?? record.imported_at ?? record.created_at,
@@ -184,7 +193,7 @@ function HistoryRecordDialog({
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
               <span className="font-mono">{record.loop_key ?? "imported"}</span>
-              <span>QA {record.qa_status}</span>
+              {record.without_plan ? <ClosedWithoutPlan /> : <span>QA {record.qa_status}</span>}
               <span>hash {record.content_hash.slice(0, 12)}…</span>
             </div>
             {record.warnings.length > 0 ? (

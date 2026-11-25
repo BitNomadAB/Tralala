@@ -125,6 +125,8 @@ export interface HistorySummary {
   content_hash: string;
   warnings: string[];
   label: string;
+  /** The Loop was closed without a plan, in one decision and with no QA (`qa_status` `not_run`). */
+  without_plan: boolean;
 }
 
 export interface HistoryDetail extends HistorySummary {

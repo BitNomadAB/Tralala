@@ -192,7 +192,8 @@ export const loopWorkflowApi = {
     payload: {
       version: number;
       accepted: boolean;
-      qa_status: "not_tested" | "tested_with_issues" | "passed";
+      /** Not read for a Loop without a plan, which has no QA; the server's default is not_tested. */
+      qa_status?: "not_tested" | "tested_with_issues" | "passed";
       attestation?: Record<string, string>;
       note?: string;
       /** Accept although delivery Tickets are not completed; each then reads `not_done`. */
