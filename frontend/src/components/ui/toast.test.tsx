@@ -63,12 +63,12 @@ function Pusher({ onUndo, numbered }: { onUndo: () => void; numbered: boolean })
 
 function renderToasts(numbered = false) {
   const onUndo = vi.fn<() => void>();
-  render(
+  const { container } = render(
     <ToastProvider>
       <Pusher onUndo={onUndo} numbered={numbered} />
     </ToastProvider>,
   );
-  return { onUndo };
+  return { onUndo, container };
 }
 
 function list(live: "polite" | "assertive"): HTMLElement {
@@ -213,6 +213,20 @@ describe("a toast's buttons", () => {
     await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
     expect(screen.queryByText("Could not save")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Edit Ticket" })).toBeInTheDocument();
+  });
+});
+
+describe("where the toasts are drawn", () => {
+  it("is the body, beside the app, so no dialog's backdrop covers a toast", () => {
+    // The app's root is a stacking context under every dialog (index.css); inside it a toast
+    // pushed while a dialog is open would be dimmed away. jsdom lays nothing out, so this holds
+    // the place in the document that the stacking follows from.
+    const { container } = renderToasts();
+    press("Fail");
+    expect(container).not.toContainElement(list("assertive"));
+    expect(container).not.toContainElement(list("polite"));
+    expect(list("assertive").parentElement?.parentElement).toBe(document.body);
+    expect(list("assertive").parentElement).toHaveClass("fixed", "z-[60]");
   });
 });
 
