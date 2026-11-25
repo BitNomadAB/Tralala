@@ -1,5 +1,5 @@
 import { CircleCheck } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { StateChip } from "@/components/ui/chip";
 import { Field, Select, Textarea } from "@/components/ui/input";
@@ -26,7 +26,7 @@ export const WAIT_REASON_FIRST = "Write why it waits first.";
  *
  * Each change says what it did ("Wait saved", "Wait cleared") and hands the focus on (WCAG 2.4.3):
  * a saved wait to its Clear the wait, a cleared one to Mark as waiting…, a cancelled form back to
- * whatever opened it.
+ * whatever opened it. `holdUps` is drawn right under the state: what holds a blocked Ticket up.
  */
 export function TicketState({
   boardId,
@@ -34,6 +34,7 @@ export function TicketState({
   card,
   readOnly,
   onChanged,
+  holdUps,
   waitOpen,
   onWaitOpenChange,
   onConfirm,
@@ -45,6 +46,8 @@ export function TicketState({
   card: Card;
   readOnly: boolean;
   onChanged: () => void;
+  /** The Tickets that hold this one up, with their buttons (`TicketHoldUps`). */
+  holdUps?: ReactNode;
   /** Whether the wait form is open; the head's Mark as waiting opens it too. */
   waitOpen: boolean;
   onWaitOpenChange: (open: boolean) => void;
@@ -91,6 +94,8 @@ export function TicketState({
           </span>
         </span>
       ) : null}
+
+      {holdUps}
 
       {waiting ? (
         <CurrentWait card={card} pending={work.pending} onClear={() => void clear()} />

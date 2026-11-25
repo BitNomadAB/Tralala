@@ -38,6 +38,11 @@ Worth knowing when you look at the dashboard:
   **Refresh** in the top bar reads any page again without reloading it. An open Ticket and the
   planning documents are not replaced under you; the Plan tab says when its documents have changed
   and shows the latest when asked.
+- **A blocked Ticket shows what holds it up, with a button for each.** A Ticket that waited for
+  earlier work read **Blocked** and named a key; the earlier Ticket had to be found and opened to
+  take the block away, and a person's task left unconfirmed in the last column held the rest of the
+  plan that way. The Ticket's rail now lists every open Ticket in its way under **Held up by**, each
+  with a link and the one step it needs: **Confirm**, **Complete**, **Clear wait** or **Restore**.
 - **A key reports on a Ticket before it takes another one.** An API key that moved an open Ticket,
   left it outside the first column and has not commented on it or set a wait on it since is refused
   its next move of another Ticket on that board with `409 report_required`, which names those

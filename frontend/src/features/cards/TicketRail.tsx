@@ -6,6 +6,7 @@ import { SelectMenu } from "@/components/ui/select-menu";
 import type { BoardList, BoardPerson, Card, Label, LoopReadiness } from "@/lib/types";
 import { NoReportLine } from "./NoReport";
 import { TicketFacts } from "./TicketFacts";
+import { TicketHoldUps } from "./TicketHoldUps";
 import { columnsInOrder, completeBlocked } from "./ticketRules";
 import { TicketState } from "./TicketState";
 import { NOT_YET } from "./ticketWork";
@@ -19,8 +20,9 @@ const MORE_BUTTON =
   "h-auto justify-start rounded border-0 px-0 py-0 text-left text-[13px] font-normal text-[var(--muted-foreground)] hover:bg-transparent hover:text-[var(--foreground)]";
 
 /**
- * The rail beside the Ticket: its column as a menu with each column's count, where it stands,
- * the Details, and More (checklists, Copy link, Move to another Loop, Archive).
+ * The rail beside the Ticket: its column as a menu with each column's count, where it stands (with
+ * what holds a blocked Ticket up and the button that takes each of those away), the Details, and
+ * More (checklists, Copy link, Move to another Loop, Archive).
  */
 export function TicketRail({
   level,
@@ -37,6 +39,8 @@ export function TicketRail({
   waitOpen,
   onWaitOpenChange,
   onConfirm,
+  ticketLink,
+  afterUnblock,
   checklists,
   onCopyLink,
 }: {
@@ -56,6 +60,10 @@ export function TicketRail({
   onWaitOpenChange: (open: boolean) => void;
   /** A person's confirmation of a human-only Ticket. */
   onConfirm: () => void;
+  /** Where another Ticket of this Loop opens: in the dialog, or on its own page. */
+  ticketLink: (cardId: string) => string;
+  /** What takes the focus once nothing holds the Ticket up any more: its own decision. */
+  afterUnblock: () => HTMLElement | null;
   checklists: ReactNode;
   onCopyLink: () => void;
 }) {
@@ -86,6 +94,18 @@ export function TicketRail({
           card={card}
           readOnly={readOnly}
           onChanged={refresh}
+          holdUps={
+            readOnly || card.completed_at !== null ? null : (
+              <TicketHoldUps
+                boardId={boardId}
+                loopId={loopId}
+                card={card}
+                ticketLink={ticketLink}
+                afterLast={afterUnblock}
+                onChanged={refresh}
+              />
+            )
+          }
           waitOpen={waitOpen}
           onWaitOpenChange={onWaitOpenChange}
           onConfirm={onConfirm}
