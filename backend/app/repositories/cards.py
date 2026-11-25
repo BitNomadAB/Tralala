@@ -156,6 +156,17 @@ class CardRepository(Protocol):
         ``waiting_set_by``; a completed card is not taken at all."""
         ...
 
+    def unreported_since(self, card_ids: Sequence[str]) -> dict[str, str | None]:
+        """For each card, the earliest ``taken_at`` of the keys that took it and have not reported
+        on it since, else ``None``; every requested id is a key.
+
+        ``unreported_by``'s rules, applied to every key at once: a key is an actor whose
+        ``card.moved`` on the card was logged with ``actor_type`` ``agent`` (only the REST move and
+        ``move_ticket`` move a card, and Tralala's own role agents never do), each key's
+        ``taken_at`` is its own first move and only its own comment or ``card.wait_set`` reports.
+        A person's move never marks a card."""
+        ...
+
     def positions(self, list_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:
         """``(id, position)`` of the list's unarchived cards in display order, minus ``exclude``."""
         ...

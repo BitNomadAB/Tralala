@@ -67,7 +67,20 @@ test.describe("agent access", () => {
     expect((await forbidden.json()).error.code).toBe("forbidden");
 
     await page.reload();
-    await expect(cardTile(page, "Done", "Agent-created task")).toBeVisible();
+    const tile = cardTile(page, "Done", "Agent-created task");
+    await expect(tile).toBeVisible();
+    // The key took the card (Done is not the first column) and has not reported on it since.
+    await expect(tile.getByText("No report", { exact: true })).toBeVisible();
+
+    // A comment by the same key is its report: the card no longer says No report.
+    const commented = await agent.post(
+      `/api/v1/boards/${boardId}/loops/${loopId}/cards/${card.id}/comments`,
+      { data: { content: "Moved it to Done; nothing else was needed." } },
+    );
+    expect(commented.status()).toBe(201);
+    await page.reload();
+    await expect(tile).toBeVisible();
+    await expect(tile.getByText("No report", { exact: true })).toHaveCount(0);
 
     await loopAction(page, "Board activity");
     const activity = page.getByRole("complementary", { name: "Board activity" });

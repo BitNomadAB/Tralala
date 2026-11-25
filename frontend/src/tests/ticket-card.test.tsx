@@ -5,7 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TicketCard } from "@/features/loops/TicketCard";
 import type { Card, TicketFace } from "@/lib/types";
+import { formatDate } from "@/lib/utils";
 import { ticketCard } from "./msw/cards";
+
+/** When a key took the Ticket, and what the mark says counts as a report. */
+const TAKEN = "2026-11-25T10:00:00Z";
+const REPORT = "A comment, a wait or a completion is a report.";
 
 const FACE: TicketFace = {
   summary: "Sessions end after 30 idle minutes.",
@@ -140,6 +145,29 @@ describe("the Kanban card", () => {
     expect(unplanned).toHaveTextContent(
       "Unplanned: Added outside the plan; it never blocks the plan or the Loop's completion",
     );
+  });
+
+  it("says No report in words while a key that took it has not reported, with when and why", () => {
+    renderCard(ticketCard({ list_id: "list-2", unreported_since: TAKEN }));
+    const reason = `Taken by a key on ${formatDate(TAKEN)}. ${REPORT}`;
+    const mark = screen.getByText("No report", { exact: true }).parentElement;
+    expect(mark).toHaveClass("rounded-full", "border");
+    expect(mark).toHaveAttribute("title", reason);
+    // What the hover says is in the text for a screen reader too; the dot only repeats the word.
+    expect(mark).toHaveTextContent(`No report: ${reason}`);
+    expect(screen.getByText(`: ${reason}`)).toHaveClass("sr-only");
+  });
+
+  it.each([
+    ["nothing is owed", ticketCard({ list_id: "list-2" })],
+    [
+      "the Ticket is completed",
+      ticketCard({ unreported_since: TAKEN, completed_at: "2026-11-25T11:00:00Z", state: null }),
+    ],
+  ])("shows no No report when %s", (_, card) => {
+    renderCard(card);
+    expect(screen.queryByText("No report", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/^Taken by a key/)).not.toBeInTheDocument();
   });
 
   it("marks a completed Ticket done, without a state", () => {

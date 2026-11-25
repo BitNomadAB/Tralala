@@ -14,7 +14,9 @@ A key (an issued API token, which is an actor of its own) reports before it take
 ``move`` refuses it a Ticket while another Ticket it took has no comment, wait or completion from it
 since (``409 report_required``, naming them). Moving that same Ticket, or putting a Ticket back in
 the Loop's first column, is never refused, and neither is a person or an internal role agent, which
-has no credential. ``unreported`` is the same read for the worker tools.
+has no credential. ``unreported`` is the same read for the worker tools. Every Ticket the service
+answers carries ``unreported_since``, read for all of them at once, so the board marks a Ticket a
+key took and has not reported on, the last one of a working session included.
 
 The JSON shapes live in ``cards_views`` and the inserting and editing writes in ``cards_writes``;
 this module keeps the service, its checks and guards, and re-exports what callers import from it.
@@ -154,6 +156,8 @@ class CardService:
         ids = [row.id for row in rows]
         labels = repos.cards.labels(ids)
         counts = repos.cards.counts(ids)
+        # One read for every listed card: when a key took each one and has not reported since.
+        unreported = repos.cards.unreported_since(ids)
         readiness: dict[str, ReadinessItem] = {}
         if loop.current_plan_id:
             for item in self.plans.readiness(repos, loop)["items"]:
@@ -168,6 +172,7 @@ class CardService:
                 counts[row.id],
                 readiness.get(row.id),
                 loop_closed=closed,
+                unreported_since=unreported[row.id],
             )
             for row in rows
         ]

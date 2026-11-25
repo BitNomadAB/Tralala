@@ -81,6 +81,9 @@ class CardEntry(CardRecord):
     phase_number: int | None
     state: TicketState | None
     needs_person: bool
+    unreported_since: str | None
+    """The first move of the earliest key that took the Ticket and has not reported on it since,
+    else ``None`` (``CardRepository.unreported_since``); derived on every read, never stored."""
     # The card route adds these when the request asks for them (``?include=``).
     checklists: NotRequired[list[ChecklistEntry]]
     comments: NotRequired[list[CommentEntry]]
@@ -175,9 +178,11 @@ def card_entry(
     item: ReadinessItem | None,
     *,
     loop_closed: bool,
+    unreported_since: str | None = None,
 ) -> CardEntry:
-    """A Ticket's JSON; ``item`` is its planned Ticket's readiness, if the plan has one, and
-    ``loop_closed`` whether its Loop was completed or cancelled."""
+    """A Ticket's JSON; ``item`` is its planned Ticket's readiness, if the plan has one,
+    ``loop_closed`` whether its Loop was completed or cancelled and ``unreported_since`` when a key
+    that has not reported on it since took it."""
     if item is not None:
         human_action_required = bool(item["human_action_required"])
     else:
@@ -205,6 +210,7 @@ def card_entry(
         "phase_number": item["phase_number"] if item is not None else None,
         "state": state,
         "needs_person": needs_person(state, human_action_required=human_action_required),
+        "unreported_since": unreported_since,
     }
 
 

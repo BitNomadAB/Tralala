@@ -1,5 +1,6 @@
 """CardService's rules on an in-memory board: ownership, versions, plan scope, completion gates,
-labels, assignees, ordering, the lists, the replayed keys and a key's report before its next move.
+labels, assignees, ordering, the lists, the replayed keys, a key's report before its next move and
+the mark a Ticket answers while a key that took it has not reported.
 
 The service runs its real code; the repositories, both units of work, the registry checks, the plan
 views, the clock and the id source are the typed fakes in ``tests/unit/fakes``.
@@ -9,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -34,6 +36,7 @@ from tests.unit.fakes.board import (
     BoardState,
     FakeBoardChecks,
     FakeBoardUnitOfWork,
+    FakeCardRepository,
     activity_row,
     card_row,
     comment_row,
@@ -162,7 +165,7 @@ def test_an_entry_is_the_row_its_labels_counts_and_readiness_in_the_former_key_o
     }
     entry = w.service.get(BOARD_ID, LOOP, "c")
     assert list(entry)[:2] == ["id", "list_id"]
-    assert list(entry)[-19:] == [
+    assert list(entry)[-20:] == [
         "workplace",
         "waiting_for",
         "waiting_reason",
@@ -182,6 +185,7 @@ def test_an_entry_is_the_row_its_labels_counts_and_readiness_in_the_former_key_o
         "phase_number",
         "state",
         "needs_person",
+        "unreported_since",
     ]
     assert entry["labels"] == [
         {"id": "bug", "name": "Bug", "color": "#ff0000"},
@@ -1047,3 +1051,47 @@ def test_unreported_names_a_keys_tickets_oldest_first_and_checks_the_board(
     w.checks.unregistered = frozenset({BOARD_ID})
     with pytest.raises(NotFound):
         w.service.unreported(BOARD_ID, HUMAN)
+
+
+# --- the mark on the board: when a key took a Ticket it has not reported on -----------------------
+
+
+def record_unreported_reads(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """The card ids of each ``unreported_since`` read the service makes, in call order."""
+    asked: list[list[str]] = []
+    read = FakeCardRepository.unreported_since
+
+    def recorded(self: FakeCardRepository, card_ids: Sequence[str]) -> dict[str, str | None]:
+        asked.append(list(card_ids))
+        return read(self, card_ids)
+
+    monkeypatch.setattr(FakeCardRepository, "unreported_since", recorded)
+    return asked
+
+
+def test_get_and_list_answer_when_a_key_took_a_ticket_with_one_read_per_listing(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w = taken(settings)
+    asked = record_unreported_reads(monkeypatch)
+    assert w.service.get(BOARD_ID, LOOP, "a")["unreported_since"] == STAMP
+    entries, _ = w.service.list(BOARD_ID, LOOP)
+    assert {entry["id"]: entry["unreported_since"] for entry in entries} == {
+        "a": STAMP,
+        "b": None,
+        "c": None,
+    }
+    # One read for the Ticket, and one for all the listed Tickets, never one per Ticket.
+    assert asked == [["a"], [entry["id"] for entry in entries]]
+    # The key's comment is its report: the next read answers no mark.
+    w.state.comments["m"] = comment_row("m", "a", actor_id=KEY.actor_id, created_at=STAMP)
+    assert w.service.get(BOARD_ID, LOOP, "a")["unreported_since"] is None
+
+
+def test_a_keys_move_answers_the_mark_and_a_persons_move_does_not(settings: Settings) -> None:
+    w = taken(settings, by=HUMAN)
+    assert w.service.get(BOARD_ID, LOOP, "a")["unreported_since"] is None
+    assert take(w, KEY, "b")["unreported_since"] == STAMP
+    # The Ticket the key completes is no longer marked; a completion is a report.
+    done = w.service.update(KEY, BOARD_ID, LOOP, "b", CardUpdate(version=2, completed=True))
+    assert done["unreported_since"] is None
