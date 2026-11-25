@@ -64,6 +64,7 @@ from app.repositories.cards import (
     CardRepository,
     CardSort,
     TicketProgress,
+    UnreportedTicket,
 )
 from app.repositories.checklists import (
     ChecklistItemChanges,
@@ -363,6 +364,50 @@ def card_row(
         waiting_set_at=None,
         waiting_set_by=None,
         face="",
+    )
+
+
+def activity_row(
+    entry_id: str,
+    action: str,
+    entity_id: str,
+    *,
+    actor_id: str,
+    actor_type: str = "agent",
+    entity_type: str = "card",
+    timestamp: str = CREATED,
+    changes_json: str = "{}",
+) -> ActivityLogRow:
+    """An activity entry; by default one about a card, as ``log_card`` writes it."""
+    return ActivityLogRow(
+        id=entry_id,
+        actor_id=actor_id,
+        actor_type=actor_type,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        request_id=None,
+        timestamp=timestamp,
+        changes_json=changes_json,
+    )
+
+
+def comment_row(
+    comment_id: str,
+    card_id: str,
+    *,
+    actor_id: str,
+    content: str = "A comment.",
+    created_at: str = CREATED,
+) -> CommentsRow:
+    """A comment as it was written: ``updated_at`` is ``created_at``."""
+    return CommentsRow(
+        id=comment_id,
+        card_id=card_id,
+        actor_id=actor_id,
+        content=content,
+        created_at=created_at,
+        updated_at=created_at,
     )
 
 
@@ -1340,6 +1385,66 @@ def _sort_value(card: CardsRow, sort: CardSort) -> tuple[int, int | str]:
             return (0, "") if card.due_at is None else (1, card.due_at)
 
 
+def _first_list(state: BoardState, loop_id: str) -> ListsRow | None:
+    """The Loop's first unarchived list by position and id, as ``_ACTIVE_FOR_LOOP`` orders them."""
+    rows = [
+        row for row in state.lists.values() if row.loop_id == loop_id and row.archived_at is None
+    ]
+    return min(rows, key=_display_order, default=None)
+
+
+def _logged_on_card(state: BoardState, card_id: str, action: str, actor_id: str) -> list[str]:
+    """When ``actor_id`` logged ``action`` on the card: the ``timestamp`` of each entry."""
+    return [
+        entry.timestamp
+        for entry in state.activity
+        if (entry.entity_type, entry.entity_id, entry.action, entry.actor_id)
+        == ("card", card_id, action, actor_id)
+    ]
+
+
+def _reported_since(state: BoardState, card_id: str, actor_id: str, taken_at: str) -> bool:
+    """The two ``NOT EXISTS``: the actor's comment, or a wait it set, at ``taken_at`` or later."""
+    commented = any(
+        row.card_id == card_id and row.actor_id == actor_id and row.created_at >= taken_at
+        for row in state.comments.values()
+    )
+    waits = _logged_on_card(state, card_id, "card.wait_set", actor_id)
+    return commented or any(timestamp >= taken_at for timestamp in waits)
+
+
+def _takeable_loop(state: BoardState, card: CardsRow) -> LoopsRow | None:
+    """The card's Loop when a move can have taken the card, else None: the ``WHERE`` that
+    ``_UNREPORTED_BY`` and ``_UNREPORTED_SINCE`` share, without the activity log."""
+    loop = state.loops.get(card.loop_id)
+    if loop is None or card.completed_at is not None or card.archived_at is not None:
+        return None
+    if (loop.completed_at, loop.archived_at, loop.cancelled_at) != (None, None, None):
+        return None
+    first = _first_list(state, card.loop_id)
+    if first is not None and card.list_id == first.id:  # c.list_id IS NOT (first list)
+        return None
+    return loop
+
+
+def _first_key_moves(state: BoardState, card_id: str) -> dict[str, str]:
+    """Each key's first ``card.moved`` on the card, by actor id: the ``taken`` rows of
+    ``_UNREPORTED_SINCE`` (``actor_type = 'agent'``, ``GROUP BY c.id, a.actor_id``, ``MIN``)."""
+    first: dict[str, str] = {}
+    for entry in state.activity:
+        if (entry.entity_type, entry.entity_id, entry.action, entry.actor_type) != (
+            "card",
+            card_id,
+            "card.moved",
+            "agent",
+        ):
+            continue
+        known = first.get(entry.actor_id)
+        if known is None or entry.timestamp < known:  # text, compared as SQLite's BINARY does
+            first[entry.actor_id] = entry.timestamp
+    return first
+
+
 class FakeCardRepository:
     def __init__(self, state: BoardState) -> None:
         self._state = state
@@ -1421,6 +1526,46 @@ class FakeCardRepository:
             )
         )
         return found[:limit]
+
+    def unreported_by(self, actor_id: str) -> list[UnreportedTicket]:
+        state = self._state
+        found: list[UnreportedTicket] = []
+        for card in state.cards.values():
+            loop = _takeable_loop(state, card)
+            if loop is None:
+                continue
+            moves = _logged_on_card(state, card.id, "card.moved", actor_id)
+            if not moves:  # the inner JOIN activity_log: no move by the actor, no row
+                continue
+            taken_at = min(moves)  # MIN(a.timestamp): text, compared as SQLite's BINARY does
+            if _reported_since(state, card.id, actor_id, taken_at):
+                continue
+            found.append(
+                UnreportedTicket(
+                    card=card,
+                    loop_id=card.loop_id,
+                    loop_key=loop.key,
+                    loop_name=loop.name,
+                    taken_at=taken_at,
+                )
+            )
+        found.sort(key=lambda ticket: (ticket.taken_at, ticket.card.id))
+        return found
+
+    def unreported_since(self, card_ids: Sequence[str]) -> dict[str, str | None]:
+        state = self._state
+        found: dict[str, str | None] = dict.fromkeys(card_ids, None)
+        for card_id in found:
+            card = state.cards.get(card_id)  # an unknown id: no row, so None
+            if card is None or _takeable_loop(state, card) is None:
+                continue
+            owed = [
+                taken_at
+                for actor_id, taken_at in _first_key_moves(state, card_id).items()
+                if not _reported_since(state, card_id, actor_id, taken_at)
+            ]
+            found[card_id] = min(owed, default=None)  # the outer MIN(t.taken_at)
+        return found
 
     def positions(self, list_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:
         found = [

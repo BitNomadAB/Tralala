@@ -39,8 +39,9 @@ Error codes: `unauthorized`, `invalid_credentials`, `invalid_session`, `invalid_
 `loop_not_found`,
 `loop_required`, `loop_mismatch`, `loop_read_only`, `document_stale`, `approval_required`,
 `human_action_required`, `invalid_dependency_graph`, `ticket_blocked`, `ticket_waiting`,
-`ticket_completed`, `plan_change_required`, `instructions_required`, `instructions_changed`,
-`generation_input_changed`, `generation_unavailable`, `generation_in_progress`, `qa_incomplete`.
+`ticket_completed`, `report_required`, `plan_change_required`, `instructions_required`,
+`instructions_changed`, `generation_input_changed`, `generation_unavailable`,
+`generation_in_progress`, `qa_incomplete`.
 
 Human-only decisions (analysis approval, RoadMap approval, confirming a human-only Ticket,
 clearing a Ticket's wait, accepting QA and finalizing a Loop) reject agent tokens with `403 human_action_required` even when
@@ -936,6 +937,16 @@ A person owns every Ticket; nothing here names who does it. A Ticket answers:
   cancelled, a Ticket that was never completed is `not_done`, whatever it waited for: the Loop is
   read-only, so nobody starts it, it waits for nobody and it never counts as done.
 - `needs_person`: `state` `needs_input`, or `ready` with `human_action_required`.
+- `unreported_since`, computed on every read and never stored: when a key (an API token) took the
+  Ticket and has not reported on it since, the time of that key's first move (the earliest, when
+  several keys have); `null` otherwise, and always once the Ticket is completed. Taken and reported
+  mean what they mean for `409 report_required` (under Cards below): the key moved the open Ticket
+  and left it outside its Loop's first column in an open Loop, and its own comment or wait, at or
+  after its first move, is its report. A person's move never sets it, and a Ticket a revoked key
+  took stays marked until a person completes it, archives it or puts it back in the first column.
+  The Loop's card list, a card read and every card write answer it, read once for all the Tickets
+  of an answer; the board-wide Ticket list and the search answer `null`. The Kanban card shows it as
+  *No report*, the Ticket view as "No report since" the date and time.
 
 | Method | Path | Scope |
 | --- | --- | --- |
@@ -984,9 +995,38 @@ lists render without a cross-database join; every change is written to the activ
 | POST | `/boards/{board_id}/loops/{loop_id}/cards/bulk` (`{"cards": [...]}`, max 100, partial failures, `Idempotency-Key`) | `cards:write` |
 | GET | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}?include=checklists,comments` | `cards:read` |
 | PATCH | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}` (requires `version`) | `cards:write` |
-| POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/move` (`version`, `list_id`, `position`) | `cards:write` |
+| POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/move` (`version`, `list_id`, `position`) | `cards:write`; a key that has not reported on a Ticket it took is refused another one (`409 report_required`, below) |
 | POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/archive` | `cards:write` |
 | POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/restore` | `cards:write` |
+
+A key (an API token) reports on a Ticket before it takes another one. A key has taken a Ticket when
+it has moved it and the Ticket is still open (neither completed nor archived), in an open Loop and
+outside its Loop's first column. Its report is a comment it wrote on the Ticket or a wait it set on
+it, at or after its first move; a completed Ticket needs none. While such a Ticket on the board has
+no report, the key's move of any other Ticket answers `409 report_required` and changes nothing:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "report_required",
+    "message": "Report on the Tickets you took before you take another one",
+    "retryable": false,
+    "details": {
+      "tickets": [
+        { "id": "…", "key": "AC004-DA02-003", "title": "…", "loop_id": "…", "loop_key": "AC004", "taken_at": "2026-11-25T20:35:03Z" }
+      ],
+      "report": "A comment, a wait or a completion on the Ticket since you took it"
+    }
+  },
+  "request_id": "…"
+}
+```
+
+`taken_at` is when the key first moved that Ticket. Moving the same Ticket again, to any column, is
+never refused, and neither is a move to the Loop's first column, which puts work back. A signed-in
+person is never refused, and Tralala's own agents never move a Ticket. Each key is its own: another
+key's Tickets never hold it back, and sessions that share one key share its Tickets.
 
 ### Labels, checklists, comments
 
@@ -1063,7 +1103,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `write_ticket_summaries` | `cards:write` | Write up to 100 Ticket summaries; each is a versioned edit that reads the version itself and retries once on a race, and each Ticket answers `written` or its refusal |
 | `set_ticket_wait` | `cards:write` | Say what an open Ticket that waits for nothing now waits for (`decision`, `information`, `access` or `third_party`) and why (`reason`); the version is read for the caller. Clearing or replacing a wait is a person's act and never a tool |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
-| `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race |
+| `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race. A key that has not reported on another Ticket it took is refused with `409 report_required` naming those Tickets, as the move route is, and the refusal is never retried |
 | `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, or to a Loop without a plan, where the first one starts the fast track ([A Loop without a plan](#a-loop-without-a-plan)); in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, face (`why`, `if_skipped`, `pros`, `cons`, `steps`; any one given checks the whole face, `422 face_invalid`), `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket, in a completed, archived or cancelled Loop too (a later Loop can point back at the work it replaced); only an archived board refuses it (`409 board_archived`) |
 | `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id`. A completed, archived or cancelled Loop refuses the call whole (`409 loop_read_only`, nothing written) |

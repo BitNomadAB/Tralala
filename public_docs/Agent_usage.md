@@ -99,7 +99,7 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | --- | --- | --- |
 | `whoami` | `boards:read` | your key, when it expires, what your scopes open, what you lack and what only a person decides |
 | `list_boards` | `boards:read` | the boards you may read, by name, with status and Loop count: the way in |
-| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked, not done) |
+| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked, not done); `unreported` names the Tickets you took and have not reported on |
 | `read_board` | `boards:read`, `loops:read` | a board's Loops by id and key, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | a Loop's overview (by id or key): documents' state and size, Phases, columns, unplanned Tickets, newest notes |
 | `read_document` | `loops:read` | one document's text a page at a time, or the technical analysis and RoadMap as an outline |
@@ -107,11 +107,11 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | `list_attachments` | `cards:read` | every file attached to a Ticket, newest first; `text` says whether `read_attachment` can read it |
 | `read_attachment` | `cards:read` | a `.txt`, `.md` or `.json` file as text, a page at a time; for any other file, the route that downloads it |
 | `search_tickets` | `cards:read` | find Tickets by words: in one Loop, a board's open Loops or every active board |
-| `list_tickets` | `cards:read`, `loops:read` | which Tickets there are and where they stand, never their text; filter by column, `assignee: me`, Phase, `state`, `workplace`, `needs_person` and more |
+| `list_tickets` | `cards:read`, `loops:read` | which Tickets there are and where they stand, never their text; filter by column, `assignee: me`, Phase, `state`, `workplace`, `needs_person` and more; `unreported` names the Tickets you took and have not reported on, whatever the filters |
 | `write_ticket_summaries` | `cards:write` | write the short summaries `read_ticket` shows first, up to 100 at a time |
 | `set_ticket_wait` | `cards:write` | say what a Ticket waits for (a decision, information, access or a third party) and why; a person clears it |
 | `assign_ticket` | `cards:write` | set or clear the person who owns a Ticket |
-| `move_ticket` | `cards:write` | move a Ticket to another column of its Loop (version-checked) |
+| `move_ticket` | `cards:write` | move a Ticket to another column of its Loop (version-checked); refused with `409 report_required` while another Ticket you took has no report from you (a comment, a wait or a completion) |
 | `create_ticket` | `cards:write`, `comments:write` | add a follow-up outside the plan while the Loop executes, or a Ticket to a Loop without a plan; keyed `<LoopKey>-UNP-<nnn>`, optionally with its face |
 | `comment_ticket` | `comments:write` | add a comment, done or not, in a completed Loop too: progress, findings, a blocker, the Loop that replaced it |
 | `complete_ticket` | `cards:write`, `comments:write` | finish a Ticket: your summary and evidence as a comment, then completed |
@@ -446,6 +446,16 @@ Ticket still open then reads `not_done`.
   `set_ticket_wait` and `write_ticket_summaries` read the version for you, and all but
   `assign_ticket` retry once on a race; a `409 version_conflict` you still
   get means someone else changed the Ticket — re-read rather than retrying blindly.
+- A key reports on a Ticket it took before it takes another one. A Ticket you moved is taken while
+  it is open, in an open Loop and outside its Loop's first column; your report on it is a comment
+  (`comment_ticket`) or a wait (`set_ticket_wait`) from the same key since you first moved it, and a
+  completed Ticket (`complete_ticket`) needs none. While a taken Ticket has no report, your move of
+  any other Ticket on the board answers `409 report_required`, naming those Tickets, and changes
+  nothing; `move_ticket` never retries it. Moving the same Ticket again, or putting a Ticket back in the first column, is
+  never refused. `loop_summaries` and `list_tickets` name the Tickets you owe a report on under
+  `unreported` (`id`, `key`, `title`, `loop` and `taken_at`), whatever the filters or the page, and
+  their `next_step` asks for those reports first. While one of them is another Ticket than the one
+  you read, `read_ticket` names it there too and leaves `move_ticket` out of `allowed_actions`.
 
 ## 7. The REST API is still there
 

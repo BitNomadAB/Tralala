@@ -5,7 +5,9 @@ is its id, key, title, Loop, column, Phase, owner, state (ready, needs input, bl
 workplace. Filters narrow it (a Loop, a column, an owner, a Phase, the state, the workplace, the
 wait, what needs a person, whether the task is a person's, a label, a priority, a due date, a
 missing or stale summary, words; ``agent_tools_filters``), and a worker reads the one it chose
-with ``read_ticket``, so a list costs the same whatever the Tickets say.
+with ``read_ticket``, so a list costs the same whatever the Tickets say. Whatever the filters and
+the page, ``unreported`` names the Tickets on the board the calling key took and has not reported on
+since (``CardService.unreported``): it is the key's standing on the board, not a choice of rows.
 ``write_ticket_summaries`` writes the short summary ``read_ticket`` and the Ticket dialog show;
 every write is an ordinary versioned Ticket edit through ``CardService.update``.
 
@@ -31,7 +33,15 @@ from .agent_tools_filters import (
     chosen_columns,
     ticket_filters,
 )
-from .agent_tools_read import ToolArguments, ToolResult, _require, _text, _whole_number
+from .agent_tools_read import (
+    ToolArguments,
+    ToolResult,
+    _require,
+    _text,
+    _whole_number,
+    report_first,
+    unreported_rows,
+)
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
@@ -214,6 +224,7 @@ def list_tickets(services: TicketListing, actor: ActorContext, args: ToolArgumen
     page = matched[start : start + limit]
     after = start + len(page)
     echo = filters.echo()
+    unreported = unreported_rows(services.card.unreported(board_id, actor))
     return {
         "board_id": board_id,
         "filters": echo,
@@ -222,14 +233,16 @@ def list_tickets(services: TicketListing, actor: ActorContext, args: ToolArgumen
         "count": len(page),
         "total": len(matched),
         "continue_from": after + 1 if after < len(matched) else None,
-        "next_step": (
+        "unreported": unreported,
+        "next_step": report_first(
+            unreported,
             empty_advice(echo, loop_named=_text(args.get("loop_id")) is not None)
             if not matched
             else (
                 "Choose a Ticket and read it with read_ticket. Narrow the list with a filter "
                 "(column, assignee me, state, workplace, needs_person, phase) rather than reading "
                 "more rows."
-            )
+            ),
         ),
     }
 
@@ -379,7 +392,8 @@ def listing_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                 "who has it. Work for a coding session: workplace codebase, state ready, "
                 "human_action_required false. What needs a person: needs_person true. Choose "
                 "one, then read it with read_ticket. The open Loops' open Tickets unless "
-                "include_completed is true."
+                "include_completed is true. Whatever the filters, unreported names the Tickets on "
+                "the board this key took and has not reported on yet."
             ),
             scopes=("cards:read", "loops:read"),
             input_schema=object_schema(

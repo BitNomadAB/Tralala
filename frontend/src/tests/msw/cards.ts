@@ -60,6 +60,7 @@ export function ticketCard(extra: Partial<CardDetail> = {}): CardDetail {
     waiting_set_by: null,
     state: "ready",
     needs_person: false,
+    unreported_since: null,
     checklists: [],
     comments: [],
     ...extra,

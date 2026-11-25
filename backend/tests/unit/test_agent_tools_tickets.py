@@ -1,7 +1,8 @@
 """``complete_ticket`` on the fakes: the real CardService, CommentService and LoopService on an
 in-memory board, handed to the tool as the attributes ``TicketCompleting`` declares; then which
-Tickets ``read_ticket`` offers it for, the longer comment it writes, and what ``tools/list`` and
-``/llms.txt`` say about it.
+Tickets ``read_ticket`` offers it for, when it leaves ``move_ticket`` out because the key owes a
+report on another Ticket, the longer comment it writes, and what ``tools/list``, the MCP
+instructions and ``/llms.txt`` say about it and about that rule.
 
 The comments keep the service's own clock, so the dedupe window, which counts from the wall clock,
 sees a comment written by this test as seconds old.
@@ -24,6 +25,7 @@ from app.core.errors import ApiError, Conflict, Forbidden, ValidationFailure
 from app.db.generated.board import CommentsRow
 from app.schemas.subresources import CommentCreate
 from app.services.agent_tools import (
+    REPORT_RULE,
     ToolResult,
     allowed_actions,
     comment_ticket,
@@ -31,8 +33,9 @@ from app.services.agent_tools import (
     create_ticket,
     tool_catalog,
 )
+from app.services.agent_tools_read import unreported_besides
 from app.services.agent_tools_tickets import completion_comment
-from app.services.cards import CardService
+from app.services.cards import REPORT_REQUIRED_CODE, CardService
 from app.services.lists import ListService
 from app.services.loops import LoopService
 from app.services.subresources import CommentService
@@ -42,7 +45,9 @@ from tests.unit.fakes.board import (
     BoardState,
     FakeBoardChecks,
     FakeBoardUnitOfWork,
+    activity_row,
     card_row,
+    comment_row,
     list_row,
     loop_row,
 )
@@ -64,6 +69,16 @@ MOVER = ActorContext(
     actor_name="Mover",
     scopes=frozenset({"cards:write"}),
 )
+# An issued key: an agent with a credential, the actor 409 report_required refuses.
+KEY = ActorContext(
+    actor_id="key-1",
+    actor_type="agent",
+    actor_name="Key",
+    scopes=frozenset({"cards:read", "cards:write", "comments:write", "loops:read"}),
+    credential_id="cred-1",
+)
+MOVED = "2026-11-03T09:30:00Z"
+LATER = "2026-11-03T09:45:00Z"
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,6 +474,40 @@ def test_allowed_actions_offer_complete_ticket_only_for_a_ready_open_ticket_of_a
     assert allowed_actions(archived, execution_allowed=True) == ["comment_ticket"]
 
 
+def test_allowed_actions_leave_out_move_ticket_while_the_key_owes_a_report_on_another_ticket(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    ticket = world.card.get(BOARD_ID, LOOP, "t")
+    offered = allowed_actions(ticket, execution_allowed=True)
+    assert "move_ticket" in offered
+    assert allowed_actions(ticket, execution_allowed=True, others_unreported=False) == offered
+    assert allowed_actions(ticket, execution_allowed=True, others_unreported=True) == [
+        action for action in offered if action != "move_ticket"
+    ]
+    # A person's task offers no move either way.
+    human = world.card.get(BOARD_ID, LOOP, "h")
+    assert allowed_actions(
+        human, execution_allowed=True, others_unreported=True
+    ) == allowed_actions(human, execution_allowed=True)
+    # The key moved m to Doing and has not reported on it: what read_ticket answers for t.
+    world.state.activity.append(
+        activity_row("e-1", "card.moved", "m", actor_id=KEY.actor_id, timestamp=MOVED)
+    )
+    owed = world.card.unreported(BOARD_ID, KEY)
+    assert unreported_besides(owed, "t") == [
+        {"id": "m", "key": None, "title": "Card m", "loop": "L-1", "taken_at": MOVED}
+    ]
+    # Reading m itself leaves nothing else: the key moves its own Ticket onward.
+    assert unreported_besides(owed, "m") == []
+    # A person and a role agent without a credential owe nothing, so nothing changes for them.
+    for actor in (KEY.__replace__(actor_type="user", credential_id=None), WORKER):
+        assert unreported_besides(world.card.unreported(BOARD_ID, actor), "t") == []
+    # A comment from the key on m is its report, and t offers move_ticket again.
+    world.state.comments["c-1"] = comment_row("c-1", "m", actor_id=KEY.actor_id, created_at=LATER)
+    assert unreported_besides(world.card.unreported(BOARD_ID, KEY), "t") == []
+
+
 def test_read_ticket_offers_only_comment_ticket_in_a_loop_that_is_read_only(
     settings: Settings,
 ) -> None:
@@ -477,8 +526,14 @@ def test_read_ticket_offers_only_comment_ticket_in_a_loop_that_is_read_only(
         world.state.loops[LOOP] = ended
         assert world.loop.read_only(BOARD_ID, LOOP)
         for card in (open_ticket, done_ticket):
-            offered = allowed_actions(card, execution_allowed=False, loop_read_only=True)
-            assert offered == ["comment_ticket"]
+            for others_unreported in (False, True):
+                offered = allowed_actions(
+                    card,
+                    execution_allowed=False,
+                    loop_read_only=True,
+                    others_unreported=others_unreported,
+                )
+                assert offered == ["comment_ticket"]
 
 
 def test_a_comment_holds_a_completion_summary_not_only_a_title() -> None:
@@ -504,3 +559,20 @@ def test_complete_ticket_is_described_in_tools_list_and_llms_txt(settings: Setti
     assert "only an archived board refuses" in text
     assert "in a completed Loop too" in tool_catalog()["comment_ticket"].description
     assert "complete_ticket" in INSTRUCTIONS
+
+
+def test_move_ticket_the_instructions_and_llms_txt_say_the_report_rule(
+    settings: Settings,
+) -> None:
+    assert f"409 {REPORT_REQUIRED_CODE};" in REPORT_RULE
+    (move,) = [tool for tool in tool_list(KEY) if tool["name"] == "move_ticket"]
+    assert str(move["description"]).endswith(" " + REPORT_RULE)
+    assert REPORT_RULE in INSTRUCTIONS
+    text = render_bootstrap(settings)
+    assert REPORT_RULE in text  # move_ticket's own section
+    working = text.split("### Working a Ticket", 1)[1].split("### Follow-ups", 1)[0]
+    working = " ".join(working.split())
+    assert REPORT_RULE.replace("409 report_required", "`409 report_required`") in working
+    assert "`loop_summaries` and `list_tickets` name the Tickets your key" in working
+    assert "under `unreported`" in working
+    assert "leaves `move_ticket` out of `allowed_actions`" in working

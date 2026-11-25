@@ -11,6 +11,10 @@ is finished). Delivery never waits on an agent: a person owns every Ticket, and 
 ``needs_person``. The documents, the Tickets and the notes themselves are read with ``read_loop``,
 ``list_tickets`` and ``read_document``.
 
+Beside the rows, ``unreported`` names the Tickets on the board the calling key took and has not
+reported on since (``CardService.unreported``), whatever the stage asked for, and ``next_step`` then
+asks for those reports first; it is empty for a person.
+
 A draft is offered both paths: a plan, or a first Ticket that starts the Loop without one. A Loop
 without a plan whose Tickets are all done waits for the person who closes it in one decision.
 
@@ -27,10 +31,18 @@ from typing import TYPE_CHECKING, Final, Literal, Protocol
 from ..core.context import ActorContext
 from ..core.errors import ValidationFailure
 from ..schemas.loops import DOCUMENT_KINDS, LOOP_STAGES
-from .agent_tools_read import ToolArguments, ToolResult, _require, _text
+from .agent_tools_read import (
+    ToolArguments,
+    ToolResult,
+    _require,
+    _text,
+    report_first,
+    unreported_rows,
+)
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
+    from .cards import CardService
     from .lists import ListEntry, ListService
     from .loops import LoopEntry, LoopService
     from .plan_views import LoopReadiness
@@ -50,6 +62,9 @@ class LoopSummarising(Protocol):
 
     @property
     def list(self) -> ListService: ...
+
+    @property
+    def card(self) -> CardService: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,14 +244,17 @@ def loop_summaries(
         )
         for entry in loops
     ]
+    unreported = unreported_rows(services.card.unreported(board_id, actor))
     return {
         "board_id": board_id,
         "loops": rows,
         "count": len(rows),
-        "next_step": (
+        "unreported": unreported,
+        "next_step": report_first(
+            unreported,
             "list_tickets with a loop_id (or key) lists its Tickets, narrowed by column, "
             "assignee me, state or needs_person; read_loop gives one Loop's documents, Phases "
-            "and notes."
+            "and notes.",
         ),
     }
 
@@ -251,8 +269,9 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                 "has to happen next and who it waits for (a person, an agent for a document, "
                 "anyone or nobody), its Tickets by state (ready, needs_input, blocked, not_done, "
                 "completed, total, needs_person) and by column, and each document's state. Open "
-                "Loops unless include_completed is true. without_plan is true for a Loop that "
-                "runs its Tickets without a plan, which a person closes in one decision."
+                "Loops unless include_completed is true. unreported names the Tickets on the "
+                "board this key took and has not reported on yet. without_plan is true for a "
+                "Loop that runs its Tickets without a plan, which a person closes in one decision."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(

@@ -10,12 +10,17 @@ declares and calls the same services as the REST routes.
 The two listing handlers are public and typed on the attributes of the composition root they use
 (``BoardListing``, ``TicketSearching``), so a unit test runs them with the real services on the
 typed fakes; the others still take the whole ``Services``.
+
+A key reports on a Ticket it took before it takes another one (``409 report_required``).
+``loop_summaries``, ``list_tickets`` and ``read_ticket`` show the key the Tickets it owes a report
+on under ``unreported`` (``unreported_rows``), and ``next_step`` asks for the reports first
+(``report_first``); ``REPORT_RULE`` is the rule in the one sentence the worker texts give it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Protocol
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import JsonValue
 
@@ -29,7 +34,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from .attachments import AttachmentEntry
     from .boards import BoardService
     from .card_notes import CardNoteEntry
-    from .cards import CardEntry
+    from .cards import CardEntry, UnreportedEntry
     from .lists import ListEntry, ListService
     from .loops import LoopService
     from .plan_views import Readiness
@@ -46,6 +51,19 @@ SEARCH_LIMIT = 100
 SEARCH_DEFAULT = 25
 # read_ticket names a Ticket's newest files; list_attachments names them all.
 TICKET_ATTACHMENTS = 50
+
+# The rule of 409 report_required in one sentence: move_ticket's description, the MCP instructions
+# and /llms.txt give it in these words.
+REPORT_RULE: Final = (
+    "A key that took another Ticket and has not reported on it since, with a comment, a wait or a "
+    "completion, is refused with 409 report_required; moving a Ticket back to the first column "
+    "never is."
+)
+# What next_step says first while the key has Tickets under unreported.
+REPORT_FIRST: Final = (
+    "Report on each Ticket under unreported with comment_ticket, set_ticket_wait or "
+    "complete_ticket before you move another Ticket."
+)
 
 
 class BoardListing(Protocol):
@@ -107,6 +125,32 @@ def _ticket_location(
 ) -> tuple[str, CardEntry]:
     loop_id, _ = services.card.locate(board_id, card_id)
     return loop_id, services.card.get(board_id, loop_id, card_id)
+
+
+def unreported_rows(entries: Sequence[UnreportedEntry]) -> list[ToolResult]:
+    """The Tickets a key took and has not reported on since, as the worker tools answer them under
+    ``unreported``: id, key, title, the Loop's key and when the key first moved it."""
+    return [
+        {
+            "id": entry["id"],
+            "key": entry["key"],
+            "title": entry["title"],
+            "loop": entry["loop_key"],
+            "taken_at": entry["taken_at"],
+        }
+        for entry in entries
+    ]
+
+
+def unreported_besides(entries: Sequence[UnreportedEntry], card_id: str) -> list[ToolResult]:
+    """What ``read_ticket`` answers under ``unreported``: the Tickets other than ``card_id`` that
+    the key has not reported on, the ones that make its move of this Ticket refused."""
+    return unreported_rows([entry for entry in entries if entry["id"] != card_id])
+
+
+def report_first(unreported: Sequence[ToolResult], advice: str) -> str:
+    """A ``next_step``: ``advice``, after ``REPORT_FIRST`` while ``unreported`` is not empty."""
+    return f"{REPORT_FIRST} {advice}" if unreported else advice
 
 
 # --- handlers ---------------------------------------------------------------
@@ -264,22 +308,28 @@ def _read_board(
 
 
 def allowed_actions(
-    card: CardEntry, *, execution_allowed: bool, loop_read_only: bool = False
+    card: CardEntry,
+    *,
+    execution_allowed: bool,
+    loop_read_only: bool = False,
+    others_unreported: bool = False,
 ) -> list[str]:
     """The tools a worker may call on a Ticket now. ``comment_ticket`` always, done or not, in a
     completed, archived or cancelled Loop too, as the service allows (only an archived board
     refuses it); nothing else in such a Loop; ``set_ticket_wait`` while it is open and waits for
     nothing (clearing a wait is a person's act); ``complete_ticket`` only while the Ticket is ready
     (no blocker, no wait), open and not a person's, and for a planned one only while the Loop
-    executes."""
+    executes. ``move_ticket`` is left out while the key has another Ticket it took and has not
+    reported on (``others_unreported``), which ``409 report_required`` would refuse."""
     if card["archived_at"] or loop_read_only:
         return ["comment_ticket"]
     may_wait = not card["completed_at"] and card["waiting_for"] == "nothing"
     if card["human_action_required"] and not card["completed_at"]:
         return ["comment_ticket", "ask_agents", *(["set_ticket_wait"] if may_wait else [])]
     allowed = ["comment_ticket", "assign_ticket", "move_ticket", "ask_agents"]
-    if card["plan_item_id"] and not card["ready"]:
-        # A planned Ticket waits for its phase entry conditions; a manual one does not.
+    # A planned Ticket waits for its phase entry conditions, a manual one does not; and while the
+    # key owes a report on another Ticket, 409 report_required would refuse the move.
+    if (card["plan_item_id"] and not card["ready"]) or others_unreported:
         allowed.remove("move_ticket")
     if may_wait:
         allowed.append("set_ticket_wait")
@@ -304,10 +354,13 @@ def _read_ticket(
         ),
         None,
     )
+    # Empty for a person and for an actor without a credential, so their answer keeps its shape.
+    unreported = unreported_besides(services.card.unreported(board_id, actor), card_id)
     allowed = allowed_actions(
         card,
         execution_allowed=readiness["execution_allowed"],
         loop_read_only=services.loop.read_only(board_id, loop_id),
+        others_unreported=bool(unreported),
     )
     return {
         "ticket": {
@@ -367,6 +420,8 @@ def _read_ticket(
             "blocked_reason": readiness["blocked_reason"],
         },
         "allowed_actions": allowed,
+        # Why move_ticket is not offered: the other Tickets the key owes a report on.
+        **({"unreported": unreported} if unreported else {}),
     }
 
 
@@ -405,6 +460,8 @@ def ticket_plan(readiness: Readiness, card_id: str) -> ToolResult | None:
 
 __all__ = [
     "BOARD_LIST_LIMIT",
+    "REPORT_FIRST",
+    "REPORT_RULE",
     "SEARCH_DEFAULT",
     "SEARCH_LIMIT",
     "TICKET_ATTACHMENTS",
@@ -422,7 +479,10 @@ __all__ = [
     "allowed_actions",
     "list_boards",
     "person_notes",
+    "report_first",
     "search_tickets",
     "ticket_attachments",
     "ticket_plan",
+    "unreported_besides",
+    "unreported_rows",
 ]

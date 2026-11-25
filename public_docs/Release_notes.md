@@ -55,6 +55,13 @@ Worth knowing when you look at the dashboard:
   **Close Loop** in one decision, with no QA. Board history shows it as **Closed without a plan**
   (`qa_status: not_run`). Nothing is chosen when a Loop is created; an analysis handed in puts the
   Loop on the planned path, and a coding agent may add the Tickets but never close the Loop.
+- **A key reports on a Ticket before it takes another one.** An API key that moved an open Ticket,
+  left it outside the first column and has not commented on it or set a wait on it since is refused
+  its next move of another Ticket on that board with `409 report_required`, which names those
+  Tickets and says what counts as a report; a completed Ticket needs none. Moving the same Ticket again, putting a
+  Ticket back in the first column and anything a signed-in person does are never refused. Tickets a
+  key took before the upgrade count too, so right after upgrading have each key comment on the open
+  Tickets it took and left without a word; only a comment by that same key counts for it.
 - **An open tab reloads itself once after an upgrade.** Each page is downloaded when it is first
   opened, so a tab left open across an upgrade asks for files the new version no longer has. It
   reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it

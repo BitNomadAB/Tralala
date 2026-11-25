@@ -42,6 +42,7 @@ from .agent_tools_plan import (
     write_roadmap,
 )
 from .agent_tools_read import (
+    REPORT_RULE,
     ToolArguments,
     ToolResult,
     _read_board,
@@ -228,7 +229,7 @@ def tool_catalog() -> dict[str, AgentTool]:
             description=(
                 "Move a Ticket to another Kanban column of its Loop. Accepts the column id or "
                 "its name, and reads the Ticket version for you; omit version unless you need "
-                "strict optimistic concurrency."
+                "strict optimistic concurrency. " + REPORT_RULE
             ),
             scopes=("cards:write",),
             input_schema=_object(
@@ -535,6 +536,7 @@ def run_tool(
 
 
 __all__ = [
+    "REPORT_RULE",
     "AgentTool",
     "ArgumentSchema",
     "InputSchema",
