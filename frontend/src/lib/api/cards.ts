@@ -91,7 +91,13 @@ export const cardsApi = {
   async listCards(
     boardId: string,
     loopId: string,
-    params: { list_id?: string | undefined; limit?: number; include_archived?: boolean } = {},
+    params: {
+      list_id?: string | undefined;
+      limit?: number;
+      /** Only completed Tickets (true) or only those that are not (false). */
+      completed?: boolean;
+      include_archived?: boolean;
+    } = {},
   ): Promise<Card[]> {
     const query = new URLSearchParams(
       Object.entries<QueryValue>(params)
