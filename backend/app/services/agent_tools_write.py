@@ -4,13 +4,17 @@ The catalogue in ``agent_tools`` declares each tool's name, description, scopes 
 the handlers here run the entries that write. Each takes ``(services, actor, args)``, opens with the
 ``actor.require`` checks of the scopes its entry declares and calls the same services as the REST
 routes, so authorization, version checks and workflow gates are the ones REST already enforces.
+
+``move_ticket`` is typed on ``TicketMoving``, the attributes of the composition root it uses, so a
+unit test runs it with the real services on the typed fakes. It retries only a version conflict;
+every other refusal of ``CardService.move`` (``409 report_required`` among them) is the answer.
 """
 
 from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import JsonValue
 
@@ -21,7 +25,6 @@ from ..schemas.loops import GenerationRequest, InfoRevisionWrite, LoopCreate
 from .agent_tools_read import (
     ToolArguments,
     ToolResult,
-    _loop_lists,
     _require,
     _text,
     _ticket_location,
@@ -29,11 +32,22 @@ from .agent_tools_read import (
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
-    from .lists import ListEntry
+    from .cards import CardService
+    from .lists import ListEntry, ListService
 
 # A retried call arrives seconds later; a deliberate repeat rarely does. This window is what tells
 # them apart without a shared idempotency store.
 DEDUPE_WINDOW_SECONDS = 300
+
+
+class TicketMoving(Protocol):
+    """What ``move_ticket`` uses of the composition root."""
+
+    @property
+    def card(self) -> CardService: ...
+
+    @property
+    def list(self) -> ListService: ...
 
 
 def _seconds_since(timestamp: str) -> float:
@@ -60,9 +74,11 @@ def _outcome(payload: JsonValue) -> JsonValue:
     raise AttributeError(f"'{type(document).__name__}' object has no attribute 'get'")
 
 
-def _resolve_list(services: Services, board_id: str, loop_id: str, wanted: str) -> ListEntry:
+def _resolve_list(
+    services: TicketMoving, board_id: str, loop_id: str, wanted: str
+) -> ListEntry:
     """Accept a list id or its name, because a model knows columns by name, not by uuid."""
-    available = _loop_lists(services, board_id, loop_id)
+    available = services.list.list(board_id, loop_id)
     for entry in available:
         if entry["id"] == wanted:
             return entry
@@ -115,7 +131,7 @@ def _assign_ticket(
 
 
 def _move_ticket(
-    services: Services, actor: ActorContext, args: ToolArguments
+    services: TicketMoving, actor: ActorContext, args: ToolArguments
 ) -> ToolResult:
     actor.require("cards:write")
     board_id = _require(args, "board_id")
@@ -325,6 +341,7 @@ def _run_roadmap(
 
 __all__ = [
     "DEDUPE_WINDOW_SECONDS",
+    "TicketMoving",
     "_assign_ticket",
     "_create_loop",
     "_move_ticket",

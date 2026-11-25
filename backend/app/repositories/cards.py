@@ -116,6 +116,19 @@ class BoardTicket:
     loop_stage: str
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UnreportedTicket:
+    """A card an actor took and has not reported on since, with the Loop that owns it.
+
+    ``taken_at`` is the time of the actor's first ``card.moved`` on the card."""
+
+    card: CardsRow
+    loop_id: str
+    loop_key: str
+    loop_name: str
+    taken_at: str
+
+
 class CardRepository(Protocol):
     def get(self, card_id: str) -> CardsRow | None: ...
 
@@ -130,6 +143,18 @@ class CardRepository(Protocol):
     def board_tickets(self, *, contains: str | None, limit: int) -> list[BoardTicket]:
         """Unarchived cards of open, unarchived Loops, by Loop sequence, position and id;
         ``contains`` matches the title or the Ticket key."""
+        ...
+
+    def unreported_by(self, actor_id: str) -> list[UnreportedTicket]:
+        """The cards ``actor_id`` has taken and not reported on since, by ``taken_at`` and id.
+
+        Taken: the actor logged a ``card.moved`` on the card, the card is neither completed nor
+        archived, its Loop is neither completed, archived nor cancelled, and the card is not in
+        the Loop's first unarchived list (by position and id); ``taken_at`` is the actor's first
+        move. Reported: the actor wrote a comment on the card, or logged a ``card.wait_set`` on
+        it, at ``taken_at`` or later; times are whole seconds, so a report in the second of the
+        move counts. A wait is read from the log, because clearing it empties the card's
+        ``waiting_set_by``; a completed card is not taken at all."""
         ...
 
     def positions(self, list_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:

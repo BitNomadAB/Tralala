@@ -43,6 +43,13 @@ Worth knowing when you look at the dashboard:
   take the block away, and a person's task left unconfirmed in the last column held the rest of the
   plan that way. The Ticket's rail now lists every open Ticket in its way under **Held up by**, each
   with a link and the one step it needs: **Confirm**, **Complete**, **Clear wait** or **Restore**.
+- **A key reports on a Ticket before it takes another one.** An API key that moved an open Ticket,
+  left it outside the first column and has not commented on it or set a wait on it since is refused
+  its next move of another Ticket on that board with `409 report_required`, which names those
+  Tickets and says what counts as a report; a completed Ticket needs none. Moving the same Ticket again, putting a
+  Ticket back in the first column and anything a signed-in person does are never refused. Tickets a
+  key took before the upgrade count too, so right after upgrading have each key comment on the open
+  Tickets it took and left without a word; only a comment by that same key counts for it.
 - **An open tab reloads itself once after an upgrade.** Each page is downloaded when it is first
   opened, so a tab left open across an upgrade asks for files the new version no longer has. It
   reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it

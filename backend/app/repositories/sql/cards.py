@@ -19,6 +19,7 @@ from ..cards import (
     CardQuery,
     CardSort,
     TicketProgress,
+    UnreportedTicket,
 )
 
 # The join a label filter needs, shared by the card list and the card search.
@@ -110,6 +111,30 @@ _MANUAL = text(
 _PLANNED = text(
     f"SELECT {sql.column_list(CARDS_COLUMNS)} FROM cards"  # noqa: S608 - from CARDS_COLUMNS
     " WHERE loop_id = :id AND plan_item_id IS NOT NULL ORDER BY created_at, id"
+)
+# Neither activity_log nor comments has an index that starts with actor_id, so the statement joins
+# from the cards: their log through idx_activity_entity, their comments through idx_comments_card.
+# taken_at (the first move) is aggregated before the two NOT EXISTS compare against it. The first
+# list is _ACTIVE_FOR_LOOP's first row (lists.py); IS NOT also keeps a card whose Loop has no
+# unarchived list, as the fake does. The JOIN makes c.loop_id the Loop's id.
+_UNREPORTED_BY = text(
+    "WITH taken AS (SELECT c.id AS card_id, MIN(a.timestamp) AS taken_at"  # noqa: S608 - from CARDS_COLUMNS
+    " FROM cards c JOIN loops l ON l.id = c.loop_id"
+    " JOIN activity_log a ON a.entity_type = 'card' AND a.entity_id = c.id"
+    " WHERE a.action = 'card.moved' AND a.actor_id = :actor_id"
+    " AND c.completed_at IS NULL AND c.archived_at IS NULL"
+    " AND l.completed_at IS NULL AND l.archived_at IS NULL AND l.cancelled_at IS NULL"
+    " AND c.list_id IS NOT (SELECT f.id FROM lists f WHERE f.loop_id = c.loop_id"
+    " AND f.archived_at IS NULL ORDER BY f.position, f.id LIMIT 1)"
+    " GROUP BY c.id)"
+    f" SELECT {_CARD_COLUMNS}, l.key AS loop_key, l.name AS loop_name, t.taken_at"
+    " FROM taken t JOIN cards c ON c.id = t.card_id JOIN loops l ON l.id = c.loop_id"
+    " WHERE NOT EXISTS (SELECT 1 FROM comments m WHERE m.card_id = c.id"
+    " AND m.actor_id = :actor_id AND m.created_at >= t.taken_at)"
+    " AND NOT EXISTS (SELECT 1 FROM activity_log w WHERE w.entity_type = 'card'"
+    " AND w.entity_id = c.id AND w.action = 'card.wait_set' AND w.actor_id = :actor_id"
+    " AND w.timestamp >= t.taken_at)"
+    " ORDER BY t.taken_at, c.id"
 )
 _ADDITIONS = text(
     "SELECT c.id AS card_id,"
@@ -266,6 +291,22 @@ class SqlCardRepository:
             )
             for row in self._connection.execute(statement, parameters).mappings()
         ]
+
+    def unreported_by(self, actor_id: str) -> list[UnreportedTicket]:
+        result = self._connection.execute(_UNREPORTED_BY, {"actor_id": actor_id})
+        found: list[UnreportedTicket] = []
+        for row in result.mappings():
+            card = CardsRow.from_mapping(row)
+            found.append(
+                UnreportedTicket(
+                    card=card,
+                    loop_id=card.loop_id,
+                    loop_key=values.text(row, "loop_key"),
+                    loop_name=values.text(row, "loop_name"),
+                    taken_at=values.text(row, "taken_at"),
+                )
+            )
+        return found
 
     def positions(self, list_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:
         if exclude is None:

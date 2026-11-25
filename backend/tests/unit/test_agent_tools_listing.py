@@ -1,6 +1,7 @@
 """``list_tickets`` and ``write_ticket_summaries`` on the fakes: the real CardService, LoopService
 and ListService on an in-memory board, handed to the tools as the attributes ``TicketListing`` and
-``SummaryWriting`` declare; then what ``tools/list`` and ``/llms.txt`` say about them."""
+``SummaryWriting`` declare; which Tickets the key has not reported on; then what ``tools/list`` and
+``/llms.txt`` say about them."""
 
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from app.services.agent_tools import (
     write_ticket_summaries,
 )
 from app.services.agent_tools_listing import empty_advice
+from app.services.agent_tools_read import REPORT_FIRST
 from app.services.cards import CardService
 from app.services.lists import ListService
 from app.services.loops import LoopService
@@ -33,7 +35,9 @@ from tests.unit.fakes.board import (
     BoardState,
     FakeBoardChecks,
     FakeBoardUnitOfWork,
+    activity_row,
     card_row,
+    comment_row,
     list_row,
     loop_row,
 )
@@ -53,6 +57,16 @@ WRITER = ActorContext(
     actor_name="Writer",
     scopes=frozenset({"cards:read", "cards:write", "loops:read"}),
 )
+# An issued key: an agent with a credential, the actor 409 report_required refuses.
+KEY = ActorContext(
+    actor_id="key-1",
+    actor_type="agent",
+    actor_name="Key",
+    scopes=frozenset({"cards:read", "loops:read"}),
+    credential_id="cred-1",
+)
+MOVED = "2026-11-25T20:35:03Z"
+LATER = "2026-11-25T20:40:00Z"
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,6 +323,71 @@ def test_list_tickets_refuses_a_filter_it_cannot_apply_by_name(settings: Setting
         assert refused.value.details["argument"] == next(iter(arguments))
     with pytest.raises(Forbidden):
         list_tickets(world, WRITER.__replace__(scopes=frozenset({"cards:read"})), ask())
+
+
+CHOOSE = (
+    "Choose a Ticket and read it with read_ticket. Narrow the list with a filter (column, "
+    "assignee me, state, workplace, needs_person, phase) rather than reading more rows."
+)
+# ``e`` in Doing, as the key took it.
+TAKEN = {"id": "e", "key": "K-e", "title": "Empty", "loop": "L-1", "taken_at": MOVED}
+
+
+def taken_world(settings: Settings) -> ListingWorld:
+    """The listing board, where the key moved ``e`` to Doing at ``MOVED`` and has not reported on
+    it since."""
+    world = listing_world(settings)
+    world.state.activity.append(
+        activity_row("e-1", "card.moved", "e", actor_id=KEY.actor_id, timestamp=MOVED)
+    )
+    return world
+
+
+def test_list_tickets_names_the_tickets_the_key_has_not_reported_on_whatever_the_filters(
+    settings: Settings,
+) -> None:
+    world = taken_world(settings)
+    answer = list_tickets(world, KEY, ask())
+    assert answer["unreported"] == [TAKEN]
+    assert answer["next_step"] == f"{REPORT_FIRST} {CHOOSE}"
+    assert all(
+        tool in str(answer["next_step"])
+        for tool in ("comment_ticket", "set_ticket_wait", "complete_ticket")
+    )
+    # Neither a filter nor the page chooses it: it is the key's standing on the board.
+    narrowed: list[dict[str, JsonValue]] = [
+        {"column": ["Todo"]},
+        {"limit": 1, "continue_from": 2},
+        {"loop_id": "L-2"},
+        {"assignee": "none", "fields": "brief"},
+    ]
+    for arguments in narrowed:
+        listed = list_tickets(world, KEY, ask(**arguments))
+        assert "e" not in ids(listed)
+        assert listed["unreported"] == [TAKEN], arguments
+        assert listed["next_step"] == f"{REPORT_FIRST} {CHOOSE}", arguments
+    empty = list_tickets(world, KEY, ask(state="blocked", workplace="codebase"))
+    assert (empty["total"], empty["unreported"]) == (0, [TAKEN])
+    assert empty["next_step"] == (
+        f"{REPORT_FIRST} No Ticket matches the filters applied (state blocked; workplace "
+        "codebase): widen or drop one of them to see more. include_completed true also lists "
+        "completed Tickets and Loops."
+    )
+
+
+def test_list_tickets_names_nothing_for_a_person_or_a_role_agent_or_after_a_report(
+    settings: Settings,
+) -> None:
+    world = taken_world(settings)
+    # The same actor id as the key that moved e: only an issued key owes a report.
+    person = KEY.__replace__(actor_type="user", credential_id=None)
+    role_agent = KEY.__replace__(credential_id=None)
+    for actor in (person, role_agent):
+        answer = list_tickets(world, actor, ask())
+        assert (answer["unreported"], answer["next_step"]) == ([], CHOOSE)
+    world.state.comments["m-1"] = comment_row("m-1", "e", actor_id=KEY.actor_id, created_at=LATER)
+    answer = list_tickets(world, KEY, ask())
+    assert (answer["unreported"], answer["next_step"]) == ([], CHOOSE)
 
 
 # --- write_ticket_summaries ----------------------------------------------------------------------
