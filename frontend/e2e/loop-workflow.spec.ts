@@ -1,11 +1,15 @@
 import { expect, test } from "playwright/test";
 import { approvedAnalysis, approveRoadmap, roadmap, ticketRow } from "./published-plan";
 import {
+  addCard,
   boardIdFromUrl,
   boardWithLoop,
+  cardTile,
+  closeDialog,
   csrfToken,
   login,
   loopAction,
+  openCard,
   openPlanDocument,
   showTab,
   uniqueName,
@@ -198,6 +202,43 @@ test.describe("loop planning and completion", () => {
     await expect(ticketRow(page, "Send the link")).toContainText("Not done");
     await expect(ticketRow(page, "Write the mail")).toContainText("done");
     await expect(ticketRow(page, "Write the mail")).not.toContainText("Not done");
+  });
+
+  test("runs a small change without a plan and closes it in one decision", async ({ page }) => {
+    await login(page);
+    const { boardId, loopId } = await boardWithLoop(page, uniqueName("Fast track"), "Fix a typo");
+    const loop = await page.request.get(`/api/v1/boards/${boardId}/loops/${loopId}`);
+    const loopKey = ((await loop.json()).data as { key: string }).key;
+
+    // A Ticket in a new Loop starts it without a plan: no Info, analysis or RoadMap first.
+    const title = "Correct the sign-in heading";
+    await addCard(page, "Backlog", title);
+    await expect(page.getByText("Without a plan", { exact: true })).toBeVisible();
+    // The Ticket is the Loop's own work: keyed, and never marked as work outside a plan.
+    await expect(cardTile(page, "Backlog", title)).toContainText(`${loopKey}-UNP-001`);
+    await expect(cardTile(page, "Backlog", title)).not.toContainText("Unplanned");
+
+    const ticket = await openCard(page, "Backlog", title);
+    await ticket.getByRole("button", { name: "Start work" }).click();
+    await ticket.getByRole("button", { name: "Mark complete" }).click();
+    await expect(ticket.getByRole("region", { name: "Status" })).toContainText("Completed");
+    await closeDialog(page);
+
+    // With every Ticket done, the header's one decision closes the Loop, and no QA is asked for.
+    await expect(page.getByText("Waits for you to close the Loop")).toBeVisible();
+    await page.getByRole("button", { name: "Close Loop", exact: true }).click();
+    const close = page.getByRole("dialog", { name: `Close ${loopKey}` });
+    await expect(close).toContainText("One decision closes a Loop without a plan.");
+    await close.getByRole("button", { name: "Close the Loop" }).click();
+    await expect(page.getByText("Loop closed", { exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: `${loopKey} is completed` })).toBeVisible();
+    await closeDialog(page);
+
+    // Board history keeps it, marked as closed without a plan where a QA result would stand.
+    await page.getByRole("link", { name: "History", exact: true }).click();
+    const record = page.getByRole("listitem").filter({ hasText: "Fix a typo" });
+    await expect(record.getByText("Closed without a plan", { exact: true })).toBeVisible();
+    await expect(record).not.toContainText("QA not_run");
   });
 
   test("resets a scope, cleared draft or approved, so it can be generated again", async ({

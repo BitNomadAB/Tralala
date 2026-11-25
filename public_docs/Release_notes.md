@@ -48,6 +48,13 @@ Worth knowing when you look at the dashboard:
   dialog. A refused QA decision is also listed in the completion dialog, scenario by scenario, and
   **Accept QA and complete** is held while the cycle has no scenarios, with the way to close the
   Loop beside it.
+- **A small change needs no plan.** A Loop could only be closed through an approved analysis, a
+  RoadMap and QA, even for a one-line fix. A Loop that gets a Ticket before it has an analysis or a
+  RoadMap now runs it without a plan: it is marked **Without a plan**, its Tickets are keyed
+  `<LoopKey>-UNP-<nnn>` and count as its work, and once they are done a person closes it with
+  **Close Loop** in one decision, with no QA. Board history shows it as **Closed without a plan**
+  (`qa_status: not_run`). Nothing is chosen when a Loop is created; an analysis handed in puts the
+  Loop on the planned path, and a coding agent may add the Tickets but never close the Loop.
 - **An open tab reloads itself once after an upgrade.** Each page is downloaded when it is first
   opened, so a tab left open across an upgrade asks for files the new version no longer has. It
   reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it
