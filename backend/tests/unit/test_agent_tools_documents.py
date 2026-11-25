@@ -1,6 +1,7 @@
 """``read_loop`` and ``read_document`` on the fakes: the real LoopDocumentService, LoopService,
 LoopNoteService, ListService and CardService on an in-memory board, handed to the tools as the
-attributes ``LoopReading`` and ``DocumentReading`` declare."""
+attributes ``LoopReading`` and ``DocumentReading`` declare; ``read_loop``'s address of the decision
+a person takes next is ``loop_summaries``'."""
 
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Forbidden, NotFound, ValidationFailure
 from app.db.generated.board import LoopNotesRow
-from app.services.agent_tools import read_document, read_loop
+from app.services.agent_tools import loop_summaries, read_document, read_loop
 from app.services.agent_tools_documents import PAGE_CHARS
 from app.services.cards import CardService
 from app.services.lists import ListService
@@ -39,7 +40,9 @@ from tests.unit.fakes.plans import FakePlanViews, plan_views
 from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState
 
 NOW = datetime(2026, 11, 5, 10, 0, tzinfo=UTC)
-LOOP = "loop-a"
+# A UUID, as a Loop's row has it: the address of the decision it waits for is built from it.
+LOOP = "6a3f9c2e-1d4b-4e8a-9b7c-5f0e2d1c3b4a"
+PUBLIC = "https://tralala.example.com"
 READER = ActorContext(
     actor_id="agent-1", actor_type="agent", actor_name="Reader", scopes=frozenset({"loops:read"})
 )
@@ -78,12 +81,14 @@ class DocumentWorld:
     loop_notes: LoopNoteService
     list: ListService
     card: CardService
+    settings: Settings
     state: BoardState
 
 
-def document_world(settings: Settings) -> DocumentWorld:
+def document_world(settings: Settings, *, public_url: str | None = None) -> DocumentWorld:
     """Loop L-1 with a three-line Info, a structured analysis_ai and roadmap_ai, a long human
-    analysis, two Tickets in two columns and six notes, the oldest one long."""
+    analysis, two Tickets in two columns and six notes, the oldest one long; ``public_url`` is
+    the installation's public address, unset unless given."""
     state = BoardState()
     state.loops = {LOOP: loop_row(LOOP, stage="analysis_review").__replace__(key="L-1")}
     state.lists = {
@@ -133,6 +138,7 @@ def document_world(settings: Settings) -> DocumentWorld:
         loop_notes=LoopNoteService(checks, store),
         list=ListService(checks, store),
         card=cards,
+        settings=settings.model_copy(update={"public_url": public_url}),
         state=state,
     )
 
@@ -230,6 +236,43 @@ def test_read_loop_cuts_a_long_note_and_refuses_document_kinds(settings: Setting
         read_loop(world, READER, ask(document_kinds=["info"]))
     with pytest.raises(Forbidden):
         read_loop(world, READER.__replace__(scopes=frozenset()), ask())
+
+
+def summary_link(world: DocumentWorld) -> object:
+    (row,) = rows(loop_summaries(world, READER, {"board_id": BOARD_ID}), "loops")
+    return row["decision_link"]
+
+
+def test_read_loop_links_the_decision_a_person_takes_next_as_loop_summaries_does(
+    settings: Settings,
+) -> None:
+    world = document_world(settings)
+    # Its analysis is out of date with its Info, so an agent writes it again: no person's decision.
+    stale = read_loop(world, READER, ask())
+    assert section(section(stale, "documents"), "analysis_ai")["state"] == "stale"
+    assert stale["decision_link"] is None
+    assert summary_link(world) is None
+    # Written from the current Info, the analysis waits for a person's review in the Plan tab.
+    world.state.documents = [
+        row.__replace__(source_info_revision_id="i1")
+        if row.id == "a1"
+        else row.__replace__(source_analysis_ai_revision_id="a1", status="ready_for_review")
+        if row.id == "h1"
+        else row
+        for row in world.state.documents
+    ]
+    review = f"/boards/{BOARD_ID}/loops/{LOOP}?tab=plan&doc=analysis"
+    assert read_loop(world, READER, ask())["decision_link"] == review
+    assert summary_link(world) == review
+    # The same Loop by its key, and with the public address set: the same decision, absolute.
+    public = world.__replace__(settings=world.settings.model_copy(update={"public_url": PUBLIC}))
+    assert read_loop(public, READER, ask(loop_id="L-1"))["decision_link"] == f"{PUBLIC}{review}"
+    assert summary_link(public) == f"{PUBLIC}{review}"
+    # Awaiting QA, a person accepts or rejects the result in the completion dialog.
+    world.state.loops[LOOP] = world.state.loops[LOOP].__replace__(stage="awaiting_qa")
+    qa = f"/boards/{BOARD_ID}/loops/{LOOP}?dialog=completion"
+    assert read_loop(world, READER, ask())["decision_link"] == qa
+    assert summary_link(world) == qa
 
 
 # --- read_document -------------------------------------------------------------------------------

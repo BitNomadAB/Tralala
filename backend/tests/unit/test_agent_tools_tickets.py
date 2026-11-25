@@ -56,7 +56,11 @@ from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState
 
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
 STAMP = "2026-11-03T10:00:00Z"
-LOOP = "loop-a"
+# The Loop's and the human-only Ticket's ids are UUIDs, as their rows have them: the address of the
+# decision a person takes on that Ticket is built from them.
+LOOP = "3c9d1e7a-2b4f-4a6c-8d0e-1f2a3b4c5d6e"
+HUMAN_TASK = "7e5d4c3b-2a19-4f08-8e7d-6c5b4a392817"
+PUBLIC = "https://tralala.example.com"
 WORKER = ActorContext(
     actor_id="agent-1",
     actor_type="agent",
@@ -89,14 +93,16 @@ class TicketWorld:
     comment: CommentService
     loop: LoopService
     list: ListService
+    settings: Settings
     state: BoardState
     views: FakePlanViews
     checks: FakeBoardChecks
 
 
-def ticket_world(settings: Settings) -> TicketWorld:
-    """An executing Loop with a planned Ticket ``t`` (K-1), a human-only one ``h`` (K-2) that
-    Grace confirms, and a manual one ``m``, all in Doing."""
+def ticket_world(settings: Settings, *, public_url: str | None = None) -> TicketWorld:
+    """An executing Loop with a planned Ticket ``t`` (K-1), a human-only one ``HUMAN_TASK`` (K-2)
+    that Grace confirms, and a manual one ``m``, all in Doing; ``public_url`` is the installation's
+    public address, unset unless given."""
     state = BoardState()
     loop = loop_row(LOOP, stage="ready").__replace__(current_plan_id="plan-1")
     state.loops = {LOOP: loop}
@@ -108,7 +114,7 @@ def ticket_world(settings: Settings) -> TicketWorld:
         "t": card_row("t", "doing", LOOP, plan_item_id="item-t").__replace__(
             ticket_key="K-1", kind="ticket"
         ),
-        "h": card_row("h", "doing", LOOP).__replace__(
+        HUMAN_TASK: card_row(HUMAN_TASK, "doing", LOOP).__replace__(
             ticket_key="K-2",
             required_actor="human",
             assignee_actor_id="person",
@@ -132,6 +138,7 @@ def ticket_world(settings: Settings) -> TicketWorld:
             settings, checks, store, plans=plan_views(views), tickets=cards, clock=lambda: NOW
         ),
         list=ListService(checks, store),
+        settings=settings.model_copy(update={"public_url": public_url}),
         state=state,
         views=views,
         checks=checks,
@@ -222,7 +229,7 @@ def test_complete_ticket_refuses_a_human_only_ticket_naming_who_confirms_it_and_
 ) -> None:
     world = ticket_world(settings)
     with pytest.raises(Forbidden) as refused:
-        complete_ticket(world, WORKER, done("h"))
+        complete_ticket(world, WORKER, done(HUMAN_TASK))
     assert refused.value.code == "human_action_required"
     assert "Grace confirms it" in refused.value.message
     assert "summary is saved as a comment" in refused.value.message
@@ -231,13 +238,64 @@ def test_complete_ticket_refuses_a_human_only_ticket_naming_who_confirms_it_and_
         key: refused.value.details[key]
         for key in ("ticket_key", "confirmed_by", "human_instructions")
     } == {"ticket_key": "K-2", "confirmed_by": "Grace", "human_instructions": "Sign the contract"}
-    assert world.state.cards["h"].completed_at is None
-    assert comments(world, "h") == ["Shipped."]
+    assert world.state.cards[HUMAN_TASK].completed_at is None
+    assert comments(world, HUMAN_TASK) == ["Shipped."]
     # A retry meets the same refusal and finds the comment it already wrote.
     with pytest.raises(Forbidden) as again:
-        complete_ticket(world, WORKER, done("h"))
+        complete_ticket(world, WORKER, done(HUMAN_TASK))
     assert comment_of(again.value) == comment_of(refused.value)
-    assert comments(world, "h") == ["Shipped."]
+    assert comments(world, HUMAN_TASK) == ["Shipped."]
+
+
+def as_answered(refusal: ApiError) -> dict[str, object]:
+    """The refusal as ``tools/call`` answers it, with its HTTP status."""
+    return {
+        "status": refusal.status_code,
+        "code": refusal.code,
+        "message": refusal.message,
+        "details": refusal.details,
+        "retryable": refusal.retryable,
+    }
+
+
+def test_complete_ticket_on_a_human_only_ticket_links_where_the_person_confirms_it(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    with pytest.raises(Forbidden) as refused:
+        complete_ticket(world, WORKER, done(HUMAN_TASK))
+    link = f"/boards/{BOARD_ID}/loops/{LOOP}/tickets/{HUMAN_TASK}?focus=confirm"
+    assert as_answered(refused.value) == {
+        "status": 403,
+        "code": "human_action_required",
+        "message": (
+            "K-2 is work for a person, and your summary is saved as a comment on the Ticket. "
+            f"Grace confirms it on the Ticket's page: {link}"
+        ),
+        "details": {
+            "action": "Confirming K-2",
+            "actor_type": "agent",
+            "comment_id": comment_of(refused.value),
+            "ticket_key": "K-2",
+            "confirmed_by": "Grace",
+            "human_instructions": "Sign the contract",
+            "decision_link": link,
+        },
+        "retryable": False,
+    }
+    # With the installation's public address the same place is absolute.
+    public = ticket_world(settings, public_url=PUBLIC)
+    with pytest.raises(Forbidden) as absolute:
+        complete_ticket(public, WORKER, done(HUMAN_TASK))
+    assert absolute.value.details is not None
+    assert absolute.value.details["decision_link"] == f"{PUBLIC}{link}"
+    assert absolute.value.message.endswith(f"confirms it on the Ticket's page: {PUBLIC}{link}")
+    # A refusal that waits for earlier work, not for a person, names no decision.
+    world.views.items = [readiness_item("t", ready=False, blockers=(BLOCKER,))]
+    with pytest.raises(Conflict) as blocked:
+        complete_ticket(world, WORKER, done("t"))
+    assert blocked.value.details is not None
+    assert "decision_link" not in blocked.value.details
 
 
 def test_complete_ticket_refuses_a_blocked_ticket_and_a_loop_that_is_not_executing(
@@ -459,7 +517,7 @@ def test_allowed_actions_offer_complete_ticket_only_for_a_ready_open_ticket_of_a
     assert offered("t") and offered("m")
     assert offered("m", execution_allowed=False)
     assert not offered("t", execution_allowed=False)
-    assert not offered("h")
+    assert not offered(HUMAN_TASK)
     world.views.items = [readiness_item("t", ready=False, blockers=(BLOCKER,))]
     assert not offered("t")
     world.state.cards["m"] = world.state.cards["m"].__replace__(completed_at=CREATED)
@@ -486,7 +544,7 @@ def test_allowed_actions_leave_out_move_ticket_while_the_key_owes_a_report_on_an
         action for action in offered if action != "move_ticket"
     ]
     # A person's task offers no move either way.
-    human = world.card.get(BOARD_ID, LOOP, "h")
+    human = world.card.get(BOARD_ID, LOOP, HUMAN_TASK)
     assert allowed_actions(
         human, execution_allowed=True, others_unreported=True
     ) == allowed_actions(human, execution_allowed=True)

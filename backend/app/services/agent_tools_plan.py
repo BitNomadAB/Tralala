@@ -22,8 +22,11 @@ by a person. The tools only make that route usable for a model:
 - the revision records who handed it in and that it came through MCP.
 
 A token never replaces an approved analysis or RoadMap: ``submit_candidate`` refuses it, so REST
-and MCP share the rule. The handlers are public and typed on ``PlanWriting``, the one attribute of
-the composition root they use, so a unit test runs them with the real service on the fakes.
+and MCP share the rule, and ``write_brief`` meets the same refusal over an approval. The tools
+answer it with ``details.decision_link``, the address of that document in the Loop's Plan tab,
+where the person requests changes or resets it (``_over_approval``). The handlers are public and
+typed on ``PlanWriting``, the attributes of the composition root they use, so a unit test runs them
+with the real service on the fakes.
 """
 
 from __future__ import annotations
@@ -36,10 +39,17 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, JsonValue, ValidationError
 
 from ..core.context import ActorContext
-from ..core.errors import ValidationFailure
+from ..core.errors import ApiError, ValidationFailure
 from ..schemas.briefs import BRIEF_KINDS, BriefWrite, HumanBrief, HumanBriefWriter, RoadmapBrief
 from ..schemas.loops import AnalysisPayload, CandidateSubmission, PlanPayload
-from .agent_tools_read import ToolArguments, ToolResult, _require, _text
+from .agent_tools_read import (
+    ToolArguments,
+    ToolResult,
+    _require,
+    _text,
+    refused_at,
+    tool_decision_link,
+)
 from .agent_tools_schema import (
     AgentTool,
     ArgumentSchema,
@@ -52,6 +62,7 @@ from .loops import DOCUMENT_KINDS
 from .ticket_face import FACE_INVALID, FACE_STEP_BAD, FACE_STEP_GOOD
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
+    from ..core.config import Settings
     from .loop_documents import LoopDocumentService
     from .loop_documents_views import DocumentsView
     from .loop_generation_instructions import WritingInstructions
@@ -87,10 +98,14 @@ class PlanInstructions(Protocol):
 
 class PlanWriting(PlanInstructions, Protocol):
     """What ``write_analysis``, ``write_roadmap`` and ``write_brief`` use of the composition root:
-    the documents, and the instructions a worker's document is held to."""
+    the documents, the instructions a worker's document is held to, and the settings that make
+    the address of a person's decision absolute."""
 
     @property
     def loop_document(self) -> LoopDocumentService: ...
+
+    @property
+    def settings(self) -> Settings: ...
 
 
 # What a worker does before it writes an analysis or a RoadMap: a board agent reads the board's
@@ -351,6 +366,22 @@ def _brief_answer(view: DocumentsView, kind: str) -> ToolResult:
     return {"written": provenance.get("written") is True, "through": provenance.get("through")}
 
 
+def _over_approval(
+    refusal: ApiError, kind: str, *, board_id: str, loop_id: str, public_url: str | None
+) -> ApiError:
+    """A token's analysis, RoadMap or brief over one a person approved (``403
+    human_action_required``), with ``decision_link``: that document in the Loop's Plan tab, where
+    the person requests changes or resets it. The service refuses only after it found the Loop's
+    row by ``loop_id``, so the id is the row's own and no key reaches the address."""
+    link = tool_decision_link(
+        "analysis" if kind == "analysis" else "roadmap",
+        board_id=board_id,
+        loop_id=loop_id,
+        public_url=public_url,
+    )
+    return refused_at(refusal, link, "The person does that in the Loop's Plan tab")
+
+
 # --- handlers ------------------------------------------------------------------------------------
 
 
@@ -371,7 +402,18 @@ def write_analysis(services: PlanWriting, actor: ActorContext, args: ToolArgumen
             "provenance": _provenance(actor, instructions_id),
         }
     )
-    view = services.loop_document.submit_candidate(actor, board_id, loop_id, submission)
+    try:
+        view = services.loop_document.submit_candidate(actor, board_id, loop_id, submission)
+    except ApiError as refusal:
+        if refusal.code != "human_action_required":
+            raise
+        raise _over_approval(
+            refusal,
+            "analysis",
+            board_id=board_id,
+            loop_id=loop_id,
+            public_url=services.settings.public_url,
+        ) from None
     return {
         **_documents(view, ("info", "analysis_ai", "analysis")),
         "brief": _brief_answer(view, "analysis"),
@@ -408,6 +450,16 @@ def write_roadmap(services: PlanWriting, actor: ActorContext, args: ToolArgument
             raise
         raise ValidationFailure(
             error.message, code=error.code, details=_original_ids(error.details, id_map)
+        ) from None
+    except ApiError as refusal:
+        if refusal.code != "human_action_required":
+            raise
+        raise _over_approval(
+            refusal,
+            "roadmap",
+            board_id=board_id,
+            loop_id=loop_id,
+            public_url=services.settings.public_url,
         ) from None
     return {
         **_documents(view, ("roadmap_ai", "roadmap")),
@@ -448,7 +500,18 @@ def write_brief(services: PlanWriting, actor: ActorContext, args: ToolArguments)
             "expected_revision_id": _text(args.get("expected_revision_id")),
         }
     )
-    view = services.loop_document.write_brief(actor, board_id, loop_id, write, through="mcp")
+    try:
+        view = services.loop_document.write_brief(actor, board_id, loop_id, write, through="mcp")
+    except ApiError as refusal:
+        if refusal.code != "human_action_required":
+            raise
+        raise _over_approval(
+            refusal,
+            kind,
+            board_id=board_id,
+            loop_id=loop_id,
+            public_url=services.settings.public_url,
+        ) from None
     scope = "analysis" if kind == "analysis" else "RoadMap"
     return {
         **_documents(view, (f"{kind}_ai", kind)),

@@ -166,6 +166,15 @@ class Instructions:
         return READ
 
 
+PUBLIC = "https://tralala.example.com"
+
+
+def unit_settings(public_url: str | None = None) -> Settings:
+    """The settings as the tools read them, with only the public address given: built without the
+    environment or a ``.env`` file, so every machine reads the same."""
+    return Settings.model_construct(public_url=public_url)
+
+
 @dataclass(frozen=True, slots=True)
 class World:
     """What the tools declare they use of the composition root, and the board under it."""
@@ -173,6 +182,7 @@ class World:
     loop_document: LoopDocumentService
     state: BoardState
     loop_generation: Instructions = dataclasses.field(default_factory=Instructions)
+    settings: Settings = dataclasses.field(default_factory=unit_settings)
 
     @property
     def repos(self) -> FakeBoardRepositories:
@@ -339,6 +349,42 @@ def test_write_analysis_never_replaces_an_approved_analysis() -> None:
     assert refused.value.code == "human_action_required"
     w.review("analysis", decision="changes_requested")
     write(w, "analysis", ANALYSIS)
+
+
+def test_a_document_over_an_approval_links_where_the_person_decides() -> None:
+    w = world(approved_analysis=True)
+    analysis = f"/boards/{BOARD_ID}/loops/{LOOP}?tab=plan&doc=analysis"
+    with pytest.raises(Forbidden) as refused:
+        write(w, "analysis", ANALYSIS)
+    assert (refused.value.status_code, refused.value.code) == (403, "human_action_required")
+    assert refused.value.message == (
+        "The analysis is approved; a person requests changes or resets it before an agent hands "
+        f"in another. The person does that in the Loop's Plan tab: {analysis}"
+    )
+    assert refused.value.details == {
+        "stage": "planning",
+        "action": "Replacing an approved analysis",
+        "decision_link": analysis,
+    }
+    # A brief over the approved analysis meets the same refusal, with the same address.
+    with pytest.raises(Forbidden) as brief:
+        write_brief(w, WORKER, brief_args("analysis", BRIEF))
+    assert field(brief.value.details, "decision_link") == analysis
+    # The RoadMap, once approved, links its own document; absolute with the public address.
+    write(w, "plan", PLAN)
+    w.review("roadmap")
+    public = w.__replace__(settings=unit_settings(PUBLIC))
+    with pytest.raises(Forbidden) as roadmap:
+        write(public, "plan", PLAN)
+    roadmap_link = f"{PUBLIC}/boards/{BOARD_ID}/loops/{LOOP}?tab=plan&doc=roadmap"
+    assert field(roadmap.value.details, "decision_link") == roadmap_link
+    assert roadmap.value.message.startswith("The RoadMap is approved;")
+    assert roadmap.value.message.endswith(f"in the Loop's Plan tab: {roadmap_link}")
+    # A refusal that is no person's decision names none.
+    with pytest.raises(Conflict) as changed:
+        write(w, "plan", PLAN, instructions_id="instructions-0")
+    assert changed.value.code == INSTRUCTIONS_CHANGED
+    assert "decision_link" not in (changed.value.details or {})
 
 
 # --- write_roadmap -------------------------------------------------------------------------------

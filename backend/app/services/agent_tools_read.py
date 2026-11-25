@@ -15,18 +15,27 @@ A key reports on a Ticket it took before it takes another one (``409 report_requ
 ``loop_summaries``, ``list_tickets`` and ``read_ticket`` show the key the Tickets it owes a report
 on under ``unreported`` (``unreported_rows``), and ``next_step`` asks for the reports first
 (``report_first``); ``REPORT_RULE`` is the rule in the one sentence the worker texts give it.
+
+What waits for a person carries ``decision_link``, the address in the web UI where the person
+decides (``decision_links``): ``loop_summaries`` and ``read_loop`` for the Loop's next decision,
+``read_ticket`` for a wait to clear and a person's task to confirm (``ticket_decision_link``), and
+the refusals a tool meets on a person's decision (``refused_at``). ``tool_decision_link`` builds
+each from the ids the services read, with the address from the composition root
+(``Services.settings.public_url``); ``DECISION_LINK_RULE`` is the sentence the worker texts give it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from pydantic import JsonValue
 
 from ..core.context import ActorContext
-from ..core.errors import ValidationFailure
+from ..core.errors import ApiError, ValidationFailure
+from ..core.identifiers import canonical_board_id
 from .attachments import attachment_summary
+from .decision_links import Decision, decision_link
 from .search import search_engine
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
@@ -63,6 +72,12 @@ REPORT_RULE: Final = (
 REPORT_FIRST: Final = (
     "Report on each Ticket under unreported with comment_ticket, set_ticket_wait or "
     "complete_ticket before you move another Ticket."
+)
+# The address of a person's decision in one sentence: the MCP instructions, /llms.txt and whoami's
+# note on what only a person decides give it in these words.
+DECISION_LINK_RULE: Final = (
+    "An answer or a refusal that waits for a person carries decision_link, the address in "
+    "Tralala where that person decides."
 )
 
 
@@ -151,6 +166,71 @@ def unreported_besides(entries: Sequence[UnreportedEntry], card_id: str) -> list
 def report_first(unreported: Sequence[ToolResult], advice: str) -> str:
     """A ``next_step``: ``advice``, after ``REPORT_FIRST`` while ``unreported`` is not empty."""
     return f"{REPORT_FIRST} {advice}" if unreported else advice
+
+
+def tool_decision_link(
+    decision: Decision,
+    *,
+    board_id: str,
+    loop_id: str,
+    card_id: str | None = None,
+    public_url: str | None,
+) -> str:
+    """``decision_links.decision_link`` as a worker tool answers it.
+
+    ``board_id`` is the board the call named, which the services have already resolved: they read
+    the board's registry row by its canonical text (``BoardService.require_row``), so that text is
+    the board's id, whichever way a UUID was written. ``loop_id`` and ``card_id`` are the ids of
+    the rows the services read, never a key, so the path is built from ids alone. ``public_url``
+    is ``Services.settings.public_url``: a handler never reads the environment or a request.
+    """
+    return decision_link(
+        decision,
+        board_id=canonical_board_id(board_id),
+        loop_id=loop_id,
+        card_id=card_id,
+        public_url=public_url,
+    )
+
+
+def ticket_decision_link(
+    card: CardEntry,
+    decision: Literal["wait", "confirmation"],
+    *,
+    loop_read_only: bool,
+    public_url: str | None,
+) -> str | None:
+    """Where a person takes ``decision`` on the Ticket while it waits for them: clearing its wait
+    (``wait``) while it waits for something, confirming it (``confirmation``) while it is a
+    person's task. None otherwise, and for a completed or archived Ticket or one in a Loop that is
+    read-only, where nobody clears or confirms anything any more (its page offers neither)."""
+    if card["completed_at"] or card["archived_at"] or loop_read_only:
+        return None
+    pending = (
+        card["waiting_for"] != "nothing" if decision == "wait" else card["human_action_required"]
+    )
+    if not pending:
+        return None
+    return tool_decision_link(
+        decision,
+        board_id=card["board_id"],
+        loop_id=card["loop_id"],
+        card_id=card["id"],
+        public_url=public_url,
+    )
+
+
+def refused_at(refusal: ApiError, link: str, where: str) -> ApiError:
+    """``refusal`` as a worker tool answers a decision that is a person's: the same class, code
+    and status, ``details.decision_link`` the address of that decision, and the message ending in
+    ``where`` the person takes it, followed by the address."""
+    return type(refusal)(
+        f"{refusal.message.rstrip('. ')}. {where}: {link}",
+        code=refusal.code,
+        status_code=refusal.status_code,
+        details={**(refusal.details or {}), "decision_link": link},
+        retryable=refusal.retryable,
+    )
 
 
 # --- handlers ---------------------------------------------------------------
@@ -356,12 +436,14 @@ def _read_ticket(
     )
     # Empty for a person and for an actor without a credential, so their answer keeps its shape.
     unreported = unreported_besides(services.card.unreported(board_id, actor), card_id)
+    loop_read_only = services.loop.read_only(board_id, loop_id)
     allowed = allowed_actions(
         card,
         execution_allowed=readiness["execution_allowed"],
-        loop_read_only=services.loop.read_only(board_id, loop_id),
+        loop_read_only=loop_read_only,
         others_unreported=bool(unreported),
     )
+    public_url = services.settings.public_url
     return {
         "ticket": {
             "id": card["id"],
@@ -392,18 +474,13 @@ def _read_ticket(
             "expected_evidence": card["expected_evidence"],
             "state": card["state"],
             "workplace": card["workplace"],
-            "wait": (
-                None
-                if card["waiting_for"] == "nothing"
-                else {
-                    "waiting_for": card["waiting_for"],
-                    "reason": card["waiting_reason"],
-                    "set_by": card["waiting_set_by"],
-                    "set_at": card["waiting_set_at"],
-                }
-            ),
+            "wait": ticket_wait(card, loop_read_only=loop_read_only, public_url=public_url),
             "blockers": card["blockers"],
             "human_action_required": card["human_action_required"],
+            # Where a person confirms a person's task.
+            "decision_link": ticket_decision_link(
+                card, "confirmation", loop_read_only=loop_read_only, public_url=public_url
+            ),
             "needs_person": card["needs_person"],
             "human_instructions": card["human_instructions"],
             "checklists": services.checklist.list(board_id, card_id),
@@ -422,6 +499,25 @@ def _read_ticket(
         "allowed_actions": allowed,
         # Why move_ticket is not offered: the other Tickets the key owes a report on.
         **({"unreported": unreported} if unreported else {}),
+    }
+
+
+def ticket_wait(
+    card: CardEntry, *, loop_read_only: bool, public_url: str | None
+) -> ToolResult | None:
+    """What the Ticket waits for as ``read_ticket`` shows it, None while it waits for nothing:
+    the kind, the reason, who set it and when, and ``decision_link``, where the person who
+    answers clears it (``ticket_decision_link``)."""
+    if card["waiting_for"] == "nothing":
+        return None
+    return {
+        "waiting_for": card["waiting_for"],
+        "reason": card["waiting_reason"],
+        "set_by": card["waiting_set_by"],
+        "set_at": card["waiting_set_at"],
+        "decision_link": ticket_decision_link(
+            card, "wait", loop_read_only=loop_read_only, public_url=public_url
+        ),
     }
 
 
@@ -460,6 +556,7 @@ def ticket_plan(readiness: Readiness, card_id: str) -> ToolResult | None:
 
 __all__ = [
     "BOARD_LIST_LIMIT",
+    "DECISION_LINK_RULE",
     "REPORT_FIRST",
     "REPORT_RULE",
     "SEARCH_DEFAULT",
@@ -479,10 +576,14 @@ __all__ = [
     "allowed_actions",
     "list_boards",
     "person_notes",
+    "refused_at",
     "report_first",
     "search_tickets",
     "ticket_attachments",
+    "ticket_decision_link",
     "ticket_plan",
+    "ticket_wait",
+    "tool_decision_link",
     "unreported_besides",
     "unreported_rows",
 ]

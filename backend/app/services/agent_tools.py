@@ -42,6 +42,7 @@ from .agent_tools_plan import (
     write_roadmap,
 )
 from .agent_tools_read import (
+    DECISION_LINK_RULE,
     REPORT_RULE,
     ToolArguments,
     ToolResult,
@@ -532,6 +533,7 @@ def run_tool(
 
 
 __all__ = [
+    "DECISION_LINK_RULE",
     "REPORT_RULE",
     "AgentTool",
     "ArgumentSchema",

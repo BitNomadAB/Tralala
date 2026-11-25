@@ -15,6 +15,12 @@ Beside the rows, ``unreported`` names the Tickets on the board the calling key t
 reported on since (``CardService.unreported``), whatever the stage asked for, and ``next_step`` then
 asks for those reports first; it is empty for a person.
 
+When the next step is a person's decision, the row's ``decision_link`` is the address where the
+person takes it (``loop_decision_link``, which ``read_loop`` answers too): approving the analysis or
+the RoadMap under review, accepting the implementation once every Ticket is done (a Loop without a
+plan closes in that one decision) and accepting or rejecting the result in QA. It is null for
+everything else, a Ticket that waits for a person included: ``read_ticket`` links that one.
+
 The handler is public and typed on the attributes of the composition root it uses, so a unit test
 runs it with the real services on the typed fakes. Its catalogue entry is built here too
 (``loop_tools``) and placed by ``agent_tools.tool_catalog``.
@@ -34,12 +40,15 @@ from .agent_tools_read import (
     _require,
     _text,
     report_first,
+    tool_decision_link,
     unreported_rows,
 )
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
+    from ..core.config import Settings
     from .cards import CardService
+    from .decision_links import Decision
     from .lists import ListEntry, ListService
     from .loops import LoopEntry, LoopService
     from .plan_views import LoopReadiness
@@ -49,6 +58,15 @@ type WaitingOn = Literal["person", "agent", "anyone", "nobody"]
 GOAL_CHARS: Final = 280
 """The most of a Loop's goal a row shows; read_loop shows the whole goal."""
 _FINISHED: Final = ("completed", "cancelled")
+ALL_DONE: Final = "Every Ticket is done: a person accepts the implementation."
+"""``next`` once nothing in a Loop under way is left to do: the implementation is a person's to
+accept, which closes a Loop without a plan and sends a planned one to QA."""
+# The review stages whose person's step is a decision in the Plan tab, and QA's in the dialog.
+_STAGE_DECISIONS: Final[dict[str, Decision]] = {
+    "analysis_review": "analysis",
+    "roadmap_review": "roadmap",
+    "awaiting_qa": "qa",
+}
 
 
 class LoopSummarising(Protocol):
@@ -62,6 +80,9 @@ class LoopSummarising(Protocol):
 
     @property
     def card(self) -> CardService: ...
+
+    @property
+    def settings(self) -> Settings: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +185,38 @@ def next_step(
     if counts.blocked:
         blocked = _tickets(counts.blocked, "waits", "wait")
         return f"{blocked} for earlier work or a third party.", "anyone"
-    return "Every Ticket is done: a person accepts the implementation.", "person"
+    return ALL_DONE, "person"
+
+
+def next_decision(
+    entry: LoopEntry, readiness: LoopReadiness, counts: TicketCounts
+) -> Decision | None:
+    """The decision ``next_step`` waits on a person for, read from its answer so the two never
+    disagree: the analysis or the RoadMap a person reviews, the result a person accepts or rejects
+    in QA, and the implementation a person accepts once every Ticket is done (``ALL_DONE``). None
+    when the next step is anyone's, an agent's or nobody's, and when the person's step is not one
+    decision of the Loop: writing the Info, answering a Ticket's wait or doing a person's task."""
+    sentence, waiting_on = next_step(entry, readiness, counts)
+    if waiting_on != "person":
+        return None
+    decision = _STAGE_DECISIONS.get(entry["stage"])
+    if decision is not None:
+        return decision
+    return "implementation" if sentence == ALL_DONE else None
+
+
+def loop_decision_link(
+    entry: LoopEntry, readiness: LoopReadiness, *, public_url: str | None
+) -> str | None:
+    """The address where a person takes the Loop's next decision (``next_decision``), or None.
+    ``loop_summaries`` and ``read_loop`` both answer it, so they never point at different places.
+    The Loop's id is its row's; ``public_url`` is ``Services.settings.public_url``."""
+    decision = next_decision(entry, readiness, ticket_counts(readiness))
+    if decision is None:
+        return None
+    return tool_decision_link(
+        decision, board_id=entry["board_id"], loop_id=entry["id"], public_url=public_url
+    )
 
 
 def _document(entry: LoopEntry, kind: str) -> str:
@@ -183,7 +235,13 @@ def _goal(goal: str) -> str:
     return text if len(text) <= GOAL_CHARS else text[: GOAL_CHARS - 1].rstrip() + "…"
 
 
-def loop_row(entry: LoopEntry, readiness: LoopReadiness, columns: list[ListEntry]) -> ToolResult:
+def loop_row(
+    entry: LoopEntry,
+    readiness: LoopReadiness,
+    columns: list[ListEntry],
+    *,
+    public_url: str | None,
+) -> ToolResult:
     """One Loop as ``loop_summaries`` shows it."""
     counts = ticket_counts(readiness)
     sentence, waiting_on = next_step(entry, readiness, counts)
@@ -196,6 +254,7 @@ def loop_row(entry: LoopEntry, readiness: LoopReadiness, columns: list[ListEntry
         "without_plan": entry["without_plan"],
         "next": sentence,
         "waiting_on": waiting_on,
+        "decision_link": loop_decision_link(entry, readiness, public_url=public_url),
         "execution_allowed": readiness["execution_allowed"],
         "tickets": {
             "ready": counts.ready,
@@ -224,11 +283,13 @@ def loop_summaries(
         )
     include_completed = args.get("include_completed") is True or stage in _FINISHED
     loops = services.loop.list(board_id, include_completed=include_completed, stage=stage)
+    public_url = services.settings.public_url
     rows = [
         loop_row(
             entry,
             services.loop.readiness(board_id, entry["id"]),
             services.list.list(board_id, entry["id"]),
+            public_url=public_url,
         )
         for entry in loops
     ]
@@ -278,13 +339,16 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
 
 
 __all__ = [
+    "ALL_DONE",
     "GOAL_CHARS",
     "LoopSummarising",
     "TicketCounts",
     "WaitingOn",
+    "loop_decision_link",
     "loop_row",
     "loop_summaries",
     "loop_tools",
+    "next_decision",
     "next_step",
     "ticket_counts",
 ]

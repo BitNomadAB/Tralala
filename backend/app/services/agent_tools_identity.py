@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from ..core.context import MEMBER_TOKEN_SCOPES, ActorContext
-from .agent_tools_read import ToolArguments, ToolResult
+from .agent_tools_read import DECISION_LINK_RULE, ToolArguments, ToolResult
 from .agent_tools_schema import AgentTool, missing_scopes, object_schema
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
@@ -37,7 +37,7 @@ catalogue guard holds this tuple to its own list of them."""
 _HUMAN_NOTE = (
     "A signed-in person makes these decisions; a key is refused with human_action_required "
     "whatever its scopes. Info stays yours to write while the Loop is draft or under analysis "
-    "review; once planning has started, editing it is a person's."
+    "review; once planning has started, editing it is a person's. " + DECISION_LINK_RULE
 )
 
 

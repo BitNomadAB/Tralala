@@ -8,6 +8,10 @@ routes, so authorization, version checks and workflow gates are the ones REST al
 ``move_ticket`` is typed on ``TicketMoving``, the attributes of the composition root it uses, so a
 unit test runs it with the real services on the typed fakes. It retries only a version conflict;
 every other refusal of ``CardService.move`` (``409 report_required`` among them) is the answer.
+
+``write_info`` is typed on ``InfoWriting`` the same way. Once planning has started, Info is a
+person's to edit, and the refusal (``403 human_action_required``) carries ``details.decision_link``,
+the address of the Info in the Loop's Plan tab.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import JsonValue
 
 from ..core.context import ActorContext
-from ..core.errors import NotFound, ValidationFailure, VersionConflict
+from ..core.errors import ApiError, NotFound, ValidationFailure, VersionConflict
 from ..schemas.cards import CardMove, CardUpdate
 from ..schemas.loops import GenerationRequest, InfoRevisionWrite, LoopCreate
 from .agent_tools_read import (
@@ -28,12 +32,16 @@ from .agent_tools_read import (
     _require,
     _text,
     _ticket_location,
+    refused_at,
+    tool_decision_link,
 )
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
+    from ..core.config import Settings
     from . import Services
     from .cards import CardService
     from .lists import ListEntry, ListService
+    from .loop_documents import LoopDocumentService
 
 # A retried call arrives seconds later; a deliberate repeat rarely does. This window is what tells
 # them apart without a shared idempotency store.
@@ -48,6 +56,16 @@ class TicketMoving(Protocol):
 
     @property
     def list(self) -> ListService: ...
+
+
+class InfoWriting(Protocol):
+    """What ``write_info`` uses of the composition root."""
+
+    @property
+    def loop_document(self) -> LoopDocumentService: ...
+
+    @property
+    def settings(self) -> Settings: ...
 
 
 def _seconds_since(timestamp: str) -> float:
@@ -202,7 +220,7 @@ def _create_loop(
 
 
 def _write_info(
-    services: Services, actor: ActorContext, args: ToolArguments
+    services: InfoWriting, actor: ActorContext, args: ToolArguments
 ) -> ToolResult:
     actor.require("loops:write")
     board_id = _require(args, "board_id")
@@ -218,16 +236,26 @@ def _write_info(
             "deduplicated": True,
             "next_step": "Call run_analysis to have an agent turn this Info into findings.",
         }
-    documents = services.loop_document.save_info(
-        actor,
-        board_id,
-        loop_id,
-        InfoRevisionWrite(
-            content=content,
-            note=_text(args.get("note")) or "",
-            expected_revision_id=_text(args.get("expected_revision_id")),
-        ),
-    )
+    try:
+        documents = services.loop_document.save_info(
+            actor,
+            board_id,
+            loop_id,
+            InfoRevisionWrite(
+                content=content,
+                note=_text(args.get("note")) or "",
+                expected_revision_id=_text(args.get("expected_revision_id")),
+            ),
+        )
+    except ApiError as refusal:
+        if refusal.code != "human_action_required":
+            raise
+        # The service refuses only after it found the Loop's row by this very id, so the id is
+        # the row's own: no key reaches the address.
+        link = tool_decision_link(
+            "info", board_id=board_id, loop_id=loop_id, public_url=services.settings.public_url
+        )
+        raise refused_at(refusal, link, "A person edits the Info in the Loop's Plan tab") from None
     info = documents["documents"]["info"]
     return {
         "loop_id": loop_id,
@@ -341,6 +369,7 @@ def _run_roadmap(
 
 __all__ = [
     "DEDUPE_WINDOW_SECONDS",
+    "InfoWriting",
     "TicketMoving",
     "_assign_ticket",
     "_create_loop",

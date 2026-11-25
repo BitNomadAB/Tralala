@@ -6,6 +6,8 @@ with their counts, and the newest notes cut short; ``list_tickets`` lists the Ti
 documents themselves are read with ``read_document``: as numbered lines a page at a time, or, for
 the technical analysis and RoadMap, as an outline whose items (a finding, a Phase, a Ticket) are
 read one at a time. Both take a Loop by its id or by its key. No answer carries a document twice.
+``read_loop``'s ``decision_link`` is the address of the Loop's next decision when a person takes
+it, the one ``loop_summaries`` gives (``agent_tools_loops.loop_decision_link``), else null.
 
 The handlers are public and typed on the attributes of the composition root they use, so a unit
 test runs them with the real services on the typed fakes. Their catalogue entries are built here
@@ -22,10 +24,12 @@ from ..core.context import ActorContext
 from ..core.errors import NotFound, ValidationFailure
 from ..schemas.loops import DOCUMENT_KINDS
 from .agent_tools_listing import loop_id_of
+from .agent_tools_loops import loop_decision_link
 from .agent_tools_read import ToolArguments, ToolResult, _require, _text, _whole_number
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
+    from ..core.config import Settings
     from .lists import ListService
     from .loop_documents import LoopDocumentService
     from .loop_documents_views import DocumentView
@@ -64,6 +68,9 @@ class LoopReading(Protocol):
 
     @property
     def list(self) -> ListService: ...
+
+    @property
+    def settings(self) -> Settings: ...
 
 
 class DocumentReading(Protocol):
@@ -109,6 +116,8 @@ def read_loop(services: LoopReading, actor: ActorContext, args: ToolArguments) -
     readiness = services.loop.readiness(board_id, loop_id)
     notes = services.loop_notes.list(actor, board_id, loop_id, limit=OVERVIEW_NOTES)
     columns = services.list.list(board_id, loop_id)
+    # The Loop as loop_summaries reads it, so both answer the same decision.
+    entry = services.loop.get(board_id, loop_id)
     return {
         "loop": {
             "id": context["loop_id"],
@@ -119,6 +128,9 @@ def read_loop(services: LoopReading, actor: ActorContext, args: ToolArguments) -
         },
         "execution_allowed": readiness["execution_allowed"],
         "blocked_reason": readiness["blocked_reason"],
+        "decision_link": loop_decision_link(
+            entry, readiness, public_url=services.settings.public_url
+        ),
         "documents": {kind: document_summary(documents[kind]) for kind in DOCUMENT_KINDS},
         "phases": [
             {

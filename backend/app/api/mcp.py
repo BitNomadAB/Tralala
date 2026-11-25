@@ -24,7 +24,12 @@ from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.errors import ApiError
 from ..schemas.loops import CRITERION_MAX_CHARS
-from ..services.agent_tools import REPORT_RULE, missing_scopes, tool_catalog
+from ..services.agent_tools import (
+    DECISION_LINK_RULE,
+    REPORT_RULE,
+    missing_scopes,
+    tool_catalog,
+)
 from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
 from ..services.loop_notes import NOTE_MAX_CHARACTERS
 from .body import read_limited_json
@@ -50,7 +55,9 @@ INSTRUCTIONS = (
     "it to and done only through complete_ticket. "
     + REPORT_RULE
     + " Approving plans, confirming human work, "
-    "clearing a wait and accepting QA are human decisions that no token can perform. The Loop "
+    "clearing a wait and accepting QA are human decisions that no token can perform. "
+    + DECISION_LINK_RULE
+    + " The Loop "
     "is the plan: what you plan or log goes into the Loop, never into a file of a repository."
 )
 
@@ -327,6 +334,8 @@ def render_bootstrap(settings: Settings) -> str:
         "  `409 version_conflict` when somebody else wrote first.",
         "- `409 plan_change_required` means the plan is stale; do not retry, report it.",
         "- `403 human_action_required` means the action belongs to a signed-in person.",
+        "- An answer or a refusal that waits for a person carries `decision_link`, the address in",
+        "  Tralala where that person decides.",
         "- Your own analysis or RoadMap (`write_analysis`, `write_roadmap`) follows the same",
         "  schema, validation and review as one a board agent writes, and is written to the same",
         "  instructions, word for word what that agent works under (`read_instructions`), whose",

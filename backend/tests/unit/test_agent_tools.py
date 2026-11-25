@@ -1,19 +1,41 @@
-"""The worker catalogue as data, and `/llms.txt` as the text generated from it."""
+"""The worker catalogue as data, and `/llms.txt` as the text generated from it; ``write_info`` on
+the fakes, the real LoopDocumentService handed to it as the attributes ``InfoWriting`` declares, and
+the one sentence the texts give a worker about the address of a person's decision."""
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import JsonValue
 
-from app.api.mcp import render_bootstrap
+from app.api.mcp import INSTRUCTIONS, render_bootstrap
 from app.core.config import Settings
 from app.core.context import MEMBER_TOKEN_SCOPES, SCOPES, ActorContext
+from app.core.errors import Forbidden
 from app.schemas.loops import CRITERION_MAX_CHARS
-from app.services.agent_tools import AgentTool, describe_scope, missing_scopes, tool_catalog
+from app.services.agent_tools import (
+    DECISION_LINK_RULE,
+    AgentTool,
+    _write_info,
+    describe_scope,
+    missing_scopes,
+    tool_catalog,
+)
+from app.services.loop_documents import LoopDocumentService
 from app.services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
 from app.services.loop_notes import NOTE_MAX_CHARACTERS
+from app.services.loop_plans import LoopPlanService
+from tests.unit.fakes.board import (
+    BOARD_ID,
+    BoardState,
+    FakeBoardChecks,
+    FakeBoardUnitOfWork,
+    loop_row,
+)
 
 CATALOGUE = tool_catalog()
 
@@ -181,3 +203,80 @@ def test_agent_usage_lists_every_tool_with_its_scopes_in_catalogue_order() -> No
     assert [name for name, _ in rows] == list(CATALOGUE)
     for name, scopes in rows:
         assert scopes == ", ".join(f"`{scope}`" for scope in CATALOGUE[name].scopes), name
+
+
+def test_the_texts_say_that_what_waits_for_a_person_carries_its_address(bootstrap: str) -> None:
+    """The MCP instructions and the rules of ``/llms.txt`` give it in one sentence, the same one
+    ``whoami`` adds to its note on the decisions only a person makes."""
+    assert DECISION_LINK_RULE.count(".") == 1 and DECISION_LINK_RULE.endswith(".")
+    assert DECISION_LINK_RULE in INSTRUCTIONS
+    assert DECISION_LINK_RULE.replace("decision_link", "`decision_link`") in _section(bootstrap, 4)
+
+
+# --- write_info ----------------------------------------------------------------------------------
+
+# A Loop's id as its row has it, a UUID: the address of its Info is built from it.
+INFO_LOOP = "4b3a2918-0716-4f5e-9d4c-3b2a19087f6e"
+NOW = datetime(2026, 11, 25, 10, 0, tzinfo=UTC)
+PUBLIC = "https://tralala.example.com"
+WRITER = _token("loops:write")
+
+
+@dataclass(frozen=True, slots=True)
+class InfoWorld:
+    """What ``write_info`` declares it uses of the composition root, and the board."""
+
+    loop_document: LoopDocumentService
+    settings: Settings
+    state: BoardState
+
+
+def info_world(settings: Settings, stage: str, *, public_url: str | None = None) -> InfoWorld:
+    """A Loop in ``stage``; ``public_url`` is the installation's public address, unset unless
+    given."""
+    state = BoardState()
+    state.loops = {INFO_LOOP: loop_row(INFO_LOOP, stage=stage)}
+    service = LoopDocumentService(
+        FakeBoardChecks(), FakeBoardUnitOfWork(state), LoopPlanService(clock=lambda: NOW)
+    )
+    return InfoWorld(service, settings.model_copy(update={"public_url": public_url}), state)
+
+
+def info(content: str = "Users confirm their address.") -> dict[str, JsonValue]:
+    return {"board_id": BOARD_ID, "loop_id": INFO_LOOP, "content": content}
+
+
+def test_write_info_writes_the_intent_while_the_loop_is_a_draft(settings: Settings) -> None:
+    world = info_world(settings, "draft")
+    answer = _write_info(world, WRITER, info())
+    assert (answer["loop_id"], answer["revision_number"]) == (INFO_LOOP, 1)
+    assert answer["state"] == "ready_for_review"
+    # The same text again is the same revision.
+    again = _write_info(world, WRITER, info())
+    assert (again["revision_id"], again["deduplicated"]) == (answer["revision_id"], True)
+
+
+def test_write_info_once_planning_has_started_links_where_a_person_edits_it(
+    settings: Settings,
+) -> None:
+    world = info_world(settings, "planning")
+    with pytest.raises(Forbidden) as refused:
+        _write_info(world, WRITER, info())
+    link = f"/boards/{BOARD_ID}/loops/{INFO_LOOP}?tab=plan&doc=info"
+    assert (refused.value.status_code, refused.value.code) == (403, "human_action_required")
+    assert refused.value.message == (
+        "Info is a person's decision once the Loop is being planned. A person edits the Info in "
+        f"the Loop's Plan tab: {link}"
+    )
+    assert refused.value.details == {
+        "stage": "planning",
+        "action": "Editing Loop Info",
+        "decision_link": link,
+    }
+    assert world.state.documents == []
+    # With the installation's public address the same place is absolute.
+    public = info_world(settings, "in_progress", public_url=PUBLIC)
+    with pytest.raises(Forbidden) as absolute:
+        _write_info(public, WRITER, info())
+    assert absolute.value.details is not None
+    assert absolute.value.details["decision_link"] == f"{PUBLIC}{link}"

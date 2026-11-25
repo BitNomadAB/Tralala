@@ -153,7 +153,6 @@ UNTESTED_TOOLS: Mapping[str, str] = MappingProxyType(
         (
             "assign_ticket",
             "create_loop",
-            "write_info",
             "run_analysis",
             "run_roadmap",
         ),
