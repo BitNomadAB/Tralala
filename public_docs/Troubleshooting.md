@@ -68,6 +68,28 @@ facts that explain most surprises:
 - **An agent on a laptop cannot reach `/mcp`** — the tailnet ACL must allow that device to the host,
   and the agent needs the token. Network first, then the key; the token cannot grant reachability.
 
+## Coding agents and `/mcp`
+
+`/mcp` speaks MCP revision 2026-07-28 and no other.
+[When it does not connect](Agent_usage.md#when-it-does-not-connect) has a request that tests the
+address and the key, and what each answer means.
+
+- **A coding agent cannot connect, and Tralala answers `400` with `-32022`** — the client opened
+  with `initialize`, the handshake of an older MCP revision, which 2026-07-28 does not have. The
+  message reads "Tralala speaks only MCP 2026-07-28, which has no initialize; connect with a client
+  that speaks MCP 2026-07-28", whatever scopes the key holds (a wrong key is answered `401` first),
+  and the client may show it only as a failed connection. No setting brings the older revision back: use a client that speaks 2026-07-28.
+  [Which clients can connect](Agent_usage.md#which-clients-can-connect) says which ones do, and
+  [When it does not connect](Agent_usage.md#when-it-does-not-connect) what keeps Claude Code on the
+  older revision.
+- **A tool is missing, or a call answers `Missing required scope: …`** — the key lacks a scope that
+  tool needs. `tools/list` leaves out every tool the key's scopes do not open, and a call to one is
+  answered with HTTP `200` and the JSON-RPC error `-32602`, not with `403`. Create a key with the
+  scopes the work needs ([Get a key](Agent_usage.md#1-get-a-key)).
+- **`403` with "Forbidden: the Origin '…' is not allowed"** — the request carried an `Origin` header
+  that is neither the origin of `TRALALA_PUBLIC_URL` nor one in `TRALALA_CORS_ORIGINS`. A request
+  without one passes.
+
 ## Boards, backups and files
 
 - **Board shows `migration_failed`** — read the backend log event `migration_failed`, fix the cause,

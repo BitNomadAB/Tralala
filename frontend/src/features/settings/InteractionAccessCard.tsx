@@ -134,13 +134,13 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     },
   });
 
-  async function copySnippet(snippet: string) {
-    if (await copyText(snippet)) {
-      toast.push({ title: "MCP configuration copied", variant: "success" });
+  async function copyCommand(command: string) {
+    if (await copyText(command)) {
+      toast.push({ title: "Command copied", variant: "success" });
       return;
     }
     toast.push({
-      title: "The browser did not copy the configuration",
+      title: "The browser did not copy the command",
       description: COPY_BY_HAND,
       variant: "error",
     });
@@ -186,8 +186,8 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         <div className="mt-2">
           <AgentAccessGuide
             token={issued?.token}
-            onCopy={(snippet) => {
-              void copySnippet(snippet);
+            onCopy={(command) => {
+              void copyCommand(command);
             }}
           />
         </div>

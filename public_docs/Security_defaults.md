@@ -93,7 +93,9 @@ decides for itself whether to believe the `X-Forwarded-For` header it receives:
   issued. An administrator may issue a wider token (`TRALALA_CREDENTIAL_DEFAULT_TTL_DAYS`, default
   90; `0` for none).
 - Scopes are enforced server-side on every request. A tool that needs more than the token holds is
-  refused, and `/mcp` hides it from `tools/list` rather than advertising a call that would fail.
+  refused, and `/mcp` hides it from `tools/list` rather than advertising a call that would fail. A
+  call to it anyway is answered with HTTP `200` and the JSON-RPC error `-32602`
+  (`Missing required scope: …`), not with `403`.
 - A key is identity: it is not bound to a device and there is no per-token rate limit. The intended
   deployment is a local machine or an internal network with approved models, not the open internet.
   Cost is bounded per discussion instead: at most four rounds, with a default token and time budget
@@ -102,7 +104,8 @@ decides for itself whether to believe the `X-Forwarded-For` header it receives:
 ## What a worker key can do
 
 A key a person issues for their coding agent works the boards through the tools of the worker
-catalogue (`/mcp`, described by `/llms.txt`), within the scopes it was given and never beyond them:
+catalogue (`/mcp`, which speaks MCP revision 2026-07-28 alone, described by `/llms.txt`), within the
+scopes it was given and never beyond them:
 
 - read boards, Loops, documents, Tickets, their attached files and notes, and search them;
 - open a Loop and write its Info while the Loop is still `draft` or `analysis_review`;
@@ -190,8 +193,16 @@ revision.
 - Requests are rate limited per actor (`TRALALA_RATE_LIMIT_PER_MINUTE`, default 600). It is a runaway
   guard, not a defence.
 - Authentication is resolved before a request body is parsed, including on `/mcp`.
+- `/mcp` then checks the `Origin` header, against DNS rebinding, before it reads the body. A request
+  whose `Origin` is neither the origin of `TRALALA_PUBLIC_URL` nor one in `TRALALA_CORS_ORIGINS` is
+  refused with `403` (`Forbidden: the Origin '…' is not allowed`). A request without an `Origin`
+  header passes, so a coding agent that sends none is judged by its key alone.
 - Errors are one envelope with a stable `code`, never a stack trace, driver message or server path.
-  An unhandled exception logs its type and returns `internal_error`.
+  An unhandled exception logs its type and returns `internal_error`. On `/mcp` the envelope carries
+  only what every route refuses alike: the key (`401`), the rate limit (`429`) and the size of the
+  body (`413`). Every other refusal there is a JSON-RPC 2.0 error, as MCP requires, and a tool's own
+  refusal is a result with `isError: true` that carries the error's `code`
+  ([The MCP endpoint](API.md#the-mcp-endpoint)).
 - API responses carry `Cache-Control: no-store`, `nosniff`, `X-Frame-Options: DENY` and
   `Referrer-Policy: no-referrer`; the web tier adds a CSP that forbids inline scripts. Neither tier
   advertises its product or version.

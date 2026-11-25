@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mcpConfigSnippet, scopeChoicesFor } from "@/lib/agentAccess";
+import { claudeCodeCommand, MCP_REVISION, scopeChoicesFor } from "@/lib/agentAccess";
 import type { ApiMeta } from "@/lib/types";
 
 const meta: ApiMeta = {
@@ -19,10 +19,13 @@ describe("interaction agent access", () => {
     expect(scopeChoicesFor(true, undefined)).toEqual([]);
   });
 
-  it("builds a paste-ready MCP client entry for this origin", () => {
-    const snippet = mcpConfigSnippet("https://tralala.example.com", "trl_abc");
-    expect(snippet).toContain('"url": "https://tralala.example.com/mcp"');
-    expect(snippet).toContain('"Authorization": "Bearer trl_abc"');
-    expect((): unknown => JSON.parse(snippet)).not.toThrow();
+  it("builds the Claude Code command for this origin and key", () => {
+    expect(claudeCodeCommand("https://tralala.example.com", "trl_abc")).toBe(
+      'claude mcp add --transport http tralala https://tralala.example.com/mcp --header "Authorization: Bearer trl_abc"',
+    );
+  });
+
+  it("names the one revision the endpoint speaks", () => {
+    expect(MCP_REVISION).toBe("2026-07-28");
   });
 });

@@ -31,7 +31,9 @@ Read this one before upgrading an installation that a coding agent connects to:
   2026-07-28 from version 2.1.274 (2.1.232 in a session that fetches feature flags), and Codex
   CLI, Cursor, VS Code with GitHub Copilot and Gemini CLI did not say that they do, so they cannot
   connect until they do. None of them has been tried against Tralala yet.
-  [Connect](Agent_usage.md#2-connect) shows how to connect Claude Code and check the connection.
+  [Connect](Agent_usage.md#2-connect) shows how to connect Claude Code and check the connection,
+  and **How do I connect my computer?** in Settings now gives the command for Claude Code instead
+  of a configuration block for VS Code.
 
 Worth knowing when you look at the dashboard:
 

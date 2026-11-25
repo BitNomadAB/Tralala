@@ -46,7 +46,10 @@ test("an administrator creates a member who cannot manage accounts", async ({ pa
   // The in-card guide is what a person follows at their own machine.
   await card.getByText("How do I connect my computer?").click();
   await expect(card.getByText("Copy the token.")).toBeVisible();
-  await expect(card.getByRole("button", { name: "Copy this block" })).toBeVisible();
+  await expect(card.getByRole("group", { name: "Code block" })).toContainText(
+    "claude mcp add --transport http tralala https://<Your URL>/mcp",
+  );
+  await expect(card.getByRole("button", { name: "Copy this command" })).toBeVisible();
 });
 
 test("the last enabled administrator cannot be disabled", async ({ page }) => {

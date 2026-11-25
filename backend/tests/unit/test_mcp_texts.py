@@ -3,7 +3,9 @@
 The route module's docstring, the instructions ``server/discover`` gives a model, section 5 of
 ``/llms.txt`` and the shipped documents describe revision 2026-07-28 and nothing older. The
 requests the documents tell a person to send, and the refusal they show for ``initialize``, are run
-through ``dispatch`` as the route runs them, so a document cannot drift from the server.
+through ``dispatch`` as the route runs them, so a document cannot drift from the server. The
+refusals the documents quote are the server's own, and the guide under Settings builds the command
+the guide for coding agents gives, for the revision the server speaks.
 """
 
 from __future__ import annotations
@@ -21,12 +23,14 @@ from app.api.mcp_protocol import (
     PROTOCOL_VERSION,
     Reply,
     dispatch,
+    origin_refusal,
     tool_list,
 )
 from app.core.config import Settings
 from app.core.context import SCOPES, ActorContext
 
 PUBLIC_DOCS = Path(__file__).resolve().parents[3] / "public_docs"
+FRONTEND = PUBLIC_DOCS.parent / "frontend" / "src"
 WORKER = ActorContext(
     actor_id="agent-1", actor_type="agent", actor_name="worker", scopes=frozenset(SCOPES)
 )
@@ -198,10 +202,87 @@ def test_api_md_lists_the_methods_the_headers_and_every_refusal() -> None:
 
 @pytest.mark.parametrize(
     "document",
-    ["Agent_usage.md", "API.md", "Architecture.md", "Installation.md", "Release_notes.md"],
+    [
+        "Agent_usage.md",
+        "API.md",
+        "Architecture.md",
+        "Installation.md",
+        "Onboarding.md",
+        "Release_notes.md",
+        "Security_defaults.md",
+        "Troubleshooting.md",
+    ],
 )
 def test_the_documents_name_the_revision_mcp_speaks(document: str) -> None:
     assert PROTOCOL_VERSION in (PUBLIC_DOCS / document).read_text(encoding="utf-8")
+
+
+def test_troubleshooting_quotes_the_refusal_initialize_gets() -> None:
+    text = (PUBLIC_DOCS / "Troubleshooting.md").read_text(encoding="utf-8")
+    section = _flat(_between(text, "\n## Coding agents and `/mcp`\n", "\n## "))
+    error = _initialize_error(1, "2025-06-18")["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == -32022
+    assert "answers `400` with `-32022`" in section
+    assert f'"{error["message"]}"' in section
+    assert "(Agent_usage.md#when-it-does-not-connect)" in section
+
+
+def _quoted(reply: Reply | None) -> str:
+    """A refusal's message as the documents quote it: each quoted value and each listed scope
+    stands as ``…``."""
+    assert isinstance(reply, Reply)
+    answer = _decoded(reply)
+    assert isinstance(answer, dict)
+    error = answer["error"]
+    assert isinstance(error, dict)
+    message = error["message"]
+    assert isinstance(message, str)
+    return re.sub(r"(?<=scope: )\S+$", "…", re.sub(r"'[^']*'", "'…'", message))
+
+
+def test_the_refusals_the_documents_quote_are_the_ones_mcp_sends() -> None:
+    """An untrusted ``Origin`` is 403 and a request without one passes; a missing scope is a
+    -32602 error with HTTP 200, not a 403. The documents quote both messages."""
+    untrusted = origin_refusal("https://elsewhere.example", frozenset())
+    assert untrusted is not None and untrusted.status == 403
+    assert origin_refusal(None, frozenset()) is None
+    reader = ActorContext(
+        actor_id="agent-2", actor_type="agent", actor_name="reader", scopes=frozenset()
+    )
+    pairs = [(HEADERS[0], PROTOCOL_VERSION), (HEADERS[1], "tools/call"), (HEADERS[2], "whoami")]
+    meta: JsonValue = {META_KEYS[0]: PROTOCOL_VERSION, META_KEYS[1]: {}}
+    call: JsonValue = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "whoami", "arguments": {}, "_meta": meta},
+    }
+    scoped = dispatch(pairs, call, reader, mcp.SERVER)
+    assert isinstance(scoped, Reply) and scoped.status == 200
+    for document in ("Security_defaults.md", "Troubleshooting.md"):
+        text = _flat((PUBLIC_DOCS / document).read_text(encoding="utf-8"))
+        assert _quoted(untrusted) in text, document
+        assert _quoted(scoped) in text, document
+        for setting in ("TRALALA_PUBLIC_URL", "TRALALA_CORS_ORIGINS"):
+            assert setting in text, (document, setting)
+
+
+def test_the_settings_guide_builds_the_documented_command_for_the_revision() -> None:
+    """The guide under Settings gives the command section 2 gives, with the address and the key
+    as its arguments, and names the revision ``/mcp`` speaks."""
+    source = (FRONTEND / "lib" / "agentAccess.ts").read_text(encoding="utf-8")
+    assert f'export const MCP_REVISION = "{PROTOCOL_VERSION}";' in source
+    (documented,) = [
+        line.strip()
+        for block in BASH_BLOCK.findall(_connect())
+        for line in block.splitlines()
+        if line.strip().startswith("claude mcp add ")
+    ]
+    template = documented.replace("http://127.0.0.1:8000", "${origin}").replace(
+        "trl_...", "${token}"
+    )
+    assert f"`{template}`" in source
 
 
 def test_the_readme_names_the_revision_mcp_speaks() -> None:

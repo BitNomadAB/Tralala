@@ -143,6 +143,20 @@ describe("revoking and rotating an access key", () => {
   });
 });
 
+describe("the guide on the access card", () => {
+  it("puts the command it shows on the clipboard and says so", async () => {
+    const { user } = await renderKeys();
+    await user.click(screen.getByText("How do I connect my computer?"));
+    const command = screen.getByRole("group", { name: "Code block" });
+    expect(command).toHaveTextContent(/^claude mcp add --transport http tralala /);
+
+    await user.click(screen.getByRole("button", { name: "Copy this command" }));
+
+    expect(await screen.findByText("Command copied")).toBeInTheDocument();
+    expect(await navigator.clipboard.readText()).toBe(command.textContent);
+  });
+});
+
 /** The editor of a built-in role whose prompt was customized; restoring is recorded. */
 async function renderRole() {
   const { writes, record } = recorder();

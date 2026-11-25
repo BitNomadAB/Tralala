@@ -11,17 +11,10 @@ export function scopeChoicesFor(isAdmin: boolean, meta: ApiMeta | undefined): st
   return isAdmin ? meta.token_scopes : meta.member_token_scopes;
 }
 
-/** A ready-to-paste MCP client entry for this installation. */
-export function mcpConfigSnippet(origin: string, token: string): string {
-  return [
-    "{",
-    '  "servers": {',
-    '    "tralala": {',
-    '      "type": "http",',
-    `      "url": "${origin}/mcp",`,
-    `      "headers": { "Authorization": "Bearer ${token}" }`,
-    "    }",
-    "  }",
-    "}",
-  ].join("\n");
+/** The one MCP revision `/mcp` speaks; a client that does not speak it cannot connect. */
+export const MCP_REVISION = "2026-07-28";
+
+/** The command that adds this installation to Claude Code, the one the agent guide gives. */
+export function claudeCodeCommand(origin: string, token: string): string {
+  return `claude mcp add --transport http tralala ${origin}/mcp --header "Authorization: Bearer ${token}"`;
 }
