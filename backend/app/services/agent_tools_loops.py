@@ -65,8 +65,9 @@ class TicketCounts:
 
 
 def ticket_counts(readiness: LoopReadiness) -> TicketCounts:
-    """The planned Tickets by state, plus the ones added outside the plan (archived ones left
-    out), which only their own wait can hold up."""
+    """The planned Tickets by state, plus the ones added by hand (outside the plan, or every
+    Ticket of a Loop without one; archived ones left out), which only their own wait can hold
+    up."""
     items = readiness["items"]
     unplanned = [ticket for ticket in readiness["unplanned"] if ticket["archived_at"] is None]
     states = [item["state"] for item in items] + [ticket["state"] for ticket in unplanned]

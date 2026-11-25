@@ -42,6 +42,7 @@ from app.services.loops import (
     stale_reasons,
     without_plan,
 )
+from app.services.plan_views import unplanned_tickets
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
@@ -840,6 +841,72 @@ def test_readiness_names_the_delivery_tickets_that_are_not_completed(settings: S
     closed = w.service.readiness(BOARD_ID, LOOP)
     assert [ticket["id"] for ticket in closed["open_delivery"]] == ["open", "shelved"]
     assert closed["unplanned"][0]["state"] == "not_done"
+
+
+def _manual(card_id: str, list_id: str, loop_id: str, key: str | None) -> CardsRow:
+    return card_row(card_id, list_id, loop_id).__replace__(kind="manual", ticket_key=key)
+
+
+def test_the_unplanned_tickets_of_a_loop_without_a_plan_are_all_its_tickets(
+    settings: Settings,
+) -> None:
+    w = world(settings, loop_row(LOOP, stage="in_progress"))
+    w.state.cards = {
+        "older": _manual("older", "todo", LOOP, None),
+        "done": _manual("done", "todo", LOOP, "L-1-UNP-001").__replace__(completed_at=STAMP),
+        "asks": _manual("asks", "todo", LOOP, "L-1-UNP-002").__replace__(waiting_for="decision"),
+        "shelved": _manual("shelved", "todo", LOOP, "L-1-UNP-003").__replace__(archived_at=STAMP),
+        # A card a plan published is not one of them.
+        "planned": card_row("planned", "todo", LOOP, plan_item_id="i").__replace__(kind="ticket"),
+    }
+    loop = w.state.loops[LOOP]
+    listed = [
+        (ticket["id"], ticket["key"], ticket["state"], ticket["archived_at"])
+        for ticket in unplanned_tickets(repos(w.state), loop)
+    ]
+    # By creation time, then id; the archived one is listed too.
+    assert listed == [
+        ("asks", "L-1-UNP-002", "needs_input", None),
+        ("done", "L-1-UNP-001", None, None),
+        ("older", None, "ready", None),
+        ("shelved", "L-1-UNP-003", "ready", STAMP),
+    ]
+    assert w.service.readiness(BOARD_ID, LOOP)["unplanned"] == unplanned_tickets(
+        repos(w.state), loop
+    )
+    closed = loop.__replace__(stage="completed", completed_at=STAMP)
+    assert [ticket["state"] for ticket in unplanned_tickets(repos(w.state), closed)] == [
+        "not_done",
+        None,
+        "not_done",
+        "not_done",
+    ]
+
+
+def test_progress_counts_the_manual_tickets_of_a_loop_without_a_plan_only(
+    settings: Settings,
+) -> None:
+    w = world(
+        settings,
+        loop_row(LOOP, stage="in_progress"),
+        loop_row("planned", stage="in_progress").__replace__(current_plan_id="p", sequence=2),
+    )
+    w.state.cards = {
+        "a": _manual("a", "todo", LOOP, "L-1-UNP-001").__replace__(completed_at=STAMP),
+        "b": _manual("b", "todo", LOOP, "L-1-UNP-002"),
+        "c": _manual("c", "todo", LOOP, "L-1-UNP-003").__replace__(archived_at=STAMP),
+        "q": card_row("q", "todo", LOOP).__replace__(kind="qa"),
+        # A Loop with a plan counts its plan's Tickets and QA, not the work outside the plan.
+        "x": _manual("x", "work", "planned", "L-2-UNP-001").__replace__(completed_at=STAMP),
+        "t": card_row("t", "work", "planned", plan_item_id="i").__replace__(kind="ticket"),
+    }
+    solo = w.service.get(BOARD_ID, LOOP)["progress"]
+    assert solo == {"ticket_total": 4, "ticket_completed": 1, "ticket_archived_incomplete": 1}
+    planned = w.service.get(BOARD_ID, "planned")["progress"]
+    assert planned == {"ticket_total": 1, "ticket_completed": 0, "ticket_archived_incomplete": 0}
+    # The overview counts every Loop the same way.
+    overview = {entry["id"]: entry["progress"] for entry in w.service.list(BOARD_ID)}
+    assert overview == {LOOP: solo, "planned": planned}
 
 
 # --- create ---------------------------------------------------------------------------------------

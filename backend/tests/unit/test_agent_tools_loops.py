@@ -247,6 +247,32 @@ def test_a_completed_loop_counts_what_was_never_done_as_not_done(settings: Setti
     }
 
 
+def test_a_loop_without_a_plan_counts_its_tickets_as_its_work(settings: Settings) -> None:
+    state = BoardState()
+    state.cards = {
+        "u": card_row("u", "todo-solo", "solo").__replace__(
+            kind="manual", ticket_key="L-1-UNP-001"
+        ),
+        "v": card_row("v", "doing-solo", "solo").__replace__(
+            kind="manual", ticket_key="L-1-UNP-002", completed_at=CREATED
+        ),
+    }
+    world = loop_world(settings, [loop("solo", "in_progress", 1)], state=state)
+    (row,) = rows(loop_summaries(world, READER, ask()))
+    assert (row["without_plan"], row["execution_allowed"]) == (True, True)
+    assert row["tickets"] == {
+        "ready": 1,
+        "needs_input": 0,
+        "blocked": 0,
+        "not_done": 0,
+        "completed": 1,
+        "total": 2,
+        "needs_person": 0,
+        "by_column": {"Todo": 1, "Doing": 1},
+    }
+    assert (row["next"], row["waiting_on"]) == ("1 Ticket is ready to start.", "anyone")
+
+
 def test_a_row_says_whether_the_loop_runs_without_a_plan(settings: Settings) -> None:
     world = loop_world(
         settings,

@@ -96,7 +96,8 @@ class Readiness(TypedDict):
 
 
 class UnplannedTicket(TypedDict):
-    """A Ticket added outside the Loop's plan: it never blocks readiness or completion."""
+    """A Ticket added by hand: outside the Loop's plan, where it never blocks the plan's readiness
+    or completion, or in a Loop without a plan, whose work it is."""
 
     id: str
     key: str | None
@@ -122,8 +123,9 @@ class OpenDeliveryTicket(TypedDict):
 
 
 class LoopReadiness(Readiness):
-    """Readiness as the Loop answers it: the plan's Tickets, the work outside the plan and the
-    delivery Tickets that are not completed."""
+    """Readiness as the Loop answers it: the plan's Tickets, the Tickets added by hand (the work
+    outside the plan, or all of a Loop without one) and the delivery Tickets that are not
+    completed."""
 
     unplanned: list[UnplannedTicket]
     open_delivery: list[OpenDeliveryTicket]
@@ -152,10 +154,10 @@ def open_delivery(repos: BoardRepositories, loop_id: str) -> list[OpenDeliveryTi
 
 
 def unplanned_tickets(repos: BoardRepositories, loop: LoopsRow) -> list[UnplannedTicket]:
-    """The manual Tickets of a Loop that executes a plan, archived ones included; a Loop without
-    a plan has nothing outside it."""
-    if not loop.current_plan_id:
-        return []
+    """The Loop's manual Tickets (not published from a plan), archived ones included: the work
+    outside the plan of a Loop that has one, and every Ticket of a Loop without a plan. No plan
+    blocks them, so ``ticket_state`` gives each one's state from its own wait: ``None`` once it is
+    completed, and ``not_done`` when the Loop was closed without it."""
     closed = loop_closed(loop)
     return [
         {

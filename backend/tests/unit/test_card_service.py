@@ -477,10 +477,28 @@ def test_an_executing_loop_takes_unplanned_work_keyed_after_every_earlier_one(
     assert third["ticket_key"] == "L-1-UNP-003"
 
 
-def test_a_loop_without_a_plan_keys_no_manual_card(settings: Settings) -> None:
+def test_a_loop_without_a_plan_keys_its_tickets_and_leaves_an_older_one_without_a_key(
+    settings: Settings,
+) -> None:
     w = world(settings)
-    entry, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Plain"))
-    assert entry["ticket_key"] is None
+    assert w.state.loops[LOOP].current_plan_id is None
+    # Added before such a Loop's Tickets got keys: it gets none afterwards and takes no number.
+    older = put(w, card_row("older", "todo", LOOP).__replace__(kind="manual"))
+    first, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="One"))
+    second, _ = w.service.create(AGENT, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Two"))
+    assert (first["ticket_key"], second["ticket_key"]) == ("L-1-UNP-001", "L-1-UNP-002")
+    assert {w.card(str(first["id"])).kind, w.card(str(second["id"])).kind} == {"manual"}
+    assert w.card("older") == older
+    # An archived one keeps its number, and a bulk request numbers after it.
+    w.service.archive(HUMAN, BOARD_ID, LOOP, str(second["id"]))
+    bulk = BulkCardCreate(cards=[CardCreate(list_id="todo", title="Three")])
+    w.service.bulk_create(HUMAN, BOARD_ID, LOOP, bulk)
+    assert {card.title: card.ticket_key for card in w.state.cards.values()} == {
+        "Card older": None,
+        "One": "L-1-UNP-001",
+        "Two": "L-1-UNP-002",
+        "Three": "L-1-UNP-003",
+    }
 
 
 def test_a_loop_without_a_plan_follows_its_tickets_through_its_stage(settings: Settings) -> None:
