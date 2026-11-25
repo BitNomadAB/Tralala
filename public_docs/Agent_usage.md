@@ -115,7 +115,7 @@ Tralala yet:
 1. **Check the version.** `claude --version` prints it; it must be one of the versions above or
    later, and `claude update` installs the newest.
 2. **Add Tralala as a server.** Run this in the folder of the project you will work on, with the
-   key from step 1 in place of `trl_...` and your address from the table above:
+   key from section 1 in place of `trl_...` and your address from the table above:
 
    ```bash
    claude mcp add --transport http tralala http://127.0.0.1:8000/mcp --header "Authorization: Bearer trl_..."
