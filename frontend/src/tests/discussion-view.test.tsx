@@ -6,7 +6,7 @@ import { renderDiscussion } from "./renderDiscussion";
 /** An expander by the start of its title (the hint follows it in the summary). */
 function expander(title: string): HTMLElement {
   const summary = Array.from(document.querySelectorAll("summary")).find((node) =>
-    (node.textContent ?? "").startsWith(title),
+    node.textContent.startsWith(title),
   );
   const details = summary?.closest("details");
   if (!details) throw new Error(`No expander "${title}"`);

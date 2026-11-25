@@ -89,7 +89,8 @@ export function TicketFaceEdit({
               id={counter}
               className="m-0 flex flex-wrap justify-between gap-2 text-xs text-[var(--foreground-faint)]"
             >
-              <span>{hint}</span>
+              {/* The space is what a screen reader hears between the hint and the count. */}
+              <span>{hint}</span>{" "}
               <span
                 className={cn("tabular-nums", count.over && "font-medium text-[var(--warning)]")}
               >

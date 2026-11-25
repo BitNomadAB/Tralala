@@ -13,7 +13,7 @@ const SECTIONS = ["In short", "Why", "What you decide", "How big", "For and agai
 function headings(): string[] {
   return screen
     .getAllByRole("heading")
-    .map((heading) => heading.textContent ?? "")
+    .map((heading) => heading.textContent)
     .filter((text) => SECTIONS.includes(text));
 }
 

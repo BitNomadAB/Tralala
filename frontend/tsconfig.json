@@ -18,9 +18,8 @@
     "noEmit": true,
     "allowImportingTsExtensions": false,
     "types": ["vite/client", "vitest/globals", "node"],
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src", "vite.config.ts"]

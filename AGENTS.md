@@ -372,9 +372,10 @@ log (`docs/decisions/0009`, untracked).
   merged pull request can make the code unsellable.
 - A dependency under a copyleft licence is a decision, not a detail: record it in the decision log.
   The current set is MIT, ISC, BSD, 0BSD, Apache-2.0, PSF, MIT-0, MPL-2.0, BlueOak-1.0.0 (only
-  `minimatch`, used by the lint tooling) and two data licences: CC-BY-4.0 (only `caniuse-lite`, data
-  with an attribution notice and no code) and CC0-1.0 (only `language-subtag-registry`, the IANA
-  language list the accessibility linter reads). Nothing copyleft.
+  `minimatch`, `@isaacs/nonrecursive-glob-match`, `graceful-fs` and `lru-cache`, used by the lint,
+  build and test tooling) and two data licences: CC-BY-4.0 (only `caniuse-lite`, data with an
+  attribution notice and no code) and CC0-1.0 (only `language-subtag-registry`, the IANA language
+  list the accessibility linter reads). Nothing copyleft.
 - `python -m tools.deps licences` holds every installed dependency to that set, Python and npm,
   runtime and development alike, and runs in CI. `backend/tools/deps/licences.toml` is the set as
   SPDX ids (change it and the sentence above together; a test compares them), plus an override

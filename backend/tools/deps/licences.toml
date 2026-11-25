@@ -30,6 +30,24 @@ package = "minimatch"
 reason = "Glob matching required by ESLint 10 and typescript-eslint; dev tooling only."
 
 [[scoped]]
+licence = "BlueOak-1.0.0"
+ecosystem = "npm"
+package = "@isaacs/nonrecursive-glob-match"
+reason = "The matcher inside minimatch 11, which ESLint and typescript-eslint use; dev tooling only."
+
+[[scoped]]
+licence = "BlueOak-1.0.0"
+ecosystem = "npm"
+package = "graceful-fs"
+reason = "File access for enhanced-resolve, which the Tailwind build plugin uses; build tooling only."
+
+[[scoped]]
+licence = "BlueOak-1.0.0"
+ecosystem = "npm"
+package = "lru-cache"
+reason = "A cache inside jsdom, the simulated browser the unit tests run in; test tooling only."
+
+[[scoped]]
 licence = "CC-BY-4.0"
 ecosystem = "npm"
 package = "caniuse-lite"
