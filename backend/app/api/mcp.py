@@ -1,9 +1,11 @@
 """MCP transport for the worker tool catalogue, plus the plain-text bootstrap.
 
-`/mcp` speaks JSON-RPC 2.0 as MCP's Streamable HTTP transport: a client POSTs one message and gets
-one JSON response. The endpoint is authenticated with the same Bearer token as REST, and the tool
-list is filtered to the scopes the token actually holds, so a worker cannot even see a capability it
-may not use.
+`/mcp` speaks MCP revision 2026-07-28, and only it, over the Streamable HTTP transport: a client
+POSTs one JSON-RPC 2.0 message and gets one JSON response, with no handshake, no session and no
+stream. The rules of the revision live in `mcp_protocol` as pure functions; this module resolves
+the actor, reads the body and runs the handler. The endpoint is authenticated with the same Bearer
+token as REST, and the tool list is filtered to the scopes the token actually holds, so a worker
+cannot even see a capability it may not use.
 
 `/llms.txt` is public and deliberately boring: it names the envelope, the workflow and the tools,
 and contains no ids, no data and no secrets. It exists so that a URL plus a token is enough for an
@@ -12,32 +14,35 @@ agent to start working, without inventing endpoints.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping
-
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
-from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
 from ..core.config import Settings
-from ..core.context import ActorContext
 from ..core.errors import ApiError
 from ..schemas.loops import CRITERION_MAX_CHARS
-from ..services.agent_tools import (
-    DECISION_LINK_RULE,
-    REPORT_RULE,
-    missing_scopes,
-    tool_catalog,
-)
+from ..services.agent_tools import DECISION_LINK_RULE, REPORT_RULE, tool_catalog
 from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
 from ..services.loop_notes import NOTE_MAX_CHARACTERS
 from .body import read_limited_json
 from .deps import get_context
+from .mcp_protocol import (
+    PROTOCOL_VERSION,
+    SUPPORTED_VERSIONS,
+    Reply,
+    ServerIdentity,
+    dispatch,
+    method_not_allowed,
+    origin_refusal,
+    parse_error,
+    tool_failure,
+    tool_list,
+    tool_result,
+    trusted_origins,
+)
 
 router = APIRouter(tags=["mcp"])
 
-PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "tralala"
 SERVER_VERSION = "1.0.0"
 
@@ -66,134 +71,51 @@ INSTRUCTIONS = (
     "is the plan: what you plan or log goes into the Loop, never into a file of a repository."
 )
 
-
-def _result(message_id: JsonValue, result: Mapping[str, object]) -> dict[str, object]:
-    return {"jsonrpc": "2.0", "id": message_id, "result": result}
+SERVER = ServerIdentity(SERVER_NAME, SERVER_VERSION, INSTRUCTIONS)
 
 
-def _error(message_id: JsonValue, code: int, message: str) -> dict[str, object]:
-    return {"jsonrpc": "2.0", "id": message_id, "error": {"code": code, "message": message}}
-
-
-def tool_call(params: JsonValue) -> tuple[str, dict[str, JsonValue]] | str:
-    """A ``tools/call``'s tool name and arguments, or why they are invalid params (-32602)."""
-    if not isinstance(params, dict):
-        return "params must be an object"
-    arguments = params.get("arguments") or {}
-    if not isinstance(arguments, dict):
-        return "arguments must be an object"
-    return str(params.get("name") or ""), arguments
-
-
-def tool_list(actor: ActorContext) -> list[dict[str, object]]:
-    """The ``tools/list`` payload: each catalogue entry the actor holds the scopes for, in order."""
-    return [
-        {
-            "name": tool.name,
-            "description": tool.description,
-            "inputSchema": tool.input_schema,
-        }
-        for tool in tool_catalog().values()
-        if not missing_scopes(tool, actor)
-    ]
-
-
-def _tool_result(payload: Mapping[str, object]) -> dict[str, object]:
-    encoded = json.dumps(payload, ensure_ascii=False)
-    return {
-        "content": [{"type": "text", "text": encoded}],
-        "structuredContent": payload,
-        "isError": False,
-    }
-
-
-def _tool_failure(error: ApiError) -> dict[str, object]:
-    encoded = json.dumps(
-        {
-            "error": {
-                "code": error.code,
-                "message": error.message,
-                "details": error.details,
-                "retryable": error.retryable,
-            }
-        },
-        ensure_ascii=False,
-    )
-    return {"content": [{"type": "text", "text": encoded}], "isError": True}
+def send(reply: Reply) -> Response:
+    """A protocol answer as one HTTP response: a single JSON body, or none at all."""
+    headers = dict(reply.headers)
+    if reply.body is None:
+        return Response(status_code=reply.status, headers=headers)
+    return JSONResponse(reply.body, status_code=reply.status, headers=headers)
 
 
 @router.post("/mcp")
 async def mcp_endpoint(request: Request) -> Response:
-    # Every method is authenticated, including initialize: an unauthenticated MCP surface would be
-    # a second, undocumented entry point into the installation. The actor is resolved before the
+    # Every method is authenticated, server/discover included: an unauthenticated MCP surface would
+    # be a second, undocumented entry point into the installation. The actor is resolved before the
     # body is read, so an unauthenticated caller cannot make the process parse or buffer anything.
     # Resolving it reads the registry, so it runs in the thread pool like every other blocking call.
     ctx = await run_in_threadpool(get_context, request)
+    settings = ctx.services.settings
+    trusted = trusted_origins(settings.allowed_origins, settings.public_url)
+    refusal = origin_refusal(request.headers.get("origin"), trusted)
+    if refusal is not None:
+        return send(refusal)
     try:
         message = await read_limited_json(request)
     except ValueError:
-        return JSONResponse(_error(None, -32700, "Parse error"), status_code=200)
-    if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
-        return JSONResponse(_error(None, -32600, "Invalid Request"), status_code=200)
-
-    method = message.get("method")
-    message_id = message.get("id")
-    params: JsonValue = message.get("params") or {}
-
-    if "id" not in message:  # notifications/initialized and friends
-        return Response(status_code=202)
-
-    if method == "initialize":
-        return JSONResponse(
-            _result(
-                message_id,
-                {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-                    "instructions": INSTRUCTIONS,
-                },
-            )
+        return send(parse_error())
+    step = dispatch(request.headers.items(), message, ctx.actor, SERVER)
+    if isinstance(step, Reply):
+        return send(step)
+    try:
+        # Handlers touch SQLite and may poll a generation run, so they never run on the event loop.
+        payload = await run_in_threadpool(
+            step.tool.handler, ctx.services, ctx.actor, step.arguments
         )
-
-    if method == "ping":
-        return JSONResponse(_result(message_id, {}))
-
-    if method == "tools/list":
-        return JSONResponse(_result(message_id, {"tools": tool_list(ctx.actor)}))
-
-    if method == "tools/call":
-        call = tool_call(params)
-        if isinstance(call, str):
-            return JSONResponse(_error(message_id, -32602, call))
-        name, arguments = call
-        tool = tool_catalog().get(name)
-        if tool is None:
-            return JSONResponse(_error(message_id, -32602, f"Unknown tool: {name}"))
-        missing = missing_scopes(tool, ctx.actor)
-        if missing:
-            return JSONResponse(
-                _error(message_id, -32602, "Missing required scope: " + ", ".join(missing))
-            )
-        try:
-            # Handlers touch SQLite and may poll a generation run, so they never run on the event
-            # loop.
-            payload = await run_in_threadpool(tool.handler, ctx.services, ctx.actor, arguments)
-        except ApiError as error:
-            return JSONResponse(_result(message_id, _tool_failure(error)))
-        return JSONResponse(_result(message_id, _tool_result(payload)))
-
-    return JSONResponse(_error(message_id, -32601, f"Method not found: {method}"))
+    except ApiError as error:
+        return send(tool_failure(step, SERVER, error))
+    return send(tool_result(step, SERVER, payload))
 
 
-@router.get("/mcp")
-def mcp_get() -> Response:
-    """No server-initiated messages, so the SSE stream is not offered."""
-    return JSONResponse(
-        _error(None, -32000, "Method not allowed; POST JSON-RPC messages to this endpoint"),
-        status_code=405,
-        headers={"Allow": "POST"},
-    )
+@router.api_route("/mcp", methods=["GET", "DELETE"])
+def mcp_not_allowed() -> Response:
+    """Revision 2026-07-28 has no stream to GET and no session to DELETE. No session id is ever
+    minted, and ``Mcp-Session-Id`` and ``Last-Event-ID`` are never read."""
+    return send(method_not_allowed())
 
 
 def render_bootstrap(settings: Settings) -> str:
@@ -478,4 +400,13 @@ def llms_txt(request: Request) -> Response:
     )
 
 
-__all__ = ["PROTOCOL_VERSION", "render_bootstrap", "router", "tool_list"]
+__all__ = [
+    "INSTRUCTIONS",
+    "PROTOCOL_VERSION",
+    "SERVER",
+    "SUPPORTED_VERSIONS",
+    "render_bootstrap",
+    "router",
+    "send",
+    "tool_list",
+]
