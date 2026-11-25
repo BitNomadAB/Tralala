@@ -411,12 +411,18 @@ context registers only its tools through `createRegistry`, which uses an `AbortC
 scopes before registration, and every tool calls the typed REST client — never the database.
 
 An agent outside the browser cannot see WebMCP at all, so the same capability idea has a second
-transport: `POST /mcp` speaks MCP over JSON-RPC 2.0 with a bearer token and `GET /llms.txt` is the
-public plain-text bootstrap that explains the product, the Loop lifecycle and the rules. Both come
-from `services/agent_tools.py`, which is the one description of what a worker token may call: the
-key's identity (`whoami`); reading boards, Loops, documents, Tickets and their attached files;
-working a Ticket (summaries, a wait, assigning, moving, commenting, completing) and adding a
-follow-up outside the plan; planning a Loop (creating it, writing Info, handing in or asking for the
+transport: `POST /mcp` speaks MCP revision 2026-07-28 alone, with a bearer token, and `GET /llms.txt`
+is the public plain-text bootstrap that explains the product, the Loop lifecycle and the rules.
+That revision has no handshake and no session: each POST is one JSON-RPC 2.0 request that carries
+its version and its client's capabilities in `_meta`, with the version and the method mirrored into
+headers, and it gets one JSON answer. A client of an older revision, which opens with `initialize`,
+is refused with an error that names 2026-07-28; the older path is not kept beside the new one. The
+rules of the revision are pure functions in `backend/app/api/mcp_protocol.py`, and the route in
+`backend/app/api/mcp.py` only resolves the key, reads the body, applies those rules and runs the
+tool's handler. Both surfaces come from `services/agent_tools.py`, which is the one description of
+what a worker token may call: the key's identity (`whoami`); reading boards, Loops, documents,
+Tickets and their attached files; working a Ticket (summaries, a wait, assigning, moving,
+commenting, completing) and adding a follow-up outside the plan; planning a Loop (creating it, writing Info, handing in or asking for the
 analysis, the RoadMap and their briefs); the Loop's notes; and the three discussion tools. No tool
 takes a planning decision. The local role agents are not part of that surface: a run invokes them, they never
 authenticate, and they never change a Ticket. [Agent_usage.md](Agent_usage.md) lists what each

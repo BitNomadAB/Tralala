@@ -19,6 +19,20 @@ installation.
   documented setup. 3.14 is tested too; newer interpreters are refused by `install` rather than
   silently accepted.
 
+Read this one before upgrading an installation that a coding agent connects to:
+
+- **A coding agent that does not speak MCP 2026-07-28 loses its connection at the upgrade.**
+  `/mcp` spoke MCP revision 2025-06-18, which opens with an `initialize` handshake; it now speaks
+  revision 2026-07-28 alone, which has none: every request states its version in `_meta` and in
+  headers, and `server/discover` says what the server offers. The older path is removed, not kept
+  beside the new one: `initialize` answers `400` with `-32022` and a message that names
+  2026-07-28, and `ping` answers `404`. Nothing on Tralala's side brings the old revision back, so
+  update the agent first. According to their own documentation on 2026-11-25, Claude Code speaks
+  2026-07-28 from version 2.1.274 (2.1.232 in a session that fetches feature flags), and Codex
+  CLI, Cursor, VS Code with GitHub Copilot and Gemini CLI did not say that they do, so they cannot
+  connect until they do. None of them has been tried against Tralala yet.
+  [Connect](Agent_usage.md#2-connect) shows how to connect Claude Code and check the connection.
+
 Worth knowing when you look at the dashboard:
 
 - **Board counters are cached**, because they live in each board's own database. A write through the

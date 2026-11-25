@@ -116,9 +116,16 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<host>.<tailnet>.ts.net/
 curl -s https://<host>.<tailnet>.ts.net/llms.txt | head -3     # plain text, not the SPA shell
 curl -s -o /dev/null -w "%{http_code}\n" -X POST \
   -H "Content-Type: application/json" -H "Authorization: Bearer <key>" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" -H "Mcp-Method: tools/list" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
   https://<host>.<tailnet>.ts.net/mcp
 ```
+
+The first and the last print `200`. `/mcp` speaks MCP revision 2026-07-28 alone, so the request
+carries that version in its `_meta` and in its headers; without them it answers `400`, and with a
+wrong key `401`. [Agent usage](Agent_usage.md#2-connect) shows which coding agents can connect and
+how.
 
 ### Reaching a model that runs on the host
 

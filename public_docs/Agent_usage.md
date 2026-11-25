@@ -57,24 +57,79 @@ reviewer needs `boards:read`, `loops:read`, `cards:read`, `discussions:read` and
 
 ## 2. Connect
 
-Two endpoints, one token, standard headers:
+A coding agent reaches Tralala through MCP, the Model Context Protocol: the standard way for an
+agent to find and call a server's tools. `/mcp` speaks its revision 2026-07-28 and no other. Two
+endpoints, one key:
 
 ```text
 GET  /llms.txt      public bootstrap: envelope, the shared workspace, rules, tool list (no ids, no data)
-POST /mcp           MCP over JSON-RPC 2.0 (Streamable HTTP), Bearer token
+POST /mcp           MCP revision 2026-07-28 over Streamable HTTP (JSON-RPC 2.0), Bearer token
 ```
 
-```bash
-export TRALALA_TOKEN="trl_..."
-export TRALALA_URL="https://tralala.example.com"   # or http://192.168.0.10:8080 on your network
+The address of `/mcp` is the address Tralala runs at, followed by `/mcp` (no slash after it):
 
-curl -s -X POST "$TRALALA_URL/mcp" \
-  -H "Authorization: Bearer $TRALALA_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+| Tralala runs | Address of `/mcp` |
+| --- | --- |
+| From source, the backend started as in [Installation](Installation.md#5-run-both-processes) | `http://127.0.0.1:8000/mcp`: that backend listens on `127.0.0.1` only |
+| With Docker on the same machine | `http://localhost:8080/mcp` (the port is `TRALALA_HTTP_PORT`) |
+| On another machine, behind TLS or a tunnel | `https://tralala.example.com/mcp`, or `http://192.168.0.10:8080/mcp` on your network |
+
+`/llms.txt` is plain text at the same address and needs no key.
+
+### Which clients can connect
+
+A client connects only if it speaks MCP 2026-07-28. That revision has no handshake: every request
+states its version in its body (`params._meta`) and in the `MCP-Protocol-Version` header, and a
+client may first ask `server/discover` what the server offers. A client of an older revision opens
+with an `initialize` handshake instead. Tralala answers that with HTTP `400` and this error, whatever
+the key, and has no setting that brings the older revision back:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 0,
+  "error": {
+    "code": -32022,
+    "message": "Tralala speaks only MCP 2026-07-28, which has no initialize; connect with a client that speaks MCP 2026-07-28",
+    "data": { "supported": ["2026-07-28"], "requested": "2025-06-18" }
+  }
+}
 ```
 
-In a client that speaks MCP:
+`id` and `requested` are the ones the client sent. How much of it the client shows you is up to
+the client; it may only say that the connection failed.
+
+What each client's own documentation said on 2026-11-25. None of them has been tried against
+Tralala yet:
+
+- **Claude Code** speaks 2026-07-28 from version 2.1.274 in every session, and from 2.1.232 in a
+  session that fetches feature flags, which is every session except one on a cloud provider (such
+  as Amazon Bedrock), one through a Claude apps gateway, and one with telemetry or feature-flag
+  fetching turned off. Its MCP page says that from those versions it connects through a client
+  runtime that adds revision 2026-07-28 and asks each HTTP server whether it speaks it.
+- **Codex CLI, Cursor, VS Code with GitHub Copilot and Gemini CLI** can connect once they speak
+  2026-07-28. Their MCP documentation did not say that they do.
+
+### Connect Claude Code
+
+1. **Check the version.** `claude --version` prints it; it must be one of the versions above or
+   later, and `claude update` installs the newest.
+2. **Add Tralala as a server.** Run this in the folder of the project you will work on, with the
+   key from step 1 in place of `trl_...` and your address from the table above:
+
+   ```bash
+   claude mcp add --transport http tralala http://127.0.0.1:8000/mcp --header "Authorization: Bearer trl_..."
+   ```
+
+   The command is the same in PowerShell, Git Bash and a macOS or Linux terminal. Claude Code saves
+   the server for that folder only, in `.claude.json` in your home folder and never in the project;
+   add `--scope user` to the command to have it in every folder. It does not check the key when it
+   saves, so a wrong key shows only when it connects. To change the address or the key, run
+   `claude mcp remove tralala` and add it again.
+3. **Start a new Claude Code session** in that folder.
+
+To share the server with everyone who works on a repository instead, put it in `.mcp.json` at the
+root of that repository, with the key in an environment variable so that it never enters the file:
 
 ```json
 {
@@ -82,14 +137,80 @@ In a client that speaks MCP:
     "tralala": {
       "type": "http",
       "url": "https://tralala.example.com/mcp",
-      "headers": { "Authorization": "Bearer <your key>" }
+      "headers": { "Authorization": "Bearer ${TRALALA_TOKEN}" }
     }
   }
 }
 ```
 
-`"type": "http"` names the transport, not the scheme: `https` is what you use over a tunnel or with a
-certificate. `/llms.txt` is plain text at the same origin.
+Set `TRALALA_TOKEN` to your key before you start Claude Code, and approve the server the first time
+Claude Code asks. `"type": "http"` names the transport, not the scheme: `https` is what you use over
+a tunnel or with a certificate. Claude Code's documentation says that it reads some environment
+variables as empty in a remote server's headers (its own credentials, a cloud provider's and others
+it names), so that a project file cannot send them anywhere; `TRALALA_TOKEN` is not among the names
+it lists.
+
+Another client takes the same address and the same `Authorization` header in its own
+configuration, once it speaks 2026-07-28.
+
+### Check that it works
+
+1. `claude mcp list` shows `tralala` as **✔ Connected**; `claude mcp get tralala` shows its details.
+2. In the session, `/mcp` lists `tralala` with its number of tools: one for each tool your key's
+   scopes open (section 3). A server that connects with no tools has a key whose scopes open none.
+3. Ask Claude to call Tralala's `whoami`. It answers with your key's name, when it expires and the
+   tools its scopes open.
+
+Tralala answers no older revision, so a server that connects at all speaks 2026-07-28.
+
+### When it does not connect
+
+Ask Tralala directly, with the same address and key, from a Bash shell (on Windows, Git Bash, which
+comes with Git):
+
+```bash
+export TRALALA_URL="http://127.0.0.1:8000"   # your address from the table, without /mcp
+export TRALALA_TOKEN="trl_..."
+
+curl -s "$TRALALA_URL/llms.txt" | head -3
+
+curl -s -w "\n%{http_code}\n" -X POST "$TRALALA_URL/mcp" \
+  -H "Authorization: Bearer $TRALALA_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/list" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+```
+
+The first command prints `# Tralala` and the start of the bootstrap. The second prints Tralala's
+answer and, on the last line, the HTTP status:
+
+| The second command prints | It means | Do this |
+| --- | --- | --- |
+| Nothing, then `000` | Nothing answers at that address | Start Tralala, or correct the address and the port |
+| `{"jsonrpc":"2.0","id":1,"result":{"resultType":"complete","tools":[...`, then `200` | Tralala, the address and the key are fine | Look at the client, below |
+| `invalid_token`, `token_expired` or `token_revoked`, then `401` | The key is wrong, has expired or was revoked | Create a new key (section 1), run `claude mcp remove tralala` and add it again |
+| An HTML page, or `http_404`, then `404` | `TRALALA_URL` is not where Tralala runs, or already ends in `/mcp` | Use your address from the table above, without `/mcp` |
+
+When Tralala answers `200` and Claude Code still fails:
+
+- `claude mcp get tralala` shows Claude Code's reason on its `Issue:` line. When that reason is
+  one of Tralala's own messages that name MCP 2026-07-28 (it speaks only that revision, or that
+  revision has no stream to GET), Claude Code tried an older revision: check the next two points.
+  A reason that says `Forbidden: the Origin '…' is not allowed` means that the request carried an
+  `Origin` header that is neither Tralala's own address (`TRALALA_PUBLIC_URL`) nor one in
+  `TRALALA_CORS_ORIGINS`; Tralala accepts a request without one.
+- Check `claude --version` against the versions above, and run `claude update` when it is older.
+- `MCP_SDK_GENERATION=v1` or `MCP_PROTOCOL_NEGOTIATION=legacy` in your environment or settings keeps
+  Claude Code on the older handshake; remove it. To ask for the new revision for one start, run
+  `MCP_SDK_GENERATION=v2 MCP_PROTOCOL_NEGOTIATION=auto claude` in Bash, or in PowerShell
+  `$env:MCP_SDK_GENERATION = "v2"; $env:MCP_PROTOCOL_NEGOTIATION = "auto"; claude`, which keeps
+  both variables for the rest of that window.
+- `claude --debug=mcp` starts a session that writes Claude Code's debug log for MCP under
+  `.claude/debug/` in your home folder.
+- The backend's own log writes one `http_request` line per call, with its path and status, so it
+  shows each request Claude Code sent to `/mcp` and how Tralala answered it.
 
 ## 3. The tools
 

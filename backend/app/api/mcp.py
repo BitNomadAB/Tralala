@@ -7,6 +7,15 @@ the actor, reads the body and runs the handler. The endpoint is authenticated wi
 token as REST, and the tool list is filtered to the scopes the token actually holds, so a worker
 cannot even see a capability it may not use.
 
+Every request carries ``params._meta`` with ``io.modelcontextprotocol/protocolVersion``
+(2026-07-28) and ``io.modelcontextprotocol/clientCapabilities``, and the headers
+``MCP-Protocol-Version`` and ``Mcp-Method``; a ``tools/call`` also names its tool in ``Mcp-Name``.
+The methods are ``server/discover`` (the supported version, the capabilities and the
+instructions), ``tools/list`` and ``tools/call``. There is no ``initialize`` and no ``ping``: a
+client of an older revision opens with ``initialize`` and gets 400 with -32022, in a message that
+names 2026-07-28, since that error is all such a client can show its person; ``ping`` is a method
+like any other the server does not know (404, -32601), and GET and DELETE answer 405.
+
 `/llms.txt` is public and deliberately boring: it names the envelope, the workflow and the tools,
 and contains no ids, no data and no secrets. It exists so that a URL plus a token is enough for an
 agent to start working, without inventing endpoints.
@@ -313,8 +322,22 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "## 5. Tools",
         "",
-        "The same catalogue is exposed as MCP tools at `/mcp` (Streamable HTTP, JSON-RPC 2.0,",
-        "`tools/list` and `tools/call`). A tool is offered only when the token holds its scope.",
+        "The same catalogue is exposed as MCP tools at `/mcp`, in MCP revision",
+        f"{PROTOCOL_VERSION} and no other: Streamable HTTP, one JSON-RPC 2.0 request per POST and",
+        "one JSON answer. A tool is offered only when the token holds its scope.",
+        "",
+        "There is no handshake, no session and no stream. Every request carries `params._meta`",
+        f"with `io.modelcontextprotocol/protocolVersion` (`{PROTOCOL_VERSION}`) and",
+        "`io.modelcontextprotocol/clientCapabilities` (an object, `{}` when you declare none),",
+        f"and the headers `MCP-Protocol-Version: {PROTOCOL_VERSION}` and `Mcp-Method` (the",
+        "method); a `tools/call` also sends `Mcp-Name` (the tool's name). The methods are",
+        "`server/discover` (the supported version, the capabilities and the server's",
+        "instructions), `tools/list` and `tools/call`, and every result carries `resultType`.",
+        "`initialize` and `ping` do not exist: a client that opens with `initialize` speaks an",
+        "older revision and is refused with HTTP 400 and `-32022`, in a message that names",
+        f"{PROTOCOL_VERSION}. A request without its `_meta` answers 400 with `-32602`, a missing",
+        "or unlike header 400 with `-32020`, and a method other than these three 404 with",
+        "`-32601`.",
         "",
     ]
     for tool in tools.values():
