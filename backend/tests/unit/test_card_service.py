@@ -1,5 +1,5 @@
 """CardService's rules on an in-memory board: ownership, versions, plan scope, completion gates,
-labels, assignees, ordering, the lists and the replayed keys.
+labels, assignees, ordering, the lists, the replayed keys and a key's report before its next move.
 
 The service runs its real code; the repositories, both units of work, the registry checks, the plan
 views, the clock and the id source are the typed fakes in ``tests/unit/fakes``.
@@ -27,14 +27,16 @@ from app.db.generated.board import (
     LoopsRow,
 )
 from app.schemas.cards import BulkCardCreate, CardCreate, CardMove, CardUpdate
-from app.services.cards import NEW_LABEL_COLOR, CardService, card_sort
+from app.services.cards import NEW_LABEL_COLOR, CardEntry, CardService, card_sort
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
     BoardState,
     FakeBoardChecks,
     FakeBoardUnitOfWork,
+    activity_row,
     card_row,
+    comment_row,
     list_row,
     loop_row,
     plan_row,
@@ -870,3 +872,178 @@ def test_archive_and_restore_are_idempotent_and_restore_appends(settings: Settin
         assert refused.value.code == "loop_read_only"
     with pytest.raises(Forbidden):
         w.service.archive(READER, BOARD_ID, LOOP, "c")
+
+
+# --- a key reports before it takes another Ticket -------------------------------------------------
+
+KEY = ActorContext(
+    actor_id="key-1", actor_type="agent", actor_name="Key", scopes=SCOPES, credential_id="cred-1"
+)
+OTHER_KEY = ActorContext(
+    actor_id="key-2", actor_type="agent", actor_name="Second", scopes=SCOPES, credential_id="cred-2"
+)
+REPORT = "A comment, a wait or a completion on the Ticket since you took it"
+
+
+def taken(settings: Settings, by: ActorContext = KEY) -> World:
+    """``by`` took ``a`` (L-1-001) from Todo to Doing; ``b`` (L-1-002) waits in Todo and a
+    person's ``c`` is in Doing; Review is a third column after Doing."""
+    w = world(settings)
+    w.state.lists["review"] = list_row("review", LOOP, 4096, name="Review")
+    put(w, card_row("a", "todo", LOOP).__replace__(ticket_key="L-1-001", title="Read the log"))
+    put(w, card_row("b", "todo", LOOP).__replace__(ticket_key="L-1-002", position=2048))
+    put(w, card_row("c", "doing", LOOP))
+    take(w, by, "a")
+    return w
+
+
+def take(w: World, actor: ActorContext, card_id: str, list_id: str = "doing") -> CardEntry:
+    """``actor`` moves the card to ``list_id`` at its current version."""
+    move = CardMove(version=w.card(card_id).version, list_id=list_id, position=0)
+    return w.service.move(actor, BOARD_ID, LOOP, card_id, move)
+
+
+def test_a_key_is_refused_another_ticket_while_one_it_took_has_no_report(
+    settings: Settings,
+) -> None:
+    w = taken(settings)
+    before = (w.card("b"), list(w.state.activity), w.store.commits)
+    with pytest.raises(Conflict) as refused:
+        take(w, KEY, "b")
+    error = refused.value
+    assert (error.status_code, error.code, error.retryable) == (409, "report_required", False)
+    assert error.message == "Report on the Tickets you took before you take another one"
+    assert error.details == {
+        "tickets": [
+            {
+                "id": "a",
+                "key": "L-1-001",
+                "title": "Read the log",
+                "loop_id": LOOP,
+                "loop_key": "L-1",
+                "taken_at": STAMP,
+            }
+        ],
+        "report": REPORT,
+    }
+    # Nothing is written: b keeps its column and version, and no activity entry is added.
+    assert (w.card("b"), w.state.activity, w.store.commits) == before
+    assert (w.card("b").list_id, w.card("b").version) == ("todo", 1)
+    # A comment the key wrote before it took the Ticket is no report on it.
+    w.state.comments["early"] = comment_row("early", "a", actor_id=KEY.actor_id)
+    with pytest.raises(Conflict, match="Report on the Tickets"):
+        take(w, KEY, "b", "review")
+
+
+def test_the_moves_own_checks_answer_before_the_report(settings: Settings) -> None:
+    w = taken(settings)
+    with pytest.raises(VersionConflict):
+        w.service.move(KEY, BOARD_ID, LOOP, "b", CardMove(version=5, list_id="doing", position=0))
+    with pytest.raises(Conflict) as other:
+        take(w, KEY, "b", "elsewhere")
+    assert other.value.code == "loop_mismatch"
+    with pytest.raises(ValidationFailure):
+        take(w, KEY, "b", "shelf")
+    w.state.loops[LOOP] = loop_row(LOOP, cancelled_at=STAMP)
+    with pytest.raises(Conflict) as closed:
+        take(w, KEY, "b")
+    assert closed.value.code == "loop_read_only"
+
+
+def test_a_key_moves_the_ticket_it_took_again_and_puts_any_ticket_back_in_the_first_column(
+    settings: Settings,
+) -> None:
+    w = taken(settings)
+    take(w, KEY, "a", "review")  # the same Ticket again, to another column
+    take(w, KEY, "a")
+    take(w, KEY, "c", "todo")  # a person's Ticket put back where work waits
+    assert (w.card("a").list_id, w.card("c").list_id) == ("doing", "todo")
+    assert [entry["id"] for entry in w.service.unreported(BOARD_ID, KEY)] == ["a"]
+    # Putting its own Ticket back means it no longer holds one, so it may take the next.
+    take(w, KEY, "a", "todo")
+    take(w, KEY, "b")
+    assert [entry["id"] for entry in w.service.unreported(BOARD_ID, KEY)] == ["b"]
+
+
+# A person is never refused, credential or not; an internal role agent (AGENT) has none.
+PERSON_WITH_CREDENTIAL = ActorContext(
+    actor_id="actor-3", actor_type="user", actor_name="Ida", scopes=SCOPES, credential_id="cred-3"
+)
+
+
+@pytest.mark.parametrize(
+    "mover",
+    [HUMAN, PERSON_WITH_CREDENTIAL, AGENT],
+    ids=["person", "person-with-credential", "agent-without-credential"],
+)
+def test_a_person_and_an_actor_without_a_credential_are_never_refused(
+    settings: Settings, mover: ActorContext
+) -> None:
+    w = taken(settings, by=mover)
+    take(w, mover, "b")
+    take(w, mover, "c", "review")
+    assert [w.card(card).list_id for card in ("a", "b", "c")] == ["doing", "doing", "review"]
+    assert w.service.unreported(BOARD_ID, mover) == []
+
+
+@pytest.mark.parametrize("report", ["comment", "wait", "completion"])
+def test_a_comment_a_wait_or_a_completion_since_the_move_lets_the_next_move_go(
+    settings: Settings, report: str
+) -> None:
+    w = taken(settings)
+    if report == "comment":  # in the second of the move: times are whole seconds
+        w.state.comments["m"] = comment_row("m", "a", actor_id=KEY.actor_id, created_at=STAMP)
+    elif report == "wait":
+        w.state.activity.append(
+            activity_row("w", "card.wait_set", "a", actor_id=KEY.actor_id, timestamp=STAMP)
+        )
+    else:
+        w.service.update(KEY, BOARD_ID, LOOP, "a", CardUpdate(version=2, completed=True))
+    take(w, KEY, "b")
+    assert w.card("b").list_id == "doing"
+    assert [entry["id"] for entry in w.service.unreported(BOARD_ID, KEY)] == ["b"]
+
+
+def test_another_keys_tickets_without_a_report_do_not_hold_a_key_back(
+    settings: Settings,
+) -> None:
+    w = taken(settings)
+    # The second key's comment on a is no report for the first key.
+    w.state.comments["m"] = comment_row("m", "a", actor_id=OTHER_KEY.actor_id, created_at=STAMP)
+    take(w, OTHER_KEY, "b")
+    assert w.card("b").list_id == "doing"
+    with pytest.raises(Conflict) as refused:
+        take(w, KEY, "c", "review")
+    assert refused.value.code == "report_required"
+    assert [entry["id"] for entry in w.service.unreported(BOARD_ID, OTHER_KEY)] == ["b"]
+
+
+def test_unreported_names_a_keys_tickets_oldest_first_and_checks_the_board(
+    settings: Settings,
+) -> None:
+    w = taken(settings)
+    w.state.activity.append(
+        activity_row("early", "card.moved", "c", actor_id=KEY.actor_id, timestamp=CREATED)
+    )
+    assert w.service.unreported(BOARD_ID, KEY) == [
+        {
+            "id": "c",
+            "key": None,
+            "title": "Card c",
+            "loop_id": LOOP,
+            "loop_key": "L-1",
+            "taken_at": CREATED,
+        },
+        {
+            "id": "a",
+            "key": "L-1-001",
+            "title": "Read the log",
+            "loop_id": LOOP,
+            "loop_key": "L-1",
+            "taken_at": STAMP,
+        },
+    ]
+    assert w.service.unreported(BOARD_ID, OTHER_KEY) == []
+    w.checks.unregistered = frozenset({BOARD_ID})
+    with pytest.raises(NotFound):
+        w.service.unreported(BOARD_ID, HUMAN)

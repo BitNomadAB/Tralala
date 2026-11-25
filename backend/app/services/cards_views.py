@@ -1,4 +1,5 @@
-"""A Ticket as the API returns it: its row, its board-wide listing and the bulk answer.
+"""A Ticket as the API returns it: its row, its board-wide listing, the bulk answer and a Ticket a
+key has not reported on.
 
 The shapes and the functions that build them are pure: ``CardService`` reads the rows, labels,
 counts and readiness through the board repositories and hands them here.
@@ -11,7 +12,7 @@ from typing import NotRequired, TypedDict
 from pydantic import JsonValue
 
 from ..db.generated.board import CardsRow, LabelsRow
-from ..repositories.cards import CardCounts, CardSort
+from ..repositories.cards import CardCounts, CardSort, UnreportedTicket
 from .plan_views import Blocker, ReadinessItem
 from .subresources import ChecklistEntry, CommentEntry, LabelEntry, label_entries
 from .ticket_face import FaceView, face_view
@@ -96,6 +97,20 @@ class BoardTicketEntry(CardRecord):
     checklist_total: int
     checklist_completed: int
     comment_count: int
+
+
+class UnreportedEntry(TypedDict):
+    """A Ticket a key took and has not reported on since, as ``409 report_required`` names it.
+
+    ``taken_at`` is when the key first moved it; ``key`` is the Ticket key, ``None`` on a manual
+    card without one."""
+
+    id: str
+    key: str | None
+    title: str
+    loop_id: str
+    loop_key: str
+    taken_at: str
 
 
 class BulkFailure(TypedDict):
@@ -190,6 +205,17 @@ def card_entry(
         "phase_number": item["phase_number"] if item is not None else None,
         "state": state,
         "needs_person": needs_person(state, human_action_required=human_action_required),
+    }
+
+
+def unreported_entry(ticket: UnreportedTicket) -> UnreportedEntry:
+    return {
+        "id": ticket.card.id,
+        "key": ticket.card.ticket_key,
+        "title": ticket.card.title,
+        "loop_id": ticket.loop_id,
+        "loop_key": ticket.loop_key,
+        "taken_at": ticket.taken_at,
     }
 
 

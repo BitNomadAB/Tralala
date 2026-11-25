@@ -152,7 +152,6 @@ UNTESTED_TOOLS: Mapping[str, str] = MappingProxyType(
     dict.fromkeys(
         (
             "assign_ticket",
-            "move_ticket",
             "create_loop",
             "write_info",
             "run_analysis",

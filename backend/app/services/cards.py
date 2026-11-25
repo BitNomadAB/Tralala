@@ -10,6 +10,12 @@ check an assignee) only through the registry unit of work, the board's registry 
 ``BoardChecks`` and the plan through ``PlanViews``; the clock and the id source are passed in, so
 every rule here runs in a unit test without a database.
 
+A key (an issued API token, which is an actor of its own) reports before it takes another Ticket:
+``move`` refuses it a Ticket while another Ticket it took has no comment, wait or completion from it
+since (``409 report_required``, naming them). Moving that same Ticket, or putting a Ticket back in
+the Loop's first column, is never refused, and neither is a person or an internal role agent, which
+has no credential. ``unreported`` is the same read for the worker tools.
+
 The JSON shapes live in ``cards_views`` and the inserting and editing writes in ``cards_writes``;
 this module keeps the service, its checks and guards, and re-exports what callers import from it.
 """
@@ -25,7 +31,7 @@ from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.dates import iso_utc, parse_due_filter
 from ..core.errors import Conflict, NotFound, ValidationFailure
-from ..db.generated.board import CardsRow, LoopsRow
+from ..db.generated.board import CardsRow, ListsRow, LoopsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.cards import CardQuery
 from ..repositories.registry import RegistryUnitOfWork
@@ -37,9 +43,11 @@ from .cards_views import (
     BulkResult,
     CardEntry,
     CardRecord,
+    UnreportedEntry,
     card_entry,
     card_record,
     card_sort,
+    unreported_entry,
 )
 from .cards_writes import (
     NEW_LABEL_COLOR,
@@ -60,12 +68,15 @@ from .ticket_state import ensure_not_waiting, loop_closed
 __all__ = [
     "NEW_LABEL_COLOR",
     "PLAN_CHANGE_CODE",
+    "REPORT_MEANS",
+    "REPORT_REQUIRED_CODE",
     "BoardTicketEntry",
     "BulkFailure",
     "BulkResult",
     "CardEntry",
     "CardRecord",
     "CardService",
+    "UnreportedEntry",
     "card_entry",
     "card_record",
     "card_sort",
@@ -74,6 +85,15 @@ __all__ = [
 logger = logging.getLogger("tralala.cards")
 
 PLAN_CHANGE_CODE = "plan_change_required"
+REPORT_REQUIRED_CODE = "report_required"
+# What counts as a report, in the words the refusal gives a key.
+REPORT_MEANS = "A comment, a wait or a completion on the Ticket since you took it"
+
+
+def _owes_reports(actor: ActorContext) -> bool:
+    """An issued key: not a person, and authenticated by a credential. An internal role agent is
+    an agent too, but has none."""
+    return not actor.is_user and actor.credential_id is not None
 
 
 def _now() -> datetime:
@@ -274,6 +294,18 @@ class CardService:
             }
             for ticket in tickets
         ]
+
+    def unreported(self, board_id: str, actor: ActorContext) -> list[UnreportedEntry]:
+        """The Tickets on the board the key took and has not reported on since, oldest first.
+
+        Empty for a person and for an actor without a credential, whom the rule never refuses.
+        """
+        self.boards.require_row(board_id)
+        if not _owes_reports(actor):
+            return []
+        with self.store.reader(board_id) as repos:
+            tickets = repos.cards.unreported_by(actor.actor_id)
+        return [unreported_entry(ticket) for ticket in tickets]
 
     # --- writes ----------------------------------------------------------------------------------
 
@@ -538,6 +570,7 @@ class CardService:
                     code="loop_mismatch",
                     details={"target_loop_id": target.loop_id},
                 )
+            self._require_reports(repos, actor, card_id, target)
             position = self._position(repos, payload.list_id, payload.position, exclude=card_id)
             repos.cards.move(card_id, payload.list_id, position, now=self._now())
             self._log(
@@ -553,6 +586,35 @@ class CardService:
             )
             row = self._card(repos, loop_id, card_id)
             return self._decorate(repos, board_id, loop, [row])[0]
+
+    @staticmethod
+    def _require_reports(
+        repos: BoardRepositories, actor: ActorContext, card_id: str, target: ListsRow
+    ) -> None:
+        """A key that took another Ticket and has not reported on it since is refused the move,
+        ``409 report_required`` naming those Tickets.
+
+        It runs in the move's own transaction, after its other checks and before anything is
+        written, so the check and the move see the same board. The Ticket being moved is left out,
+        so a key moves its own Ticket onward; a move to the Loop's first column puts work back and
+        is never refused.
+        """
+        if not _owes_reports(actor):
+            return
+        columns = repos.lists.for_loop(target.loop_id, include_archived=False)
+        if columns and columns[0].id == target.id:
+            return
+        taken = repos.cards.unreported_by(actor.actor_id)
+        owed = [ticket for ticket in taken if ticket.card.id != card_id]
+        if owed:
+            raise Conflict(
+                "Report on the Tickets you took before you take another one",
+                code=REPORT_REQUIRED_CODE,
+                details={
+                    "tickets": [unreported_entry(ticket) for ticket in owed],
+                    "report": REPORT_MEANS,
+                },
+            )
 
     def archive(
         self, actor: ActorContext, board_id: str, loop_id: str, card_id: str
