@@ -8,15 +8,17 @@ import { useAuth } from "@/features/auth/useAuth";
 import { api } from "@/lib/api";
 import { useReadiness } from "@/lib/queries";
 import type { Board, Loop, LoopSummary } from "@/lib/types";
-import { decisionShown, loopDecision } from "./loopDecision";
+import { completionMenuItems, decisionShown, loopDecision } from "./loopDecision";
 import { LoopDialogs, type LoopDialog } from "./LoopDialogs";
 import { loopNextAction, STAGE_WORDS } from "./loopNextAction";
 import type { LoopView } from "./useLoopView";
+import { WithoutPlanChip } from "./WithoutPlanChip";
 
 /**
- * The Loop's header: its name as the page title, the key and the stage under it, what the Loop
- * waits for (from the board's Loop summaries) and the one primary button for the person's next
- * decision. Everything else is in the quiet "Loop actions" menu.
+ * The Loop's header: its name as the page title, the key and the stage under it (with "Without a
+ * plan" for a Loop that runs without one), what the Loop waits for (from the board's Loop
+ * summaries) and the one primary button for the person's next decision. Everything else is in the
+ * quiet "Loop actions" menu.
  */
 export function LoopHeader({
   board,
@@ -53,18 +55,7 @@ export function LoopHeader({
   const items: MenuItem[] = [
     { label: "Edit Loop", disabled: readOnly, hint: locked, onSelect: () => setDialog("edit") },
     { label: "Loop agents", onSelect: () => setDialog("agents") },
-    ...(decision?.kind === "finalize"
-      ? []
-      : [
-          {
-            label: "Finalize Loop",
-            disabled: readOnly,
-            hint: locked,
-            onSelect: () => {
-              setDialog("completion");
-            },
-          },
-        ]),
+    ...completionMenuItems(loop, decision, locked, () => setDialog("completion")),
     {
       label: "Save columns as template",
       disabled: readOnly,
@@ -91,6 +82,7 @@ export function LoopHeader({
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--muted-foreground)]">
             <Chip mono>{loop.key}</Chip>
             <Chip>{STAGE_WORDS[loop.stage]}</Chip>
+            {loop.without_plan ? <WithoutPlanChip /> : null}
             <span className="tabular-nums">
               {loop.progress.ticket_completed}/{loop.progress.ticket_total} Tickets done
               {loop.plan ? ` · ${loop.plan.phase_count} phases` : ""}

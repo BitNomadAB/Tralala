@@ -24,6 +24,7 @@ export function KanbanColumn({
   cards,
   emptyText,
   readOnly,
+  withoutPlan,
   moveItems,
   cardActions,
   focusCard,
@@ -39,6 +40,8 @@ export function KanbanColumn({
   cards: Card[];
   emptyText: string;
   readOnly: boolean;
+  /** The Loop runs without a plan, so no card is marked Unplanned. */
+  withoutPlan: boolean;
   moveItems: readonly MenuItem[];
   cardActions: (card: Card) => readonly MenuItem[];
   focusCard: { cardId: string; control: CardControl } | null;
@@ -206,6 +209,7 @@ export function KanbanColumn({
                 key={card.id}
                 card={card}
                 onOpen={onOpenCard}
+                withoutPlan={withoutPlan}
                 actions={cardActions(card)}
                 focus={focusCard?.cardId === card.id ? focusCard.control : null}
                 onFocused={onCardFocused}

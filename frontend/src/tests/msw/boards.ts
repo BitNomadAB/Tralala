@@ -32,7 +32,8 @@ export function loop(id: string, name: string, extra: Partial<Loop> = {}): Loop 
 
 /**
  * A Loop summary as `GET /boards/{id}/loop-summaries` gives it: by default a draft without Info,
- * waiting for a person. `extra.tickets` merges into the counts.
+ * with no Tickets and so not without a plan, waiting for a person. `extra.tickets` merges into the
+ * counts.
  */
 export function summary(
   id: string,
@@ -46,6 +47,7 @@ export function summary(
     name,
     goal: "",
     stage: "draft",
+    without_plan: false,
     next: "Write the Loop's Info: what should change and why.",
     waiting_on: "person",
     execution_allowed: false,

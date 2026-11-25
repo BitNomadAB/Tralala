@@ -13,6 +13,8 @@ export interface LoopSummary {
   name: string;
   goal: string;
   stage: LoopStage;
+  /** The Loop runs its Tickets without a plan (`Loop.without_plan`). */
+  without_plan: boolean;
   /** One sentence for a worker; the UI words its own line from the fields below. */
   next: string;
   waiting_on: LoopWaitingOn;

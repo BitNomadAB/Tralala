@@ -1,8 +1,23 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import { http } from "msw";
 import { describe, expect, it } from "vitest";
-import { LOOP_PATH } from "./msw/loops";
+import type { Loop } from "@/lib/types";
+import { apiPath, ok } from "./msw/envelope";
+import { LOOP, LOOP_PATH } from "./msw/loops";
 import { PHASE_NAME } from "./msw/ticketView";
 import { query, renderLoopPage, TITLE } from "./renderLoopPage";
+
+/** The Loop at `stage` without a plan, its one Ticket done when it is in progress. */
+function withoutPlan(stage: Loop["stage"]): Loop {
+  const completed = stage === "in_progress" ? 1 : 0;
+  return {
+    ...LOOP,
+    stage,
+    without_plan: true,
+    warnings: [],
+    progress: { ticket_total: 1, ticket_completed: completed, ticket_archived_incomplete: 0 },
+  };
+}
 
 describe("the Loop page's header", () => {
   it("shows the key, the stage, what it waits for and the one decision", async () => {
@@ -49,6 +64,49 @@ describe("the Loop page's header", () => {
       ]);
     });
     expect(screen.queryByRole("dialog", { name: "Edit Loop" })).not.toBeInTheDocument();
+  });
+
+  it("marks a Loop without a plan and closes it from the header's one decision", async () => {
+    const { header, user } = await renderLoopPage(
+      "",
+      "in_progress",
+      { tickets: { total: 1, completed: 1 }, without_plan: true },
+      [http.get(apiPath(LOOP_PATH), () => ok(withoutPlan("in_progress")))],
+    );
+    expect(within(header).getByText("In progress")).toBeInTheDocument();
+    expect(within(header).getByText("Without a plan")).toBeInTheDocument();
+    expect(within(header).getByText(/1\/1 Tickets done/)).toBeInTheDocument();
+    expect(await within(header).findByText("Waits for you to close the Loop")).toBeInTheDocument();
+
+    await user.click(within(header).getByRole("button", { name: "Close Loop" }));
+    const dialog = await screen.findByRole("dialog", { name: "Close SES-1" });
+    expect(within(dialog).getByRole("button", { name: "Close the Loop" })).toBeInTheDocument();
+    expect(within(dialog).queryByText("Was QA performed?")).toBeNull();
+  });
+
+  it("offers Close Loop in the menu of a Loop without a plan while Tickets are open", async () => {
+    const { header, user } = await renderLoopPage(
+      "",
+      "ready",
+      { tickets: { ready: 1, total: 1 }, without_plan: true, waiting_on: "anyone" },
+      [http.get(apiPath(LOOP_PATH), () => ok(withoutPlan("ready")))],
+    );
+    expect(await within(header).findByText("1 Ticket ready to start")).toBeInTheDocument();
+    await user.click(within(header).getByRole("button", { name: "Loop actions" }));
+    expect(screen.queryByRole("menuitem", { name: /Finalize Loop/ })).toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "Close Loop" }));
+    expect(await screen.findByRole("dialog", { name: "Close SES-1" })).toBeInTheDocument();
+  });
+
+  it("shows a draft's Finalize Loop without offering it", async () => {
+    const { header, user } = await renderLoopPage("", "draft", {});
+    await user.click(within(header).getByRole("button", { name: "Loop actions" }));
+    const finalize = screen.getByRole("menuitem", {
+      name: "Finalize Loop: Nothing to finalize yet: add a Ticket or plan the Loop",
+    });
+    expect(finalize).toHaveAttribute("aria-disabled", "true");
+    await user.click(finalize);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("asks before it cancels the Loop", async () => {

@@ -3,15 +3,17 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Section } from "@/components/ui/section";
 import { inboxPath, WAITS_ON_DISCUSSION } from "@/features/discussions/inboxRules";
 import { loopHref } from "@/features/loops/loopNextAction";
+import { WithoutPlanChip } from "@/features/loops/WithoutPlanChip";
 import type { DiscussionInboxRow } from "@/lib/types";
 import type { WaitingRow } from "./boardSummaries";
 
 /**
  * What waits for the person, first: one row per Loop, across their boards, whose next step is a
- * decision only a person makes. Each row names the board and the Loop, says what it waits for and
- * offers the link that opens the Loop page where the decision is made. After the Loops come the
- * discussions that wait for the person's decision, each opening the discussion on its Ticket. Rows
- * appear as each board answers; `pending` says some have not answered yet.
+ * decision only a person makes. Each row names the board and the Loop (marked "Without a plan" when
+ * it runs without one), says what it waits for and offers the link that opens the Loop page where
+ * the decision is made. After the Loops come the discussions that wait for the person's decision,
+ * each opening the discussion on its Ticket. Rows appear as each board answers; `pending` says some
+ * have not answered yet.
  */
 export function WaitsForYou({
   rows,
@@ -47,6 +49,7 @@ export function WaitsForYou({
                   <span className="font-mono text-xs text-[var(--foreground-faint)]">
                     {loop.key}
                   </span>
+                  {loop.without_plan ? <WithoutPlanChip /> : null}
                 </p>
                 <p className="m-0 text-sm text-[var(--muted-foreground)]">{action.waiting}</p>
               </div>
