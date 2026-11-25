@@ -63,7 +63,9 @@ from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState
 
 NOW = datetime(2026, 11, 7, 9, 0, tzinfo=UTC)
 STAMP = "2026-11-07T09:00:00Z"
-LOOP = "loop-a"
+# A UUID, as the Loop's row has it: the address where a person clears a wait is built from it.
+LOOP = "2e8f6a4c-0b9d-4c7e-a5f3-1d2b4c6e8a0f"
+PUBLIC = "https://tralala.example.com"
 REVISION = Path(__file__).resolve().parents[2] / "migrations/board/versions/0017_ticket_work.py"
 WORKER = ActorContext(
     actor_id="agent-1",
@@ -203,12 +205,14 @@ class World:
     loop: LoopService
     list: ListService
     ticket_work: TicketWorkService
+    settings: Settings
     state: BoardState
 
 
-def world(settings: Settings) -> World:
+def world(settings: Settings, *, public_url: str | None = None) -> World:
     """An executing Loop with a planned Ticket ``t`` (ready), a manual one ``m`` and a human-only
-    one ``h``, in Todo; the board has the labels Development and UX."""
+    one ``h``, in Todo; the board has the labels Development and UX. ``public_url`` is the
+    installation's public address, unset unless given."""
     state = BoardState()
     state.loops = {LOOP: loop_row(LOOP, stage="ready").__replace__(current_plan_id="plan-1")}
     state.lists = {"todo": list_row("todo", LOOP, 512, name="Todo")}
@@ -234,6 +238,7 @@ def world(settings: Settings) -> World:
         loop=LoopService(settings, checks, store, plans=views, tickets=cards, clock=lambda: NOW),
         list=ListService(checks, store),
         ticket_work=TicketWorkService(checks, store, cards, clock=lambda: NOW),
+        settings=settings.model_copy(update={"public_url": public_url}),
         state=state,
     )
 
@@ -496,6 +501,58 @@ def test_set_ticket_wait_sets_a_wait_with_its_reason_and_says_who_clears_it(
             READER,
             {"board_id": BOARD_ID, "card_id": "m", "waiting_for": "decision", "reason": "x"},
         )
+
+
+# A Ticket's id as its row has it, a UUID: the address of its page is built from it.
+ASKED = "9c8b7a69-5847-4362-a514-f3e2d1c0b9a8"
+
+
+def test_set_ticket_wait_over_another_wait_links_where_the_person_clears_it(
+    settings: Settings,
+) -> None:
+    w = world(settings)
+    w.state.cards[ASKED] = card_row(ASKED, "todo", LOOP).__replace__(
+        ticket_key="L-1-UNP-002", kind="manual"
+    )
+    ask: dict[str, JsonValue] = {
+        "board_id": BOARD_ID,
+        "card_id": ASKED,
+        "waiting_for": "access",
+        "reason": "The API key",
+    }
+    first = set_ticket_wait(w, WORKER, ask)
+    assert part(first, "ticket")["state"] == "needs_input"
+    # The same wait again is no new wait: it changes nothing and is not refused.
+    assert part(set_ticket_wait(w, WORKER, ask), "ticket")["version"] == 2
+    other = {**ask, "waiting_for": "decision", "reason": "Which provider?"}
+    with pytest.raises(Forbidden) as refused:
+        set_ticket_wait(w, WORKER, other)
+    link = f"/boards/{BOARD_ID}/loops/{LOOP}/tickets/{ASKED}?focus=clear-wait"
+    assert (refused.value.status_code, refused.value.code) == (403, "human_action_required")
+    assert refused.value.message == (
+        "Replacing a Ticket's wait is a human decision. The person who answers it clears that "
+        f"wait on the Ticket's page: {link}"
+    )
+    assert refused.value.details == {
+        "action": "Replacing a Ticket's wait",
+        "actor_type": "agent",
+        "decision_link": link,
+    }
+    assert w.state.cards[ASKED].waiting_for == "access"
+    # With the installation's public address the same place is absolute.
+    public = world(settings, public_url=PUBLIC)
+    public.state.cards[ASKED] = w.state.cards[ASKED]
+    with pytest.raises(Forbidden) as absolute:
+        set_ticket_wait(public, WORKER, other)
+    assert absolute.value.details is not None
+    assert absolute.value.details["decision_link"] == f"{PUBLIC}{link}"
+    # A refusal that is no person's decision names none: a completed Ticket takes no wait.
+    w.state.cards["m"] = w.state.cards["m"].__replace__(completed_at=STAMP)
+    with pytest.raises(Conflict) as completed:
+        set_ticket_wait(w, WORKER, {**ask, "card_id": "m"})
+    assert completed.value.code == "ticket_completed"
+    assert completed.value.details is not None
+    assert "decision_link" not in completed.value.details
 
 
 def test_create_ticket_says_where_the_work_is_done_what_it_waits_for_and_its_area(

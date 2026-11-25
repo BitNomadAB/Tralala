@@ -1,12 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   completionMenuItems,
+  completionOffered,
   decisionShown,
   loopDecision,
   NOTHING_TO_FINALIZE,
 } from "@/features/loops/loopDecision";
 import { loopNextAction } from "@/features/loops/loopNextAction";
-import { parseDocument, parseTab, stageDocument, viewParams } from "@/features/loops/useLoopView";
+import {
+  parseDialog,
+  parseDocument,
+  parseTab,
+  stageDocument,
+  viewParams,
+  withoutDialog,
+} from "@/features/loops/useLoopView";
 import { summary } from "./msw/boards";
 
 describe("the Loop page's view in the URL", () => {
@@ -34,6 +42,20 @@ describe("the Loop page's view in the URL", () => {
     expect(parseDocument("roadmap", "in_progress", true)).toBe("roadmap");
     expect(stageDocument("in_progress")).toBe("roadmap");
     expect(stageDocument("in_progress", false)).toBe("roadmap");
+  });
+
+  it("reads the dialog a link opens, completion and nothing else", () => {
+    expect(parseDialog("completion")).toBe("completion");
+    expect(parseDialog(null)).toBeNull();
+    expect(parseDialog("")).toBeNull();
+    expect(parseDialog("cancel")).toBeNull();
+    expect(parseDialog("Completion")).toBeNull();
+  });
+
+  it("drops the dialog from the URL and keeps the tab, the document and the Ticket", () => {
+    const current = new URLSearchParams("tab=plan&dialog=completion&doc=roadmap&card=card-1");
+    expect(withoutDialog(current).toString()).toBe("tab=plan&doc=roadmap&card=card-1");
+    expect(current.get("dialog")).toBe("completion");
   });
 
   it("writes tab and doc and keeps the Ticket that is open", () => {
@@ -149,6 +171,15 @@ describe("the Loop actions item that opens the completion dialog", () => {
     expect(shown(item("completed", true, locked).items)).toEqual([
       { label: "Close Loop", disabled: true, hint: locked },
     ]);
+  });
+
+  it("offers the dialog, to the menu and to a link, unless the Loop is a draft or read-only", () => {
+    for (const stage of ["analysis_review", "ready", "in_progress", "awaiting_qa"] as const) {
+      expect(completionOffered({ stage }, undefined)).toBe(true);
+    }
+    expect(completionOffered({ stage: "draft" }, undefined)).toBe(false);
+    expect(completionOffered({ stage: "completed" }, "The Loop is read-only")).toBe(false);
+    expect(completionOffered({ stage: "in_progress" }, "The Loop is read-only")).toBe(false);
   });
 
   it("is left out while the header's one button opens the dialog", () => {

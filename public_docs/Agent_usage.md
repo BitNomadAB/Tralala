@@ -99,11 +99,11 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | --- | --- | --- |
 | `whoami` | `boards:read` | your key, when it expires, what your scopes open, what you lack and what only a person decides |
 | `list_boards` | `boards:read` | the boards you may read, by name, with status and Loop count: the way in |
-| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked, not done); `unreported` names the Tickets you took and have not reported on |
+| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked, not done), and `decision_link`, where a person takes the decision it waits for; `unreported` names the Tickets you took and have not reported on |
 | `read_board` | `boards:read`, `loops:read` | a board's Loops by id and key, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | a Loop's overview (by id or key): documents' state and size, Phases, columns, unplanned Tickets, newest notes |
+| `read_loop` | `loops:read` | a Loop's overview (by id or key): documents' state and size, Phases, columns, unplanned Tickets, newest notes, and the same `decision_link` as `loop_summaries` |
 | `read_document` | `loops:read` | one document's text a page at a time, or the technical analysis and RoadMap as an outline |
-| `read_ticket` | `cards:read` | one Ticket in full: its face for people, summary, description, criteria, state, wait, a person's notes (`person_notes`), its newest 50 files and what you may do next |
+| `read_ticket` | `cards:read` | one Ticket in full: its face for people, summary, description, criteria, state, wait, a person's notes (`person_notes`), its newest 50 files and what you may do next; `decision_link` where a person clears its wait or confirms it |
 | `list_attachments` | `cards:read` | every file attached to a Ticket, newest first; `text` says whether `read_attachment` can read it |
 | `read_attachment` | `cards:read` | a `.txt`, `.md` or `.json` file as text, a page at a time; for any other file, the route that downloads it |
 | `search_tickets` | `cards:read` | find Tickets by words: in one Loop, a board's open Loops or every active board |
@@ -409,9 +409,9 @@ Ticket still open then reads `not_done`.
 - Complete a Ticket by moving it: a column named Done completes nothing. `complete_ticket` is the
   way, and it is offered in `read_ticket`'s `allowed_actions` only while the Ticket is ready, open
   and not a person's. A human-only Ticket answers `403 human_action_required` naming who confirms
-  it; an unfinished prerequisite answers `409 ticket_blocked` with the blockers, and an open wait
-  `409 ticket_waiting` naming it. Either way your summary is kept as a comment, and the refusal
-  names its `comment_id`.
+  it and where (`decision_link`); an unfinished prerequisite answers `409 ticket_blocked` with the
+  blockers, and an open wait `409 ticket_waiting` naming it. Either way your summary is kept as a
+  comment, and the refusal names its `comment_id`.
 - Change a completed, archived or cancelled Loop: its documents, plan, Tickets, checklists,
   attachments and QA answer `409 loop_read_only`, and so does `complete_ticket` there, which then
   writes nothing. Its Tickets still take a comment (`comment_ticket`, the only action
@@ -420,6 +420,32 @@ Ticket still open then reads `not_done`.
   archived board refuses a comment (`409 board_archived`).
 - Attach a file through the tools, issue or rotate a key, or see or change users, credentials or
   agent configuration.
+
+What you can do is show your person where to decide. An answer or a refusal that waits for a
+person carries `decision_link`, the address in Tralala of the tab, dialog or button where that
+person takes the decision; give it to them rather than asking them to look for it. It is a path
+inside Tralala (`/boards/...`) unless the installation sets its public address
+(`TRALALA_PUBLIC_URL`, see [Installation](Installation.md)), and then a full address such as
+`https://tralala.example.com/boards/...`. It is `null` when nothing waits for a person. You find it
+in three places:
+
+- `loop_summaries`, on each Loop's row, and `read_loop` give the Loop's next decision, the same in
+  both. An analysis or a RoadMap a person reviews opens in the Loop's Plan tab
+  (`?tab=plan&doc=analysis`, `?tab=plan&doc=roadmap`). The implementation a person accepts once
+  every Ticket is done, and the result a person accepts or rejects in QA, open the completion
+  dialog (`?dialog=completion`); in a Loop without a plan that one acceptance closes the Loop.
+  Writing the Info, answering a Ticket's wait and doing a person's task are no single decision of
+  the Loop, so the Loop's link is `null` for them and `read_ticket` links the Ticket instead.
+- `read_ticket` gives it under `wait`, where the person who answers clears the wait
+  (`?focus=clear-wait` on the Ticket's page), and on the Ticket while it is a person's task, where a
+  person confirms it (`?focus=confirm`). Both are `null` once the Ticket is done or archived, or its
+  Loop is completed, cancelled or archived.
+- A refusal of a person's decision (`403 human_action_required`, the code is unchanged) gives it
+  under `details.decision_link`, and its message names the place: `complete_ticket` on a
+  human-only Ticket (its confirmation), `set_ticket_wait` on a Ticket that already waits (the wait
+  to clear first), `write_info` once planning has started (the Info in the Plan tab), and
+  `write_analysis`, `write_roadmap` or `write_brief` over an approved analysis or RoadMap (that
+  document in the Plan tab, where the person requests changes or resets it).
 
 ## 6. Retries and repeats
 

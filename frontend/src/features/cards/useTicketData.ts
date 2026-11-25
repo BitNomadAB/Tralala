@@ -51,6 +51,8 @@ export function useTicketData(boardId: string, loopId: string, cardId: string) {
       (loop.data.stage === "completed" ||
         loop.data.stage === "cancelled" ||
         loop.data.archived_at !== null));
+  // Whether `readOnly` is final: the board and the Loop have answered (or failed).
+  const settled = board.status !== "pending" && loop.status !== "pending";
 
   return {
     card,
@@ -64,5 +66,6 @@ export function useTicketData(boardId: string, loopId: string, cardId: string) {
     refresh,
     live,
     readOnly,
+    settled,
   };
 }

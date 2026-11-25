@@ -25,8 +25,9 @@ the Ticket can be completed: on a Ticket that is already done, and beside a refu
 worker did is on the Ticket either way. A completed, archived or cancelled Loop refuses the call
 whole (``loop_read_only``, nothing written): it takes comments through ``comment_ticket``, never a
 completion. An archived board refuses it too. The other refusals are the service's: a human-only
-Ticket (the answer names who confirms it), an unfinished prerequisite (``ticket_blocked`` with the
-blockers), an open wait (``ticket_waiting``, which a person clears) and a Loop that is not
+Ticket (the answer names who confirms it, and ``details.decision_link`` is the address of the
+Ticket's page with its confirmation in focus), an unfinished prerequisite (``ticket_blocked`` with
+the blockers), an open wait (``ticket_waiting``, which a person clears) and a Loop that is not
 executing.
 
 ``complete_ticket`` is typed on ``TicketCompleting``, the attributes of the composition root it
@@ -46,11 +47,12 @@ from ..core.errors import ApiError, Conflict, NotFound, ValidationFailure, Versi
 from ..schemas.cards import CardCreate, CardUpdate
 from ..schemas.common import Priority
 from ..schemas.subresources import CommentCreate
-from .agent_tools_read import ToolArguments, ToolResult, _require, _text
+from .agent_tools_read import ToolArguments, ToolResult, _require, _text, tool_decision_link
 from .agent_tools_write import DEDUPE_WINDOW_SECONDS, _seconds_since
 from .ticket_face import FACE_FIELDS
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
+    from ..core.config import Settings
     from .cards import CardEntry, CardService
     from .lists import ListService
     from .loops import LoopService
@@ -91,6 +93,9 @@ class TicketCompleting(TicketCommenting, Protocol):
 
     @property
     def loop(self) -> LoopService: ...
+
+    @property
+    def settings(self) -> Settings: ...
 
 
 def completion_comment(summary: str, evidence: list[str]) -> str:
@@ -144,24 +149,34 @@ def _recent(
     return None
 
 
-def _refused(refusal: ApiError, card: CardEntry, comment: CommentEntry) -> ApiError:
+def _refused(
+    refusal: ApiError, card: CardEntry, comment: CommentEntry, *, public_url: str | None
+) -> ApiError:
     """The service's refusal, saying the summary was kept as a comment; a human-only Ticket also
-    says who confirms it and what they were asked to do."""
+    says who confirms it, what they were asked to do and where: ``decision_link``, the Ticket's
+    page with its confirmation in focus, the ids taken from the Ticket's row."""
     details: dict[str, object] = {**(refusal.details or {}), "comment_id": comment["id"]}
-    message = refusal.message
+    message = f"{refusal.message}. Your summary is saved as a comment on the Ticket."
     if refusal.code == "human_action_required":
         who = card["assignee_name"] or "a person on the board"
-        message = f"{card['ticket_key'] or 'This Ticket'} is work for a person: {who} confirms it"
+        link = tool_decision_link(
+            "confirmation",
+            board_id=card["board_id"],
+            loop_id=card["loop_id"],
+            card_id=card["id"],
+            public_url=public_url,
+        )
+        message = (
+            f"{card['ticket_key'] or 'This Ticket'} is work for a person, and your summary is "
+            f"saved as a comment on the Ticket. {who} confirms it on the Ticket's page: {link}"
+        )
         details |= {
             "ticket_key": card["ticket_key"],
             "confirmed_by": card["assignee_name"],
             "human_instructions": card["human_instructions"],
+            "decision_link": link,
         }
-    return type(refusal)(
-        f"{message}. Your summary is saved as a comment on the Ticket.",
-        code=refusal.code,
-        details=details,
-    )
+    return type(refusal)(message, code=refusal.code, details=details)
 
 
 def comment_ticket(
@@ -347,7 +362,9 @@ def complete_ticket(
         except ApiError as refusal:
             if refusal.code not in REFUSALS:
                 raise
-            raise _refused(refusal, card, comment()) from None
+            raise _refused(
+                refusal, card, comment(), public_url=services.settings.public_url
+            ) from None
         return _answer(services, board_id, done, comment())
     raise NotFound("Ticket not found")  # pragma: no cover - the loop returns or raises
 

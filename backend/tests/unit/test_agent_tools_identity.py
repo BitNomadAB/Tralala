@@ -14,7 +14,7 @@ import pytest
 from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Forbidden
-from app.services.agent_tools import tool_catalog, whoami
+from app.services.agent_tools import DECISION_LINK_RULE, tool_catalog, whoami
 from app.services.agent_tools_identity import HUMAN_DECISIONS
 from app.services.auth import AuthService
 from tests.unit.fakes.data_files import FakeBootstrapPasswordFile
@@ -141,6 +141,8 @@ def test_whoami_lists_the_decisions_only_a_person_makes_and_never_token_material
     assert "human_action_required" in str(human["note"])
     # A Loop without a plan is past draft from its first Ticket, so its Info is a person's.
     assert "A Loop without a plan leaves draft with its first Ticket" in str(human["note"])
+    # Where the person takes such a decision comes with what waits for them.
+    assert str(human["note"]).endswith(" " + DECISION_LINK_RULE)
     text = json.dumps(answer)
     assert "digest:" not in text
     assert "token_hash" not in text

@@ -1,5 +1,5 @@
 import { AlertTriangle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
@@ -8,9 +8,15 @@ import { useAuth } from "@/features/auth/useAuth";
 import { api } from "@/lib/api";
 import { useReadiness } from "@/lib/queries";
 import type { Board, Loop, LoopSummary } from "@/lib/types";
-import { completionMenuItems, decisionShown, loopDecision } from "./loopDecision";
-import { LoopDialogs, type LoopDialog } from "./LoopDialogs";
+import {
+  completionMenuItems,
+  completionOffered,
+  decisionShown,
+  loopDecision,
+} from "./loopDecision";
+import { LoopDialogs } from "./LoopDialogs";
 import { loopNextAction, STAGE_WORDS } from "./loopNextAction";
+import { useLoopDialog } from "./useLoopDialog";
 import type { LoopView } from "./useLoopView";
 import { WithoutPlanChip } from "./WithoutPlanChip";
 
@@ -40,7 +46,13 @@ export function LoopHeader({
   onChanged: () => void;
   onToggleActivity: () => void;
 }) {
-  const [dialog, setDialog] = useState<LoopDialog | null>(null);
+  const locked = readOnly ? "The Loop is read-only" : undefined;
+  // `?dialog=completion` opens the completion dialog when the Loop offers it.
+  const {
+    open: dialog,
+    setOpen: setDialog,
+    close: closeDialog,
+  } = useLoopDialog(view, completionOffered(loop, locked));
   const readiness = useReadiness(board.id, loop.id);
   const { actor } = useAuth();
   const next = summary ? loopNextAction(summary) : null;
@@ -51,7 +63,6 @@ export function LoopHeader({
     [readiness.data],
   );
 
-  const locked = readOnly ? "The Loop is read-only" : undefined;
   const items: MenuItem[] = [
     { label: "Edit Loop", disabled: readOnly, hint: locked, onSelect: () => setDialog("edit") },
     { label: "Loop agents", onSelect: () => setDialog("agents") },
@@ -140,7 +151,7 @@ export function LoopHeader({
 
       <LoopDialogs
         open={dialog}
-        onClose={() => setDialog(null)}
+        onClose={closeDialog}
         board={board}
         loop={loop}
         isHuman={actor?.type === "user"}

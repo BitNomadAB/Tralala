@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from ..core.context import MEMBER_TOKEN_SCOPES, ActorContext
-from .agent_tools_read import ToolArguments, ToolResult
+from .agent_tools_read import DECISION_LINK_RULE, ToolArguments, ToolResult
 from .agent_tools_schema import AgentTool, missing_scopes, object_schema
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
@@ -39,7 +39,7 @@ _HUMAN_NOTE = (
     "whatever its scopes. Info stays yours to write while the Loop is draft or under analysis "
     "review; once planning has started, editing it is a person's. "
     "A Loop without a plan leaves draft with its first Ticket, so its Info is a person's from "
-    "then on, and accepting its implementation is what closes it."
+    "then on, and accepting its implementation is what closes it. " + DECISION_LINK_RULE
 )
 
 

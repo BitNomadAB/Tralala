@@ -40,7 +40,8 @@ opens the same view:
   Loop's header names the human Tickets that hold a Phase up, and a Ticket shows what it waits for.
 - **Notes**: the Loop's log of notes ([Notes](#notes)).
 
-`?card=<card_id>` opens a Ticket over any tab ([The Ticket view](#the-ticket-view)).
+`?card=<card_id>` opens a Ticket over any tab ([The Ticket view](#the-ticket-view)), and
+`?dialog=completion` opens the completion dialog ([Links to a decision](#links-to-a-decision)).
 
 A Ticket on the Kanban shows the first line of its face: the title in two lines at most, its plain
 summary muted under it, and a bottom row with the key, *Needs input* or *Blocked* only when it
@@ -351,6 +352,41 @@ wrote. A note holds up to 4 000 characters. Your coding agent reads them: `read_
 as `person_notes`, apart from the plan, and no key can write, edit or delete one. Only the author
 changes a note, an edit names the version it read, and a completed, cancelled or archived Loop, like
 an archived board, takes no note.
+
+## Links to a decision
+
+A coding session that meets a decision only a person takes gives its person a link to the place in
+Tralala where it is taken (`decision_link`, see [Agent usage](Agent_usage.md)). Opened in the
+browser, the link lands on that decision and stops there: it opens the tab or the dialog, or puts
+the focus on the button, and the person reads and presses it. Opening a link decides nothing.
+
+| Decision | Address | What it opens |
+| --- | --- | --- |
+| Review the analysis | `/boards/{board_id}/loops/{loop_id}?tab=plan&doc=analysis` | The Plan tab on the analysis, with **Approve analysis** |
+| Review the RoadMap | `/boards/{board_id}/loops/{loop_id}?tab=plan&doc=roadmap` | The Plan tab on the RoadMap, with **Approve RoadMap** |
+| Edit the Info | `/boards/{board_id}/loops/{loop_id}?tab=plan&doc=info` | The Plan tab on the Info |
+| Accept the implementation, or accept or reject QA | `/boards/{board_id}/loops/{loop_id}?dialog=completion` | The completion dialog, "{key} completion and QA": **Accept implementation**, and once QA is asked for its section **2. Quality assurance** with **Reject QA** and **Accept QA and complete**. A Loop without a plan opens "Close {key}" with **Close the Loop** instead |
+| Clear a wait | `/boards/{board_id}/loops/{loop_id}/tickets/{card_id}?focus=clear-wait` | The Ticket's page, the focus on **Clear the wait** |
+| Confirm a person's task | `/boards/{board_id}/loops/{loop_id}/tickets/{card_id}?focus=confirm` | The Ticket's page, the focus on **Confirm human action** |
+
+- **The sign-in keeps the whole address.** A person who is signed out signs in first and then lands
+  on the address they opened, with everything after the `?` and the `#`. Only an address inside
+  Tralala, a path that starts with a single `/`, is followed after the sign-in; anything else
+  (`//host`, another site, a full `https://` address) opens the dashboard instead.
+- **`?dialog=completion`** opens the dialog only where **Loop actions** offers it: not in a draft,
+  which has nothing to finalize yet, and not in a completed, cancelled or archived Loop or on an
+  archived board, which are read-only. There the Loop page opens without it. Closing the dialog
+  takes `dialog` out of the address, so a reload or **Back** does not open it again.
+- **`?focus=`** works on the Ticket's page and over the Kanban
+  (`/boards/{board_id}/loops/{loop_id}?card={card_id}&focus=confirm`). The button takes the focus
+  once the Ticket has loaded, and `focus` then leaves the address. **Confirm human action** takes the
+  focus also while it cannot be pressed yet (the Ticket waits, or earlier work comes first): it reads
+  as unavailable with the reason beside it, and a wait's **Clear the wait** sits above it. When the
+  button is no longer there (the wait was cleared, the Ticket was confirmed), the Ticket's title
+  takes the focus.
+- A link is a path inside Tralala (`/boards/...`) unless the installation sets its public address
+  (`TRALALA_PUBLIC_URL`, see [Installation](Installation.md)); to open a path, put the address you
+  open Tralala at in front of it.
 
 ## Ask the agents
 

@@ -1,7 +1,9 @@
 """The two listing tools on the fakes: ``list_boards`` runs BoardService on the registry fakes and
 ``search_tickets`` runs SearchService, LoopService and ListService on the board fakes, each handed
 only the attributes of the composition root its Protocol declares; then what ``tools/list`` and
-``/llms.txt`` say about them.
+``/llms.txt`` say about them. Last, the parts of ``read_ticket`` that read no service: what the
+approved plan says of a Ticket, and where a person clears its wait or confirms it
+(``decision_link``), with the helpers every tool builds that address and its refusal with.
 """
 
 from __future__ import annotations
@@ -18,18 +20,27 @@ from app.api.mcp import render_bootstrap, tool_list
 from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Forbidden, ValidationFailure
+from app.db.generated.board import CardsRow
+from app.repositories.cards import CardCounts
 from app.repositories.search import FullTextIndex
 from app.services.agent_tools import ToolResult, list_boards, search_tickets, tool_catalog
-from app.services.agent_tools_read import ticket_plan
+from app.services.agent_tools_read import (
+    refused_at,
+    ticket_decision_link,
+    ticket_plan,
+    ticket_wait,
+    tool_decision_link,
+)
 from app.services.agents import AgentService
 from app.services.boards import BoardCounters, BoardSchema, BoardService, Counts
-from app.services.cards import CardService
+from app.services.cards import CardEntry, CardService, card_entry
 from app.services.lists import ListService
 from app.services.loops import LoopService
 from app.services.plan_views import PhaseView, Readiness, ReadinessItem
 from app.services.repositories import RepositoryService
 from app.services.search import SearchService
 from tests.unit.fakes.board import (
+    BOARD_ID,
     CREATED,
     BoardState,
     FakeBoardChecks,
@@ -425,3 +436,128 @@ def test_read_ticket_says_why_a_planned_ticket_is_there_and_in_which_phase() -> 
         "objective": "Order of work 10 of 21: right after the overview",
         "phase": {"number": 2, "name": None},
     }
+
+
+# --- the address of a person's decision ----------------------------------------------------------
+
+# A Loop's and a Ticket's ids as their rows have them: UUIDs.
+TICKET_LOOP = "5d4c3b2a-1f0e-4d9c-8b7a-695847362514"
+TICKET = "8a7b6c5d-4e3f-4a1b-9c0d-1e2f3a4b5c6d"
+PUBLIC = "https://tralala.example.com"
+TICKET_PAGE = f"/boards/{BOARD_ID}/loops/{TICKET_LOOP}/tickets/{TICKET}"
+NO_COUNTS = CardCounts(checklist_total=0, checklist_completed=0, comment_count=0)
+
+
+def ticket(row: CardsRow, *, loop_closed: bool = False) -> CardEntry:
+    """The Ticket as ``CardService.get`` answers it, outside the plan."""
+    return card_entry(BOARD_ID, row, [], NO_COUNTS, None, loop_closed=loop_closed)
+
+
+def open_ticket() -> CardsRow:
+    return card_row(TICKET, "todo", TICKET_LOOP)
+
+
+def waiting() -> CardsRow:
+    return open_ticket().__replace__(
+        waiting_for="decision",
+        waiting_reason="Which provider?",
+        waiting_set_by="agent-1",
+        waiting_set_at=CREATED,
+    )
+
+
+def test_read_ticket_links_where_the_person_who_answers_clears_the_wait() -> None:
+    assert ticket_wait(ticket(waiting()), loop_read_only=False, public_url=None) == {
+        "waiting_for": "decision",
+        "reason": "Which provider?",
+        "set_by": "agent-1",
+        "set_at": CREATED,
+        "decision_link": f"{TICKET_PAGE}?focus=clear-wait",
+    }
+    absolute = ticket_wait(ticket(waiting()), loop_read_only=False, public_url=PUBLIC)
+    assert absolute is not None
+    assert absolute["decision_link"] == f"{PUBLIC}{TICKET_PAGE}?focus=clear-wait"
+    # Waiting for nothing, there is no wait to show; and nobody confirms a Ticket that is no
+    # person's task, waiting or not.
+    assert ticket_wait(ticket(open_ticket()), loop_read_only=False, public_url=None) is None
+    for row in (open_ticket(), waiting()):
+        assert (
+            ticket_decision_link(ticket(row), "confirmation", loop_read_only=False, public_url=None)
+            is None
+        )
+
+
+def test_read_ticket_links_where_a_person_confirms_their_task() -> None:
+    task = open_ticket().__replace__(required_actor="human")
+    assert ticket(task)["human_action_required"] is True
+    assert (
+        ticket_decision_link(ticket(task), "confirmation", loop_read_only=False, public_url=None)
+        == f"{TICKET_PAGE}?focus=confirm"
+    )
+    assert (
+        ticket_decision_link(ticket(task), "confirmation", loop_read_only=False, public_url=PUBLIC)
+        == f"{PUBLIC}{TICKET_PAGE}?focus=confirm"
+    )
+    # A person's task that also waits is linked twice: the wait to clear, then the confirmation.
+    both = ticket(task.__replace__(waiting_for="access", waiting_reason="The admin login"))
+    wait = ticket_wait(both, loop_read_only=False, public_url=None)
+    assert wait is not None
+    assert wait["decision_link"] == f"{TICKET_PAGE}?focus=clear-wait"
+    assert ticket_decision_link(both, "confirmation", loop_read_only=False, public_url=None) == (
+        f"{TICKET_PAGE}?focus=confirm"
+    )
+
+
+def test_nothing_is_linked_once_nobody_decides_on_the_ticket_any_more() -> None:
+    """A completed or archived Ticket, and every Ticket of a completed, cancelled or archived
+    Loop, waits for nobody: the wait still shows, without an address."""
+    task = waiting().__replace__(required_actor="human")
+    for card, loop_read_only in (
+        (ticket(task.__replace__(completed_at=CREATED)), False),
+        (ticket(task.__replace__(archived_at=CREATED)), False),
+        (ticket(task, loop_closed=True), True),
+        (ticket(task), True),  # an archived Loop is read-only without being closed
+    ):
+        wait = ticket_wait(card, loop_read_only=loop_read_only, public_url=PUBLIC)
+        assert wait is not None
+        assert (wait["waiting_for"], wait["decision_link"]) == ("decision", None)
+        assert (
+            ticket_decision_link(
+                card, "confirmation", loop_read_only=loop_read_only, public_url=PUBLIC
+            )
+            is None
+        )
+
+
+def test_a_tool_builds_the_address_from_the_boards_own_id_and_the_rows_ids() -> None:
+    # A board id written in capitals names the same board; the address carries its canonical id,
+    # the one its registry row has.
+    capitals = BOARD_ID.upper()
+    assert (
+        tool_decision_link("analysis", board_id=capitals, loop_id=TICKET_LOOP, public_url=None)
+        == f"/boards/{BOARD_ID}/loops/{TICKET_LOOP}?tab=plan&doc=analysis"
+    )
+    # A Loop's key is no id: the tools take the ids from the rows, never from an argument.
+    with pytest.raises(ValueError, match="loop_id must be a UUID"):
+        tool_decision_link("analysis", board_id=BOARD_ID, loop_id="L-1", public_url=None)
+
+
+def test_a_refusal_keeps_its_code_and_says_where_the_person_decides() -> None:
+    refusal = Forbidden(
+        "Editing Loop Info is a human decision",
+        code="human_action_required",
+        details={"action": "Editing Loop Info"},
+    )
+    link = f"/boards/{BOARD_ID}/loops/{TICKET_LOOP}?tab=plan&doc=info"
+    answered = refused_at(refusal, link, "A person edits the Info in the Loop's Plan tab")
+    assert isinstance(answered, Forbidden)
+    assert (answered.status_code, answered.code, answered.retryable) == (
+        403,
+        "human_action_required",
+        False,
+    )
+    assert answered.message == (
+        f"Editing Loop Info is a human decision. A person edits the Info in the Loop's Plan tab: "
+        f"{link}"
+    )
+    assert answered.details == {"action": "Editing Loop Info", "decision_link": link}

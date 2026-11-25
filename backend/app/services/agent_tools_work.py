@@ -9,7 +9,9 @@ read: it needs input (a decision, information or access) or is blocked (a third 
 Setting a wait describes the Ticket and assigns nothing. Clearing one, or replacing one with
 another, is a person's act (AGENTS.md rule 11a), so it is never a tool: the person who answers
 clears it in the Ticket dialog. The write is ``TicketWorkService.set_wait``, version-checked with
-the version read for the worker and one retry when someone else changed the Ticket in between.
+the version read for the worker and one retry when someone else changed the Ticket in between. A
+token that would replace a wait is refused (``403 human_action_required``) with
+``details.decision_link``, the address of the Ticket's page with the wait's Clear in focus.
 
 The handler is public and typed on the attributes of the composition root it uses, so a unit test
 runs it with the real services on the typed fakes. Its catalogue entry is built here too
@@ -23,12 +25,13 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import ValidationError
 
 from ..core.context import ActorContext
-from ..core.errors import ValidationFailure, VersionConflict
+from ..core.errors import ApiError, ValidationFailure, VersionConflict
 from ..schemas.cards import WAITING_REASON_CHARS, WAITS, TicketWaitSet
-from .agent_tools_read import ToolArguments, ToolResult, _require
+from .agent_tools_read import ToolArguments, ToolResult, _require, refused_at, tool_decision_link
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
+    from ..core.config import Settings
     from .cards import CardService
     from .ticket_work import TicketWorkService
 
@@ -41,6 +44,9 @@ class WaitSetting(Protocol):
 
     @property
     def ticket_work(self) -> TicketWorkService: ...
+
+    @property
+    def settings(self) -> Settings: ...
 
 
 def _payload(version: int, args: ToolArguments) -> TicketWaitSet:
@@ -74,6 +80,20 @@ def set_ticket_wait(services: WaitSetting, actor: ActorContext, args: ToolArgume
             if attempt:
                 raise
             continue
+        except ApiError as refusal:
+            if refusal.code != "human_action_required":
+                raise
+            # Another wait is set: the person who answers it clears it on the Ticket's page.
+            link = tool_decision_link(
+                "wait",
+                board_id=board_id,
+                loop_id=loop_id,
+                card_id=card["id"],
+                public_url=services.settings.public_url,
+            )
+            raise refused_at(
+                refusal, link, "The person who answers it clears that wait on the Ticket's page"
+            ) from None
         return {
             "ticket": {
                 "id": written["id"],

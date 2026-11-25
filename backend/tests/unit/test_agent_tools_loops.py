@@ -1,6 +1,7 @@
 """``loop_summaries`` on the fakes: the real LoopService, ListService and CardService on an
 in-memory board, handed to the tool as the attributes ``LoopSummarising`` declares; what each Loop's
-row says comes next and who does it, and which Tickets the key has not reported on."""
+row says comes next and who does it, the address of the decision a person takes next, and which
+Tickets the key has not reported on."""
 
 from __future__ import annotations
 
@@ -16,8 +17,9 @@ from app.api.mcp import render_bootstrap, tool_list
 from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Forbidden, ValidationFailure
-from app.db.generated.board import LoopsRow
+from app.db.generated.board import CardsRow, LoopsRow
 from app.services.agent_tools import ToolResult, loop_summaries, tool_catalog
+from app.services.agent_tools_loops import ALL_DONE, ALL_DONE_WITHOUT_PLAN
 from app.services.agent_tools_read import REPORT_FIRST
 from app.services.cards import CardService
 from app.services.lists import ListService
@@ -53,6 +55,12 @@ KEY = ActorContext(
 )
 MOVED = "2026-11-25T20:35:03Z"
 LATER = "2026-11-25T20:40:00Z"
+PUBLIC = "https://tralala.example.com"
+
+
+def uid(n: int) -> str:
+    """A Loop's id as its row has it, a UUID: the address of a decision is built from it."""
+    return f"00000000-0000-4000-8000-{n:012d}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +70,7 @@ class LoopWorld:
     loop: LoopService
     list: ListService
     card: CardService
+    settings: Settings
     state: BoardState
 
 
@@ -71,9 +80,11 @@ def loop_world(
     *,
     items: list[ReadinessItem] | None = None,
     state: BoardState | None = None,
+    public_url: str | None = None,
 ) -> LoopWorld:
     """The Loops given, each with a Todo and a Doing column; every Loop answers ``items`` as its
-    planned Tickets' readiness."""
+    planned Tickets' readiness. ``public_url`` is the installation's public address: unset unless
+    given, whatever the environment says."""
     board = state or BoardState()
     board.loops = {loop.id: loop for loop in loops}
     for loop in loops:
@@ -94,6 +105,7 @@ def loop_world(
         loop=LoopService(settings, checks, store, plans=views, tickets=cards, clock=lambda: NOW),
         list=ListService(checks, store),
         card=cards,
+        settings=settings.model_copy(update={"public_url": public_url}),
         state=board,
     )
 
@@ -133,18 +145,17 @@ def done(item: ReadinessItem) -> ReadinessItem:
 
 
 def test_each_open_loop_says_what_comes_next_and_who_does_it(settings: Settings) -> None:
+    review = uid(2)
     state = BoardState()
     state.documents = [
-        document_row("i2", "review", "info", content="Why"),
-        document_row(
-            "a2", "review", "analysis_ai", status="ready_for_review", revision=3, info="i2"
-        ),
+        document_row("i2", review, "info", content="Why"),
+        document_row("a2", review, "analysis_ai", status="ready_for_review", revision=3, info="i2"),
     ]
     world = loop_world(
         settings,
         [
             loop("draft", "draft", 1, goal="Know  what\nto fix " + "x" * 300),
-            loop("review", "analysis_review", 2),
+            loop(review, "analysis_review", 2),
             loop("plan", "planning", 3),
             loop("old", "completed", 4),
         ],
@@ -234,7 +245,7 @@ def test_a_loop_in_delivery_counts_its_tickets_by_state(settings: Settings) -> N
     # A Loop with a plan whose Tickets are all done goes on to the acceptance and its QA.
     finished = loop_world(
         settings,
-        [loop("run", "ready", 1).__replace__(current_plan_id="plan-1")],
+        [loop(uid(1), "ready", 1).__replace__(current_plan_id="plan-1")],
         items=items[4:],
     )
     (row,) = rows(loop_summaries(finished, READER, ask()))
@@ -303,8 +314,8 @@ def test_a_row_says_whether_the_loop_runs_without_a_plan(settings: Settings) -> 
     world = loop_world(
         settings,
         [
-            loop("solo", "in_progress", 1),
-            loop("run", "in_progress", 2).__replace__(current_plan_id="plan-1"),
+            loop(uid(1), "in_progress", 1),
+            loop(uid(2), "in_progress", 2).__replace__(current_plan_id="plan-1"),
             loop("draft", "draft", 3),
         ],
     )
@@ -334,23 +345,21 @@ def test_a_draft_with_its_info_offers_the_analysis_or_a_ticket_without_a_plan(
 def test_a_loop_without_a_plan_whose_tickets_are_done_waits_for_a_person_to_close_it(
     settings: Settings,
 ) -> None:
+    solo = uid(6)
     state = BoardState()
     state.cards = {
-        "u": card_row("u", "doing-solo", "solo").__replace__(
+        "u": card_row("u", f"doing-{solo}", solo).__replace__(
             kind="manual", ticket_key="L-1-UNP-001", completed_at=CREATED
         ),
         # Archived before it was done: it neither counts nor holds the Loop up.
-        "v": card_row("v", "todo-solo", "solo").__replace__(
+        "v": card_row("v", f"todo-{solo}", solo).__replace__(
             kind="manual", ticket_key="L-1-UNP-002", archived_at=CREATED
         ),
     }
-    world = loop_world(settings, [loop("solo", "in_progress", 1)], state=state)
+    world = loop_world(settings, [loop(solo, "in_progress", 1)], state=state)
     (row,) = rows(loop_summaries(world, READER, ask()))
     assert row["without_plan"] is True
-    assert (row["next"], row["waiting_on"]) == (
-        "Every Ticket is done: a person closes the Loop with one decision; no QA.",
-        "person",
-    )
+    assert (row["next"], row["waiting_on"]) == (ALL_DONE_WITHOUT_PLAN, "person")
     tickets = row["tickets"]
     assert isinstance(tickets, Mapping)
     assert (tickets["completed"], tickets["total"]) == (1, 1)
@@ -391,6 +400,143 @@ def test_loop_summaries_narrows_to_a_stage_and_refuses_an_unknown_one(settings: 
         loop_summaries(world, READER, ask(stage="shipping"))
     with pytest.raises(Forbidden):
         loop_summaries(world, READER.__replace__(scopes=frozenset({"cards:read"})), ask())
+
+
+# --- the address of the decision a person takes next ---------------------------------------------
+
+
+def decisions_world(settings: Settings, *, public_url: str | None = None) -> LoopWorld:
+    """A Loop for each decision a person takes next, and one for each next step that is no single
+    decision of the Loop. Every Loop answers one planned Ticket, done.
+
+    L-1 reviews its analysis, L-2 its RoadMap, L-3 awaits QA; every Ticket of L-4 (planned) and of
+    L-5 (without a plan) is done. L-6 is a draft without Info, L-7's analysis is out of date with
+    its Info, L-8 has a Ticket ready to start and L-9 a Ticket that waits for a person's answer.
+    """
+    state = BoardState()
+    state.documents = [
+        document_row("i1", uid(1), "info"),
+        document_row("a1", uid(1), "analysis_ai", status="ready_for_review", info="i1"),
+        document_row("i2", uid(2), "info"),
+        document_row("a2", uid(2), "analysis_ai", status="approved", info="i2"),
+        document_row("h2", uid(2), "analysis", status="approved", analysis_ai="a2"),
+        document_row(
+            "r2",
+            uid(2),
+            "roadmap_ai",
+            status="ready_for_review",
+            info="i2",
+            analysis_ai="a2",
+            analysis="h2",
+        ),
+        document_row("i7", uid(7), "info", revision=2),
+        document_row("a7", uid(7), "analysis_ai", status="ready_for_review", info="i7-old"),
+    ]
+
+    def manual(card_id: str, loop_id: str, number: int) -> CardsRow:
+        return card_row(card_id, f"doing-{loop_id}", loop_id).__replace__(
+            kind="manual", ticket_key=f"L-{number}-UNP-001"
+        )
+
+    state.cards = {
+        "solo": manual("solo", uid(5), 5).__replace__(completed_at=CREATED),
+        "open": manual("open", uid(8), 8),
+        "asks": manual("asks", uid(9), 9).__replace__(waiting_for="decision"),
+    }
+    planned = "plan-1"
+    loops = [
+        loop(uid(1), "analysis_review", 1),
+        loop(uid(2), "roadmap_review", 2),
+        loop(uid(3), "awaiting_qa", 3).__replace__(current_plan_id=planned),
+        loop(uid(4), "in_progress", 4).__replace__(current_plan_id=planned),
+        loop(uid(5), "in_progress", 5),
+        loop(uid(6), "draft", 6),
+        loop(uid(7), "analysis_review", 7),
+        loop(uid(8), "in_progress", 8).__replace__(current_plan_id=planned),
+        loop(uid(9), "in_progress", 9).__replace__(current_plan_id=planned),
+    ]
+    return loop_world(
+        settings,
+        loops,
+        items=[done(readiness_item("planned"))],
+        state=state,
+        public_url=public_url,
+    )
+
+
+def links(answer: ToolResult) -> dict[object, object]:
+    return {row["key"]: row["decision_link"] for row in rows(answer)}
+
+
+def decision_paths() -> dict[object, object]:
+    """Each Loop's ``decision_link`` without a public address: the path inside Tralala."""
+    loop_page = f"/boards/{BOARD_ID}/loops/"
+    return {
+        "L-1": f"{loop_page}{uid(1)}?tab=plan&doc=analysis",
+        "L-2": f"{loop_page}{uid(2)}?tab=plan&doc=roadmap",
+        "L-3": f"{loop_page}{uid(3)}?dialog=completion",
+        "L-4": f"{loop_page}{uid(4)}?dialog=completion",
+        "L-5": f"{loop_page}{uid(5)}?dialog=completion",
+        "L-6": None,
+        "L-7": None,
+        "L-8": None,
+        "L-9": None,
+    }
+
+
+def test_a_row_links_the_decision_a_person_takes_next_and_nothing_else(settings: Settings) -> None:
+    answer = loop_summaries(decisions_world(settings), READER, ask())
+    assert links(answer) == decision_paths()
+    by_key = {row["key"]: row for row in rows(answer)}
+    # A link only where the row waits on a person, and not for every such row: Info to write
+    # and a Ticket's answer are not one decision of the Loop.
+    for key, link in decision_paths().items():
+        row = by_key[key]
+        assert link is None or row["waiting_on"] == "person", key
+    assert [by_key[key]["waiting_on"] for key in ("L-6", "L-7", "L-8", "L-9")] == [
+        "person",
+        "agent",
+        "anyone",
+        "person",
+    ]
+    # Every Ticket done: the implementation is a person's to accept, in the completion dialog;
+    # in a Loop without a plan that acceptance closes the Loop, and the sentence says so.
+    assert (by_key["L-4"]["next"], by_key["L-5"]["next"]) == (ALL_DONE, ALL_DONE_WITHOUT_PLAN)
+    assert (by_key["L-5"]["without_plan"], by_key["L-4"]["without_plan"]) == (True, False)
+
+
+def test_a_loop_without_a_plan_links_the_one_decision_that_closes_it(settings: Settings) -> None:
+    """The fast track: every Ticket of a Loop without a plan is done, and accepting the
+    implementation closes it with no QA. The address is the completion dialog, as for a planned
+    Loop; while a Ticket is still open nothing waits for a person."""
+    solo = uid(5)
+    state = BoardState()
+    state.cards = {
+        "u": card_row("u", f"todo-{solo}", solo).__replace__(
+            kind="manual", ticket_key="L-1-UNP-001"
+        ),
+        "v": card_row("v", f"doing-{solo}", solo).__replace__(
+            kind="manual", ticket_key="L-1-UNP-002", completed_at=CREATED
+        ),
+    }
+    world = loop_world(settings, [loop(solo, "in_progress", 1)], state=state)
+    (row,) = rows(loop_summaries(world, READER, ask()))
+    assert (row["without_plan"], row["waiting_on"], row["decision_link"]) == (True, "anyone", None)
+    state.cards["u"] = state.cards["u"].__replace__(completed_at=CREATED)
+    (row,) = rows(loop_summaries(world, READER, ask()))
+    assert (row["without_plan"], row["next"], row["waiting_on"]) == (
+        True,
+        ALL_DONE_WITHOUT_PLAN,
+        "person",
+    )
+    assert row["decision_link"] == f"/boards/{BOARD_ID}/loops/{solo}?dialog=completion"
+
+
+def test_with_a_public_url_every_link_is_absolute(settings: Settings) -> None:
+    answer = loop_summaries(decisions_world(settings, public_url=PUBLIC), READER, ask())
+    assert links(answer) == {
+        key: None if path is None else f"{PUBLIC}{path}" for key, path in decision_paths().items()
+    }
 
 
 # --- the Tickets the key has not reported on -----------------------------------------------------
@@ -434,6 +580,7 @@ def test_loop_summaries_names_the_tickets_the_key_took_and_has_not_reported_on(
                 "without_plan": False,
                 "next": "1 Ticket is ready to start.",
                 "waiting_on": "anyone",
+                "decision_link": None,
                 "execution_allowed": True,
                 "tickets": {
                     "ready": 1,

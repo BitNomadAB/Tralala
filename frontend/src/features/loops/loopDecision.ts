@@ -43,6 +43,15 @@ export function decisionShown(
 export const NOTHING_TO_FINALIZE = "Nothing to finalize yet: add a Ticket or plan the Loop";
 
 /**
+ * Whether the Loop offers its completion dialog: it is neither read-only (`locked` says why when
+ * it is) nor a draft. "Loop actions" then lets the person open it, and so does a link
+ * (`?dialog=completion`); otherwise neither does.
+ */
+export function completionOffered(loop: Pick<Loop, "stage">, locked: string | undefined): boolean {
+  return locked === undefined && loop.stage !== "draft";
+}
+
+/**
  * The "Loop actions" item that opens the completion dialog: "Close Loop" for a Loop without a plan,
  * else "Finalize Loop", which a draft shows but does not offer. None while the header's one button
  * already opens the dialog. `locked` is why the Loop is read-only, when it is.
@@ -58,7 +67,7 @@ export function completionMenuItems(
   return [
     {
       label: loop.without_plan ? "Close Loop" : "Finalize Loop",
-      disabled: locked !== undefined || draft,
+      disabled: !completionOffered(loop, locked),
       hint: locked ?? (draft ? NOTHING_TO_FINALIZE : undefined),
       onSelect: open,
     },
