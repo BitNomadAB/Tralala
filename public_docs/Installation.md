@@ -84,12 +84,20 @@ TLS is configuration in the web container, not a second service. `TRALALA_SITE_A
 | `:80` (default) | Plain HTTP. Right behind Tailscale Serve, a load balancer or another TLS terminator. |
 | `tralala.example.com` | Automatic HTTPS: a public CA for a public name, Caddy's own local CA for a private one. Publish 443 (`TRALALA_HTTPS_PORT=443`) and leave 80 reachable for the ACME challenge and the redirect. |
 
-Set `TRALALA_COOKIE_SECURE=true` once the site is served over HTTPS. Keep
+Set `TRALALA_COOKIE_SECURE=true` once the site is served over HTTPS, and `TRALALA_PUBLIC_URL` to
+the address people open it at, for example `https://tralala.example.com`. Keep
 `TRALALA_TRUST_PROXY_HEADERS=true` (the compose default): Caddy is the only caller of the backend, so
 trusting its `X-Forwarded-For` is what keeps the sign-in throttle keyed on the real client rather
 than on the proxy. When another proxy terminates TLS in front of Caddy, also set
 `TRALALA_TRUSTED_PROXIES` to that proxy's address, as
 [Security defaults](Security_defaults.md#client-addresses-behind-a-proxy) explains.
+
+`TRALALA_PUBLIC_URL` is what a link to a decision that waits for a person, such as an approval or a
+wait to clear, is built on, so the link opens that place directly. Left empty, the link is a path
+inside Tralala (`/boards/...`) without the host name. The server never takes the address from a
+request's `Host` or `X-Forwarded-*` headers, and it refuses to start with a value that is not an
+`http` or `https` address with a host name, or that carries a user name, a password, a query or a
+fragment; a trailing slash is dropped.
 
 ### Behind Tailscale
 

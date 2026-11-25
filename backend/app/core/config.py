@@ -2,11 +2,56 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+PUBLIC_URL_SCHEMES = ("http", "https")
+
+
+def _public_url_problem(address: str) -> str | None:
+    """What keeps ``address`` from being the base of every link, or None when nothing does."""
+    if any(char.isspace() or not char.isprintable() for char in address):
+        return "must not contain spaces or control characters"
+    try:
+        parts = urlsplit(address)
+    except ValueError:  # an unclosed IPv6 bracket, say
+        return "is not a URL"
+    if parts.scheme not in PUBLIC_URL_SCHEMES:
+        return "must start with http:// or https://"
+    if "@" in parts.netloc:
+        return "must not carry a user name or password"
+    try:
+        _ = parts.port  # urlsplit checks the port only when it is read
+    except ValueError:
+        return "has a port that is not a number from 0 to 65535"
+    if not parts.hostname:
+        return "must name a host, as https://tralala.example.com does"
+    if "?" in address:
+        return "must not have a query (?...)"
+    if "#" in address:
+        return "must not have a fragment (#...)"
+    return None
+
+
+def checked_public_url(value: str | None) -> str | None:
+    """``public_url`` as links are built on it: None when unset or empty, else the address
+    without its trailing slash.
+
+    Only an http or https address with a host name is accepted; a user name or password, a query
+    or a fragment would end up in every link, so each is refused. The error names the setting and
+    what is wrong with it, and it stops ``Settings()``, so the server does not start with an
+    address it cannot build a link on.
+    """
+    address = (value or "").strip()
+    if not address:
+        return None
+    problem = _public_url_problem(address)
+    if problem is not None:
+        raise ValueError(f"public_url (TRALALA_PUBLIC_URL) {problem}")
+    return address.rstrip("/")
 
 
 class Settings(BaseSettings):
@@ -28,6 +73,10 @@ class Settings(BaseSettings):
     invite_ttl_hours: int = 72
     trust_proxy_headers: bool = False
     cookie_secure: bool = False
+    # The address people open Tralala at (https://tralala.example.com), which makes the link to a
+    # decision that waits for a person absolute. The server never learns it from a request's Host
+    # or X-Forwarded-* headers; unset (or empty), such a link is a path inside Tralala.
+    public_url: str | None = None
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     max_request_bytes: int = 8 * 1024 * 1024
     rate_limit_per_minute: int = 600
@@ -98,6 +147,11 @@ class Settings(BaseSettings):
         if cleaned not in LOG_LEVELS:
             raise ValueError(f"log_level must be one of {', '.join(LOG_LEVELS)}")
         return cleaned
+
+    @field_validator("public_url", mode="after")
+    @classmethod
+    def _public_address(cls, value: str | None) -> str | None:
+        return checked_public_url(value)
 
     @field_validator("platform_profile", mode="after")
     @classmethod
