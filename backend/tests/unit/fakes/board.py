@@ -1413,6 +1413,38 @@ def _reported_since(state: BoardState, card_id: str, actor_id: str, taken_at: st
     return commented or any(timestamp >= taken_at for timestamp in waits)
 
 
+def _takeable_loop(state: BoardState, card: CardsRow) -> LoopsRow | None:
+    """The card's Loop when a move can have taken the card, else None: the ``WHERE`` that
+    ``_UNREPORTED_BY`` and ``_UNREPORTED_SINCE`` share, without the activity log."""
+    loop = state.loops.get(card.loop_id)
+    if loop is None or card.completed_at is not None or card.archived_at is not None:
+        return None
+    if (loop.completed_at, loop.archived_at, loop.cancelled_at) != (None, None, None):
+        return None
+    first = _first_list(state, card.loop_id)
+    if first is not None and card.list_id == first.id:  # c.list_id IS NOT (first list)
+        return None
+    return loop
+
+
+def _first_key_moves(state: BoardState, card_id: str) -> dict[str, str]:
+    """Each key's first ``card.moved`` on the card, by actor id: the ``taken`` rows of
+    ``_UNREPORTED_SINCE`` (``actor_type = 'agent'``, ``GROUP BY c.id, a.actor_id``, ``MIN``)."""
+    first: dict[str, str] = {}
+    for entry in state.activity:
+        if (entry.entity_type, entry.entity_id, entry.action, entry.actor_type) != (
+            "card",
+            card_id,
+            "card.moved",
+            "agent",
+        ):
+            continue
+        known = first.get(entry.actor_id)
+        if known is None or entry.timestamp < known:  # text, compared as SQLite's BINARY does
+            first[entry.actor_id] = entry.timestamp
+    return first
+
+
 class FakeCardRepository:
     def __init__(self, state: BoardState) -> None:
         self._state = state
@@ -1499,13 +1531,8 @@ class FakeCardRepository:
         state = self._state
         found: list[UnreportedTicket] = []
         for card in state.cards.values():
-            loop = state.loops.get(card.loop_id)
-            if loop is None or card.completed_at is not None or card.archived_at is not None:
-                continue
-            if (loop.completed_at, loop.archived_at, loop.cancelled_at) != (None, None, None):
-                continue
-            first = _first_list(state, card.loop_id)
-            if first is not None and card.list_id == first.id:  # c.list_id IS NOT (first list)
+            loop = _takeable_loop(state, card)
+            if loop is None:
                 continue
             moves = _logged_on_card(state, card.id, "card.moved", actor_id)
             if not moves:  # the inner JOIN activity_log: no move by the actor, no row
@@ -1523,6 +1550,21 @@ class FakeCardRepository:
                 )
             )
         found.sort(key=lambda ticket: (ticket.taken_at, ticket.card.id))
+        return found
+
+    def unreported_since(self, card_ids: Sequence[str]) -> dict[str, str | None]:
+        state = self._state
+        found: dict[str, str | None] = dict.fromkeys(card_ids, None)
+        for card_id in found:
+            card = state.cards.get(card_id)  # an unknown id: no row, so None
+            if card is None or _takeable_loop(state, card) is None:
+                continue
+            owed = [
+                taken_at
+                for actor_id, taken_at in _first_key_moves(state, card_id).items()
+                if not _reported_since(state, card_id, actor_id, taken_at)
+            ]
+            found[card_id] = min(owed, default=None)  # the outer MIN(t.taken_at)
         return found
 
     def positions(self, list_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:

@@ -228,6 +228,14 @@ class CardOut(OutModel):
     needs_person: bool = Field(
         default=False, description="needs_input, or ready with human_action_required"
     )
+    unreported_since: str | None = Field(
+        default=None,
+        description=(
+            "When a key (an API token) took the Ticket and has not reported on it since (a "
+            "comment, a wait or a completion): the earliest such key's first move, ISO 8601 UTC; "
+            "null otherwise and for a person's move. Computed on every read, never stored"
+        ),
+    )
 
 
 class BoardTicketOut(CardOut):

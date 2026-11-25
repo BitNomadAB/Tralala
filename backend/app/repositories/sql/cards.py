@@ -136,6 +136,28 @@ _UNREPORTED_BY = text(
     " AND w.timestamp >= t.taken_at)"
     " ORDER BY t.taken_at, c.id"
 )
+# _UNREPORTED_BY for the listed cards and every key at once, so a listing reads it once: the same
+# conditions line by line, with the card ids in place of :actor_id and taken_at grouped per card and
+# actor, where a key's move is logged with actor_type 'agent'. Each NOT EXISTS compares an actor's
+# report with that actor's own first move; the outer MIN is the earliest key still owed a report.
+_UNREPORTED_SINCE = text(
+    "WITH taken AS (SELECT c.id AS card_id, a.actor_id, MIN(a.timestamp) AS taken_at"
+    " FROM cards c JOIN loops l ON l.id = c.loop_id"
+    " JOIN activity_log a ON a.entity_type = 'card' AND a.entity_id = c.id"
+    " WHERE a.action = 'card.moved' AND a.actor_type = 'agent' AND c.id IN :card_ids"
+    " AND c.completed_at IS NULL AND c.archived_at IS NULL"
+    " AND l.completed_at IS NULL AND l.archived_at IS NULL AND l.cancelled_at IS NULL"
+    " AND c.list_id IS NOT (SELECT f.id FROM lists f WHERE f.loop_id = c.loop_id"
+    " AND f.archived_at IS NULL ORDER BY f.position, f.id LIMIT 1)"
+    " GROUP BY c.id, a.actor_id)"
+    " SELECT t.card_id, MIN(t.taken_at) AS taken_at FROM taken t"
+    " WHERE NOT EXISTS (SELECT 1 FROM comments m WHERE m.card_id = t.card_id"
+    " AND m.actor_id = t.actor_id AND m.created_at >= t.taken_at)"
+    " AND NOT EXISTS (SELECT 1 FROM activity_log w WHERE w.entity_type = 'card'"
+    " AND w.entity_id = t.card_id AND w.action = 'card.wait_set' AND w.actor_id = t.actor_id"
+    " AND w.timestamp >= t.taken_at)"
+    " GROUP BY t.card_id"
+).bindparams(bindparam("card_ids", expanding=True))
 _ADDITIONS = text(
     "SELECT c.id AS card_id,"
     " (SELECT COUNT(*) FROM comments WHERE card_id = c.id)"
@@ -306,6 +328,14 @@ class SqlCardRepository:
                     taken_at=values.text(row, "taken_at"),
                 )
             )
+        return found
+
+    def unreported_since(self, card_ids: Sequence[str]) -> dict[str, str | None]:
+        found: dict[str, str | None] = dict.fromkeys(card_ids, None)
+        if card_ids:
+            result = self._connection.execute(_UNREPORTED_SINCE, {"card_ids": list(card_ids)})
+            for row in result.mappings():
+                found[values.text(row, "card_id")] = values.text(row, "taken_at")
         return found
 
     def positions(self, list_id: str, *, exclude: str | None = None) -> list[tuple[str, int]]:

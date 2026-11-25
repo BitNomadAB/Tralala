@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Chip, StateChip } from "@/components/ui/chip";
 import { Menu, type MenuItem } from "@/components/ui/menu";
+import { NoReportChip } from "@/features/cards/NoReport";
 import { NOT_DONE_REASON } from "@/features/cards/ticketWork";
 import type { Card } from "@/lib/types";
 import { cn, isOverdue } from "@/lib/utils";
@@ -62,8 +63,9 @@ const GRIP =
 /**
  * A Ticket on the Kanban, the first line of its face: the title, the plain summary, and a bottom
  * row with the key, the state unless it is Ready (Needs input, Blocked, or Not done once its Loop
- * was closed without it), the priority and due date when set, "done" once completed, "Needs a
- * person" for a person's task that can still be done, and the owner.
+ * was closed without it), "No report" while a key that took it has not reported on it, the
+ * priority and due date when set, "done" once completed, "Needs a person" for a person's task that
+ * can still be done, and the owner.
  * The title is the button that opens the Ticket (Enter or a click); it covers the whole card, so a
  * pointer drags the card from anywhere on it. The grip beside the title ("Move <title>") is the
  * keyboard's drag handle: Space or Enter picks the card up, the arrow keys move it. `actions`, the
@@ -185,6 +187,7 @@ export function TicketCard({
           </span>
         ) : null}
         {held && !done ? <StateChip state={held} compact title={heldReason(card)} /> : null}
+        <NoReportChip card={card} />
         {card.human_action_required && !done && !notDone ? (
           <Chip className="px-1.5 py-px text-xs">Needs a person</Chip>
         ) : null}
