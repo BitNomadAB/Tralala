@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnnouncerProvider } from "./announcer";
 import { ToastItem } from "./toast-item";
 import { ToastContext, withToast, type Toast, type ToastInput } from "./useToast";
@@ -31,6 +32,12 @@ function ToastList({
  * provider can also announce. An error is read at once and stays until it is dismissed; any other
  * toast is read after what the screen reader is reading and leaves by itself. At most three show,
  * and the same message again replaces the one shown (`withToast`).
+ *
+ * The toasts are drawn in the body, beside the app, not inside it. The app's root is a stacking
+ * context of its own (`#root` in `index.css`) and a dialog is portalled to the body above it, so a
+ * toast drawn inside the root sat under every dialog's backdrop, dimmed and blurred: a refusal
+ * that came while a dialog was open could not be read. In the body `z-[60]` puts a toast over a
+ * dialog (`z-50`) and its backdrop (`z-40`).
  */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -52,18 +59,21 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <AnnouncerProvider>
       <ToastContext.Provider value={value}>
         {children}
-        <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(340px,90vw)] flex-col gap-2">
-          <ToastList
-            toasts={toasts.filter((toast) => toast.variant === "error")}
-            live="assertive"
-            onDismiss={dismiss}
-          />
-          <ToastList
-            toasts={toasts.filter((toast) => toast.variant !== "error")}
-            live="polite"
-            onDismiss={dismiss}
-          />
-        </div>
+        {createPortal(
+          <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(340px,90vw)] flex-col gap-2">
+            <ToastList
+              toasts={toasts.filter((toast) => toast.variant === "error")}
+              live="assertive"
+              onDismiss={dismiss}
+            />
+            <ToastList
+              toasts={toasts.filter((toast) => toast.variant !== "error")}
+              live="polite"
+              onDismiss={dismiss}
+            />
+          </div>,
+          document.body,
+        )}
       </ToastContext.Provider>
     </AnnouncerProvider>
   );

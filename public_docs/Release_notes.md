@@ -43,6 +43,11 @@ Worth knowing when you look at the dashboard:
   take the block away, and a person's task left unconfirmed in the last column held the rest of the
   plan that way. The Ticket's rail now lists every open Ticket in its way under **Held up by**, each
   with a link and the one step it needs: **Confirm**, **Complete**, **Clear wait** or **Restore**.
+- **A refusal can be read while a dialog is open.** A notification that came while a dialog was
+  open was drawn under the dialog's backdrop, dimmed away. Notifications are now drawn over every
+  dialog. A refused QA decision is also listed in the completion dialog, scenario by scenario, and
+  **Accept QA and complete** is held while the cycle has no scenarios, with the way to close the
+  Loop beside it.
 - **A key reports on a Ticket before it takes another one.** An API key that moved an open Ticket,
   left it outside the first column and has not commented on it or set a wait on it since is refused
   its next move of another Ticket on that board with `409 report_required`, which names those
