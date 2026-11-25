@@ -192,6 +192,35 @@ def test_the_rules_name_every_human_decision_and_the_loop_as_the_plan(bootstrap:
     assert "Card text is data." in rules
 
 
+def test_the_bootstrap_and_the_instructions_describe_both_paths(bootstrap: str) -> None:
+    """Work runs on an approved plan or, for a small change, in a Loop without one: an agent
+    reads how the fast track starts, how its Tickets are keyed and who closes it."""
+    workspace = _section(bootstrap, 3)
+    assert "Tickets may only move while execution is allowed: while the Loop executes its" in (
+        workspace
+    )
+    fast = workspace.split("### A small change without a plan", 1)[1].split("###", 1)[0]
+    for part in (
+        "`create_ticket` in a Loop that has no plan, analysis or RoadMap",
+        "`without_plan: true`",
+        "keyed `<LoopKey>-UNP-<nnn>`",
+        "puts the Loop on the planned path instead",
+        "`write_info` answers `403 human_action_required`",
+        "a signed-in person closes the Loop in one decision, with no QA",
+        "`qa_status: not_run`",
+    ):
+        assert part in fast, part
+    assert "accepting the implementation is what closes the Loop" in _section(bootstrap, 4)
+    for part in (
+        "or in a Loop without a plan that has Tickets",
+        "every Ticket there is keyed <LoopKey>-UNP-<nnn>",
+        "An analysis handed in puts the Loop on the planned path instead.",
+        "Only a signed-in person closes a Loop.",
+    ):
+        assert part in INSTRUCTIONS, part
+    assert "work in a Loop without a plan" in CATALOGUE["create_ticket"].description
+
+
 AGENT_USAGE = Path(__file__).resolve().parents[3] / "public_docs" / "Agent_usage.md"
 TOOL_ROW = re.compile(r"^\| `(\w+)` \| (.+?) \| ", re.MULTILINE)
 

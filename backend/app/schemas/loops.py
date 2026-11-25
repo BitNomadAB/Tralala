@@ -392,13 +392,18 @@ class ReadinessOut(OutModel):
     phases: list[PhaseOut] = Field(default_factory=list[PhaseOut])
     unplanned: list[UnplannedTicketOut] = Field(
         default_factory=list["UnplannedTicketOut"],
-        description="Tickets added outside the plan while it executes; they never block",
+        description=(
+            "Tickets added by hand: outside the plan while it executes, where they never block, "
+            "or every Ticket of a Loop without a plan, which is its work"
+        ),
     )
     open_delivery: list[OpenDeliveryTicketOut] = Field(
         default_factory=list["OpenDeliveryTicketOut"],
         description=(
-            "Tickets a plan published that are not completed; accepting the implementation is "
-            "refused while there is one, unless a person accepts it without them"
+            "Tickets a plan published that are not completed, or in a Loop without a plan its "
+            "Tickets that are neither completed nor archived; accepting the implementation "
+            "(which closes a Loop without a plan) is refused while there is one, unless a person "
+            "accepts it without them"
         ),
     )
 
@@ -486,8 +491,8 @@ class ImplementationAcceptance(StrictModel):
     accept_unfinished: bool = Field(
         default=False,
         description=(
-            "Accept although delivery Tickets are not completed. They stay as they are and read "
-            "not_done once the Loop is completed"
+            "Accept although delivery Tickets (in a Loop without a plan, its open Tickets) are "
+            "not completed. They stay as they are and read not_done once the Loop is completed"
         ),
     )
 

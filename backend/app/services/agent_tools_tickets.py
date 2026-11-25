@@ -9,6 +9,11 @@ board has: an unknown label is refused with the names there are, never created. 
 for people (``why``, ``if_skipped``, ``pros``, ``cons``, ``steps`` with the summary): when any of
 them is given the whole face is held to its template, and a problem is ``422 face_invalid``.
 
+``create_ticket`` also adds a Ticket to a Loop without a plan, keyed the same way. There it is the
+Loop's own work: the first one in a Loop with no plan, analysis or RoadMap puts the Loop under way
+(``compute_stage``), and a person closes such a Loop in one decision, which names the Tickets still
+open.
+
 A comment goes on a Ticket whether it is done or not and whatever its Loop's state, completed,
 archived or cancelled included, so a later Loop can point back at the work it replaced; only an
 archived board refuses it (the service's rule, AGENTS.md rule 11b).

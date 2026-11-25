@@ -19,7 +19,7 @@ from app.core.context import ActorContext
 from app.core.errors import Forbidden, ValidationFailure
 from app.db.generated.board import CardsRow, LoopsRow
 from app.services.agent_tools import ToolResult, loop_summaries, tool_catalog
-from app.services.agent_tools_loops import ALL_DONE
+from app.services.agent_tools_loops import ALL_DONE, ALL_DONE_WITHOUT_PLAN
 from app.services.agent_tools_read import REPORT_FIRST
 from app.services.cards import CardService
 from app.services.lists import ListService
@@ -165,7 +165,10 @@ def test_each_open_loop_says_what_comes_next_and_who_does_it(settings: Settings)
     draft, review, plan = rows(answer)
     assert answer["count"] == 3
     assert (draft["key"], draft["stage"], draft["waiting_on"]) == ("L-1", "draft", "person")
-    assert draft["next"] == "Write the Loop's Info: what should change and why."
+    assert draft["next"] == (
+        "Write the Loop's Info for the planned path, or add a Ticket (create_ticket) for a small "
+        "change without a plan."
+    )
     assert str(draft["goal"]).startswith("Know what to fix x")
     assert len(str(draft["goal"])) == 280
     assert (review["waiting_on"], review["next"]) == (
@@ -239,8 +242,14 @@ def test_a_loop_in_delivery_counts_its_tickets_by_state(settings: Settings) -> N
         "1 Ticket waits for earlier work or a third party.",
         "anyone",
     )
-    finished = loop_world(settings, [loop(uid(1), "ready", 1)], items=items[4:])
+    # A Loop with a plan whose Tickets are all done goes on to the acceptance and its QA.
+    finished = loop_world(
+        settings,
+        [loop(uid(1), "ready", 1).__replace__(current_plan_id="plan-1")],
+        items=items[4:],
+    )
     (row,) = rows(loop_summaries(finished, READER, ask()))
+    assert row["without_plan"] is False
     assert (row["waiting_on"], "accepts the implementation" in str(row["next"])) == ("person", True)
 
 
@@ -316,6 +325,44 @@ def test_a_row_says_whether_the_loop_runs_without_a_plan(settings: Settings) -> 
         ("L-2", False),
         ("L-3", False),
     ]
+
+
+def test_a_draft_with_its_info_offers_the_analysis_or_a_ticket_without_a_plan(
+    settings: Settings,
+) -> None:
+    state = BoardState()
+    state.documents = [document_row("i1", "draft", "info", content="Why")]
+    world = loop_world(settings, [loop("draft", "draft", 1)], state=state)
+    (row,) = rows(loop_summaries(world, READER, ask()))
+    assert (row["next"], row["waiting_on"]) == (
+        "Ask for the analysis (run_analysis) or hand one in, written to a board agent's "
+        "instructions (read_instructions, then write_analysis); or add a Ticket (create_ticket) "
+        "for a small change without a plan.",
+        "agent",
+    )
+
+
+def test_a_loop_without_a_plan_whose_tickets_are_done_waits_for_a_person_to_close_it(
+    settings: Settings,
+) -> None:
+    solo = uid(6)
+    state = BoardState()
+    state.cards = {
+        "u": card_row("u", f"doing-{solo}", solo).__replace__(
+            kind="manual", ticket_key="L-1-UNP-001", completed_at=CREATED
+        ),
+        # Archived before it was done: it neither counts nor holds the Loop up.
+        "v": card_row("v", f"todo-{solo}", solo).__replace__(
+            kind="manual", ticket_key="L-1-UNP-002", archived_at=CREATED
+        ),
+    }
+    world = loop_world(settings, [loop(solo, "in_progress", 1)], state=state)
+    (row,) = rows(loop_summaries(world, READER, ask()))
+    assert row["without_plan"] is True
+    assert (row["next"], row["waiting_on"]) == (ALL_DONE_WITHOUT_PLAN, "person")
+    tickets = row["tickets"]
+    assert isinstance(tickets, Mapping)
+    assert (tickets["completed"], tickets["total"]) == (1, 1)
 
 
 def test_no_ticket_count_or_ticket_sentence_names_an_agent(settings: Settings) -> None:
@@ -452,8 +499,9 @@ def test_a_row_links_the_decision_a_person_takes_next_and_nothing_else(settings:
         "anyone",
         "person",
     ]
-    # Every Ticket done: the implementation is a person's to accept, in the completion dialog.
-    assert {by_key[key]["next"] for key in ("L-4", "L-5")} == {ALL_DONE}
+    # Every Ticket done: the implementation is a person's to accept, in the completion dialog;
+    # in a Loop without a plan that acceptance closes the Loop, and the sentence says so.
+    assert (by_key["L-4"]["next"], by_key["L-5"]["next"]) == (ALL_DONE, ALL_DONE_WITHOUT_PLAN)
     assert (by_key["L-5"]["without_plan"], by_key["L-4"]["without_plan"]) == (True, False)
 
 
@@ -476,7 +524,11 @@ def test_a_loop_without_a_plan_links_the_one_decision_that_closes_it(settings: S
     assert (row["without_plan"], row["waiting_on"], row["decision_link"]) == (True, "anyone", None)
     state.cards["u"] = state.cards["u"].__replace__(completed_at=CREATED)
     (row,) = rows(loop_summaries(world, READER, ask()))
-    assert (row["without_plan"], row["next"], row["waiting_on"]) == (True, ALL_DONE, "person")
+    assert (row["without_plan"], row["next"], row["waiting_on"]) == (
+        True,
+        ALL_DONE_WITHOUT_PLAN,
+        "person",
+    )
     assert row["decision_link"] == f"/boards/{BOARD_ID}/loops/{solo}?dialog=completion"
 
 

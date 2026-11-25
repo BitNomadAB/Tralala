@@ -11,6 +11,8 @@ Board
       -> Awaiting QA -> Completed
     Kanban: Backlog | Todo | In progress | Review | Done
     Phases: planning groups that appear in the RoadMap and on Tickets, never as columns
+  Loop: Fix a typo (without a plan)
+    Draft -> In progress from its first Ticket -> Completed in one decision, no QA
 ```
 
 ## The Loop page
@@ -20,8 +22,10 @@ are done, and one line on what the Loop waits for ("Waits for you to approve the
 Tickets ready to start"). Beside it sits at most one primary button, the person's next decision:
 **Approve analysis** or **Approve RoadMap** opens that document on the Plan tab, because an
 approval binds to the revisions on screen and the header approves nothing unseen; **Accept work**
-and **Finalize Loop** open the completion dialog. Everything else is in the quiet **Loop actions**
-menu: **Edit Loop**, **Loop agents**, **Finalize Loop** (when it is not the primary button),
+and **Finalize Loop** open the completion dialog, and **Close Loop** opens the one that closes a
+Loop without a plan ([A Loop without a plan](#a-loop-without-a-plan)). Everything else is in the quiet
+**Loop actions** menu: **Edit Loop**, **Loop agents**, **Finalize Loop** (**Close Loop** in a Loop
+without a plan; when it is not the primary button),
 **Save columns as template**, **Board activity**, **Export board** and **Cancel Loop**. A completed
 Loop greys out what would change it ("The Loop is read-only").
 
@@ -44,9 +48,10 @@ summary muted under it, and a bottom row with the key, *Needs input* or *Blocked
 waits (the reason on hover), *No report* while a key (an API token) that took it has not reported
 on it since (on hover, the day the key took it and that a comment, a wait or a completion is a
 report; it goes away by itself when the report comes), *Needs a person* for a person's task,
-*Unplanned* for a Ticket outside the plan, *QA*, the priority and the due date when set (red when
-overdue), *done* with a check once it is completed, and the owner's initials on the right. Labels,
-checklists and comment counts are in the Ticket, not on the card.
+*Unplanned* for a Ticket outside the plan (never in a Loop without a plan, whose Tickets are its
+own work), *QA*, the priority and the due date when set (red when overdue), *done* with a check
+once it is completed, and the owner's initials on the right. Labels, checklists and comment counts
+are in the Ticket, not on the card.
 
 The page follows its board: what an agent or another person changes shows within five seconds on
 the Kanban, in the header and in Notes while the tab is visible, and at once when you come back to
@@ -167,7 +172,8 @@ listed in readiness (`unplanned`), and never blocks
 a Phase or the Loop's completion; accepting the implementation names the ones still open, and in
 the completed Loop they read **Not done**. A Loop
 whose plan is not executing refuses a new Ticket with
-`409 plan_change_required`; a Loop without a plan yet takes one without a key.
+`409 plan_change_required`. A Loop without a plan takes one, keyed the same way, and one that has no
+analysis or RoadMap either then runs it without a plan ([A Loop without a plan](#a-loop-without-a-plan)).
 
 Changing an input invalidates what depended on it: a new Info revision makes the analysis pair and
 both RoadMap views stale, the Loop moves to `replanning`, and execution transitions are rejected
@@ -186,6 +192,39 @@ restored. A Ticket added outside the plan stays, and a Ticket key is never used 
 whose text is already empty can still be reset while its plan is on the Kanban. Because the text
 is retired rather than edited, a reset asks for confirmation first (**Reset and clear**), and the
 RoadMap's confirmation says how many Tickets leave the Kanban.
+
+## A Loop without a plan
+
+A small change needs no Info, analysis or RoadMap: add a Ticket to a new Loop and the Loop runs its
+Tickets without a plan. That is the fast track. Nothing is chosen when the Loop is created; the
+first piece of work decides the path.
+
+- **When it applies.** A Loop with no plan, no analysis and no RoadMap is under way as soon as it
+  holds a Ticket that is not archived: its stage is `ready` from its first Ticket and `in_progress`
+  once one of them is done (the stage chip reads **In progress** for both). Info does not count, so
+  a Loop whose Info is written takes the fast track too. An analysis or a RoadMap written for it,
+  handed in or generated, puts it on the planned path instead, and archiving every Ticket it holds
+  takes it back to `draft`.
+- **How it is marked.** **Without a plan** stands beside the stage in the Loop's header, in its row
+  on the board page and in its row under **Waits for you** on the dashboard; the Loop, its Loop
+  summary and its history record say `without_plan: true`. The Plan tab opens on the Info, since
+  there is no RoadMap to show.
+- **Its Tickets.** Every Ticket added to it, by a person (**Add card**) or a worker
+  (`create_ticket`), is keyed `<LoopKey>-UNP-<nnn>` and is the Loop's own work: it counts in the
+  header's Tickets done, and no card carries the *Unplanned* badge. A worker key may add and work
+  them, but from the first Ticket on the Info is a person's to edit (`write_info` answers
+  `403 human_action_required`).
+- **Closing it.** Once every Ticket is done, the header says "Waits for you to close the Loop" and
+  offers **Close Loop**; while Tickets are open, **Close Loop** is in **Loop actions**. The dialog
+  **Close** *key* is one decision: "One decision closes a Loop without a plan. No QA is asked for."
+  It lists the Tickets that are still open, and **Close the Loop** waits until they are done or
+  the person chooses **Accept without it** (**Accept without them** for several). Such a Ticket
+  stays as it is and reads **Not done** in the closed Loop. Only a signed-in person closes a Loop;
+  a key is refused (`403 human_action_required`).
+- **Its history.** Closing completes the Loop, which is read-only from then on, and Board history
+  shows its record with **Closed without a plan** in place of the QA result. The record says
+  `qa_status: not_run`, and a Ticket the Loop was closed without is kept with the disposition
+  `not_done`.
 
 ## Who does the work, and a Ticket's state
 
@@ -464,18 +503,20 @@ each with **Open discussion**.
 | Reset a scope: clears the documents and any approval behind them | Signed-in person | `POST …/reviews/{scope}/reset` |
 | Confirm a human-only Ticket | Signed-in person | `POST …/cards/{card_id}/confirm` |
 | Clear (or replace) a Ticket's wait | Signed-in person | `POST …/cards/{card_id}/wait/clear` |
-| Accept implementation | Signed-in person | `POST …/completion` |
+| Accept implementation (in a Loop without a plan, this closes it) | Signed-in person | `POST …/completion` |
 | Accept QA and finalize | Signed-in person | `POST …/qa/decision` |
 
 Info is the intent a person and their worker agree on, so the worker that agreed it may write it —
 but only while the Loop is still speculative (`draft` or `analysis_review`). Once planning has
 started a new Info revision would invalidate approvals, so the edit returns
-`403 human_action_required` for a token and stays a person's decision.
+`403 human_action_required` for a token and stays a person's decision. A Loop without a plan
+leaves `draft` with its first Ticket, so from then on its Info is a person's too.
 
 A worker token may write the Info while the Loop is speculative, hand in or ask for candidates and
 briefs, set a wait on a Ticket that waits for nothing, move and complete eligible Tickets, add
-Tickets outside the plan, write notes, record QA results and comment. It is rejected with
-`403 human_action_required` for every other action in the table, even when it holds the scope.
+Tickets outside the plan or to a Loop without a plan, write notes, record QA results and comment.
+It is rejected with `403 human_action_required` for every other action in the table, even when it
+holds the scope.
 Two writes are a person's too, although they decide nothing: changing a Ticket's face (a token
 writes a new RoadMap revision instead) and writing, editing or deleting a note on a Ticket (the
 person's own words). WebMCP registers inspection, generation and permitted Ticket tools, never
@@ -583,6 +624,10 @@ works without a deadlock. Moving a Ticket into a column called `Done` completes 
 
 ## QA handover
 
+A Loop without a plan has no QA handover: one decision closes it, and its open Tickets are listed
+the same way ([A Loop without a plan](#a-loop-without-a-plan)). What follows is the Loop with a
+plan.
+
 Accepting implementation is refused while a delivery Ticket is not completed. The dialog (**Loop
 actions**, **Finalize Loop**) names each of them: every Ticket a plan published that is not done,
 an archived one and one an earlier plan left on the Kanban included. A person either completes
@@ -622,7 +667,8 @@ Completed Loops live in `loop_history` inside their Board database: envelope, do
 delivery dispositions, human decisions, QA evidence, generation provenance (agent, model and a
 `system_prompt_sha256` rather than the prompt itself) and an asset manifest,
 plus a content hash. `GET /boards/{board_id}/history` searches a derived text projection with FTS5
-(or `LIKE` when FTS5 is unavailable).
+(or `LIKE` when FTS5 is unavailable). The record of a Loop closed without a plan says
+`qa_status: not_run` and `without_plan: true` ([A Loop without a plan](#a-loop-without-a-plan)).
 
 A completed Loop is read-only: its documents, plan, Tickets' fields, checklists, attachments and QA
 take no writes (`409 loop_read_only`), and a Ticket in it is not completed again. The one exception

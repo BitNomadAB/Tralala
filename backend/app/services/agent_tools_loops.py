@@ -21,6 +21,9 @@ the RoadMap under review, accepting the implementation once every Ticket is done
 plan closes in that one decision) and accepting or rejecting the result in QA. It is null for
 everything else, a Ticket that waits for a person included: ``read_ticket`` links that one.
 
+A draft is offered both paths: a plan, or a first Ticket that starts the Loop without one. A Loop
+without a plan whose Tickets are all done waits for the person who closes it in one decision.
+
 The handler is public and typed on the attributes of the composition root it uses, so a unit test
 runs it with the real services on the typed fakes. Its catalogue entry is built here too
 (``loop_tools``) and placed by ``agent_tools.tool_catalog``.
@@ -59,8 +62,13 @@ GOAL_CHARS: Final = 280
 """The most of a Loop's goal a row shows; read_loop shows the whole goal."""
 _FINISHED: Final = ("completed", "cancelled")
 ALL_DONE: Final = "Every Ticket is done: a person accepts the implementation."
-"""``next`` once nothing in a Loop under way is left to do: the implementation is a person's to
-accept, which closes a Loop without a plan and sends a planned one to QA."""
+"""``next`` once nothing in a Loop with a plan is left to do: the implementation is a person's to
+accept, which sends the Loop to QA."""
+ALL_DONE_WITHOUT_PLAN: Final = (
+    "Every Ticket is done: a person closes the Loop with one decision; no QA."
+)
+"""``next`` once every Ticket of a Loop without a plan is done: the same acceptance, which closes
+such a Loop."""
 # The review stages whose person's step is a decision in the Plan tab, and QA's in the dialog.
 _STAGE_DECISIONS: Final[dict[str, Decision]] = {
     "analysis_review": "analysis",
@@ -147,11 +155,17 @@ def next_step(
     if stage in _FINISHED:
         return f"Nothing: the Loop is {stage} and read-only.", "nobody"
     if stage == "draft":
+        # A draft takes either path: a plan, or its first Ticket starts it without one.
         if states["info"] == "empty":
-            return "Write the Loop's Info: what should change and why.", "person"
+            return (
+                "Write the Loop's Info for the planned path, or add a Ticket (create_ticket) for "
+                "a small change without a plan.",
+                "person",
+            )
         return (
             "Ask for the analysis (run_analysis) or hand one in, written to a board agent's "
-            "instructions (read_instructions, then write_analysis).",
+            "instructions (read_instructions, then write_analysis); or add a Ticket "
+            "(create_ticket) for a small change without a plan.",
             "agent",
         )
     if stage == "analysis_review":
@@ -185,6 +199,9 @@ def next_step(
     if counts.blocked:
         blocked = _tickets(counts.blocked, "waits", "wait")
         return f"{blocked} for earlier work or a third party.", "anyone"
+    if entry["without_plan"]:
+        # Accepting the work of a Loop without a plan closes it: there is no QA to follow.
+        return ALL_DONE_WITHOUT_PLAN, "person"
     return ALL_DONE, "person"
 
 
@@ -193,7 +210,8 @@ def next_decision(
 ) -> Decision | None:
     """The decision ``next_step`` waits on a person for, read from its answer so the two never
     disagree: the analysis or the RoadMap a person reviews, the result a person accepts or rejects
-    in QA, and the implementation a person accepts once every Ticket is done (``ALL_DONE``). None
+    in QA, and the implementation a person accepts once every Ticket is done (``ALL_DONE``, or
+    ``ALL_DONE_WITHOUT_PLAN`` where that acceptance closes the Loop). None
     when the next step is anyone's, an agent's or nobody's, and when the person's step is not one
     decision of the Loop: writing the Info, answering a Ticket's wait or doing a person's task."""
     sentence, waiting_on = next_step(entry, readiness, counts)
@@ -202,7 +220,7 @@ def next_decision(
     decision = _STAGE_DECISIONS.get(entry["stage"])
     if decision is not None:
         return decision
-    return "implementation" if sentence == ALL_DONE else None
+    return "implementation" if sentence in (ALL_DONE, ALL_DONE_WITHOUT_PLAN) else None
 
 
 def loop_decision_link(
@@ -319,7 +337,8 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                 "anyone or nobody), its Tickets by state (ready, needs_input, blocked, not_done, "
                 "completed, total, needs_person) and by column, and each document's state. Open "
                 "Loops unless include_completed is true. unreported names the Tickets on the "
-                "board this key took and has not reported on yet."
+                "board this key took and has not reported on yet. without_plan is true for a "
+                "Loop that runs its Tickets without a plan, which a person closes in one decision."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(
@@ -340,6 +359,7 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
 
 __all__ = [
     "ALL_DONE",
+    "ALL_DONE_WITHOUT_PLAN",
     "GOAL_CHARS",
     "LoopSummarising",
     "TicketCounts",

@@ -37,7 +37,9 @@ catalogue guard holds this tuple to its own list of them."""
 _HUMAN_NOTE = (
     "A signed-in person makes these decisions; a key is refused with human_action_required "
     "whatever its scopes. Info stays yours to write while the Loop is draft or under analysis "
-    "review; once planning has started, editing it is a person's. " + DECISION_LINK_RULE
+    "review; once planning has started, editing it is a person's. "
+    "A Loop without a plan leaves draft with its first Ticket, so its Info is a person's from "
+    "then on, and accepting its implementation is what closes it. " + DECISION_LINK_RULE
 )
 
 
