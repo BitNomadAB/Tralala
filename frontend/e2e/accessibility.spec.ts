@@ -68,7 +68,7 @@ test.describe("accessibility", () => {
     await createBoard(page, name);
     await page.getByRole("link", { name: "Boards" }).click();
     await expect(page.getByRole("heading", { name: "Boards", level: 1 })).toBeVisible();
-    await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^Waits for you/, level: 2 })).toBeVisible();
 
     expect(await blockingViolations(page, testInfo)).toEqual([]);
