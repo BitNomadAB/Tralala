@@ -12,8 +12,9 @@ import type { ActivityTab } from "./TicketActivity";
 import { TicketBody } from "./TicketBody";
 import { TicketHead } from "./TicketHead";
 import { TicketRail } from "./TicketRail";
-import { completeBlocked, phaseName, ticketPagePath } from "./ticketRules";
+import { completeBlocked, loopPagePath, phaseName, ticketPagePath } from "./ticketRules";
 import type { useCardComments } from "./useCardComments";
+import { focusTarget } from "./useFocusAfter";
 import { useTicketActions } from "./useTicketActions";
 import type { useTicketData } from "./useTicketData";
 import { useTicketDiscussions } from "./useTicketDiscussions";
@@ -104,6 +105,17 @@ export function TicketLayout({
   const copyLink = () => {
     copy(`${window.location.origin}${ticketPagePath(boardId, loopId, card.id)}`, "Link copied");
   };
+
+  /** Another Ticket of the Loop: swapped into the dialog over the Kanban, or opened on its page. */
+  const ticketLink = (cardId: string) =>
+    modal
+      ? `${loopPagePath(boardId, loopId)}?card=${encodeURIComponent(cardId)}`
+      : ticketPagePath(boardId, loopId, cardId);
+  /** Once nothing holds the Ticket up: its confirmation or its primary decision, else the title. */
+  const afterUnblock = () =>
+    focusTarget(root.current, "confirm") ??
+    root.current?.querySelector<HTMLElement>("[data-primary-action]") ??
+    heading.current;
 
   const completed = card.completed_at !== null;
   const primary: PrimaryAction = actions.startTarget
@@ -201,6 +213,8 @@ export function TicketLayout({
             waitOpen={waitOpen}
             onWaitOpenChange={setWaitOpen}
             onConfirm={() => void decide(() => actions.confirm(""), "confirm")}
+            ticketLink={ticketLink}
+            afterUnblock={afterUnblock}
             onCopyLink={copyLink}
             checklists={checklists}
           />

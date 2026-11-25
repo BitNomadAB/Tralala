@@ -27,9 +27,13 @@ export const keys = {
   listCards: (boardId: string, loopId: string, listId: string, limit: number) =>
     ["cards", boardId, loopId, listId, limit] as const,
   loopCardsPrefix: (boardId: string, loopId: string) => ["cards", boardId, loopId] as const,
+  /** Under the Loop's cards, so whatever refreshes the Kanban's columns refreshes it too. */
+  openCards: (boardId: string, loopId: string) => ["cards", boardId, loopId, "open"] as const,
   boardCardsPrefix: (boardId: string) => ["cards", boardId] as const,
   card: (boardId: string, loopId: string, cardId: string) =>
     ["card", boardId, loopId, cardId] as const,
+  /** Every Ticket view of a Loop: completing one Ticket changes what holds another up. */
+  loopCardViews: (boardId: string, loopId: string) => ["card", boardId, loopId] as const,
   cardNotes: (boardId: string, loopId: string, cardId: string) =>
     ["card-notes", boardId, loopId, cardId] as const,
   mentions: (boardId: string, loopId: string, cardId: string) =>
@@ -95,6 +99,26 @@ export function useListCards(boardId: string, loopId: string, listId: string, li
     queryKey: keys.listCards(boardId, loopId, listId, limit),
     queryFn: () => api.listCards(boardId, loopId, { list_id: listId, limit }),
     enabled: Boolean(boardId && loopId && listId),
+  });
+}
+
+/** The most Tickets one request lists (the server's page limit). */
+const OPEN_CARDS_LIMIT = 200;
+
+/**
+ * The Loop's Tickets that are not completed, archived ones included: what holds a blocked Ticket
+ * up is found among them. Read while `enabled`.
+ */
+export function useOpenCards(boardId: string, loopId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.openCards(boardId, loopId),
+    queryFn: () =>
+      api.listCards(boardId, loopId, {
+        completed: false,
+        include_archived: true,
+        limit: OPEN_CARDS_LIMIT,
+      }),
+    enabled: enabled && Boolean(boardId && loopId),
   });
 }
 

@@ -38,6 +38,11 @@ Worth knowing when you look at the dashboard:
   **Refresh** in the top bar reads any page again without reloading it. An open Ticket and the
   planning documents are not replaced under you; the Plan tab says when its documents have changed
   and shows the latest when asked.
+- **A blocked Ticket shows what holds it up, with a button for each.** A Ticket that waited for
+  earlier work read **Blocked** and named a key; the earlier Ticket had to be found and opened to
+  take the block away, and a person's task left unconfirmed in the last column held the rest of the
+  plan that way. The Ticket's rail now lists every open Ticket in its way under **Held up by**, each
+  with a link and the one step it needs: **Confirm**, **Complete**, **Clear wait** or **Restore**.
 - **An open tab reloads itself once after an upgrade.** Each page is downloaded when it is first
   opened, so a tab left open across an upgrade asks for files the new version no longer has. It
   reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it
