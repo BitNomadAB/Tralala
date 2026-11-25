@@ -52,7 +52,13 @@ from .cards_writes import (
     ticket_in_loop,
 )
 from .lists import BoardChecks
-from .loops import EXECUTION_STAGES, ensure_execution_allowed, readiness_item, require_loop
+from .loops import (
+    EXECUTION_STAGES,
+    ensure_execution_allowed,
+    readiness_item,
+    refresh_stage,
+    require_loop,
+)
 from .plan_views import PlanViews, ReadinessItem
 from .subresources import label_entries
 from .ticket_state import ensure_not_waiting, loop_closed
@@ -309,6 +315,13 @@ class CardService:
             )
         return loop
 
+    def _refresh_without_plan(self, repos: BoardRepositories, loop: LoopsRow) -> None:
+        """A Loop without a plan is under way while it holds Tickets (``compute_stage``), so adding,
+        archiving or restoring one keeps its stage in step; a planned Loop's stage follows its
+        plan and does not change here."""
+        if loop.current_plan_id is None:
+            refresh_stage(repos, loop.id, now=self._now())
+
     def create(
         self,
         actor: ActorContext,
@@ -340,6 +353,7 @@ class CardService:
             row = self._insert_card(
                 repos, actor, loop, payload, known_labels_only=known_labels_only
             )
+            self._refresh_without_plan(repos, loop)
             entry = self._decorate(repos, board_id, loop, [row])[0]
             if idempotency_key:
                 self._remember(repos, actor, idempotency_key, fingerprint, entry)
@@ -395,6 +409,8 @@ class CardService:
                             "message": "Card could not be created",
                         }
                     )
+            if result["created"]:
+                self._refresh_without_plan(repos, loop)
             if idempotency_key:
                 self._remember(repos, actor, idempotency_key, fingerprint, result)
         return result, False
@@ -575,6 +591,7 @@ class CardService:
                         "still_required": existing.plan_item_id is not None,
                     },
                 )
+                self._refresh_without_plan(repos, loop)
             row = self._card(repos, loop_id, card_id)
             return self._decorate(repos, board_id, loop, [row])[0]
 
@@ -592,5 +609,6 @@ class CardService:
                 position = self._position(repos, existing.list_id, None)
                 repos.cards.restore(card_id, position, now=now)
                 self._log(repos, actor, "card.restored", card_id)
+                self._refresh_without_plan(repos, loop)
             row = self._card(repos, loop_id, card_id)
             return self._decorate(repos, board_id, loop, [row])[0]

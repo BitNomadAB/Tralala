@@ -1060,6 +1060,24 @@ def test_without_an_active_plan_readiness_asks_for_an_approval() -> None:
     }
 
 
+@pytest.mark.parametrize("stage", ["ready", "in_progress"])
+def test_a_loop_without_a_plan_that_is_under_way_allows_execution(stage: str) -> None:
+    w = board(loop_row(LOOP, stage=stage))
+    assert w.plans.readiness(w.repos, w.state.loops[LOOP]) == {
+        "loop_id": LOOP,
+        "stage": stage,
+        "execution_allowed": True,
+        "blocked_reason": None,
+        "items": [],
+        "phases": [],
+    }
+    draft = board(loop_row(LOOP, stage="draft"))
+    assert draft.plans.readiness(draft.repos, draft.state.loops[LOOP])["blocked_reason"] == {
+        "code": "approval_required",
+        "message": "No approved plan has been published for this Loop",
+    }
+
+
 def test_the_plan_view_shows_the_active_plan_and_its_phases() -> None:
     w = published()
     state = w.state

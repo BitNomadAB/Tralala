@@ -41,7 +41,12 @@ INSTRUCTIONS = (
     "see what your key may do, then list_boards to find a board id. loop_summaries says where "
     "each Loop stands and what comes next; list_tickets lists Tickets by id, key and title, "
     "narrowed by column, assignee (me), Phase, state (ready, needs_input, blocked), workplace "
-    "or needs_person, never with their text. Work for a coding session is workplace codebase, "
+    "or needs_person, never with their text. "
+    "Work runs in a Loop whose plan a person approved, or in a Loop without a plan that has "
+    "Tickets, the fast track for a small change: create_ticket in a Loop with no plan, analysis "
+    "or RoadMap starts it, and every Ticket there is keyed <LoopKey>-UNP-<nnn>. An analysis "
+    "handed in puts the Loop on the planned path instead. Only a signed-in person closes a Loop. "
+    "Work for a coding session is workplace codebase, "
     "state ready and human_action_required false. Read the one you chose with read_ticket "
     "before you change anything; read_loop and read_document give a Loop's overview and its "
     "documents; search_tickets finds a Ticket by words. A person owns every Ticket; you are a "
@@ -269,8 +274,24 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "A Loop moves through stages: `draft`, `analysis_review`, `planning`, `roadmap_review`,",
         "`ready`, `in_progress`, `awaiting_qa`, `completed`, plus `replanning` when a new Info",
-        "revision invalidated the plan. Tickets may only move while execution is allowed;",
+        "revision invalidated the plan. Tickets may only move while execution is allowed: while",
+        "the Loop executes its approved plan (`ready`, `in_progress`, `awaiting_qa`), or while a",
+        "Loop without a plan has Tickets (`ready`, `in_progress`).",
         "`GET /boards/{board_id}/loops/{loop_id}/readiness` answers that for the whole Loop.",
+        "",
+        "### A small change without a plan",
+        "",
+        "A small change needs no Info, analysis or RoadMap. `create_ticket` in a Loop that has no",
+        "plan, analysis or RoadMap (a new Loop, with or without its Info) starts the fast track;",
+        "nothing is chosen when the Loop is created. The Loop is `ready` from its first Ticket and",
+        "`in_progress` once one is done, and `loop_summaries` says `without_plan: true`. Every",
+        "Ticket in it is keyed `<LoopKey>-UNP-<nnn>` and is the Loop's own work (`read_loop` lists",
+        "them under `unplanned_tickets`). An analysis handed in (`write_analysis`) or generated",
+        "(`run_analysis`) puts the Loop on the planned path instead. From its first Ticket on, the",
+        "Info is a person's: `write_info` answers `403 human_action_required`. When the work is",
+        "done, a signed-in person closes the Loop in one decision, with no QA; a Ticket still open",
+        "holds that up until the person closes the Loop without it, and it then reads `not_done`.",
+        "No token can close a Loop. Its history record says `qa_status: not_run`.",
         "",
         "### Working a Ticket",
         "",
@@ -298,7 +319,8 @@ def render_bootstrap(settings: Settings) -> str:
         "### Follow-ups, status and questions",
         "",
         "- A follow-up you find while the Loop executes is `create_ticket`: a Ticket outside the",
-        "  plan, with `follow_up_of` naming the Ticket it came from.",
+        "  plan, with `follow_up_of` naming the Ticket it came from. In a Loop without a plan it",
+        "  is one more of the Loop's own Tickets.",
         "- What belongs to the Loop and to no single Ticket is a note: `write_note`, and",
         "  `read_notes` for the log.",
         "- A question for the board's agents is a discussion on the Ticket: `ask_agents`, then",
@@ -312,6 +334,8 @@ def render_bootstrap(settings: Settings) -> str:
         "  replacing a Ticket's wait, accepting the implementation or QA, and finalizing a Loop.",
         "  No token performs them, whatever its scopes; `whoami` lists them. An approval binds",
         "  exact document revisions, so a new Info revision makes it stale.",
+        "  In a Loop without a plan, accepting the implementation is what closes the Loop, and",
+        "  the Info is a person's from its first Ticket on.",
         "- The Loop is the plan: never write a plan, a progress log or a to-do list into a file",
         "  of a repository; it goes into the Loop (section 3).",
         "- Card mutations are version-checked: send the `version` you read last and expect",
@@ -333,6 +357,8 @@ def render_bootstrap(settings: Settings) -> str:
         "  passed, a merge, a deploy, what is still open) is `write_note`.",
         "- A follow-up you discover is `create_ticket`: it is outside the plan, keyed",
         "  `<LoopKey>-UNP-<nnn>`, and never blocks the plan or the Loop's completion.",
+        "  In a Loop without a plan every Ticket is keyed so and is the Loop's work: closing the",
+        "  Loop names the ones still open.",
         "- A Ticket is done through `complete_ticket`, which sets `completed_at` and comments your",
         "  summary and evidence; a column named Done completes nothing. A column move records",
         "  where the work is. A human-only Ticket is confirmed by a person, never by a token.",

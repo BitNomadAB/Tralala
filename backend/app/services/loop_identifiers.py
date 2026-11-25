@@ -49,7 +49,8 @@ UNPLANNED_MARK = "UNP"
 
 
 def format_unplanned_key(loop_key: str, sequence: int) -> str:
-    """The key of a Ticket added outside a Loop's plan: ``<LoopKey>-UNP-<nnn>``."""
+    """The key of a Ticket added by hand, outside a Loop's plan or in a Loop without one:
+    ``<LoopKey>-UNP-<nnn>``."""
     return f"{loop_key}-{UNPLANNED_MARK}-{sequence:03d}"
 
 

@@ -14,6 +14,7 @@ from typing import TypeGuard
 
 from ..db.generated.board import LoopGenerationRunsRow, LoopsRow
 from ..repositories.board import BoardRepositories
+from .loops_stage import without_plan
 
 HISTORY_SCHEMA_VERSION = 1
 MAX_SEARCH_TEXT = 200_000
@@ -65,8 +66,15 @@ def snapshot(
     repos: BoardRepositories, loop: LoopsRow, *, board_id: str | None, completed_at: str
 ) -> tuple[Envelope, str, list[dict[str, object]]]:
     """A completed Loop as its history records it, the text its search reads, and the asset
-    manifest inside it (finalization marks which files it embedded)."""
+    manifest inside it (finalization marks which files it embedded).
+
+    A Loop without a plan (``without_plan``) is marked so: ``loop.without_plan`` is ``true``,
+    ``loop.stage`` is the stage it was closed in, and a Ticket it closed without, neither
+    completed nor archived, is ``not_done`` rather than ``open``. For a Loop with a plan neither
+    key nor value changes."""
     loop_id = loop.id
+    no_plan = without_plan(loop)
+    left_open = "not_done" if no_plan else "open"
     archive = repos.archive
     documents = archive.documents(loop_id)
     approvals = archive.approvals(loop_id)
@@ -139,23 +147,27 @@ def snapshot(
         }
         for attachment in attachments
     ]
+    loop_entry: dict[str, object] = {
+        "id": loop.id,
+        "key": loop.key,
+        "name": loop.name,
+        "goal": loop.goal,
+        "stage": loop.stage,
+        "sequence": loop.sequence,
+        "created_at": loop.created_at,
+        "completed_at": completed_at,
+        "created_by_actor_id": loop.created_by_actor_id,
+        "created_by_name": loop.created_by_name,
+    }
+    if no_plan:
+        # Written only for such a Loop, so the envelope of a planned one keeps its bytes.
+        loop_entry["without_plan"] = True
     envelope: Envelope = {
         "history_schema_version": HISTORY_SCHEMA_VERSION,
         "source_kind": "native",
         "conformance": "native",
         "board_id": board_id,
-        "loop": {
-            "id": loop.id,
-            "key": loop.key,
-            "name": loop.name,
-            "goal": loop.goal,
-            "stage": loop.stage,
-            "sequence": loop.sequence,
-            "created_at": loop.created_at,
-            "completed_at": completed_at,
-            "created_by_actor_id": loop.created_by_actor_id,
-            "created_by_name": loop.created_by_name,
-        },
+        "loop": loop_entry,
         "documents": document_entries,
         "plan": {
             "revisions": [
@@ -221,7 +233,7 @@ def snapshot(
                     "completed_at": card.completed_at,
                     "disposition": "completed"
                     if card.completed_at
-                    else ("archived" if card.archived_at else "open"),
+                    else ("archived" if card.archived_at else left_open),
                     "human_confirmed_at": card.human_confirmed_at,
                     "human_confirmed_by_actor_id": card.human_confirmed_by_actor_id,
                     "assignee_name": card.assignee_name,

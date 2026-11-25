@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { http } from "msw";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
+import { ToastProvider } from "@/components/ui/toast";
+import { LoopKanban } from "@/features/loops/LoopKanban";
 import { openUnplanned } from "@/features/loops/loopUi";
 import { TicketCard } from "@/features/loops/TicketCard";
 import { UnplannedWarning } from "@/features/loops/Unplanned";
@@ -10,6 +12,7 @@ import type { Card, LoopReadiness, UnplannedTicket } from "@/lib/types";
 import { apiPath, ok } from "./msw/envelope";
 import { BOARD_ID, LOOP_ID, LOOP_PATH, NOW } from "./msw/loops";
 import { server } from "./msw/server";
+import { COLUMNS } from "./msw/ticketView";
 
 function unplanned(
   key: string,
@@ -108,6 +111,28 @@ function card(extra: Partial<Card>): Card {
   };
 }
 
+/** The Loop's Kanban with `cards` in its first column. */
+function Kanban({ cards, withoutPlan }: { cards: Card[]; withoutPlan: boolean }) {
+  return (
+    <ToastProvider>
+      <LoopKanban
+        boardId={BOARD_ID}
+        loopId={LOOP_ID}
+        lists={COLUMNS}
+        cardsByList={{ "list-1": cards }}
+        matchingIds={null}
+        readOnly={false}
+        withoutPlan={withoutPlan}
+        onOpenCard={() => undefined}
+        onListsChanged={() => undefined}
+        onCardsChanged={() => undefined}
+      >
+        {null}
+      </LoopKanban>
+    </ToastProvider>
+  );
+}
+
 describe("work outside the plan", () => {
   it("warns at completion about what is still open, and only then", async () => {
     expect(openUnplanned(OUTSIDE).map((ticket) => ticket.key)).toEqual(["SES-1-UNP-001"]);
@@ -125,5 +150,18 @@ describe("work outside the plan", () => {
     unmount();
     render(<TicketCard card={card({})} overlay />);
     expect(screen.queryByText("Unplanned")).not.toBeInTheDocument();
+  });
+
+  it("carries no Unplanned badge in a Loop without a plan, which the Kanban tells its cards", () => {
+    const keyed = card({ ticket_key: "SES-1-UNP-001" });
+    const { unmount } = withQueries(<Kanban cards={[keyed]} withoutPlan />);
+    const column = screen.getByRole("region", { name: "Column Backlog" });
+    expect(within(column).getByText("SES-1-UNP-001")).toBeInTheDocument();
+    expect(within(column).queryByText("Unplanned")).not.toBeInTheDocument();
+    unmount();
+    // The same card in a Loop with a plan is work outside it.
+    withQueries(<Kanban cards={[keyed]} withoutPlan={false} />);
+    const planned = screen.getByRole("region", { name: "Column Backlog" });
+    expect(within(planned).getByText("Unplanned")).toBeInTheDocument();
   });
 });

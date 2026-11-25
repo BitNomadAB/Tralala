@@ -104,7 +104,8 @@ def ensure_ticket_commentable(repos: BoardRepositories, card_id: str) -> LoopsRo
 
 
 def ensure_execution_allowed(loop: LoopsRow) -> None:
-    """Delivery work starts and completes only while the Loop executes an approved plan."""
+    """Delivery work starts and completes only while the Loop executes an approved plan, or while
+    a Loop without a plan holds Tickets (its stage is then ``ready`` or ``in_progress``)."""
     stage = loop.stage
     if stage in EXECUTION_STAGES:
         return
@@ -120,13 +121,14 @@ def ensure_execution_allowed(loop: LoopsRow) -> None:
 
 def refresh_stage(repos: BoardRepositories, loop_id: str, *, now: str) -> str:
     """Compute the Loop's stage from its documents, approvals, plan and Tickets, and store it when
-    it changed; returns the stage."""
+    it changed; returns the stage. The manual Tickets count without the archived ones."""
     loop = require_loop(repos, loop_id)
     documents = document_slots(repos.documents.current_or_approved(loop_id))
     approvals = latest_approvals(repos.approvals.newest_first(loop_id))
     stale = stale_reasons(documents, approvals)
     has_active_plan = repos.plans.active(loop_id) is not None
     tickets_done = repos.cards.completed_tickets(loop_id)
+    manual = [card for card in repos.cards.manual(loop_id) if card.archived_at is None]
     stage = compute_stage(
         loop,
         documents,
@@ -134,6 +136,8 @@ def refresh_stage(repos: BoardRepositories, loop_id: str, *, now: str) -> str:
         stale,
         has_active_plan=has_active_plan,
         tickets_done=tickets_done,
+        manual_tickets=len(manual),
+        manual_done=sum(1 for card in manual if card.completed_at is not None),
     )
     if stage != loop.stage:
         repos.loops.set_stage(loop_id, stage, now=now)

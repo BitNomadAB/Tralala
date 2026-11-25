@@ -139,6 +139,8 @@ def test_whoami_lists_the_decisions_only_a_person_makes_and_never_token_material
     human = section(answer, "human_only")
     assert human["decisions"] == list(HUMAN_DECISIONS)
     assert "human_action_required" in str(human["note"])
+    # A Loop without a plan is past draft from its first Ticket, so its Info is a person's.
+    assert "A Loop without a plan leaves draft with its first Ticket" in str(human["note"])
     text = json.dumps(answer)
     assert "digest:" not in text
     assert "token_hash" not in text
