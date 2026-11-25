@@ -88,6 +88,10 @@ test.describe("drag and drop", () => {
     // "is over" is first said once dnd-kit has measured the columns; an arrow key pressed before
     // that has nowhere to go.
     await expect(said).toContainText(`${title} is over Todo`);
+    // That is said while Space is still being handled, but dnd-kit's keyboard sensor listens for
+    // the arrow keys only from a zero-delay timer it starts as the card is picked up; an arrow key
+    // that comes first is the browser's and scrolls the columns. A timer started now runs after it.
+    await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve)));
     await page.keyboard.press("ArrowRight");
     await expect(said).toContainText(`${title} is over In Progress`);
     await page.keyboard.press("Space");
