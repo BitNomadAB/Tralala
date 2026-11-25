@@ -24,7 +24,7 @@ from ..core.config import Settings
 from ..core.context import ActorContext
 from ..core.errors import ApiError
 from ..schemas.loops import CRITERION_MAX_CHARS
-from ..services.agent_tools import missing_scopes, tool_catalog
+from ..services.agent_tools import REPORT_RULE, missing_scopes, tool_catalog
 from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
 from ..services.loop_notes import NOTE_MAX_CHARACTERS
 from .body import read_limited_json
@@ -47,7 +47,9 @@ INSTRUCTIONS = (
     "documents; search_tickets finds a Ticket by words. A person owns every Ticket; you are a "
     "tool in their session. When you cannot go on without an answer, set_ticket_wait says what "
     "the Ticket waits for and why. A Ticket is in progress when it sits in the column you moved "
-    "it to and done only through complete_ticket. Approving plans, confirming human work, "
+    "it to and done only through complete_ticket. "
+    + REPORT_RULE
+    + " Approving plans, confirming human work, "
     "clearing a wait and accepting QA are human decisions that no token can perform. The Loop "
     "is the plan: what you plan or log goes into the Loop, never into a file of a repository."
 )
@@ -280,6 +282,13 @@ def render_bootstrap(settings: Settings) -> str:
         "`set_ticket_wait`. When the work is done, `complete_ticket` with your summary and the",
         "evidence. `assign_ticket` names the person who owns it, and `write_ticket_summaries`",
         "writes the short summary that `read_ticket` shows first.",
+        "",
+        "A key that took another Ticket and has not reported on it since, with a comment, a wait",
+        "or a completion, is refused with `409 report_required`; moving a Ticket back to the",
+        "first column never is. `loop_summaries` and `list_tickets` name the Tickets your key",
+        "has not reported on under `unreported`; while one of them is another Ticket than the",
+        "one you read, `read_ticket` names it there too and leaves `move_ticket` out of",
+        "`allowed_actions`.",
         "",
         "A Ticket says where its work is done (`workplace`: `codebase`, `outside` or `unknown`)",
         "and what it waits for (`waiting_for`: `nothing`, `decision`, `information`, `access` or",

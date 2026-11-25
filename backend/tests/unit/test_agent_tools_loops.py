@@ -1,6 +1,6 @@
-"""``loop_summaries`` on the fakes: the real LoopService and ListService on an in-memory board,
-handed to the tool as the attributes ``LoopSummarising`` declares; what each Loop's row says comes
-next and who does it."""
+"""``loop_summaries`` on the fakes: the real LoopService, ListService and CardService on an
+in-memory board, handed to the tool as the attributes ``LoopSummarising`` declares; what each Loop's
+row says comes next and who does it, and which Tickets the key has not reported on."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from app.core.context import ActorContext
 from app.core.errors import Forbidden, ValidationFailure
 from app.db.generated.board import LoopsRow
 from app.services.agent_tools import ToolResult, loop_summaries, tool_catalog
+from app.services.agent_tools_read import REPORT_FIRST
 from app.services.cards import CardService
 from app.services.lists import ListService
 from app.services.loops import LoopService
@@ -28,7 +29,9 @@ from tests.unit.fakes.board import (
     BoardState,
     FakeBoardChecks,
     FakeBoardUnitOfWork,
+    activity_row,
     card_row,
+    comment_row,
     document_row,
     list_row,
     loop_row,
@@ -40,14 +43,26 @@ NOW = datetime(2026, 11, 5, 10, 0, tzinfo=UTC)
 READER = ActorContext(
     actor_id="agent-1", actor_type="agent", actor_name="Reader", scopes=frozenset({"loops:read"})
 )
+# An issued key: an agent with a credential, the actor 409 report_required refuses.
+KEY = ActorContext(
+    actor_id="key-1",
+    actor_type="agent",
+    actor_name="Key",
+    scopes=frozenset({"loops:read"}),
+    credential_id="cred-1",
+)
+MOVED = "2026-11-25T20:35:03Z"
+LATER = "2026-11-25T20:40:00Z"
 
 
 @dataclass(frozen=True, slots=True)
 class LoopWorld:
-    """What ``loop_summaries`` declares it uses of the composition root."""
+    """What ``loop_summaries`` declares it uses of the composition root, and the board."""
 
     loop: LoopService
     list: ListService
+    card: CardService
+    state: BoardState
 
 
 def loop_world(
@@ -78,6 +93,8 @@ def loop_world(
     return LoopWorld(
         loop=LoopService(settings, checks, store, plans=views, tickets=cards, clock=lambda: NOW),
         list=ListService(checks, store),
+        card=cards,
+        state=board,
     )
 
 
@@ -282,6 +299,102 @@ def test_loop_summaries_narrows_to_a_stage_and_refuses_an_unknown_one(settings: 
         loop_summaries(world, READER, ask(stage="shipping"))
     with pytest.raises(Forbidden):
         loop_summaries(world, READER.__replace__(scopes=frozenset({"cards:read"})), ask())
+
+
+# --- the Tickets the key has not reported on -----------------------------------------------------
+
+THEN = (
+    "list_tickets with a loop_id (or key) lists its Tickets, narrowed by column, assignee me, "
+    "state or needs_person; read_loop gives one Loop's documents, Phases and notes."
+)
+
+
+def taken_world(settings: Settings) -> LoopWorld:
+    """Loop L-1 in progress, with its planned Ticket ``c1`` (L-1-DE01-001) in Doing, which the key
+    moved at ``MOVED`` and has not reported on since."""
+    state = BoardState()
+    state.cards = {
+        "c1": card_row("c1", "doing-run", "run", plan_item_id="item-c1").__replace__(
+            ticket_key="L-1-DE01-001", title="Read the log"
+        ),
+    }
+    state.activity.append(
+        activity_row("e-1", "card.moved", "c1", actor_id=KEY.actor_id, timestamp=MOVED)
+    )
+    run = loop("run", "in_progress", 1).__replace__(current_plan_id="plan-1")
+    return loop_world(settings, [run], items=[readiness_item("c1")], state=state)
+
+
+def test_loop_summaries_names_the_tickets_the_key_took_and_has_not_reported_on(
+    settings: Settings,
+) -> None:
+    world = taken_world(settings)
+    answer = loop_summaries(world, KEY, ask())
+    assert answer == {
+        "board_id": BOARD_ID,
+        "loops": [
+            {
+                "id": "run",
+                "key": "L-1",
+                "name": "Loop run",
+                "goal": "",
+                "stage": "in_progress",
+                "next": "1 Ticket is ready to start.",
+                "waiting_on": "anyone",
+                "execution_allowed": True,
+                "tickets": {
+                    "ready": 1,
+                    "needs_input": 0,
+                    "blocked": 0,
+                    "not_done": 0,
+                    "completed": 0,
+                    "total": 1,
+                    "needs_person": 0,
+                    "by_column": {"Todo": 0, "Doing": 1},
+                },
+                "documents": {
+                    "info": "empty",
+                    "analysis_ai": "empty",
+                    "analysis": "empty",
+                    "roadmap_ai": "empty",
+                    "roadmap": "empty",
+                },
+            }
+        ],
+        "count": 1,
+        "unreported": [
+            {
+                "id": "c1",
+                "key": "L-1-DE01-001",
+                "title": "Read the log",
+                "loop": "L-1",
+                "taken_at": MOVED,
+            }
+        ],
+        "next_step": (
+            "Report on each Ticket under unreported with comment_ticket, set_ticket_wait or "
+            "complete_ticket before you move another Ticket. " + THEN
+        ),
+    }
+    assert answer["next_step"] == f"{REPORT_FIRST} {THEN}"
+    # The key's standing on the board, whatever the stage asked for.
+    planning = loop_summaries(world, KEY, ask(stage="planning"))
+    assert (planning["count"], planning["unreported"]) == (0, answer["unreported"])
+
+
+def test_loop_summaries_names_nothing_for_a_person_or_a_role_agent_or_after_a_report(
+    settings: Settings,
+) -> None:
+    world = taken_world(settings)
+    # The same actor id as the key that moved c1: only an issued key owes a report.
+    person = KEY.__replace__(actor_type="user", credential_id=None)
+    role_agent = KEY.__replace__(credential_id=None)
+    for actor in (person, role_agent):
+        answer = loop_summaries(world, actor, ask())
+        assert (answer["unreported"], answer["next_step"]) == ([], THEN)
+    world.state.comments["m-1"] = comment_row("m-1", "c1", actor_id=KEY.actor_id, created_at=LATER)
+    answer = loop_summaries(world, KEY, ask())
+    assert (answer["unreported"], answer["next_step"]) == ([], THEN)
 
 
 def test_loop_summaries_is_offered_to_loops_read_and_documented(settings: Settings) -> None:
