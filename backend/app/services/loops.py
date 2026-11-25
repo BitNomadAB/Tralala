@@ -76,6 +76,7 @@ from .loops_stage import (
     latest_approvals,
     roadmap_approved,
     stale_reasons,
+    without_plan,
 )
 from .loops_views import (
     LoopEntry,
@@ -503,4 +504,5 @@ __all__ = [
     "roadmap_approved",
     "stale_reasons",
     "ticket_loop",
+    "without_plan",
 ]

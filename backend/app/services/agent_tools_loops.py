@@ -177,6 +177,7 @@ def loop_row(entry: LoopEntry, readiness: LoopReadiness, columns: list[ListEntry
         "name": entry["name"],
         "goal": _goal(entry["goal"]),
         "stage": entry["stage"],
+        "without_plan": entry["without_plan"],
         "next": sentence,
         "waiting_on": waiting_on,
         "execution_allowed": readiness["execution_allowed"],

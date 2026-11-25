@@ -83,6 +83,7 @@ class LoopOut(OutModel):
     cancelled_at: str | None = None
     completed_at: str | None = None
     history_id: str | None = None
+    without_plan: bool = False
     documents: dict[str, object] = Field(default_factory=dict)
     plan: dict[str, object] | None = None
     qa: dict[str, object] | None = None

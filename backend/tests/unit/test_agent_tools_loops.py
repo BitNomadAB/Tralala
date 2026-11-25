@@ -247,6 +247,23 @@ def test_a_completed_loop_counts_what_was_never_done_as_not_done(settings: Setti
     }
 
 
+def test_a_row_says_whether_the_loop_runs_without_a_plan(settings: Settings) -> None:
+    world = loop_world(
+        settings,
+        [
+            loop("solo", "in_progress", 1),
+            loop("run", "in_progress", 2).__replace__(current_plan_id="plan-1"),
+            loop("draft", "draft", 3),
+        ],
+    )
+    answer = rows(loop_summaries(world, READER, ask()))
+    assert [(row["key"], row["without_plan"]) for row in answer] == [
+        ("L-1", True),
+        ("L-2", False),
+        ("L-3", False),
+    ]
+
+
 def test_no_ticket_count_or_ticket_sentence_names_an_agent(settings: Settings) -> None:
     """A person owns every Ticket: delivery never waits on an agent, and no count says one does
     the work; only a document may wait on an agent (decision support)."""

@@ -40,6 +40,7 @@ from app.services.loops import (
     refresh_stage,
     roadmap_approved,
     stale_reasons,
+    without_plan,
 )
 from tests.unit.fakes.board import (
     BOARD_ID,
@@ -316,13 +317,24 @@ def _stage(
     *scopes: str,
     plan: bool = False,
     done: int = 0,
+    manual_tickets: int = 0,
+    manual_done: int = 0,
 ) -> str:
     reviewed = _all_reviewed()
     approvals = latest_approvals(
         approval_row(scope, LOOP, scope, revisions_json=reviewed) for scope in scopes
     )
     stale = stale_reasons(documents, approvals)
-    return compute_stage(loop, documents, approvals, stale, has_active_plan=plan, tickets_done=done)
+    return compute_stage(
+        loop,
+        documents,
+        approvals,
+        stale,
+        has_active_plan=plan,
+        tickets_done=done,
+        manual_tickets=manual_tickets,
+        manual_done=manual_done,
+    )
 
 
 def test_completion_and_cancellation_are_recorded_and_win() -> None:
@@ -356,6 +368,74 @@ def test_accepted_implementation_awaits_qa_unless_the_analysis_changed() -> None
     assert _stage(accepted, _documents(), plan=True) == "replanning"
     qa_done = accepted.__replace__(qa_approval_id="qa")
     assert _stage(qa_done, _documents(), "analysis", "roadmap", plan=True) == "ready"
+
+
+def _info_only() -> DocumentSlots:
+    return document_slots([document_row("info-1", LOOP, "info")])
+
+
+def test_a_loop_without_a_plan_is_under_way_while_it_holds_tickets() -> None:
+    loop = loop_row(LOOP, stage="draft")
+    assert _stage(loop, document_slots(())) == "draft"
+    assert _stage(loop, _info_only()) == "draft"
+    assert _stage(loop, document_slots(()), manual_tickets=1) == "ready"
+    # Info does not put the Loop on the planned path.
+    assert _stage(loop, _info_only(), manual_tickets=2) == "ready"
+    assert _stage(loop, document_slots(()), manual_tickets=1, manual_done=1) == "in_progress"
+    assert _stage(loop, _info_only(), manual_tickets=3, manual_done=1) == "in_progress"
+
+
+def test_a_written_analysis_or_roadmap_keeps_the_planned_stage_despite_manual_tickets() -> None:
+    loop = loop_row(LOOP, stage="draft")
+    analysis_ai = _documents(**{"an-1": None, "rai-1": None, "rm-1": None})
+    assert _stage(loop, analysis_ai, manual_tickets=2, manual_done=1) == "draft"
+    analysis = _documents(**{"rai-1": None, "rm-1": None})
+    assert _stage(loop, analysis, manual_tickets=2, manual_done=1) == "analysis_review"
+    roadmap_ai = document_slots([document_row("rai-1", LOOP, "roadmap_ai")])
+    assert _stage(loop, roadmap_ai, manual_tickets=1) == "draft"
+    roadmap_only = document_slots([document_row("rm-1", LOOP, "roadmap")])
+    assert _stage(loop, roadmap_only, manual_tickets=1) == "roadmap_review"
+    assert _stage(loop, _documents(), "analysis", manual_tickets=1) == "planning"
+
+
+def test_manual_tickets_change_no_stage_with_a_plan_an_acceptance_or_a_recorded_end() -> None:
+    loop = loop_row(LOOP)
+    both = ("analysis", "roadmap")
+    assert _stage(loop, _documents(), *both, plan=True, manual_tickets=3, manual_done=2) == "ready"
+    assert (
+        _stage(loop, _documents(), *both, plan=True, done=1, manual_tickets=3) == "in_progress"
+    )
+    assert _stage(loop, _documents(), "analysis", plan=True, manual_tickets=1) == "replanning"
+    accepted = loop.__replace__(implementation_approval_id="impl")
+    assert _stage(accepted, document_slots(()), manual_tickets=1) == "replanning"
+    qa_done = accepted.__replace__(qa_approval_id="qa")
+    assert _stage(qa_done, document_slots(()), manual_tickets=1, manual_done=1) == "draft"
+    completed = loop_row(LOOP, completed_at=STAMP)
+    assert _stage(completed, document_slots(()), manual_tickets=1) == "completed"
+    cancelled = loop_row(LOOP, cancelled_at=STAMP)
+    assert _stage(cancelled, document_slots(()), manual_tickets=1) == "cancelled"
+
+
+def test_the_stage_counts_the_manual_tickets_that_are_not_archived() -> None:
+    state = BoardState(loops={LOOP: loop_row(LOOP, stage="draft")})
+    state.lists = {"todo": list_row("todo", LOOP, 1024)}
+    state.cards = {
+        # Archived, done or not: neither counts.
+        "gone": card_row("gone", "todo", LOOP, archived_at=STAMP).__replace__(kind="manual"),
+        "shelved": card_row("shelved", "todo", LOOP, archived_at=STAMP).__replace__(
+            kind="manual", completed_at=STAMP
+        ),
+        # A completed QA card is no manual Ticket.
+        "qa": card_row("qa", "todo", LOOP).__replace__(kind="qa", completed_at=STAMP),
+    }
+    assert refresh_stage(repos(state), LOOP, now=STAMP) == "draft"
+    state.cards["m"] = card_row("m", "todo", LOOP).__replace__(kind="manual")
+    assert refresh_stage(repos(state), LOOP, now=STAMP) == "ready"
+    assert state.loops[LOOP].stage == "ready"
+    state.cards["m"] = state.cards["m"].__replace__(completed_at=STAMP)
+    assert refresh_stage(repos(state), LOOP, now=STAMP) == "in_progress"
+    state.cards["m"] = state.cards["m"].__replace__(archived_at=STAMP)
+    assert refresh_stage(repos(state), LOOP, now=STAMP) == "draft"
 
 
 def test_a_column_named_done_never_completes_work(settings: Settings) -> None:
@@ -494,6 +574,53 @@ def test_warnings_name_stale_documents_the_stage_and_a_missing_analysis_approval
     approvals = latest_approvals([approval_row("a", LOOP, "analysis")])
     quiet = loop_warnings("awaiting_qa", document_slots(()), approvals, {"info": ["x"]})
     assert [warning["code"] for warning in quiet] == ["qa_incomplete"]
+
+
+@pytest.mark.parametrize(
+    ("stage", "plan", "expected"),
+    [
+        ("ready", None, True),
+        ("in_progress", None, True),
+        ("completed", None, True),
+        ("draft", None, False),
+        ("analysis_review", None, False),
+        ("awaiting_qa", None, False),
+        ("cancelled", None, False),
+        ("ready", "plan-1", False),
+        ("in_progress", "plan-1", False),
+        ("completed", "plan-1", False),
+    ],
+)
+def test_a_loop_runs_without_a_plan_when_it_has_none_and_is_under_way_or_completed(
+    stage: str, plan: str | None, expected: bool
+) -> None:
+    assert without_plan(loop_row(LOOP, stage=stage).__replace__(current_plan_id=plan)) is expected
+
+
+def test_a_loop_without_a_plan_is_not_told_its_analysis_lacks_an_approval(
+    settings: Settings,
+) -> None:
+    assert loop_warnings("ready", document_slots(()), {}, {}, without_plan=True) == []
+    loud = loop_warnings("ready", document_slots(()), {}, {})
+    assert [warning["code"] for warning in loud] == ["approval_required"]
+    # Every other warning stays.
+    documents = _documents(ai="info-0")
+    stale = stale_reasons(documents, {})
+    codes = [
+        warning["code"]
+        for warning in loop_warnings("replanning", documents, {}, stale, without_plan=True)
+    ]
+    assert codes == ["document_stale"] * 4 + ["plan_change_required"]
+    w = world(
+        settings,
+        loop_row(LOOP, stage="in_progress"),
+        loop_row("planned", stage="in_progress").__replace__(current_plan_id="p", sequence=2),
+    )
+    entry = w.service.get(BOARD_ID, LOOP)
+    assert (entry["without_plan"], entry["warnings"]) == (True, [])
+    planned = w.service.get(BOARD_ID, "planned")
+    assert planned["without_plan"] is False
+    assert [warning["code"] for warning in planned["warnings"]] == ["approval_required"]
 
 
 def test_the_qa_summary_shows_the_open_cycle_or_else_the_latest() -> None:
