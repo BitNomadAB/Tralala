@@ -327,7 +327,12 @@ def test_licences_toml_is_the_list_in_agents_md() -> None:
     match = re.search(r"The current set is (.*?)Nothing copyleft", agents, re.S)
     assert match, "AGENTS.md no longer states the licence list"
     sentence = " ".join(match.group(1).split())
-    scoped = set(re.findall(r"([\w.-]+) \(only `([^`]+)`", sentence))
+    # "BlueOak-1.0.0 (only `a`, `b` and `c`, used by ...)": every package named in the brackets.
+    scoped = {
+        (licence, package)
+        for licence, named in re.findall(r"([\w.-]+) \(only ([^)]*)\)", sentence)
+        for package in re.findall(r"`([^`]+)`", named)
+    }
     assert scoped == {(entry.licence, entry.package) for entry in policy.scoped}
     words = set(re.findall(r"[A-Za-z0-9][\w.-]*", re.sub(r"\([^)]*\)", "", sentence)))
     families = {word for word in words if not word.islower()} - {name for name, _ in scoped}
