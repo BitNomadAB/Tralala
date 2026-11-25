@@ -381,14 +381,20 @@ class LoopPlanService(PlanViews):
 
     def readiness(self, repos: BoardRepositories, loop: LoopsRow) -> Readiness:
         if repos.plans.active(loop.id) is None:
+            # A Loop without a plan that holds Tickets is under way in an execution stage
+            # (``compute_stage``); any other one waits for a plan.
+            allowed = loop.stage in EXECUTION_STAGES
+            waiting: BlockedReason | None = None
+            if not allowed:
+                waiting = {
+                    "code": "approval_required",
+                    "message": "No approved plan has been published for this Loop",
+                }
             return {
                 "loop_id": loop.id,
                 "stage": loop.stage,
-                "execution_allowed": False,
-                "blocked_reason": {
-                    "code": "approval_required",
-                    "message": "No approved plan has been published for this Loop",
-                },
+                "execution_allowed": allowed,
+                "blocked_reason": waiting,
                 "items": [],
                 "phases": [],
             }

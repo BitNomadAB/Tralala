@@ -58,6 +58,7 @@ from .loops import (
     ensure_writable,
     refresh_stage,
     require_loop,
+    without_plan,
 )
 from .plan_views import open_delivery, unplanned_tickets
 
@@ -134,7 +135,10 @@ class LoopQaService:
         """A person accepts the implementation. Delivery Tickets that are not completed refuse it
         (``409 ticket_blocked``, naming them) unless the person accepts it without them
         (``accept_unfinished``): they stay as they are, the decision and the activity name them,
-        and once the Loop is completed each one reads ``not_done`` (``ticket_state``)."""
+        and once the Loop is completed each one reads ``not_done`` (``ticket_state``).
+
+        A Loop without a plan (``without_plan``) closes in this one decision
+        (``_close_without_plan``); a Loop with a plan goes on to its QA."""
         actor.require_human("Accepting implementation as complete")
         actor.require("loops:review")
         if not payload.accepted:
@@ -145,7 +149,9 @@ class LoopQaService:
             ensure_writable(loop)
             _check_version(loop, payload.version)
             ensure_execution_allowed(loop)
-            unfinished = open_delivery(repos, loop_id)
+            if without_plan(loop):
+                return self._close_without_plan(repos, loop, actor, board_id, payload)
+            unfinished = open_delivery(repos, loop)
             if unfinished and not payload.accept_unfinished:
                 raise Conflict(
                     "Delivery Tickets are still open",
@@ -235,6 +241,67 @@ class LoopQaService:
             result["unplanned_open"] = unplanned_open
             result["unfinished"] = unfinished
         return result
+
+    def _close_without_plan(
+        self,
+        repos: BoardRepositories,
+        loop: LoopsRow,
+        actor: ActorContext,
+        board_id: str,
+        payload: ImplementationAcceptance,
+    ) -> Entry:
+        """A person closes a Loop without a plan in one decision, inside the caller's writer: no
+        QA cycle, no QA Task and no QA decision. Its Tickets that are neither completed nor
+        archived refuse it (``409 ticket_blocked``, naming them) unless the person accepts it
+        without them; the decision says the Loop had no plan and names what it left, and the
+        history records ``qa_status`` ``not_run``. The payload's ``qa_status`` and
+        ``attestation`` are not read: there is no QA to report on."""
+        unfinished = open_delivery(repos, loop)
+        if unfinished and not payload.accept_unfinished:
+            raise Conflict(
+                "The Loop's Tickets are still open",
+                code="ticket_blocked",
+                details={"open": unfinished},
+            )
+        unfinished_keys = [ticket["ticket_key"] or ticket["id"] for ticket in unfinished]
+        extra: dict[str, object] = {"without_plan": True}
+        if unfinished_keys:
+            extra["unfinished"] = unfinished_keys
+        approval_id = self._record_decision(
+            repos,
+            loop,
+            actor,
+            scope="implementation",
+            decision="approved",
+            feedback=payload.note,
+            extra=extra,
+        )
+        if unfinished_keys:
+            self._log(
+                repos,
+                actor,
+                "loop.accepted_unfinished",
+                loop.id,
+                {"tickets": unfinished_keys},
+                self._now(),
+            )
+        # No refresh_stage: the history records the stage the Loop was closed in, and the Loop
+        # goes straight to completed.
+        repos.loops.set_approval(
+            loop.id, "implementation_approval_id", approval_id, now=self._now()
+        )
+        finalized = self.history.finalize(
+            repos,
+            loop.id,
+            board_id=board_id,
+            actor=actor,
+            qa_approval_id=None,
+            attestation={},
+        )
+        # Every Ticket of such a Loop is its work, so none is named again as work outside a plan.
+        finalized["unplanned_open"] = []
+        finalized["unfinished"] = unfinished
+        return finalized
 
     def _request_instructions(self, actor: ActorContext, board_id: str, loop_id: str) -> None:
         """Start QA instruction generation when a provider exists; never block acceptance."""

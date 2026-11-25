@@ -41,6 +41,7 @@ from .loop_history_snapshot import (
     is_object,
     snapshot,
 )
+from .loops_stage import without_plan
 
 MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_TOTAL = 20 * 1024 * 1024
@@ -65,14 +66,23 @@ def fts_query(value: str) -> str:
     return " AND ".join(f'"{token}"*' for token in tokens)
 
 
+def _closed_without_plan(envelope: object) -> bool:
+    """Whether the snapshot says its Loop was closed without a plan (``loop.without_plan``); an
+    imported record and one written before the key existed say nothing, which is ``False``."""
+    loop = envelope.get("loop") if is_object(envelope) else None
+    return is_object(loop) and loop.get("without_plan") is True
+
+
 def serialize(record: LoopHistoryRow, *, with_envelope: bool) -> HistoryEntry:
     entry: HistoryEntry = dict(asdict(record))
     entry.pop("validation_warnings_json", None)
     entry["warnings"] = json.loads(record.validation_warnings_json or "[]")
     entry["label"] = LEGACY_LABEL if record.source_kind == "imported_legacy" else ""
     entry.pop("envelope_json", None)
+    envelope: object = json.loads(record.envelope_json or "{}")
+    entry["without_plan"] = _closed_without_plan(envelope)
     if with_envelope:
-        entry["envelope"] = json.loads(record.envelope_json or "{}")
+        entry["envelope"] = envelope
     entry.pop("search_text", None)
     return entry
 
@@ -111,14 +121,25 @@ class LoopHistoryService:
         attestation: Mapping[str, object],
         board_id: str,
     ) -> HistoryEntry:
-        """Atomically capture history and mark the Loop completed. Idempotent."""
+        """Atomically capture history and mark the Loop completed. Idempotent.
+
+        A Loop with a plan needs an accepted QA (``409 qa_incomplete``). A Loop without a plan
+        (``without_plan``) has no QA: a person's acceptance of its work closes it
+        (``409 approval_required`` without one), and its record says ``qa_status`` ``not_run``."""
         loop = repos.loops.get(loop_id)
         if loop is None:
             raise NotFound("Loop not found", code="loop_not_found")
         existing = repos.history.native_for(board_id, loop_id)
         if existing is not None:
             return serialize(existing, with_envelope=True)
-        if loop.qa_approval_id is None and qa_approval_id is None:
+        no_plan = without_plan(loop)
+        if no_plan:
+            if loop.implementation_approval_id is None:
+                raise Conflict(
+                    "A person accepts the work before the Loop can be completed",
+                    code="approval_required",
+                )
+        elif loop.qa_approval_id is None and qa_approval_id is None:
             raise Conflict(
                 "QA must be accepted before the Loop can be completed", code="qa_incomplete"
             )
@@ -137,7 +158,7 @@ class LoopHistoryService:
                 "loop_id": loop_id,
                 "loop_key": loop.key,
                 "loop_name": loop.name,
-                "qa_status": "accepted",
+                "qa_status": "not_run" if no_plan else "accepted",
                 "envelope_json": blob,
                 "search_text": search_text,
                 "content_hash": _digest(blob),

@@ -23,6 +23,7 @@ from app.schemas.loops import (
 from app.services.loop_history import LoopHistoryService
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_qa import LoopQaService, render_qa_task
+from app.services.plan_views import open_delivery, unplanned_tickets
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -537,3 +538,161 @@ def test_revised_instructions_invalidate_earlier_results(tmp_path: Path) -> None
         ]
     }
     assert state.qa_cycles[cycle_id].instruction_revision == 2
+
+
+# --- a Loop without a plan --------------------------------------------------------------------
+
+UNP_OPEN = {
+    "id": "u-2",
+    "ticket_key": "L-1-UNP-002",
+    "title": "Card u-2",
+    "completed_at": None,
+    "archived_at": None,
+}
+"""The Ticket ``make_without_plan(open_ticket=True)`` leaves open, as the service names it."""
+
+
+def store_of(service: LoopQaService) -> FakeBoardUnitOfWork:
+    store = service.store
+    assert isinstance(store, FakeBoardUnitOfWork)
+    return store
+
+
+def make_without_plan(
+    tmp_path: Path, *, open_ticket: bool = False, stage: str = "in_progress"
+) -> tuple[LoopQaService, BoardState, Generation, FakeBoardUnitOfWork]:
+    """A Loop that runs its Tickets without a plan: no plan and no Phase, and outside ``draft``
+    its manual Tickets, one completed, one archived and, with ``open_ticket``, one open."""
+    service, state, generation = make(tmp_path)
+    state.loops[LOOP] = loop_row(LOOP, stage=stage)
+    state.plans.clear()
+    state.phases.clear()
+    state.cards.clear()
+    if stage != "draft":
+        state.cards["u-1"] = card_row("u-1", "list-a", LOOP).__replace__(
+            kind="manual", ticket_key="L-1-UNP-001", completed_at=NOW
+        )
+        state.cards["u-3"] = card_row("u-3", "list-a", LOOP, archived_at=NOW).__replace__(
+            kind="manual", ticket_key="L-1-UNP-003"
+        )
+    if open_ticket:
+        state.cards["u-2"] = card_row("u-2", "list-a", LOOP).__replace__(
+            kind="manual", ticket_key="L-1-UNP-002"
+        )
+    return service, state, generation, store_of(service)
+
+
+def test_a_loop_without_a_plan_closes_in_one_decision(tmp_path: Path) -> None:
+    service, state, generation, store = make_without_plan(tmp_path)
+    # What the payload says of QA is not read: such a Loop has no QA to report on.
+    record = accept(service, note="small fix", qa_status="passed", attestation={})
+    loop = state.loops[LOOP]
+    (decision,) = state.approvals
+    assert (decision.scope, decision.decision, decision.feedback) == (
+        "implementation",
+        "approved",
+        "small fix",
+    )
+    assert json.loads(decision.revisions_json) == {"without_plan": True}
+    assert (loop.stage, loop.completed_at, loop.version) == ("completed", NOW, 3)
+    assert (loop.implementation_approval_id, loop.qa_approval_id) == (decision.id, None)
+    # No QA cycle, no QA Task, no QA decision and no request for QA instructions.
+    assert (state.qa_cycles, loop.active_qa_cycle_id) == ({}, None)
+    assert [card.kind for card in state.cards.values()] == ["manual", "manual"]
+    assert generation.started == []
+    # The decision and the history are one write.
+    assert (store.commits, store.rollbacks) == (1, 0)
+    (stored,) = state.history.values()
+    assert (stored.qa_status, loop.history_id, record["id"]) == ("not_run", stored.id, stored.id)
+    envelope = json.loads(stored.envelope_json)
+    assert (envelope["loop"]["without_plan"], envelope["loop"]["stage"]) == (True, "in_progress")
+    assert (envelope["qa"], envelope["qa_attestation"]) == ({"cycles": [], "results": []}, {})
+    assert {
+        ticket["key"]: (ticket["kind"], ticket["disposition"])
+        for ticket in envelope["delivery"]["tickets"]
+    } == {"L-1-UNP-001": ("manual", "completed"), "L-1-UNP-003": ("manual", "archived")}
+    assert (record["without_plan"], record["qa_status"]) == (True, "not_run")
+    assert (record["unfinished"], record["unplanned_open"]) == ([], [])
+    assert actions(state) == ["loop.completed"]
+
+
+def test_an_open_ticket_holds_up_closing_a_loop_without_a_plan(tmp_path: Path) -> None:
+    service, state, generation, store = make_without_plan(tmp_path, open_ticket=True)
+    with pytest.raises(Conflict) as refused:
+        accept(service)
+    assert refused.value.code == "ticket_blocked"
+    # Only the open Ticket is named: neither the completed nor the archived one.
+    assert refused.value.details == {"open": [UNP_OPEN]}
+    assert (state.approvals, state.history, state.activity) == ([], {}, [])
+    assert state.loops[LOOP].completed_at is None
+    assert (store.commits, store.rollbacks, generation.started) == (0, 1, [])
+
+
+def test_a_person_closes_a_loop_without_a_plan_without_its_open_tickets(tmp_path: Path) -> None:
+    service, state, _, store = make_without_plan(tmp_path, open_ticket=True)
+    # A Ticket from before the keys is named by its id.
+    state.cards["u-0"] = card_row("u-0", "list-a", LOOP).__replace__(kind="manual")
+    keyless = {**UNP_OPEN, "id": "u-0", "ticket_key": None, "title": "Card u-0"}
+    record = accept(service, accept_unfinished=True, note="the rest is dropped")
+    loop = state.loops[LOOP]
+    assert loop.completed_at == NOW
+    # Closing the Loop never completes a Ticket: each stays as it was, and so reads not_done.
+    assert (state.cards["u-0"].completed_at, state.cards["u-2"].completed_at) == (None, None)
+    (decision,) = state.approvals
+    assert json.loads(decision.revisions_json) == {
+        "without_plan": True,
+        "unfinished": ["u-0", "L-1-UNP-002"],
+    }
+    assert actions(state) == ["loop.accepted_unfinished", "loop.completed"]
+    assert json.loads(state.activity[0].changes_json) == {"tickets": ["u-0", "L-1-UNP-002"]}
+    with store.reader(BOARD_ID) as repos:
+        states = {ticket["id"]: ticket["state"] for ticket in unplanned_tickets(repos, loop)}
+    assert states == {"u-0": "not_done", "u-1": None, "u-2": "not_done", "u-3": "not_done"}
+    (stored,) = state.history.values()
+    envelope = json.loads(stored.envelope_json)
+    assert {
+        ticket["id"]: ticket["disposition"] for ticket in envelope["delivery"]["tickets"]
+    } == {"u-0": "not_done", "u-1": "completed", "u-2": "not_done", "u-3": "archived"}
+    (implementation,) = envelope["human_decisions"]
+    assert implementation["revisions"] == {
+        "without_plan": True,
+        "unfinished": ["u-0", "L-1-UNP-002"],
+    }
+    # The open Tickets are named once, as what was left; never again as work outside a plan.
+    assert (record["unfinished"], record["unplanned_open"]) == ([keyless, UNP_OPEN], [])
+
+
+def test_closing_a_loop_without_a_plan_is_a_persons_decision_on_its_version(
+    tmp_path: Path,
+) -> None:
+    service, state, _, store = make_without_plan(tmp_path, open_ticket=True)
+    payload = ImplementationAcceptance(version=1, accept_unfinished=True)
+    with pytest.raises(Forbidden) as refused:
+        service.accept_implementation(BOT, BOARD_ID, LOOP, payload)
+    assert refused.value.code == "human_action_required"
+    with pytest.raises(VersionConflict):
+        accept(service, version=3, accept_unfinished=True)
+    assert (state.approvals, state.history, state.activity) == ([], {}, [])
+    assert state.loops[LOOP].completed_at is None
+    assert store.commits == 0
+
+
+def test_a_loop_without_a_plan_or_tickets_has_nothing_to_close(tmp_path: Path) -> None:
+    service, state, _, _ = make_without_plan(tmp_path, stage="draft")
+    with pytest.raises(Conflict) as refused:
+        accept(service)
+    assert refused.value.code == "approval_required"
+    assert (state.approvals, state.history, state.qa_cycles) == ([], {}, {})
+
+
+def test_open_delivery_of_a_loop_without_a_plan_is_its_open_tickets(tmp_path: Path) -> None:
+    _, state, _, store = make_without_plan(tmp_path, open_ticket=True)
+    # A Ticket a plan once published does not count in a Loop that runs without one.
+    state.cards["t-9"] = card_row("t-9", "list-a", LOOP).__replace__(
+        kind="ticket", ticket_key="L-1-P01-009"
+    )
+    with store.reader(BOARD_ID) as repos:
+        assert open_delivery(repos, state.loops[LOOP]) == [UNP_OPEN]
+        # With a plan, the same Loop's open delivery is the plan's Tickets, as before.
+        planned = state.loops[LOOP].__replace__(current_plan_id="plan-1")
+        assert [ticket["id"] for ticket in open_delivery(repos, planned)] == ["t-9"]

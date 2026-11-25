@@ -5,6 +5,7 @@ import {
   type AskableAgent,
   type BoardList,
   type BoardPerson,
+  type Card,
   type CardDetail,
   type CardNote,
   type Discussion,
@@ -172,8 +173,9 @@ function patched(body: Record<string, unknown>): Partial<CardDetail> {
  * (`noteHandlers`).
  * `state.bodies` holds every write's body, `state.csrf` the CSRF header of every write. `options`
  * give the Loop's fields (a completed stage), the notes, the card's history, its discussions
- * (`GET /discussions?card_id=` and each one's detail; none by default) and the agents the board
- * may ask (none).
+ * (`GET /discussions?card_id=` and each one's detail; none by default), the agents the board
+ * may ask (none) and the Loop's Tickets that are not completed (`open`, read by reference on every
+ * request, so a test changes the list by changing the array; none by default).
  */
 export function ticketViewHandlers(
   initial: CardDetail = ticketCard(),
@@ -183,6 +185,7 @@ export function ticketViewHandlers(
     activity?: ActivityEntry[];
     discussions?: Discussion[];
     agents?: AskableAgent[];
+    open?: Card[];
   } = {},
 ) {
   const work = ticketWorkHandlers(initial);
@@ -206,6 +209,7 @@ export function ticketViewHandlers(
     ),
     http.get(apiPath(LOOP_PATH), () => ok({ ...LOOP, stage: "in_progress", ...options.loop })),
     http.get(apiPath(`${LOOP_PATH}/lists`), () => ok(COLUMNS)),
+    http.get(apiPath(`${LOOP_PATH}/cards`), () => ok(options.open ?? [])),
     http.get(apiPath(`${LOOP_PATH}/readiness`), () => ok(READINESS)),
     http.get(apiPath(`/boards/${BOARD_ID}/labels`), () => ok(LABELS)),
     http.get(apiPath(`/boards/${BOARD_ID}/actors`), () =>

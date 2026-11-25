@@ -12,17 +12,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound
 from app.db.generated.board import AttachmentsRow, CommentsRow, LoopNotesRow
-from app.schemas.loops import LegacyImportRequest
+from app.schemas.loops import HistorySummary, LegacyImportRequest
 from app.schemas.subresources import CommentCreate
 from app.services.loop_history import (
     LEGACY_LABEL,
     LoopHistoryService,
     canonical,
     fts_query,
+    serialize,
 )
 from app.services.subresources import CommentService
 from tests.unit.fakes.board import (
@@ -302,3 +304,110 @@ def test_a_legacy_import_is_a_human_labelled_reference_and_replays_its_key(
 
 def test_canonical_json_is_stable() -> None:
     assert canonical({"b": 1, "a": [2]}) == '{"a":[2],"b":1}'
+
+
+# --- a Loop without a plan --------------------------------------------------------------------
+
+
+def run_without_plan(state: BoardState, *, accepted: bool = True) -> None:
+    """The Loop runs its one Ticket without a plan; ``accepted`` once a person accepted its work."""
+    state.loops[LOOP] = loop_row(LOOP, stage="ready").__replace__(
+        implementation_approval_id="approval-0" if accepted else None
+    )
+    state.cards["card-1"] = state.cards["card-1"].__replace__(
+        kind="manual", ticket_key="L-1-UNP-001"
+    )
+
+
+def test_a_loop_without_a_plan_is_completed_without_qa(tmp_path: Path) -> None:
+    service, state, store = make(tmp_path)
+    run_without_plan(state)
+    record = finalize(service, store, qa_approval_id=None)
+    loop = state.loops[LOOP]
+    (stored,) = state.history.values()
+    assert (loop.stage, loop.completed_at, loop.qa_approval_id) == ("completed", NOW, None)
+    assert (stored.qa_status, record["qa_status"], record["without_plan"]) == (
+        "not_run",
+        "not_run",
+        True,
+    )
+    assert stored.content_hash == hashlib.sha256(stored.envelope_json.encode()).hexdigest()
+    envelope = json.loads(stored.envelope_json)
+    assert (envelope["loop"]["without_plan"], envelope["loop"]["stage"]) == (True, "ready")
+    # The Ticket it was closed without is not done, not open.
+    (ticket,) = envelope["delivery"]["tickets"]
+    assert (ticket["key"], ticket["kind"], ticket["disposition"]) == (
+        "L-1-UNP-001",
+        "manual",
+        "not_done",
+    )
+
+
+def test_a_loop_without_a_plan_is_completed_only_once_a_person_accepted_its_work(
+    tmp_path: Path,
+) -> None:
+    service, state, store = make(tmp_path)
+    run_without_plan(state, accepted=False)
+    with pytest.raises(Conflict) as refused:
+        finalize(service, store, qa_approval_id=None)
+    assert refused.value.code == "approval_required"
+    assert state.history == {}
+    assert state.loops[LOOP].completed_at is None
+
+
+def test_a_loop_with_a_plan_still_needs_an_accepted_qa(tmp_path: Path) -> None:
+    service, state, store = make(tmp_path)
+    state.loops[LOOP] = loop_row(LOOP, stage="in_progress").__replace__(
+        current_plan_id="plan-1", implementation_approval_id="approval-0"
+    )
+    with pytest.raises(Conflict) as refused:
+        finalize(service, store, qa_approval_id=None)
+    assert refused.value.code == "qa_incomplete"
+    assert state.history == {}
+
+
+def test_the_envelope_of_a_loop_with_a_plan_keeps_its_keys_and_values(tmp_path: Path) -> None:
+    service, state, store = make(tmp_path)
+    state.loops[LOOP] = state.loops[LOOP].__replace__(current_plan_id="plan-1", stage="awaiting_qa")
+    record = finalize(service, store)
+    (stored,) = state.history.values()
+    envelope = json.loads(stored.envelope_json)
+    assert sorted(envelope["loop"]) == [
+        "completed_at",
+        "created_at",
+        "created_by_actor_id",
+        "created_by_name",
+        "goal",
+        "id",
+        "key",
+        "name",
+        "sequence",
+        "stage",
+    ]
+    assert [ticket["disposition"] for ticket in envelope["delivery"]["tickets"]] == ["open"]
+    assert (stored.qa_status, record["without_plan"]) == ("accepted", False)
+
+
+def test_every_record_says_whether_its_loop_ran_without_a_plan(tmp_path: Path) -> None:
+    service, state, store = make(tmp_path)
+    run_without_plan(state)
+    closed = finalize(service, store, qa_approval_id=None)
+    imported, _ = service.import_legacy(
+        ADA, BOARD_ID, LegacyImportRequest(loop_name="Old", raw_text="notes")
+    )
+    assert (closed["without_plan"], imported["without_plan"]) == (True, False)
+    assert service.detail(BOARD_ID, str(closed["id"]))["without_plan"] is True
+    listed = TypeAdapter(list[HistorySummary]).validate_python(service.search(BOARD_ID)["items"])
+    assert {item.id: item.without_plan for item in listed} == {
+        closed["id"]: True,
+        imported["id"]: False,
+    }
+    # A record written before the key existed says nothing, which is false, here and in the schema.
+    stored = state.history[str(closed["id"])]
+    older = stored.__replace__(envelope_json='{"loop": {"id": "loop-a"}}')
+    empty = stored.__replace__(envelope_json="")
+    assert serialize(older, with_envelope=False)["without_plan"] is False
+    assert serialize(empty, with_envelope=True)["without_plan"] is False
+    summary = serialize(older, with_envelope=False)
+    summary.pop("without_plan")
+    assert HistorySummary.model_validate(summary).without_plan is False

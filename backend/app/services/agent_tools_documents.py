@@ -136,7 +136,8 @@ def read_loop(services: LoopReading, actor: ActorContext, args: ToolArguments) -
             for column in columns
         ],
         "ticket_count": sum(column["card_count"] for column in columns),
-        # Work added outside the plan (create_ticket): it never blocks readiness or completion.
+        # Tickets added by hand (create_ticket): outside the plan, where they never block
+        # readiness or completion, or every Ticket of a Loop without a plan.
         "unplanned_tickets": readiness["unplanned"],
         "notes": [
             {
