@@ -13,6 +13,7 @@ from pydantic import JsonValue
 
 from ..db.generated.board import CardsRow, LoopsRow
 from ..repositories.board import BoardRepositories
+from .loops_stage import without_plan
 from .ticket_state import TicketState, loop_closed, ticket_state
 
 
@@ -112,8 +113,9 @@ class UnplannedTicket(TypedDict):
 
 
 class OpenDeliveryTicket(TypedDict):
-    """A Ticket a plan published that is not completed. Accepting the implementation is refused
-    while there is one, unless the person accepts it without them."""
+    """A Ticket a plan published that is not completed, or in a Loop without a plan one of its
+    Tickets that is neither completed nor archived. Accepting the implementation is refused while
+    there is one, unless the person accepts it without them."""
 
     id: str
     ticket_key: str | None
@@ -138,8 +140,18 @@ def delivery_tickets(repos: BoardRepositories, loop_id: str) -> list[CardsRow]:
     return [card for card in repos.archive.tickets(loop_id) if card.kind == "ticket"]
 
 
-def open_delivery(repos: BoardRepositories, loop_id: str) -> list[OpenDeliveryTicket]:
-    """The delivery Tickets that are not completed: work the Loop planned and has not finished."""
+def open_delivery(repos: BoardRepositories, loop: LoopsRow) -> list[OpenDeliveryTicket]:
+    """The delivery Tickets that are not completed: work the Loop planned and has not finished.
+    A Loop without a plan (``without_plan``) has its Tickets as its work, so for it these are its
+    manual Tickets that are neither completed nor archived, by key."""
+    if without_plan(loop):
+        cards = [
+            card
+            for card in repos.archive.tickets(loop.id)
+            if card.kind == "manual" and card.completed_at is None and card.archived_at is None
+        ]
+    else:
+        cards = [card for card in delivery_tickets(repos, loop.id) if card.completed_at is None]
     return [
         {
             "id": card.id,
@@ -148,8 +160,7 @@ def open_delivery(repos: BoardRepositories, loop_id: str) -> list[OpenDeliveryTi
             "completed_at": card.completed_at,
             "archived_at": card.archived_at,
         }
-        for card in delivery_tickets(repos, loop_id)
-        if card.completed_at is None
+        for card in cards
     ]
 
 

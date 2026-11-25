@@ -594,6 +594,7 @@ class HistorySummary(OutModel):
     content_hash: str
     warnings: list[str] = Field(default_factory=list)
     label: str = ""
+    without_plan: bool = False
 
 
 class HistoryDetail(HistorySummary):

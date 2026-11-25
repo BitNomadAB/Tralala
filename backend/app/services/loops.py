@@ -211,7 +211,7 @@ class LoopService:
             return {
                 **self.plans.readiness(repos, loop),
                 "unplanned": unplanned_tickets(repos, loop),
-                "open_delivery": open_delivery(repos, loop.id),
+                "open_delivery": open_delivery(repos, loop),
             }
 
     # --- writes ----------------------------------------------------------------------------------
