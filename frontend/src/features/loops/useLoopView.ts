@@ -6,6 +6,26 @@ import type { PlanTab } from "./loopUi";
 
 const TABS: readonly LoopTab[] = ["kanban", "plan", "notes"];
 const DOCUMENTS: readonly PlanTab[] = ["info", "analysis", "roadmap"];
+const DIALOGS = ["completion"] as const;
+
+/**
+ * A dialog of the Loop page a link opens (`?dialog=`): `completion`, the dialog where a person
+ * accepts the implementation and QA, or closes a Loop without a plan. The server's decision links
+ * (`decision_links.py`) name it.
+ */
+export type LinkedDialog = (typeof DIALOGS)[number];
+
+/** The dialog `?dialog=` names; anything else, or nothing, is none. */
+export function parseDialog(value: string | null): LinkedDialog | null {
+  return DIALOGS.find((dialog) => dialog === value) ?? null;
+}
+
+/** The search parameters without `dialog`, everything else as it was. */
+export function withoutDialog(current: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(current);
+  next.delete("dialog");
+  return next;
+}
 
 /** The tab `?tab=` names; anything else, or nothing, is the Kanban. */
 export function parseTab(value: string | null): LoopTab {
@@ -44,18 +64,27 @@ export function viewParams(current: URLSearchParams, tab: LoopTab, doc?: PlanTab
   return next;
 }
 
-/** The Loop page's tab and the Plan tab's document, both in the URL so a link lands on them. */
+/**
+ * The Loop page's tab, the Plan tab's document and the dialog a link opens, all in the URL so a
+ * link lands on them. `closeDialog` takes `dialog` out of the URL, replacing the entry, so a reload
+ * or Back does not open the dialog again.
+ */
 export function useLoopView(stage: LoopStage, withoutPlan = false) {
   const [params, setParams] = useSearchParams();
   const tab = parseTab(params.get("tab"));
   const doc = parseDocument(params.get("doc"), stage, withoutPlan);
+  const dialog = parseDialog(params.get("dialog"));
+  const linked = params.has("dialog");
   const show = useCallback(
     (next: LoopTab, nextDoc?: PlanTab) => {
       setParams((current) => viewParams(current, next, nextDoc), { replace: true });
     },
     [setParams],
   );
-  return { tab, doc, show };
+  const closeDialog = useCallback(() => {
+    if (linked) setParams(withoutDialog, { replace: true });
+  }, [linked, setParams]);
+  return { tab, doc, dialog, show, closeDialog };
 }
 
 export type LoopView = ReturnType<typeof useLoopView>;

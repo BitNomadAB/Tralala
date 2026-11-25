@@ -84,7 +84,8 @@ export function TicketLayout({
     refresh: data.refresh,
     onArchived: onArchived ?? onClose,
   });
-  const { root, heading, afterDecision } = useTicketFocus(focusOnOpen);
+  // `?focus=` focuses the button a link names once the buttons the Ticket shows are final.
+  const { root, heading, afterDecision } = useTicketFocus(focusOnOpen, data.settled);
 
   /** Runs a decision; once it went through, the focus goes on from its button. */
   async function decide(change: () => Promise<boolean>, decision: Decision) {

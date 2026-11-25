@@ -12,7 +12,7 @@ function cardTitle(cardId: string | null): HTMLElement | null {
  * Which Ticket the Loop page shows over its tabs, and which of its discussions: `?card=` opens a
  * Ticket (and a later change of it, a Ticket key's link, opens that one), `?discussion=` shows a
  * discussion of it in the same dialog. Back to the Ticket drops the discussion and sets `?card=`
- * again; Close drops both.
+ * again; Close drops both, and `?focus=` (the button a link to the Ticket's decision focused).
  *
  * `returnFocus` says where the focus goes when the dialog closes (WCAG 2.4.3): back to what opened
  * it, the card's title, while that is still on the page, else to the title of the card the dialog
@@ -52,6 +52,8 @@ export function useTicketDialog() {
         const next = new URLSearchParams(current);
         next.delete("card");
         next.delete("discussion");
+        // A link's button (`?focus=`, useTicketFocus) belongs to the Ticket that closes.
+        next.delete("focus");
         return next;
       },
       { replace: true },

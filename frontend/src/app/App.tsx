@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ToastProvider } from "@/components/ui/toast";
 import { AuthProvider } from "@/features/auth/AuthProvider";
+import { addressOf, returnPath } from "@/features/auth/returnPath";
 import { useAuth } from "@/features/auth/useAuth";
 import { ThemeProvider } from "@/themes/ThemeProvider";
 import { AmbientBackground } from "./AmbientBackground";
@@ -66,7 +67,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     );
   }
   if (!actor) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    // The whole address, query and fragment too, so a link to a decision opens it after the sign-in.
+    return <Navigate to="/login" replace state={{ from: addressOf(location) }} />;
   }
   return <>{children}</>;
 }
@@ -77,10 +79,15 @@ function RouteFocus() {
   return null;
 }
 
+/**
+ * The login page, or for a signed-in person the address the sign-in goes to: the one the login
+ * page navigates to as well, so whichever of the two runs first, the person lands on it.
+ */
 function LoginRoute() {
   const { actor, loading } = useAuth();
+  const location = useLocation();
   if (loading) return null;
-  if (actor) return <Navigate to="/" replace />;
+  if (actor) return <Navigate to={returnPath(location.state)} replace />;
   return <LoginPage />;
 }
 

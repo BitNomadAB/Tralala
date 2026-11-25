@@ -8,6 +8,7 @@ import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { ApiError } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { problemAt } from "@/lib/fieldProblems";
+import { returnPath } from "./returnPath";
 import { useAuth } from "./useAuth";
 
 /** Said under the password when the server refuses the pair; it does not tell which one is wrong. */
@@ -25,7 +26,8 @@ export function LoginPage() {
   const [pending, setPending] = useState(false);
   const fields = useFieldErrors();
 
-  const target = (location.state as { from?: string } | null)?.from ?? "/";
+  // The address the person opened before the sign-in, query included; "/" for any other site.
+  const target = returnPath(location.state);
 
   async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
