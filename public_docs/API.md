@@ -912,6 +912,16 @@ A person owns every Ticket; nothing here names who does it. A Ticket answers:
   cancelled, a Ticket that was never completed is `not_done`, whatever it waited for: the Loop is
   read-only, so nobody starts it, it waits for nobody and it never counts as done.
 - `needs_person`: `state` `needs_input`, or `ready` with `human_action_required`.
+- `unreported_since`, computed on every read and never stored: when a key (an API token) took the
+  Ticket and has not reported on it since, the time of that key's first move (the earliest, when
+  several keys have); `null` otherwise, and always once the Ticket is completed. Taken and reported
+  mean what they mean for `409 report_required` (under Cards below): the key moved the open Ticket
+  and left it outside its Loop's first column in an open Loop, and its own comment or wait, at or
+  after its first move, is its report. A person's move never sets it, and a Ticket a revoked key
+  took stays marked until a person completes it, archives it or puts it back in the first column.
+  The Loop's card list, a card read and every card write answer it, read once for all the Tickets
+  of an answer; the board-wide Ticket list and the search answer `null`. The Kanban card shows it as
+  *No report*, the Ticket view as "No report since" the date and time.
 
 | Method | Path | Scope |
 | --- | --- | --- |

@@ -78,6 +78,11 @@ export interface Card {
   state: TicketState | null;
   /** It needs input, or it is ready and the task itself is a person's. */
   needs_person: boolean;
+  /**
+   * When a key (an API token) took the Ticket and has not reported on it since (a comment, a wait
+   * or a completion): the earliest such key's first move. Derived on every read; null otherwise.
+   */
+  unreported_since: string | null;
 }
 
 export interface ChecklistItem {

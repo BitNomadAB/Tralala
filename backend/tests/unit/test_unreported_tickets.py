@@ -1,13 +1,18 @@
 """The Tickets an actor has taken and not reported on since (``CardRepository.unreported_by``),
-on the fake board: what counts as taken, what counts as a report, and the order of the answer.
+and the same for the listed cards and every key at once (``CardRepository.unreported_since``), on
+the fake board: what counts as taken, what counts as a report, and the answers.
 
 Taken is a ``card.moved`` by the actor on an open, unarchived card of an open Loop that is not in
 the Loop's first column; a report is the actor's comment or wait at the first move's second or
-later. The SQL statement in ``app/repositories/sql/cards.py`` answers the same rules; dbgen
-compiles it against the schema.
+later. For the batched read a key is an actor whose move was logged as ``agent``, each key is held
+to its own first move, and the card answers the earliest key still owed a report. The SQL
+statements in ``app/repositories/sql/cards.py`` answer the same rules; dbgen compiles them against
+the schema.
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 import pytest
 
@@ -41,9 +46,21 @@ def board() -> BoardState:
     return state
 
 
-def log(state: BoardState, action: str, card_id: str, *, actor_id: str, at: str) -> None:
+def log(
+    state: BoardState,
+    action: str,
+    card_id: str,
+    *,
+    actor_id: str,
+    at: str,
+    actor_type: str = "agent",
+) -> None:
     entry_id = f"e-{len(state.activity) + 1}"
-    state.activity.append(activity_row(entry_id, action, card_id, actor_id=actor_id, timestamp=at))
+    state.activity.append(
+        activity_row(
+            entry_id, action, card_id, actor_id=actor_id, actor_type=actor_type, timestamp=at
+        )
+    )
 
 
 def comment(state: BoardState, card_id: str, *, actor_id: str, at: str) -> None:
@@ -243,3 +260,142 @@ def test_the_answer_covers_every_loop_by_taken_at_then_card_id() -> None:
         (LOOP, "L-1"),
         (LOOP, "L-1"),
     ]
+
+
+# --- the listed cards, every key at once (unreported_since) ---------------------------------------
+
+
+def since(state: BoardState, card_ids: Sequence[str] = ("c1",)) -> dict[str, str | None]:
+    cards: CardRepository = FakeCardRepository(state)
+    return cards.unreported_since(card_ids)
+
+
+def test_a_keys_move_without_a_report_marks_the_card_with_the_move() -> None:
+    state = board()
+    state.cards["c2"] = card_row("c2", "doing", LOOP)
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    # Every requested id is a key: one nobody took, and one the board does not have, are None.
+    assert since(state, ["c1", "c2", "missing"]) == {"c1": MOVED, "c2": None, "missing": None}
+    assert since(state, []) == {}
+
+
+@pytest.mark.parametrize("at", [LATER, MOVED], ids=["after the move", "in its second"])
+def test_the_keys_comment_since_the_move_takes_the_mark_away(at: str) -> None:
+    state = board()
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    comment(state, "c1", actor_id=WORKER, at=at)
+    assert since(state) == {"c1": None}
+
+
+def test_a_comment_before_the_move_leaves_the_mark() -> None:
+    state = board()
+    comment(state, "c1", actor_id=WORKER, at=EARLIER)
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    assert since(state) == {"c1": MOVED}
+
+
+@pytest.mark.parametrize("cleared", [False, True], ids=["still waiting", "cleared by a person"])
+def test_the_keys_wait_since_the_move_takes_the_mark_away(cleared: bool) -> None:
+    state = board()
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    log(state, "card.wait_set", "c1", actor_id=WORKER, at=LATER)
+    if cleared:  # the log keeps the wait a person cleared
+        log(state, "card.wait_cleared", "c1", actor_id=PERSON, at=LATER, actor_type="user")
+    assert since(state) == {"c1": None}
+    # A wait set before the move is no report on it.
+    state = board()
+    log(state, "card.wait_set", "c1", actor_id=WORKER, at=EARLIER)
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    assert since(state) == {"c1": MOVED}
+
+
+def test_a_persons_move_never_marks_the_card() -> None:
+    state = board()
+    log(state, "card.moved", "c1", actor_id=PERSON, at=MOVED, actor_type="user")
+    assert since(state) == {"c1": None}
+    # Nor does a person's later move of a card a key took: the key still owes its report.
+    log(state, "card.moved", "c1", actor_id=WORKER, at=LATER)
+    log(state, "card.moved", "c1", actor_id=PERSON, at="2026-11-25T10:09:00Z", actor_type="user")
+    assert since(state) == {"c1": LATER}
+
+
+def test_two_keys_without_a_report_give_the_earliest_move_and_each_reports_for_itself() -> None:
+    state = board()
+    log(state, "card.moved", "c1", actor_id=OTHER, at=LATER)
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    assert since(state) == {"c1": MOVED}
+    # The second key's comment is no report for the first, which still marks the card.
+    comment(state, "c1", actor_id=OTHER, at="2026-11-25T10:06:00Z")
+    assert since(state) == {"c1": MOVED}
+    # The first key's comment after its own move reports for it; the second key has reported too.
+    comment(state, "c1", actor_id=WORKER, at=MOVED)
+    assert since(state) == {"c1": None}
+
+
+def test_each_key_is_held_to_its_own_first_move() -> None:
+    state = board()
+    log(state, "card.moved", "c1", actor_id=WORKER, at=EARLIER)
+    comment(state, "c1", actor_id=WORKER, at=MOVED)
+    log(state, "card.moved", "c1", actor_id=OTHER, at=LATER)
+    # The first key reported after its move; the second moved later and has not.
+    assert since(state) == {"c1": LATER}
+    log(state, "card.wait_set", "c1", actor_id=OTHER, at=MOVED)  # before the second key's move
+    assert since(state) == {"c1": LATER}
+
+
+def test_a_card_in_the_first_column_is_not_marked() -> None:
+    state = board()
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    state.cards["c1"] = state.cards["c1"].__replace__(list_id="todo")
+    assert since(state) == {"c1": None}
+
+
+@pytest.mark.parametrize("column", ["completed_at", "archived_at"])
+def test_a_completed_or_archived_card_is_not_marked(column: str) -> None:
+    state = board()
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    card = state.cards["c1"]
+    if column == "completed_at":
+        state.cards["c1"] = card.__replace__(completed_at=LATER)
+    else:
+        state.cards["c1"] = card.__replace__(archived_at=LATER)
+    assert since(state) == {"c1": None}
+
+
+@pytest.mark.parametrize("column", ["completed_at", "cancelled_at", "archived_at"])
+def test_a_card_of_a_completed_cancelled_or_archived_loop_is_not_marked(column: str) -> None:
+    state = board()
+    log(state, "card.moved", "c1", actor_id=WORKER, at=MOVED)
+    match column:
+        case "completed_at":
+            state.loops[LOOP] = loop_row(LOOP, stage="completed", completed_at=LATER)
+        case "cancelled_at":
+            state.loops[LOOP] = loop_row(LOOP, stage="cancelled", cancelled_at=LATER)
+        case _:
+            state.loops[LOOP] = loop_row(LOOP, archived_at=LATER)
+    assert since(state) == {"c1": None}
+
+
+def test_the_batched_read_agrees_with_the_read_for_each_key() -> None:
+    """For every card, the earliest ``taken_at`` among the keys whose ``unreported_by`` names it."""
+    state = board()
+    for card_id, list_id in (("c2", "doing"), ("c3", "done"), ("c4", "todo"), ("c5", "done")):
+        state.cards[card_id] = card_row(card_id, list_id, LOOP)
+    log(state, "card.moved", "c1", actor_id=WORKER, at=LATER)
+    log(state, "card.moved", "c1", actor_id=OTHER, at=MOVED)
+    log(state, "card.moved", "c2", actor_id=WORKER, at=MOVED)
+    comment(state, "c2", actor_id=WORKER, at=LATER)
+    log(state, "card.moved", "c3", actor_id=OTHER, at=EARLIER)
+    log(state, "card.wait_set", "c3", actor_id=WORKER, at=LATER)
+    log(state, "card.moved", "c4", actor_id=WORKER, at=MOVED)
+    log(state, "card.moved", "c5", actor_id=PERSON, at=MOVED, actor_type="user")
+    ids = sorted(state.cards)
+    expected: dict[str, str | None] = dict.fromkeys(ids, None)
+    for actor_id in (WORKER, OTHER):
+        for ticket in unreported(state, actor_id):
+            known = expected[ticket.card.id]
+            expected[ticket.card.id] = (
+                ticket.taken_at if known is None else min(known, ticket.taken_at)
+            )
+    assert expected == {"c1": MOVED, "c2": None, "c3": EARLIER, "c4": None, "c5": None}
+    assert since(state, ids) == expected

@@ -4,6 +4,7 @@ import { ReasonButton } from "@/components/ui/reason-button";
 import { SectionHeader } from "@/components/ui/section";
 import { SelectMenu } from "@/components/ui/select-menu";
 import type { BoardList, BoardPerson, Card, Label, LoopReadiness } from "@/lib/types";
+import { NoReportLine } from "./NoReport";
 import { TicketFacts } from "./TicketFacts";
 import { columnsInOrder, completeBlocked } from "./ticketRules";
 import { TicketState } from "./TicketState";
@@ -91,6 +92,7 @@ export function TicketRail({
           confirmBlocked={completeBlocked(card)}
           pending={actions.pending}
         />
+        <NoReportLine card={card} />
       </section>
 
       <section aria-label="Details">

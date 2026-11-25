@@ -40,10 +40,12 @@ opens the same view:
 
 A Ticket on the Kanban shows the first line of its face: the title in two lines at most, its plain
 summary muted under it, and a bottom row with the key, *Needs input* or *Blocked* only when it
-waits (the reason on hover), *Needs a person* for a person's task, *Unplanned* for a Ticket outside
-the plan, *QA*, the priority and the due date when set (red when overdue), *done* with a check once
-it is completed, and the owner's initials on the right. Labels, checklists and comment counts are
-in the Ticket, not on the card.
+waits (the reason on hover), *No report* while a key (an API token) that took it has not reported
+on it since (on hover, the day the key took it and that a comment, a wait or a completion is a
+report; it goes away by itself when the report comes), *Needs a person* for a person's task,
+*Unplanned* for a Ticket outside the plan, *QA*, the priority and the due date when set (red when
+overdue), *done* with a check once it is completed, and the owner's initials on the right. Labels,
+checklists and comment counts are in the Ticket, not on the card.
 
 The page follows its board: what an agent or another person changes shows within five seconds on
 the Kanban, in the header and in Notes while the tab is visible, and at once when you come back to
@@ -285,7 +287,8 @@ Board / Loop / Phase / key and **Back to the board**. Nothing is a form until yo
   summary and the completion with its evidence that a coding session recorded). **Ask the agents**
   sits in Activity's head.
 - **The rail**: the column as a menu, the state with *Mark as waiting…* or the wait with **Clear
-  the wait**, **Confirm human action** for a Ticket only a person can do, **Details** (Owner,
+  the wait**, **Confirm human action** for a Ticket only a person can do, *No report since* the
+  date and time a key took the Ticket while that key has not reported on it, **Details** (Owner,
   Phase, Work is done, Depends on, Priority, Due, Labels, Created; each value turns into its control
   on a click and saves itself) and **More** (Checklists, Copy link, Archive).
 

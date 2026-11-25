@@ -1,5 +1,5 @@
 import type { BadgeTone } from "@/components/ui/badge";
-import type { TicketState, Wait, Workplace } from "@/lib/types";
+import type { Card, TicketState, Wait, Workplace } from "@/lib/types";
 
 /** Why a button cannot be pressed while the change before it is still being saved. */
 export const SAVING = "Saving…";
@@ -39,6 +39,19 @@ export const WAIT_HINTS: Record<Wait, string> = {
   access: "A system, key, account, setting or machine.",
   third_party: "A supplier, a customer, a lawyer or someone else outside the team.",
 };
+
+/** What counts as a key's report on a Ticket it took, as "No report" explains it. */
+export const REPORT_MEANS = "A comment, a wait or a completion is a report.";
+
+/**
+ * Since when a key that took the Ticket has not reported on it, while the Ticket is open; null
+ * when nothing is owed. The server answers it on every read (`unreported_since`).
+ */
+export function unreportedSince(
+  card: Pick<Card, "unreported_since" | "completed_at">,
+): string | null {
+  return card.completed_at === null ? card.unreported_since : null;
+}
 
 /** Why a Ticket is Not done: its Loop was completed or cancelled first, and takes no more work. */
 export const NOT_DONE_REASON = "The Loop was closed before this Ticket was done.";

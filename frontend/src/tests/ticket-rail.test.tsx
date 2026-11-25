@@ -1,9 +1,14 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { formatDateTime } from "@/lib/utils";
 import { CARD_PATH, ticketCard } from "./msw/cards";
 import { NOW } from "./msw/loops";
 import { PREREQUISITE_KEY } from "./msw/ticketView";
 import { renderTicket, writes } from "./renderTicket";
+
+/** When a key took the Ticket, and what the rail says counts as a report. */
+const TAKEN = "2026-11-25T10:00:00Z";
+const REPORT = "A comment, a wait or a completion is a report.";
 
 function rail() {
   return screen.getByRole("complementary", { name: "Status and details" });
@@ -119,6 +124,28 @@ describe("the Ticket's rail", () => {
     expect(writes(view)).toEqual([
       { route: `POST ${CARD_PATH}/confirm`, body: { version: 3, note: "" } },
     ]);
+  });
+
+  it("says under where the Ticket stands since when a key that took it has not reported", async () => {
+    await renderTicket(ticketCard({ list_id: "list-2", unreported_since: TAKEN }));
+    const status = within(rail()).getByRole("region", { name: "Status" });
+    const since = within(status).getByText(`No report since ${formatDateTime(TAKEN)}`);
+    expect(since.parentElement).toHaveTextContent(
+      `No report since ${formatDateTime(TAKEN)}· Taken by a key. ${REPORT}`,
+    );
+  });
+
+  it.each([
+    ["nothing is owed", ticketCard({ list_id: "list-2" })],
+    [
+      "the Ticket is completed",
+      ticketCard({ unreported_since: TAKEN, completed_at: NOW, state: null }),
+    ],
+  ])("says nothing of a report when %s", async (_, card) => {
+    await renderTicket(card);
+    const status = within(rail()).getByRole("region", { name: "Status" });
+    expect(within(status).queryByText(/^No report/)).toBeNull();
+    expect(status).not.toHaveTextContent("Taken by a key");
   });
 
   it("keeps Move to another Loop for later, and says so beside it", async () => {
