@@ -431,6 +431,7 @@ def test_loop_summaries_names_the_tickets_the_key_took_and_has_not_reported_on(
                 "name": "Loop run",
                 "goal": "",
                 "stage": "in_progress",
+                "without_plan": False,
                 "next": "1 Ticket is ready to start.",
                 "waiting_on": "anyone",
                 "execution_allowed": True,
