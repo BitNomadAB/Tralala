@@ -43,6 +43,11 @@ Worth knowing when you look at the dashboard:
   take the block away, and a person's task left unconfirmed in the last column held the rest of the
   plan that way. The Ticket's rail now lists every open Ticket in its way under **Held up by**, each
   with a link and the one step it needs: **Confirm**, **Complete**, **Clear wait** or **Restore**.
+- **A refusal can be read while a dialog is open.** A notification that came while a dialog was
+  open was drawn under the dialog's backdrop, dimmed away. Notifications are now drawn over every
+  dialog. A refused QA decision is also listed in the completion dialog, scenario by scenario, and
+  **Accept QA and complete** is held while the cycle has no scenarios, with the way to close the
+  Loop beside it.
 - **An open tab reloads itself once after an upgrade.** Each page is downloaded when it is first
   opened, so a tab left open across an upgrade asks for files the new version no longer has. It
   reloads once to pick up the new version instead of failing; if the page still cannot be loaded, it

@@ -561,6 +561,12 @@ Scenario outcomes are `passed`, `failed`, `blocked`, `not_run` or `not_applicabl
 blocked or not-run scenario prevents acceptance; `not_applicable` needs an explicit human waiver.
 Finalization stores an immutable snapshot and returns the existing record on every retry.
 
+A cycle whose scenarios were never written cannot be accepted (`409 qa_incomplete`, reason
+`instructions_missing`). The dialog then holds **Accept QA and complete** and says the way to close
+the Loop without them: accept under 1 with *Tested and passed outside Tralala*, which records a
+person's own word that it was tested. A QA decision the server refuses is listed in the dialog, one
+line for each scenario it names as unresolved, and stays there until the next attempt.
+
 ## Notes
 
 A Loop keeps a log of notes for what belongs to the Loop and to no single Ticket: the
