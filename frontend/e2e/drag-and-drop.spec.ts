@@ -85,6 +85,9 @@ test.describe("drag and drop", () => {
     await page.keyboard.press("Space");
     await expect(grip).toHaveAttribute("aria-pressed", "true");
     await expect(said).toContainText(title);
+    // "is over" is first said once dnd-kit has measured the columns; an arrow key pressed before
+    // that has nowhere to go.
+    await expect(said).toContainText(`${title} is over Todo`);
     await page.keyboard.press("ArrowRight");
     await expect(said).toContainText(`${title} is over In Progress`);
     await page.keyboard.press("Space");
