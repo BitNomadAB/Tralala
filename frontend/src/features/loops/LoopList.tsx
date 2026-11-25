@@ -4,6 +4,7 @@ import { Chip } from "@/components/ui/chip";
 import type { Loop, LoopSummary } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 import { STAGE_WORDS, loopHref, loopNextAction, tickets } from "./loopNextAction";
+import { WithoutPlanChip } from "./WithoutPlanChip";
 
 /** The line under a finished Loop's name: when it ended. */
 function finishedLine(loop: Loop): string {
@@ -52,6 +53,7 @@ function LoopRow({
           </Link>
           <span className="font-mono text-xs text-[var(--foreground-faint)]">{loop.key}</span>
           <Chip>{STAGE_WORDS[loop.stage]}</Chip>
+          {loop.without_plan ? <WithoutPlanChip /> : null}
         </div>
         {line ? <p className="m-0 mt-1 text-sm text-[var(--muted-foreground)]">{line}</p> : null}
         {shown.length > 0 ? (
@@ -78,10 +80,10 @@ function LoopRow({
 }
 
 /**
- * A board's Loops as rows: the name (the row opens the Loop page), the key, the stage, what the
- * Loop waits for and the person's next action as a button, from the board's Loop summaries. A
- * Loop whose summary has not arrived yet shows its row without the line; a read-only board shows
- * no action.
+ * A board's Loops as rows: the name (the row opens the Loop page), the key, the stage (and
+ * "Without a plan" for a Loop that runs without one), what the Loop waits for and the person's next
+ * action as a button, from the board's Loop summaries. A Loop whose summary has not arrived yet
+ * shows its row without the line; a read-only board shows no action.
  */
 export function LoopList({
   loops,

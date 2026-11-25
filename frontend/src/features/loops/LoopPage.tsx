@@ -37,7 +37,7 @@ export function LoopPage() {
   usePageTitle({ page: "loop", loop: loopQuery.data?.name, board: boardQuery.data?.name });
   const listsQuery = useLists(boardId, loopId);
   const summaries = useLoopSummaries(boardId);
-  const view = useLoopView(loopQuery.data?.stage ?? "draft");
+  const view = useLoopView(loopQuery.data?.stage ?? "draft", loopQuery.data?.without_plan);
   // A search result or a discussion deep-links the Ticket it points at.
   const dialog = useTicketDialog();
   const [showActivity, setShowActivity] = useState(false);
@@ -160,6 +160,7 @@ export function LoopPage() {
               matchingIds={matchingIds}
               emptyText={emptyColumnText(matchingIds !== null, matchCount)}
               readOnly={readOnly}
+              withoutPlan={loop.without_plan}
               onOpenCard={dialog.openCard}
               onListsChanged={invalidateLists}
               onCardsChanged={invalidateCards}

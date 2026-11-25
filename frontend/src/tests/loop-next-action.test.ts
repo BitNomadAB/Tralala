@@ -115,6 +115,58 @@ describe("a Loop's next action for a person", () => {
     ]);
   });
 
+  it("asks a person to close a Loop without a plan once every Ticket is done, and not before", () => {
+    const fast = (
+      stage: LoopSummary["stage"],
+      tickets: Partial<LoopSummary["tickets"]>,
+      waiting: LoopSummary["waiting_on"] = "person",
+    ) => shown(summary("a", "A", { stage, without_plan: true, waiting_on: waiting, tickets }));
+    // While something is open, the delivery lines are the same as with a plan.
+    expect(fast("ready", { ready: 1, total: 1 }, "anyone")).toEqual([
+      "1 Ticket ready to start",
+      null,
+      false,
+      "kanban",
+    ]);
+    expect(
+      fast("in_progress", { needs_input: 1, needs_person: 1, total: 2, completed: 1 }),
+    ).toEqual(["Waits for your answer on 1 Ticket", "Clear the wait", true, "kanban"]);
+    expect(fast("in_progress", { blocked: 1, total: 2, completed: 1 }, "anyone")[0]).toBe(
+      "1 Ticket waiting for earlier work",
+    );
+    // Every Ticket done: one decision closes it, whoever the server says it waits for.
+    for (const stage of ["ready", "in_progress"] as const) {
+      expect(fast(stage, { total: 2, completed: 2 })).toEqual([
+        "Waits for you to close the Loop",
+        "Close Loop",
+        true,
+        "kanban",
+      ]);
+    }
+    expect(fast("in_progress", { total: 1, completed: 1 }, "anyone")[1]).toBe("Close Loop");
+    // Completed, it is finished like any other Loop.
+    expect(fast("completed", { total: 2, completed: 2 }, "nobody")).toEqual([
+      "Completed",
+      null,
+      false,
+      "kanban",
+    ]);
+  });
+
+  it("keeps a planned Loop's words when every Ticket is done", () => {
+    const planned = summary("a", "A", {
+      stage: "in_progress",
+      waiting_on: "person",
+      tickets: { total: 2, completed: 2 },
+    });
+    expect(shown(planned)).toEqual([
+      "Waits for you to accept the work",
+      "Accept work",
+      true,
+      "kanban",
+    ]);
+  });
+
   it("offers nothing on a finished Loop", () => {
     expect(shown(summary("a", "A", { stage: "completed", waiting_on: "nobody" }))).toEqual([
       "Completed",
@@ -160,6 +212,27 @@ describe("the dashboard's summaries", () => {
       waiting: 1,
     });
     expect(tileCounts([review], true)).toEqual({ open: 1, waiting: 0 });
+  });
+
+  it("lists a Loop without a plan whose Tickets are all done as waiting to be closed", () => {
+    const closing = summary("c", "Typos", {
+      stage: "in_progress",
+      without_plan: true,
+      tickets: { total: 3, completed: 3 },
+    });
+    const working = summary("w", "Small fixes", {
+      stage: "ready",
+      without_plan: true,
+      waiting_on: "anyone",
+      tickets: { ready: 1, total: 1 },
+    });
+    const active = board("b1", "One");
+    const entries = new Map([["b1", { loops: [working, closing], pending: false, failed: false }]]);
+    const rows = waitingRows([active], entries);
+    expect(rows.map((row) => [row.loop.name, row.action.waiting, row.action.label])).toEqual([
+      ["Typos", "Waits for you to close the Loop", "Close Loop"],
+    ]);
+    expect(tileCounts([working, closing], false)).toEqual({ open: 2, waiting: 1 });
   });
 
   it("asks only a board that can be opened", () => {

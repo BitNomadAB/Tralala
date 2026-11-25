@@ -69,11 +69,13 @@ const GRIP =
  * keyboard's drag handle: Space or Enter picks the card up, the arrow keys move it. `actions`, the
  * menu after the grip ("Actions for <title>"), moves it without dragging. `focus` names the control
  * that takes the focus once the card shows where it moved to; `onFocused` says it did.
+ * `withoutPlan` says the card's Loop runs without a plan (the Kanban knows it from the Loop).
  */
 export function TicketCard({
   card,
   onOpen,
   overlay = false,
+  withoutPlan = false,
   actions,
   focus = null,
   onFocused,
@@ -81,6 +83,7 @@ export function TicketCard({
   card: Card;
   onOpen?: (card: Card) => void;
   overlay?: boolean;
+  withoutPlan?: boolean | undefined;
   actions?: readonly MenuItem[] | undefined;
   focus?: CardControl | null | undefined;
   onFocused?: (() => void) | undefined;
@@ -115,8 +118,9 @@ export function TicketCard({
   const held = card.state === "ready" ? null : card.state;
   const done = card.completed_at !== null;
   const notDone = card.state === "not_done";
-  // A manual Ticket with a key was added while the Loop's plan executes: outside the plan.
-  const unplanned = card.kind === "manual" && card.ticket_key !== null;
+  // A manual Ticket with a key was added while the Loop's plan executes: outside the plan. In a
+  // Loop without a plan every Ticket is keyed so and is the Loop's own work, as the Loop's mark says.
+  const unplanned = !withoutPlan && card.kind === "manual" && card.ticket_key !== null;
   const priority = card.priority === "none" ? null : card.priority;
   const overdue = card.due_at !== null && isOverdue(card.due_at, card.completed_at);
 
