@@ -164,6 +164,17 @@ Three rules that keep this honest:
   `replanning`; the dependent approvals go stale and execution stops until you approve a replacement.
 - **A column named Done completes nothing.** Completion is the acceptance decision, not a move.
 
+### A small change: skip the plan
+
+Not every change needs Info, an analysis and a RoadMap. Create a Loop and add a Ticket on its
+**Kanban** (**Add card**), or let your coding agent add one: the Loop then runs without a plan,
+marked **Without a plan** beside its stage, and its Tickets are keyed like `FI001-UNP-001`. Work the
+Tickets as usual. When they are done, the header says "Waits for you to close the Loop": **Close
+Loop**, then **Close the Loop** in the dialog, is one decision with no QA, and Board history keeps
+the Loop as **Closed without a plan**. Nothing is chosen when the Loop is created: hand in an
+analysis instead and the Loop takes the planned path above. More in
+[A Loop without a plan](Loops.md#a-loop-without-a-plan).
+
 ### Where to talk instead of writing
 
 Every Ticket can have **discussions**: ask the agents a question about it, read where they stand,

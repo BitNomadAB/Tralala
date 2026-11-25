@@ -112,11 +112,11 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | `set_ticket_wait` | `cards:write` | say what a Ticket waits for (a decision, information, access or a third party) and why; a person clears it |
 | `assign_ticket` | `cards:write` | set or clear the person who owns a Ticket |
 | `move_ticket` | `cards:write` | move a Ticket to another column of its Loop (version-checked); refused with `409 report_required` while another Ticket you took has no report from you (a comment, a wait or a completion) |
-| `create_ticket` | `cards:write`, `comments:write` | add a follow-up outside the plan while the Loop executes, keyed `<LoopKey>-UNP-<nnn>`, optionally with its face |
+| `create_ticket` | `cards:write`, `comments:write` | add a follow-up outside the plan while the Loop executes, or a Ticket to a Loop without a plan; keyed `<LoopKey>-UNP-<nnn>`, optionally with its face |
 | `comment_ticket` | `comments:write` | add a comment, done or not, in a completed Loop too: progress, findings, a blocker, the Loop that replaced it |
 | `complete_ticket` | `cards:write`, `comments:write` | finish a Ticket: your summary and evidence as a comment, then completed |
 | `create_loop` | `loops:write` | open a Loop for an agreed intent (idempotent) |
-| `write_info` | `loops:write` | write the Info while the Loop is `draft` or `analysis_review` |
+| `write_info` | `loops:write` | write the Info while the Loop is `draft` or `analysis_review`, so not once a Loop without a plan has a Ticket |
 | `write_note` | `loops:write` | add a note to the Loop's log: baseline, checks, merge, deploy, what is open |
 | `read_notes` | `loops:read` | read the Loop's notes, a page at a time |
 | `run_analysis` | `loops:generate` | ask the Loop's analysis agent for a candidate |
@@ -362,14 +362,41 @@ It never blocks a Phase, the plan's readiness or the Loop's completion; `read_lo
 `unplanned_tickets`, and accepting the implementation names the ones still open. With
 `follow_up_of`, the description starts with `Follow-up of <KEY>:` and the origin Ticket gets the
 comment `Follow-up: <NEW KEY> - <title>`. A Loop that has a plan but is not executing it answers
-`409 plan_change_required`; a Loop without a plan yet takes the Ticket without a key.
+`409 plan_change_required`. A Loop without a plan takes the Ticket, keyed the same way; one that has
+no analysis or RoadMap either then runs it without a plan, as below.
+
+### A small change without a plan
+
+A small change needs no Info, analysis or RoadMap. Agree it with your person, then:
+
+```text
+create_loop(name, goal)         -> a Loop in draft for the change you and your person agreed
+create_ticket(loop_id, title)   -> the first Ticket starts the fast track: keyed <LoopKey>-UNP-001
+  ... the work, as in "Working the Tickets": move_ticket, comment_ticket, complete_ticket ...
+loop_summaries                  -> without_plan true; "Every Ticket is done: a person closes the
+                                   Loop with one decision; no QA." once they are
+  ... a person closes the Loop in Tralala ...
+```
+
+Nothing is chosen when the Loop is created: a Loop with no plan, analysis or RoadMap is under way
+from its first Ticket (`ready`, then `in_progress` once one is done), and `loop_summaries` says
+`without_plan: true`. Every Ticket in it is keyed `<LoopKey>-UNP-<nnn>` and is the Loop's own work;
+`read_loop` lists them under `unplanned_tickets`. Handing in an analysis (`write_analysis`, or one a
+board agent writes through `run_analysis`) puts the Loop on the planned path instead, so do that
+only when your person wants the plan. From the first Ticket on, the Info is your person's:
+`write_info` answers `403 human_action_required`, and a note (`write_note`) or a comment holds what
+you would have added. Your key may add Tickets to such a Loop and work them, but never close it:
+closing is the acceptance of the implementation, a person's decision in Tralala with no QA, and a
+Ticket still open then reads `not_done`.
 
 ## 5. What a worker cannot do, by design
 
 - Take a planning decision: approve or reset an analysis or a RoadMap, edit the Info once planning
   has started, confirm a human-only Ticket, clear or replace a Ticket's wait, accept the
   implementation or QA, finalize a Loop. These answer `403 human_action_required` even with every
-  scope, and no tool offers them.
+  scope, and no tool offers them. Closing a Loop without a plan is accepting its implementation, so
+  a key adds Tickets to such a Loop but never closes it, and its Info is a person's from its first
+  Ticket on.
 - Replace an approved analysis or RoadMap, or write a brief over one: the person requests changes
   or resets it first.
 - Create or archive boards, change board structure, publish or edit a RoadMap, or create a

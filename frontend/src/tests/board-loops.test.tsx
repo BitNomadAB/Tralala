@@ -106,6 +106,44 @@ describe("the board page", () => {
     );
   });
 
+  it("marks a Loop without a plan in its row, in progress and waiting to be closed", async () => {
+    const fast = loop("loop-5", "Small fixes", {
+      stage: "in_progress",
+      without_plan: true,
+      progress: { ticket_total: 2, ticket_completed: 2, ticket_archived_incomplete: 0 },
+    });
+    const closed = loop("loop-6", "Typos", {
+      stage: "completed",
+      completed_at: NOW,
+      without_plan: true,
+    });
+    const rows = [
+      ...SUMMARIES,
+      summary("loop-5", "Small fixes", {
+        stage: "in_progress",
+        without_plan: true,
+        tickets: { total: 2, completed: 2 },
+      }),
+    ];
+    const user = renderBoard(PLATFORM, [DELIVERY, fast, closed], rows);
+
+    const current = await screen.findByRole("list", { name: "Current Loops" });
+    const row = within((await within(current).findByText("Small fixes")).closest("li") ?? current);
+    expect(row.getByText("In progress")).toBeInTheDocument();
+    expect(row.getByText("Without a plan")).toBeInTheDocument();
+    expect(await row.findByText("Waits for you to close the Loop")).toBeInTheDocument();
+    expect(row.getByText("2 of 2 Tickets done")).toBeInTheDocument();
+    // A Loop with a plan carries no such mark.
+    expect(within(current).getAllByText("Without a plan")).toHaveLength(1);
+
+    // Closed, it keeps its mark among the completed Loops.
+    const finished = screen.getByRole("list", { name: "Completed Loops", hidden: true });
+    expect(within(finished).getByText("Without a plan")).toBeInTheDocument();
+
+    await user.click(row.getByRole("button", { name: "Close Loop: Small fixes" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/boards/board-1/loops/loop-5");
+  });
+
   it("folds completed Loops under a collapsed Completed (N), and the agents and repositories", async () => {
     renderBoard(PLATFORM, [DRAFT, DONE], SUMMARIES);
 

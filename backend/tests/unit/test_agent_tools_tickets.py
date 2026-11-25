@@ -389,6 +389,23 @@ def test_create_ticket_adds_work_outside_the_plan_in_the_first_column(
     assert all(item["card_id"] != card.id for item in readiness["items"])
 
 
+def test_create_ticket_in_a_loop_without_a_plan_answers_its_key_and_unplanned(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    world.state.loops[LOOP] = world.state.loops[LOOP].__replace__(
+        current_plan_id=None, stage="draft"
+    )
+    answer = create_ticket(world, WORKER, ask("Rename the export"))
+    card = world.state.cards[str(part(answer, "ticket")["id"])]
+    assert (card.kind, card.ticket_key) == ("manual", "L-1-UNP-001")
+    assert (part(answer, "ticket")["key"], answer["unplanned"]) == ("L-1-UNP-001", True)
+    # The Loop is under way with it, and the Loop's readiness lists it.
+    assert world.state.loops[LOOP].stage == "ready"
+    readiness = world.loop.readiness(BOARD_ID, LOOP)
+    assert [entry["key"] for entry in readiness["unplanned"]] == ["L-1-UNP-001"]
+
+
 def test_create_ticket_as_a_follow_up_points_both_ways_and_a_retry_answers_the_first(
     settings: Settings,
 ) -> None:

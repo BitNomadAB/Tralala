@@ -275,7 +275,7 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops` | `include_completed`, `include_archived`, `stage` filters |
 | POST | `/boards/{board_id}/loops` | Creates the Loop with its own columns and five empty documents; accepts `Idempotency-Key` |
 | GET/PATCH | `/boards/{board_id}/loops/{loop_id}` | `PATCH` requires the Loop `version` |
-| GET | `/boards/{board_id}/loop-summaries` | One row a Loop, as `loop_summaries` gives it: stage, the next step, who it waits for (`person`, `agent`, `anyone`, `nobody`), Tickets by state and column, each document's state; open Loops unless `include_completed=true`. The dashboard and the board page read it, one request a board |
+| GET | `/boards/{board_id}/loop-summaries` | One row a Loop, as `loop_summaries` gives it: stage, `without_plan`, the next step, who it waits for (`person`, `agent`, `anyone`, `nobody`), Tickets by state and column, each document's state; open Loops unless `include_completed=true`. The dashboard and the board page read it, one request a board |
 | POST | `/boards/{board_id}/loops/{loop_id}/cancel` | Human-only; records `cancelled_at` |
 | POST | `/boards/{board_id}/loops/{loop_id}/archive` | Hides the Loop from active views |
 | GET | `/boards/{board_id}/loops/{loop_id}/documents` | Current and approved revisions per kind |
@@ -296,20 +296,45 @@ document slots; there is no Board-level Kanban.
 | GET | `/boards/{board_id}/loops/{loop_id}/generation-runs[/{run_id}]` | Durable run state and failures |
 | POST | `/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/cancel` | Cancels a queued or running run |
 | POST | `/boards/{board_id}/loops/{loop_id}/generation-runs/{run_id}/retry` | Starts a new run with the same inputs |
-| POST | `/boards/{board_id}/loops/{loop_id}/completion` | Human-only implementation acceptance and QA outcome; `accept_unfinished: true` accepts although delivery Tickets are not completed |
+| POST | `/boards/{board_id}/loops/{loop_id}/completion` | Human-only implementation acceptance and QA outcome; `accept_unfinished: true` accepts although delivery Tickets are not completed. In a Loop without a plan it is the one decision that closes the Loop, with no QA ([A Loop without a plan](#a-loop-without-a-plan)) |
 | GET | `/boards/{board_id}/loops/{loop_id}/qa` | Active or latest QA cycle with both instruction views |
 | PUT | `/boards/{board_id}/loops/{loop_id}/qa/instructions` | Supplies a scenario set (human or agent) |
 | POST | `/boards/{board_id}/loops/{loop_id}/qa/results` | Records scenario outcomes; agents may submit |
 | POST | `/boards/{board_id}/loops/{loop_id}/qa/decision` | Human-only acceptance; finalizes atomically |
 | POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/confirm` | Human-only confirmation of a human Ticket |
 | GET | `/boards/{board_id}/tickets` | Explicit Board-level aggregate read; each row names its Loop |
-| GET | `/boards/{board_id}/history` | History search (`q`, `source_kind`, `loop_key`, `qa_status`, dates) |
+| GET | `/boards/{board_id}/history` | History search (`q`, `source_kind`, `loop_key`, `qa_status`, dates); each record says `without_plan`, and a Loop closed without a plan has `qa_status` `not_run` |
 | GET | `/boards/{board_id}/history/{history_id}` | Immutable record with its envelope and artifacts |
 | POST | `/boards/{board_id}/history/import` | Legacy envelope ingestion; never creates Tickets |
 
 Ticket keys look like `AC004-DA02-003`: Loop prefix and Board-local Loop sequence, Phase prefix and
 number, then the Ticket sequence within that Phase. They are allocated by the server, frozen after
-allocation and unique within the Board.
+allocation and unique within the Board. A Ticket added by hand (`POST .../cards`, `create_ticket`)
+is keyed `<LoopKey>-UNP-<nnn>` instead, such as `AC004-UNP-001`, whether it is work outside a plan
+or a Ticket of a Loop without a plan; the number is never used again in that Loop.
+
+#### A Loop without a plan
+
+A Loop that has no plan, no analysis and no RoadMap is under way as soon as it holds a Ticket that
+is not archived: the fast track for a small change. Nothing is chosen when the Loop is created, and
+Info does not count. Its stage is `ready`, then `in_progress` once one of its Tickets is completed;
+the Loop (`GET .../loops/{loop_id}` and the list) and its `loop-summaries` row say
+`without_plan: true`, and its `progress` counts its Tickets. Readiness answers
+`execution_allowed: true` with no Phases, lists the Tickets under `unplanned` and the open ones
+under `open_delivery`, and the Loop's warnings leave out the missing analysis. An analysis or a
+RoadMap written for it puts it on the planned path, and archiving every Ticket it holds takes it
+back to `draft`; either way `without_plan` is false again. From its first Ticket on, the Info is a
+person's: a token's `PUT .../documents/info` answers `403 human_action_required`.
+
+`POST .../completion` closes such a Loop in one decision of a signed-in person (a token gets
+`403 human_action_required`): no QA cycle, QA Task or QA decision, and the payload's `qa_status`
+and `attestation` are not read. A Ticket that is neither completed nor archived refuses it
+(`409 ticket_blocked`, the Tickets under `details.open`) unless `accept_unfinished: true`; it then
+stays as it is and reads `state: not_done`. The decision records `without_plan: true` and the keys
+it left (`unfinished`). The answer is the completed history record: `qa_status` `not_run`,
+`without_plan: true`, the envelope's `loop.without_plan` `true`, and a Ticket left open with the
+disposition `not_done`. Once every Ticket is done, the Loop's `loop-summaries` row says "Every
+Ticket is done: a person closes the Loop with one decision; no QA." with `waiting_on: person`.
 
 #### Generation run steps
 
@@ -1066,7 +1091,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | --- | --- | --- |
 | `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, and the rule-11a decisions only a person makes; never the token or its hash |
 | `list_boards` | `boards:read` | The boards the token may read, by name, with status and Loop count; a board id comes from here |
-| `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent` for a document, `anyone` or `nobody`; a Ticket never waits on an agent), `execution_allowed`, its Tickets by state (`ready`, `needs_input`, `blocked`, `not_done`, `completed`, `total`, `needs_person`) and by column, and each document's state and revision. Computed from what the Loop records, never written by anyone |
+| `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `without_plan`, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent` for a document, `anyone` or `nobody`; a Ticket never waits on an agent), `execution_allowed`, its Tickets by state (`ready`, `needs_input`, `blocked`, `not_done`, `completed`, `total`, `needs_person`) and by column, and each document's state and revision. Computed from what the Loop records, never written by anyone |
 | `read_board` | `boards:read`, `loops:read` | The board's Loops by id, key, name and stage, the people you may assign, the agents you may ask |
 | `read_loop` | `loops:read` | The Loop's overview, by its id or its key: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases and the columns with their Ticket counts, the work outside the plan and the newest five notes cut to 500 characters; the Tickets themselves are `list_tickets`' answer |
 | `read_document` | `loops:read` | One document of a Loop named by its id or its key, by `kind` (`info`, `analysis`, `analysis_ai`, `roadmap`, `roadmap_ai`): as numbered lines, at most 60 000 characters, with `continue_from` for the rest; `analysis_ai` and `roadmap_ai` also as `view: structured`, an outline of the findings or the Phases and Tickets, and one of them in full with `item` |
@@ -1079,11 +1104,11 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `set_ticket_wait` | `cards:write` | Say what an open Ticket that waits for nothing now waits for (`decision`, `information`, `access` or `third_party`) and why (`reason`); the version is read for the caller. Clearing or replacing a wait is a person's act and never a tool |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race. A key that has not reported on another Ticket it took is refused with `409 report_required` naming those Tickets, as the move route is, and the refusal is never retried |
-| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, face (`why`, `if_skipped`, `pros`, `cons`, `steps`; any one given checks the whole face, `422 face_invalid`), `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
+| `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, or to a Loop without a plan, where the first one starts the fast track ([A Loop without a plan](#a-loop-without-a-plan)); in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, face (`why`, `if_skipped`, `pros`, `cons`, `steps`; any one given checks the whole face, `422 face_invalid`), `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |
 | `comment_ticket` | `comments:write` | Add a progress note, finding or blocker, on an open or a completed Ticket, in a completed, archived or cancelled Loop too (a later Loop can point back at the work it replaced); only an archived board refuses it (`409 board_archived`) |
 | `complete_ticket` | `cards:write`, `comments:write` | Complete a Ticket (`completed: true`, the version read for the caller, one retry on a race), then comment the summary and the evidence as a list; answers the key, version, comment id and the Loop's stage and progress. The summary is kept as a comment even on a Ticket that is already done or whose completion is refused; the refusal carries its `comment_id`. A completed, archived or cancelled Loop refuses the call whole (`409 loop_read_only`, nothing written) |
 | `create_loop` | `loops:write` | Start a Loop on a board for one coherent change |
-| `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review` |
+| `write_info` | `loops:write` | Write the agreed intent; allowed while the Loop is `draft` or `analysis_review`, so not in a Loop without a plan once it has a Ticket |
 | `write_note` | `loops:write` | Add a note to the Loop's log: what belongs to the Loop and to no single Ticket; refused on a completed Loop |
 | `read_notes` | `loops:read` | The Loop's notes, oldest first, a page at a time (`older` is the next `before`) |
 | `run_analysis` | `loops:generate` | Ask a board agent for the Analysis candidate and report the run and the document state |
@@ -1100,8 +1125,10 @@ The flow a person and their worker use to plan is `create_loop` → `write_info`
 person approves the RoadMap, which publishes its Tickets with their keys. To work them:
 `list_tickets` → `read_ticket` → `move_ticket` and `comment_ticket` → `set_ticket_wait` when an
 answer is needed → `complete_ticket`; `create_ticket` for a follow-up outside the plan and
-`write_note` for what belongs to the Loop. Every step stays inside the same gates: the analysis and
-the RoadMap are candidates until a signed-in person approves them, and a cancelled or completed
+`write_note` for what belongs to the Loop. A small change skips the plan: `create_loop` →
+`create_ticket` → the same work on its Tickets → a person closes the Loop in one decision. Every
+step stays inside the same gates: the analysis and the RoadMap are candidates until a signed-in
+person approves them, and a cancelled or completed
 Loop is read-only but for comments on its Tickets. The Loop is the plan: nothing a worker plans or
 logs is a file in a repository.
 
@@ -1119,7 +1146,9 @@ QA, finalizing a Loop).
 Phase, the plan's readiness or the Loop's completion, and is listed under `unplanned` in readiness
 and `unplanned_tickets` in `read_loop`. Accepting the implementation names the ones still open.
 A Loop that has a plan but is not executing it refuses a new Ticket with
-`409 plan_change_required`; a Loop without a plan yet takes one without a key.
+`409 plan_change_required`. A Loop without a plan takes one, keyed the same way, and one that has
+no analysis or RoadMap either then runs its Tickets without a plan
+([A Loop without a plan](#a-loop-without-a-plan)).
 
 ### Completion
 
@@ -1129,7 +1158,8 @@ plan: an unfinished prerequisite answers `409 ticket_blocked`, an open wait `409
 naming it, and a human-only Ticket `403 human_action_required` for a token (a person confirms it
 with `POST .../cards/{card_id}/confirm`). Work completes only while the Loop executes an approved
 plan: in another stage the answer is `409 approval_required`, or `409 plan_change_required` while
-the plan is being replaced. Moving a Ticket into a column named `Done` completes nothing. A
+the plan is being replaced. A Loop without a plan has no plan to wait for, so its Tickets complete
+whenever they are ready. Moving a Ticket into a column named `Done` completes nothing. A
 completed, archived or cancelled Loop refuses a completion with `409 loop_read_only`.
 
 Accepting the implementation (`POST .../completion`, a person only) is refused while a delivery
@@ -1139,7 +1169,9 @@ archived one and one an earlier plan left on the Kanban included. With `accept_u
 the person accepts without them. Nothing is changed on those Tickets: the decision records their
 keys (`unfinished`), the Loop's activity names them (`loop.accepted_unfinished`), the answer lists
 them as `unfinished`, and once the Loop is completed each one that is still not completed reads
-`state: not_done`. The history snapshot keeps them with the disposition `open`.
+`state: not_done`. The history snapshot keeps them with the disposition `open`. In a Loop without a
+plan the same decision closes the Loop, its own open Tickets take the place of the delivery
+Tickets, and the snapshot keeps them as `not_done` ([A Loop without a plan](#a-loop-without-a-plan)).
 
 A tool lists **every** scope it needs, and `tools/list` hides a tool unless the token holds all of
 them — advertising a call that would fail is worse than not advertising it. Calling a tool the token

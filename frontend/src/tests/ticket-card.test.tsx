@@ -21,14 +21,17 @@ const FACE: TicketFace = {
   steps: ["End a session after 30 idle minutes"],
 };
 
-/** The card on a Kanban column, as the board renders it: sortable, with an open handler. */
-function renderCard(card: Card) {
+/**
+ * The card on a Kanban column, as the board renders it: sortable, with an open handler, in a Loop
+ * with a plan unless `withoutPlan`.
+ */
+function renderCard(card: Card, withoutPlan = false) {
   const onOpen = vi.fn();
   render(
     <DndContext>
       <SortableContext items={[card.id]}>
         <ul>
-          <TicketCard card={card} onOpen={onOpen} />
+          <TicketCard card={card} onOpen={onOpen} withoutPlan={withoutPlan} />
         </ul>
       </SortableContext>
     </DndContext>,
@@ -145,6 +148,13 @@ describe("the Kanban card", () => {
     expect(unplanned).toHaveTextContent(
       "Unplanned: Added outside the plan; it never blocks the plan or the Loop's completion",
     );
+  });
+
+  it("marks no Ticket of a Loop without a plan Unplanned, and keeps its key", () => {
+    const { item } = renderCard(ticketCard({ kind: "manual", ticket_key: "SES-1-UNP-001" }), true);
+    expect(within(item).getByText("SES-1-UNP-001")).toBeInTheDocument();
+    expect(within(item).queryByText("Unplanned")).not.toBeInTheDocument();
+    expect(within(item).queryByText(/Added outside the plan/)).not.toBeInTheDocument();
   });
 
   it("says No report in words while a key that took it has not reported, with when and why", () => {

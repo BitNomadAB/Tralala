@@ -247,9 +247,12 @@ def tool_catalog() -> dict[str, AgentTool]:
         AgentTool(
             name="create_ticket",
             description=(
-                "Add a follow-up you found while executing a Loop: a Ticket outside the plan, "
-                "keyed <LoopKey>-UNP-<nnn>, in the first column. It never blocks the plan or the "
-                "Loop's completion. With follow_up_of, the origin Ticket gets a comment pointing "
+                "Add a Ticket, keyed <LoopKey>-UNP-<nnn>, to a Loop's first column: a follow-up "
+                "you found while the Loop executes its plan, or work in a Loop without a plan. "
+                "Outside a plan it never blocks the plan or the Loop's completion. In a Loop with "
+                "no plan, analysis or RoadMap the first Ticket starts the fast track for a small "
+                "change; a person closes that Loop once its Tickets are done. With follow_up_of, "
+                "the origin Ticket gets a comment pointing "
                 "at it. Asking for the same Ticket again answers the first one. Optionally give "
                 "it a face for people (summary of at most 20 words, why and if_skipped in at most "
                 "3 sentences each, at most 3 pros and 3 cons, 1 to 5 steps saying what changes "
@@ -363,7 +366,8 @@ def tool_catalog() -> dict[str, AgentTool]:
             description=(
                 "Write the Loop's Info: requirements, constraints and the desired outcome. Allowed "
                 "while the Loop is still draft or under analysis review; once planning has started "
-                "the edit belongs to a signed-in person."
+                "the edit belongs to a signed-in person. A Loop without a plan leaves draft with "
+                "its first Ticket, so its Info is a person's from then on."
             ),
             scopes=("loops:write",),
             input_schema=_object(

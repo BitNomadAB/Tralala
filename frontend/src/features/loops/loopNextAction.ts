@@ -11,8 +11,8 @@ export interface LoopNextAction {
   label: string | null;
   /**
    * True for a decision only a person makes (approve the analysis or the RoadMap, confirm a
-   * Ticket, clear a wait, accept the work, finalize the Loop): such a Loop is listed under
-   * "Waits for you" on the dashboard.
+   * Ticket, clear a wait, accept the work, finalize the Loop or close one without a plan): such a
+   * Loop is listed under "Waits for you" on the dashboard.
    */
   decision: boolean;
   tab: LoopTab;
@@ -64,7 +64,10 @@ function review(summary: LoopSummary, document: "analysis" | "RoadMap"): LoopNex
   return act(`Waits for a new ${document}`, ask, "plan");
 }
 
-/** Delivery: the server's order (needs input, ready, a person's task, blocked, all done). */
+/**
+ * Delivery: the server's order (needs input, ready, a person's task, blocked, all done). Once every
+ * Ticket of a Loop without a plan is done, a person closes it in one decision, with no QA.
+ */
 function delivery(summary: LoopSummary): LoopNextAction {
   const counts = summary.tickets;
   const personTasks = counts.needs_person - counts.needs_input;
@@ -89,6 +92,9 @@ function delivery(summary: LoopSummary): LoopNextAction {
   }
   if (counts.blocked > 0) {
     return act(`${tickets(counts.blocked)} waiting for earlier work`, null, "kanban");
+  }
+  if (summary.without_plan && counts.total > 0 && counts.completed === counts.total) {
+    return act("Waits for you to close the Loop", "Close Loop", "kanban", true);
   }
   if (summary.waiting_on === "person" && counts.completed === counts.total) {
     return act("Waits for you to accept the work", "Accept work", "kanban", true);

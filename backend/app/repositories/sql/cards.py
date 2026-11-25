@@ -173,18 +173,21 @@ _COMPLETED_TICKETS = text(
     "SELECT COUNT(*) AS total FROM cards WHERE loop_id = :id AND kind IN ('ticket','qa')"
     " AND completed_at IS NOT NULL"
 )
+# Ticket and QA cards, and the manual cards of a Loop without a plan (its Tickets).
 _PROGRESS = text(
     "SELECT loop_id, COUNT(*) AS total,"
     " COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS completed,"
     " COALESCE(SUM(CASE WHEN archived_at IS NOT NULL AND completed_at IS NULL THEN 1 ELSE 0"
-    " END), 0) AS archived FROM cards WHERE kind IN ('ticket','qa') AND loop_id = :id"
-    " GROUP BY loop_id"
+    " END), 0) AS archived FROM cards WHERE (kind IN ('ticket','qa') OR (kind = 'manual'"
+    " AND loop_id IN (SELECT id FROM loops WHERE current_plan_id IS NULL)))"
+    " AND loop_id = :id GROUP BY loop_id"
 )
 _ALL_PROGRESS = text(
     "SELECT loop_id, COUNT(*) AS total,"
     " COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS completed,"
     " COALESCE(SUM(CASE WHEN archived_at IS NOT NULL AND completed_at IS NULL THEN 1 ELSE 0"
-    " END), 0) AS archived FROM cards WHERE kind IN ('ticket','qa')"
+    " END), 0) AS archived FROM cards WHERE (kind IN ('ticket','qa') OR (kind = 'manual'"
+    " AND loop_id IN (SELECT id FROM loops WHERE current_plan_id IS NULL)))"
     " AND loop_id IN (SELECT id FROM loops) GROUP BY loop_id"
 )
 _LABELS = text(

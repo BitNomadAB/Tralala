@@ -231,6 +231,11 @@ export interface Loop {
   cancelled_at: string | null;
   completed_at: string | null;
   history_id: string | null;
+  /**
+   * The Loop runs its Tickets without a plan: it has none, and its Tickets put it in progress
+   * (`ready`, `in_progress`) until a person closes it in one decision, with no QA (`completed`).
+   */
+  without_plan: boolean;
   documents: Record<DocumentKind, LoopDocument>;
   plan: {
     plan_id: string;

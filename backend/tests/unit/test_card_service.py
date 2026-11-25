@@ -483,10 +483,72 @@ def test_an_executing_loop_takes_unplanned_work_keyed_after_every_earlier_one(
     assert third["ticket_key"] == "L-1-UNP-003"
 
 
-def test_a_loop_without_a_plan_keys_no_manual_card(settings: Settings) -> None:
+def test_a_loop_without_a_plan_keys_its_tickets_and_leaves_an_older_one_without_a_key(
+    settings: Settings,
+) -> None:
     w = world(settings)
-    entry, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Plain"))
-    assert entry["ticket_key"] is None
+    assert w.state.loops[LOOP].current_plan_id is None
+    # Added before such a Loop's Tickets got keys: it gets none afterwards and takes no number.
+    older = put(w, card_row("older", "todo", LOOP).__replace__(kind="manual"))
+    first, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="One"))
+    second, _ = w.service.create(AGENT, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Two"))
+    assert (first["ticket_key"], second["ticket_key"]) == ("L-1-UNP-001", "L-1-UNP-002")
+    assert {w.card(str(first["id"])).kind, w.card(str(second["id"])).kind} == {"manual"}
+    assert w.card("older") == older
+    # An archived one keeps its number, and a bulk request numbers after it.
+    w.service.archive(HUMAN, BOARD_ID, LOOP, str(second["id"]))
+    bulk = BulkCardCreate(cards=[CardCreate(list_id="todo", title="Three")])
+    w.service.bulk_create(HUMAN, BOARD_ID, LOOP, bulk)
+    assert {card.title: card.ticket_key for card in w.state.cards.values()} == {
+        "Card older": None,
+        "One": "L-1-UNP-001",
+        "Two": "L-1-UNP-002",
+        "Three": "L-1-UNP-003",
+    }
+
+
+def test_a_loop_without_a_plan_follows_its_tickets_through_its_stage(settings: Settings) -> None:
+    w = world(settings)
+    assert w.state.loops[LOOP].stage == "draft"
+    # A worker key adds a Ticket to a Loop without a plan as before.
+    entry, _ = w.service.create(AGENT, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Fix"))
+    card_id = str(entry["id"])
+    assert (w.state.loops[LOOP].stage, w.state.loops[LOOP].updated_at) == ("ready", STAMP)
+    w.service.update(HUMAN, BOARD_ID, LOOP, card_id, CardUpdate(version=1, completed=True))
+    assert w.state.loops[LOOP].stage == "in_progress"
+    # Archiving the only one takes the Loop back to the stage its documents give.
+    w.service.archive(HUMAN, BOARD_ID, LOOP, card_id)
+    assert w.state.loops[LOOP].stage == "draft"
+    w.service.restore(HUMAN, BOARD_ID, LOOP, card_id)
+    assert w.state.loops[LOOP].stage == "in_progress"
+    assert w.card(card_id).version == 4
+    w.service.update(HUMAN, BOARD_ID, LOOP, card_id, CardUpdate(version=4, completed=False))
+    assert w.state.loops[LOOP].stage == "ready"
+    assert w.store.rollbacks == 0
+
+
+def test_a_bulk_request_puts_a_loop_without_a_plan_under_way(settings: Settings) -> None:
+    w = world(settings)
+    failing = BulkCardCreate(cards=[CardCreate(list_id="elsewhere", title="Wrong loop")])
+    w.service.bulk_create(HUMAN, BOARD_ID, LOOP, failing)
+    assert w.state.loops[LOOP].stage == "draft"
+    payload = BulkCardCreate(
+        cards=[CardCreate(list_id="todo", title="One"), CardCreate(list_id="doing", title="Two")]
+    )
+    w.service.bulk_create(HUMAN, BOARD_ID, LOOP, payload)
+    assert w.state.loops[LOOP].stage == "ready"
+
+
+def test_a_planned_loops_stage_does_not_follow_its_manual_tickets(settings: Settings) -> None:
+    # Were the stage computed here, the fakes (no active plan, no documents) would make it ready.
+    w = world(settings, loop_row(LOOP, stage="in_progress").__replace__(current_plan_id="p"))
+    entry, _ = w.service.create(HUMAN, BOARD_ID, LOOP, CardCreate(list_id="todo", title="Extra"))
+    w.service.bulk_create(
+        HUMAN, BOARD_ID, LOOP, BulkCardCreate(cards=[CardCreate(list_id="todo", title="More")])
+    )
+    w.service.archive(HUMAN, BOARD_ID, LOOP, str(entry["id"]))
+    w.service.restore(HUMAN, BOARD_ID, LOOP, str(entry["id"]))
+    assert (w.state.loops[LOOP].stage, w.state.loops[LOOP].updated_at) == ("in_progress", CREATED)
 
 
 def test_a_replayed_card_key_answers_the_stored_card(settings: Settings) -> None:

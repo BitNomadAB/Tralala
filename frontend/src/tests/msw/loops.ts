@@ -48,6 +48,7 @@ export const LOOP: Loop = {
   cancelled_at: null,
   completed_at: null,
   history_id: null,
+  without_plan: false,
   documents: DOCUMENTS,
   plan: null,
   qa: null,

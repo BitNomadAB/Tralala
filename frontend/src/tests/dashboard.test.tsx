@@ -149,6 +149,38 @@ describe("the dashboard", () => {
     );
   });
 
+  it("lists a Loop without a plan whose Tickets are done as waiting to be closed, marked", async () => {
+    const closing = summary("loop-3", "Small fixes", {
+      stage: "in_progress",
+      without_plan: true,
+      waiting_on: "person",
+      tickets: { total: 2, completed: 2 },
+    });
+    const working = summary("loop-4", "Typos", {
+      stage: "ready",
+      without_plan: true,
+      waiting_on: "anyone",
+      tickets: { ready: 1, total: 1 },
+    });
+    const { user } = renderDashboard([PLATFORM], { "board-1": [REVIEW, working, closing] });
+
+    const waits = await screen.findByRole("list", { name: "Waits for you" });
+    const rows = within(waits).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    // The planned Loop's row carries no mark; the one without a plan says so beside its key.
+    expect(within(rows[0] ?? waits).queryByText("Without a plan")).toBeNull();
+    const row = within(rows[1] ?? waits);
+    expect(row.getByText("Small fixes")).toBeInTheDocument();
+    expect(row.getByText("Without a plan")).toBeInTheDocument();
+    expect(row.getByText("Waits for you to close the Loop")).toBeInTheDocument();
+    const tiles = screen.getByRole("list", { name: "Boards" });
+    expect(within(tiles).getByText("3 Loops in progress · 2 wait for you")).toBeInTheDocument();
+
+    // The button opens the Loop page, whose header closes it.
+    await user.click(row.getByRole("link", { name: "Close Loop: Small fixes" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/boards/board-1/loops/loop-3");
+  });
+
   it("says nothing waits when neither a Loop nor a discussion needs a decision", async () => {
     renderDashboard(
       [PLATFORM],

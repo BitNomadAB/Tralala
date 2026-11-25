@@ -8,13 +8,26 @@ import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys, useReadiness } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
+import { LoopCloseDialog, type CompletionDialogProps } from "./LoopCloseDialog";
 import { OpenDelivery } from "./OpenDelivery";
 import { QaDecision } from "./QaDecision";
 import { UnplannedWarning } from "./Unplanned";
 
 type QaStatus = "not_tested" | "tested_with_issues" | "passed";
 
-export function LoopCompletionDialog({
+/**
+ * The dialog that completes a Loop: for a Loop without a plan the one decision that closes it
+ * (`LoopCloseDialog`), else the acceptance of the implementation and the QA below.
+ */
+export function LoopCompletionDialog(props: CompletionDialogProps) {
+  return props.loop.without_plan ? (
+    <LoopCloseDialog {...props} />
+  ) : (
+    <PlannedCompletionDialog {...props} />
+  );
+}
+
+function PlannedCompletionDialog({
   boardId,
   loop,
   open,

@@ -98,7 +98,8 @@ class CardCounts:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TicketProgress:
-    """A Loop's Tickets and QA cards: all, completed, and archived before completion."""
+    """A Loop's Tickets and QA cards (``CardRepository.progress`` says which): all, completed,
+    and archived before completion."""
 
     total: int
     completed: int
@@ -232,8 +233,9 @@ class CardRepository(Protocol):
         ...
 
     def progress(self, loop_id: str | None) -> dict[str, TicketProgress]:
-        """Ticket and QA cards per Loop id (every Loop when ``loop_id`` is None); a Loop without
-        one is absent."""
+        """Ticket and QA cards per Loop id (every Loop when ``loop_id`` is None), and in a Loop
+        without a plan (``current_plan_id`` NULL) its manual cards with them, since those are its
+        Tickets; a Loop with a plan counts no manual card. A Loop without any is absent."""
         ...
 
     def labels(self, card_ids: Sequence[str]) -> dict[str, list[LabelsRow]]:

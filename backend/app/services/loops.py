@@ -76,6 +76,7 @@ from .loops_stage import (
     latest_approvals,
     roadmap_approved,
     stale_reasons,
+    without_plan,
 )
 from .loops_views import (
     LoopEntry,
@@ -210,7 +211,7 @@ class LoopService:
             return {
                 **self.plans.readiness(repos, loop),
                 "unplanned": unplanned_tickets(repos, loop),
-                "open_delivery": open_delivery(repos, loop.id),
+                "open_delivery": open_delivery(repos, loop),
             }
 
     # --- writes ----------------------------------------------------------------------------------
@@ -503,4 +504,5 @@ __all__ = [
     "roadmap_approved",
     "stale_reasons",
     "ticket_loop",
+    "without_plan",
 ]

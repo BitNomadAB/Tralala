@@ -1729,9 +1729,14 @@ class FakeCardRepository:
 
     def progress(self, loop_id: str | None) -> dict[str, TicketProgress]:
         loops = _loops_of(self._state, loop_id)
+        # kind = 'manual' AND loop_id IN (SELECT id FROM loops WHERE current_plan_id IS NULL)
+        planless = {row.id for row in self._state.loops.values() if row.current_plan_id is None}
         found: dict[str, TicketProgress] = {}
         for card in self._state.cards.values():
-            if card.loop_id not in loops or card.kind not in {"ticket", "qa"}:
+            counted = card.kind in {"ticket", "qa"} or (
+                card.kind == "manual" and card.loop_id in planless
+            )
+            if card.loop_id not in loops or not counted:
                 continue
             before = found.get(
                 card.loop_id, TicketProgress(total=0, completed=0, archived_incomplete=0)

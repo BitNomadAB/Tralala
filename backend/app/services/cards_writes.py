@@ -283,17 +283,17 @@ def insert_card(
         )
     card_id = new_id()
     timestamp = now()
-    # Work added to a Loop that executes a plan is outside it: keyed so a person can follow it.
-    key = None
-    if loop.current_plan_id:
-        sequence = next_unplanned_sequence(
-            loop.key, [row.ticket_key for row in repos.cards.manual(loop.id)]
-        )
-        key = format_unplanned_key(loop.key, sequence)
+    # Work added by hand is keyed so a person can refer to it: outside the plan in a Loop that
+    # executes one, the Loop's own work in a Loop without one. The number follows the highest of
+    # the Loop's manual cards, archived ones included (none is ever deleted), so it is never used
+    # again; a card added before such work got keys keeps none.
+    sequence = next_unplanned_sequence(
+        loop.key, [row.ticket_key for row in repos.cards.manual(loop.id)]
+    )
+    key = format_unplanned_key(loop.key, sequence)
     face = ""
     if payload.face_given():
-        label = key or f'"{payload.title}"'
-        face = checked_face(label, payload.summary, _given_face(payload, make_face()))
+        face = checked_face(key, payload.summary, _given_face(payload, make_face()))
     repos.cards.add(
         CardsRow(
             id=card_id,

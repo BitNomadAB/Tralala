@@ -15,6 +15,9 @@ Beside the rows, ``unreported`` names the Tickets on the board the calling key t
 reported on since (``CardService.unreported``), whatever the stage asked for, and ``next_step`` then
 asks for those reports first; it is empty for a person.
 
+A draft is offered both paths: a plan, or a first Ticket that starts the Loop without one. A Loop
+without a plan whose Tickets are all done waits for the person who closes it in one decision.
+
 The handler is public and typed on the attributes of the composition root it uses, so a unit test
 runs it with the real services on the typed fakes. Its catalogue entry is built here too
 (``loop_tools``) and placed by ``agent_tools.tool_catalog``.
@@ -80,8 +83,9 @@ class TicketCounts:
 
 
 def ticket_counts(readiness: LoopReadiness) -> TicketCounts:
-    """The planned Tickets by state, plus the ones added outside the plan (archived ones left
-    out), which only their own wait can hold up."""
+    """The planned Tickets by state, plus the ones added by hand (outside the plan, or every
+    Ticket of a Loop without one; archived ones left out), which only their own wait can hold
+    up."""
     items = readiness["items"]
     unplanned = [ticket for ticket in readiness["unplanned"] if ticket["archived_at"] is None]
     states = [item["state"] for item in items] + [ticket["state"] for ticket in unplanned]
@@ -125,11 +129,17 @@ def next_step(
     if stage in _FINISHED:
         return f"Nothing: the Loop is {stage} and read-only.", "nobody"
     if stage == "draft":
+        # A draft takes either path: a plan, or its first Ticket starts it without one.
         if states["info"] == "empty":
-            return "Write the Loop's Info: what should change and why.", "person"
+            return (
+                "Write the Loop's Info for the planned path, or add a Ticket (create_ticket) for "
+                "a small change without a plan.",
+                "person",
+            )
         return (
             "Ask for the analysis (run_analysis) or hand one in, written to a board agent's "
-            "instructions (read_instructions, then write_analysis).",
+            "instructions (read_instructions, then write_analysis); or add a Ticket "
+            "(create_ticket) for a small change without a plan.",
             "agent",
         )
     if stage == "analysis_review":
@@ -163,6 +173,9 @@ def next_step(
     if counts.blocked:
         blocked = _tickets(counts.blocked, "waits", "wait")
         return f"{blocked} for earlier work or a third party.", "anyone"
+    if entry["without_plan"]:
+        # Accepting the work of a Loop without a plan closes it: there is no QA to follow.
+        return "Every Ticket is done: a person closes the Loop with one decision; no QA.", "person"
     return "Every Ticket is done: a person accepts the implementation.", "person"
 
 
@@ -192,6 +205,7 @@ def loop_row(entry: LoopEntry, readiness: LoopReadiness, columns: list[ListEntry
         "name": entry["name"],
         "goal": _goal(entry["goal"]),
         "stage": entry["stage"],
+        "without_plan": entry["without_plan"],
         "next": sentence,
         "waiting_on": waiting_on,
         "execution_allowed": readiness["execution_allowed"],
@@ -256,7 +270,8 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                 "anyone or nobody), its Tickets by state (ready, needs_input, blocked, not_done, "
                 "completed, total, needs_person) and by column, and each document's state. Open "
                 "Loops unless include_completed is true. unreported names the Tickets on the "
-                "board this key took and has not reported on yet."
+                "board this key took and has not reported on yet. without_plan is true for a "
+                "Loop that runs its Tickets without a plan, which a person closes in one decision."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(

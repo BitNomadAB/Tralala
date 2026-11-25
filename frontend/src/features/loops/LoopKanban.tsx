@@ -27,7 +27,8 @@ import { useKanbanMoves } from "./useKanbanMoves";
  * The Loop's columns with drag and drop: a card moves between columns optimistically, a column moves
  * by position. The same moves are in the card's and the column's menus, for a single pointer or a
  * keyboard without dragging (WCAG 2.5.7). Archiving a column offers Undo (`useKanbanMoves`).
- * `children` is the slot after the last column ("Add column").
+ * `children` is the slot after the last column ("Add column"). In a Loop without a plan
+ * (`withoutPlan`) the cards carry no Unplanned mark: the Loop itself is marked.
  */
 export function LoopKanban({
   boardId,
@@ -37,6 +38,7 @@ export function LoopKanban({
   matchingIds,
   emptyText = "Drop cards here",
   readOnly,
+  withoutPlan = false,
   onOpenCard,
   onListsChanged,
   onCardsChanged,
@@ -50,6 +52,8 @@ export function LoopKanban({
   /** What a column without cards says (that no Ticket matches, while the filters are set). */
   emptyText?: string;
   readOnly: boolean;
+  /** The Loop runs without a plan (`Loop.without_plan`). */
+  withoutPlan?: boolean | undefined;
   onOpenCard: (cardId: string) => void;
   onListsChanged: () => void;
   onCardsChanged: () => void;
@@ -175,6 +179,7 @@ export function LoopKanban({
                   cards={cards}
                   emptyText={emptyText}
                   readOnly={readOnly}
+                  withoutPlan={withoutPlan}
                   moveItems={columnMoveItems(lists, list.id, readOnly, (to) => {
                     moves.moveColumn(list.id, to, { announce: true, focus: "menu" });
                   })}
@@ -207,7 +212,7 @@ export function LoopKanban({
           {children}
         </div>
         <DragOverlay dropAnimation={null}>
-          {activeCard ? <TicketCard card={activeCard} overlay /> : null}
+          {activeCard ? <TicketCard card={activeCard} overlay withoutPlan={withoutPlan} /> : null}
         </DragOverlay>
       </DndContext>
     </div>

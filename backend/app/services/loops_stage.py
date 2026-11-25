@@ -2,8 +2,9 @@
 
 Pure functions over typed rows: which revision of each document kind is current and which is
 approved, which decision of each review scope still counts, why a document no longer matches its
-inputs, the stage that follows from them, and a document's state as the API returns it. ``loops``
-re-exports every name here, so callers keep importing them from there.
+inputs, the stage that follows from them (and from a Loop's Tickets when it has no plan), whether a
+Loop runs without a plan, and a document's state as the API returns it. ``loops`` re-exports every
+name here, so callers keep importing them from there.
 """
 
 from __future__ import annotations
@@ -23,6 +24,9 @@ EXECUTION_STAGES = ("ready", "in_progress", "awaiting_qa")
 QA_OPEN_STATUSES = ("pending", "instructions_ready", "in_progress")
 ANALYSIS_KINDS = ("info", "analysis_ai", "analysis")
 ROADMAP_KINDS = ("info", "analysis_ai", "analysis", "roadmap_ai", "roadmap")
+# A current revision of any of these puts a Loop on the planned path; Info alone does not.
+_PLANNED_PATH_KINDS = ("analysis_ai", "analysis", "roadmap_ai", "roadmap")
+_WITHOUT_PLAN_STAGES = frozenset({"ready", "in_progress", "completed"})
 
 
 # --- the documents, approvals and stage of a Loop ------------------------------------------------
@@ -181,8 +185,16 @@ def compute_stage(
     *,
     has_active_plan: bool,
     tickets_done: int,
+    manual_tickets: int,
+    manual_done: int,
 ) -> str:
-    """The stage the Loop is in. Completion and cancellation are recorded, never computed."""
+    """The stage the Loop is in. Completion and cancellation are recorded, never computed.
+
+    A Loop without a plan that holds Tickets (``manual_tickets``: its manual cards that are not
+    archived, ``manual_done`` of them completed) is under way while no analysis or RoadMap has a
+    current revision: ``ready``, then ``in_progress`` once one of them is done. Info does not
+    count, and a written analysis or RoadMap puts the Loop on the planned path as before.
+    """
     if loop.completed_at is not None:
         return "completed"
     if loop.cancelled_at is not None:
@@ -196,6 +208,13 @@ def compute_stage(
         if any_stale or not roadmap_approved(documents, approvals, stale):
             return "replanning"
         return "in_progress" if tickets_done else "ready"
+    if not loop.implementation_approval_id and all(
+        documents[kind].current is None for kind in _PLANNED_PATH_KINDS
+    ):
+        if manual_done > 0:
+            return "in_progress"
+        if manual_tickets > 0:
+            return "ready"
     if analysis_approved(documents, approvals, stale):
         return "planning"
     if documents["analysis"].current is not None:
@@ -203,6 +222,12 @@ def compute_stage(
     if documents["roadmap"].current is not None:
         return "roadmap_review"
     return "draft"
+
+
+def without_plan(loop: LoopsRow) -> bool:
+    """Whether the Loop runs its Tickets without a plan: it has none and its stage is ``ready``,
+    ``in_progress`` or ``completed`` (the stage ``compute_stage`` gives such a Loop)."""
+    return loop.current_plan_id is None and loop.stage in _WITHOUT_PLAN_STAGES
 
 
 # --- a document's state --------------------------------------------------------------------------

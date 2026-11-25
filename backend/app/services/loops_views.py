@@ -31,6 +31,7 @@ from .loops_stage import (
     document_state,
     latest_approvals,
     stale_reasons,
+    without_plan,
 )
 
 # --- the Loop's JSON -----------------------------------------------------------------------------
@@ -93,6 +94,7 @@ class LoopEntry(TypedDict):
     archived_at: str | None
     cancelled_at: str | None
     completed_at: str | None
+    without_plan: bool
     board_id: str
     documents: dict[str, DocumentState]
     plan: PlanSummary | None
@@ -142,8 +144,15 @@ def progress_entry(progress: TicketProgress | None) -> Progress:
 
 
 def loop_warnings(
-    stage: str, documents: DocumentSlots, approvals: Approvals, stale: StaleReasons
+    stage: str,
+    documents: DocumentSlots,
+    approvals: Approvals,
+    stale: StaleReasons,
+    *,
+    without_plan: bool = False,
 ) -> list[LoopWarning]:
+    """What a Loop's JSON warns about. A Loop that runs its Tickets without a plan
+    (``loops_stage.without_plan``) has no analysis to approve, so it is not told it lacks one."""
     warnings: list[LoopWarning] = []
     for kind in DOCUMENT_KINDS:
         reasons = stale.get(kind) or []
@@ -170,7 +179,7 @@ def loop_warnings(
                 "message": "QA is outstanding; the Loop cannot be completed yet",
             }
         )
-    if "analysis" not in approvals:
+    if "analysis" not in approvals and not without_plan:
         warnings.append({"code": "approval_required", "message": "Analysis has not been approved"})
     return warnings
 
@@ -189,6 +198,7 @@ class LoopFacts:
 def loop_entry(board_id: str, loop: LoopsRow, facts: LoopFacts) -> LoopEntry:
     documents = facts.documents or document_slots(())
     stale = stale_reasons(documents, facts.approvals)
+    planless = without_plan(loop)
     return {
         "id": loop.id,
         "name": loop.name,
@@ -213,6 +223,7 @@ def loop_entry(board_id: str, loop: LoopsRow, facts: LoopFacts) -> LoopEntry:
         "archived_at": loop.archived_at,
         "cancelled_at": loop.cancelled_at,
         "completed_at": loop.completed_at,
+        "without_plan": planless,
         "board_id": board_id,
         "documents": {
             kind: document_state(kind, documents, facts.approvals, stale)
@@ -221,7 +232,9 @@ def loop_entry(board_id: str, loop: LoopsRow, facts: LoopFacts) -> LoopEntry:
         "plan": facts.plan,
         "qa": facts.qa,
         "progress": facts.progress,
-        "warnings": loop_warnings(loop.stage, documents, facts.approvals, stale),
+        "warnings": loop_warnings(
+            loop.stage, documents, facts.approvals, stale, without_plan=planless
+        ),
     }
 
 
