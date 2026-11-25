@@ -82,7 +82,7 @@ A client connects only if it speaks MCP 2026-07-28. That revision has no handsha
 states its version in its body (`params._meta`) and in the `MCP-Protocol-Version` header, and a
 client may first ask `server/discover` what the server offers. A client of an older revision opens
 with an `initialize` handshake instead. Tralala answers that with HTTP `400` and this error, whatever
-the key, and has no setting that brings the older revision back:
+scopes the key holds, and has no setting that brings the older revision back:
 
 ```json
 {
