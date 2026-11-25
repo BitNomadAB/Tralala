@@ -225,6 +225,14 @@ third party*) and why (required, at most 500 characters). A worker marks one wit
 can neither clear nor replace a wait (`403 human_action_required`), and **Mark complete** stays off
 while one is open ("Clear the wait first"). The Kanban card shows *Needs input* or *Blocked*.
 
+A Ticket the plan blocks lists what holds it up under its state, **Held up by**: every open Ticket
+that has to be done first, the ones behind those included, each with a link that opens it and the
+button for what it needs now. That is **Confirm** for a person's task, **Complete** for any other,
+**Clear wait** while it waits, and **Restore** for an archived one. A Ticket in the list that waits
+for earlier work itself keeps its button off, with the reason beside it, below the ones that can be
+pressed, so the list is worked from the top. The buttons are the other Ticket's own actions: the
+plan's order and every other rule hold as they do in that Ticket's view.
+
 ## A Ticket's face for people
 
 Every Ticket a RoadMap plans ends with its **face**: what a person reads of it by default. It is a
