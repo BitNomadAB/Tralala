@@ -110,6 +110,7 @@ export interface AskedResult {
   requestState?: string;
   structuredContent?: ToolAnswer;
   isError?: boolean;
+  content?: { text: string }[];
 }
 
 /** What a client of 2026-07-28 brings to a tool that may ask: its modes, answers and state. */
@@ -145,13 +146,17 @@ export async function mcpAsk(
   options: AskOptions = {},
 ): Promise<AskedResult> {
   const params = askParams(name, args, options);
-  return (await rpcResult(
+  const result = (await rpcResult(
     page,
     token,
     "tools/call",
     params,
     askCapabilities(options),
   )) as AskedResult;
+  // A tool that failed says why in its content; the step that called it names that, not a missing
+  // field further on.
+  if (result.isError) throw new Error(`${name} failed: ${result.content?.[0]?.text ?? ""}`);
+  return result;
 }
 
 /** Calls a tool that may ask and must be refused at the protocol level; the JSON-RPC error. */

@@ -31,6 +31,7 @@ from app.services.agent_tools import (
     ask_person_with_input,
     tool_catalog,
 )
+from app.services.agent_tools_decide import NEVER_ANSWER
 from app.services.agent_tools_decisions import CALL_AGAIN, STILL_OPEN, ask_message
 from app.services.auth import AuthService
 from app.services.cards import CardService
@@ -796,7 +797,7 @@ def test_the_catalogue_entry_reads_and_asks() -> None:
     assert tool.asks is ask_person_with_input
     assert tool.input_schema["required"] == ["board_id", "loop_id", "decision"]
     assert set(tool.input_schema["properties"]) == {"board_id", "loop_id", "decision", "card_id"}
-    assert "you never fill it in" in tool.description
+    assert NEVER_ANSWER in tool.description
     others = [entry.name for entry in tool_catalog().values() if entry.asks is not None]
     assert others == ["ask_person"]
 

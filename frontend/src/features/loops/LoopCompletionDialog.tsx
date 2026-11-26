@@ -4,9 +4,10 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { HeldButton } from "@/components/ui/held-button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/useToast";
+import { decidedByText } from "@/features/history/askedThrough";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
-import { keys, useReadiness } from "@/lib/queries";
+import { keys, useLoopDocuments, useReadiness } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
 import { LoopCloseDialog, type CompletionDialogProps } from "./LoopCloseDialog";
 import { OpenDelivery } from "./OpenDelivery";
@@ -50,6 +51,8 @@ function PlannedCompletionDialog({
   const [note, setNote] = useState("");
   // Delivery Tickets that are not done hold the acceptance up until the person accepts without them.
   const unfinished = useReadiness(boardId, loop.id).data?.open_delivery ?? [];
+  // Who accepted the implementation and how, once someone has.
+  const accepted = decidedByText(useLoopDocuments(boardId, loop.id).data?.approvals.implementation);
   const [acceptUnfinished, setAcceptUnfinished] = useState(false);
   const heldByUnfinished = isHuman && unfinished.length > 0 && !acceptUnfinished;
   const unfinishedId = useId();
@@ -106,6 +109,7 @@ function PlannedCompletionDialog({
           <div className="flex flex-col gap-4">
             <section className="flex flex-col gap-2">
               <h2 className="text-sm font-medium">1. Accept the implementation</h2>
+              {accepted ? <p className="text-xs text-[var(--foreground)]">{accepted}</p> : null}
               <OpenDelivery
                 tickets={unfinished}
                 accepted={acceptUnfinished}

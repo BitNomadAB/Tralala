@@ -44,6 +44,7 @@ from ..services.agent_tools import (
     run_tool_with_input,
     tool_catalog,
 )
+from ..services.agent_tools_decide import NEVER_ANSWER
 from ..services.agent_tools_decisions import ASK_PERSON_RULE
 from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
 from ..services.loop_notes import NOTE_MAX_CHARACTERS
@@ -409,8 +410,10 @@ def render_bootstrap(settings: Settings) -> str:
         "`editor_decisions` is on (`whoami` says so) and the key holds `loops:decide`, and only",
         "for the analysis, the RoadMap, a wait, a person's task and the implementation of a Loop",
         "with a plan; QA, a reset and closing a Loop keep the link. The form is a flat object",
-        "with the choice `decision` and an optional `feedback`; the person answers it in their",
-        "editor and an agent never fills it in. The repeated call with `action: accept` and that",
+        "with the choice `decision` and an optional `feedback`, for the person to answer in",
+        "their editor. Tralala cannot tell who sent the answer, so the rule is yours to keep:",
+        NEVER_ANSWER,
+        "The repeated call with `action: accept` and that",
         "`content` takes the decision as the key's owner, checked again on that call, and",
         "answers `status: decided` with `taken_through`; a revision or a version no longer in",
         "force, or content that is not the form's, is asked again; a setting turned off, a right",

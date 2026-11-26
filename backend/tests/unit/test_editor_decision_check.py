@@ -32,6 +32,7 @@ from app.schemas.loops import (
     QaDecision,
     ScopeResetRequest,
 )
+from app.services.decision_requests import approval_marks
 from tests.unit import test_auth_service as accounts
 from tests.unit import test_loop_document_service as documents
 from tests.unit import test_loop_history_service as histories
@@ -248,3 +249,50 @@ def test_issuing_or_rotating_a_key_refuses_the_owners_context(
             registry.service.rotate_credential(owner, "t-1")
     refused(error)
     assert list(registry.state.credentials) == ["t-1"]
+
+
+# --- the marks the Loop page shows while the Loop is live -----------------------------------------
+
+
+def test_the_documents_view_marks_an_approval_taken_through_a_key() -> None:
+    w = documents.world()
+    documents.info(w)
+    documents.analysis(w)
+    request = ApprovalRequest(decision="approved", version=w.loop.version)
+    w.service.review(through_key(documents.HUMAN), BOARD_ID, documents.LOOP, "analysis", request)
+    shown = w.service.documents(BOARD_ID, documents.LOOP)["approvals"]["analysis"]
+    assert shown.get("taken_through") == TAKEN
+    assert "asked_through" not in shown
+    # The binding to the revisions is what it always was.
+    assert set(json.loads(shown["revisions_json"])) == {"info", "analysis_ai", "analysis"}
+
+
+def test_a_persons_own_approval_carries_no_mark_in_the_documents_view() -> None:
+    w = documents.world()
+    documents.approved_analysis(w)
+    shown = w.service.documents(BOARD_ID, documents.LOOP)["approvals"]["analysis"]
+    assert "taken_through" not in shown and "asked_through" not in shown
+
+
+def test_a_roadmap_approved_through_a_key_publishes_its_plan_marked_the_same() -> None:
+    w = documents.world()
+    documents.approved_analysis(w)
+    documents.roadmap(w)
+    request = ApprovalRequest(decision="approved", version=w.loop.version)
+    w.service.review(through_key(documents.HUMAN), BOARD_ID, documents.LOOP, "roadmap", request)
+    (published,) = [row for row in w.state.activity if row.action == "loop.plan_published"]
+    assert json.loads(published.changes_json or "{}")["taken_through"] == TAKEN
+    shown = w.service.documents(BOARD_ID, documents.LOOP)["approvals"]["roadmap"]
+    assert shown.get("taken_through") == TAKEN
+
+
+def test_the_implementations_marks_are_read_from_its_decision_row(tmp_path: Path) -> None:
+    service, state, _ = qa.make(tmp_path)
+    service.accept_implementation(
+        through_key(qa.ADA), BOARD_ID, qa.LOOP, ImplementationAcceptance(version=1)
+    )
+    (approval,) = [row for row in state.approvals if row.scope == "implementation"]
+    with qa.store_of(service).reader(BOARD_ID) as repos:
+        assert approval_marks(repos, approval) == {"taken_through": TAKEN}
+        unreadable = approval.__replace__(revisions_json="not json")
+        assert approval_marks(repos, unreadable) == {}

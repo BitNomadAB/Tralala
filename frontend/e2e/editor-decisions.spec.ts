@@ -34,6 +34,33 @@ function formOf(asked: AskedResult): Record<string, unknown> {
   return question?.params ?? {};
 }
 
+/**
+ * Answers the form with `choice`. A board agent left by another journey may be writing the
+ * analysis for people when the answer arrives; the review refuses the approval for as long, and the
+ * tool says so (`not_taken`, `generation_in_progress`) and takes nothing. Then the key asks again
+ * and the answer goes again, as a coding session would, until it is taken.
+ */
+async function answerUntilTaken(
+  page: Page,
+  token: string,
+  args: Record<string, unknown>,
+  state: string,
+  choice: string,
+): Promise<AskedResult> {
+  let current = state;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const answer = await mcpAsk(page, token, "ask_person", args, answering(current, choice));
+    const status = answer.structuredContent?.status;
+    if (status !== "not_taken") return answer;
+    expect(answer.structuredContent?.code).toBe("generation_in_progress");
+    await page.waitForTimeout(1000);
+    const again = await mcpAsk(page, token, "ask_person", args, { elicitation: FORM_AND_URL });
+    formOf(again);
+    current = again.requestState ?? "";
+  }
+  throw new Error("the person's answer was never taken");
+}
+
 /** A key with the right, created under Settings as a person does; returns its token. */
 async function keyWithTheRight(page: Page, name: string): Promise<string> {
   await page.getByRole("link", { name: "Settings" }).click();
@@ -110,7 +137,7 @@ test.describe("deciding in the editor", () => {
     });
 
     await test.step("the answer approve is the person's approval, through the key", async () => {
-      const decided = await mcpAsk(page, token, "ask_person", args, answering(state, "approve"));
+      const decided = await answerUntilTaken(page, token, args, state, "approve");
       expect(decided.resultType).toBe("complete");
       expect(decided.structuredContent).toMatchObject({
         status: "decided",

@@ -39,6 +39,7 @@ from ..repositories.board import BoardRepositories
 from ..schemas.loops import PlanPayload
 from .activity import activity_entry
 from .cards_writes import known_label_ids
+from .decision_requests import with_asked_through
 from .loop_identifiers import format_ticket_key, phase_prefix
 from .loop_plans_canonical import (
     CanonicalPhase,
@@ -328,7 +329,11 @@ class LoopPlanService(PlanViews):
         if removed or kept:
             changes["removed"] = [entry["key"] for entry in removed]
             changes["kept"] = [entry["key"] for entry in kept]
-        self._log(repos, actor, "loop.plan_published", loop.id, changes)
+        # A RoadMap approved in the editor through a key publishes its plan the same way, and
+        # the row says so as the approval's does.
+        self._log(
+            repos, actor, "loop.plan_published", loop.id, with_asked_through(changes, [], actor)
+        )
         return {"plan_id": plan_id, "tickets": created, "removed": removed, "kept": kept}
 
     def withdraw(self, repos: BoardRepositories, loop_id: str) -> Withdrawal:

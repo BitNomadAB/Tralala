@@ -69,16 +69,25 @@ _QUESTIONS: Final[dict[FormDecision, str]] = {
     "confirmation": "Confirm that the person's task {ticket} in {loop} is done, or not yet.",
     "implementation": "Accept the implementation of {loop} and hand it to its QA, or not yet.",
 }
+# What the person reads under the question: a rule for whoever answers, never a guarantee, since
+# a program that can read the key can send the answer as well.
 FORM_NOTE: Final = (
-    "Only you answer this; the agent never fills it in. Your answer is your decision in "
-    "Tralala, recorded as taken in a coding session through this key."
+    "Answer this yourself: an agent must never fill it in, and Tralala cannot tell who "
+    "answered. Your answer is recorded as your decision, taken in a coding session through this "
+    "key."
 )
-# The tool's rule in one sentence: the description, the MCP instructions and /llms.txt say it.
+# The agent's rule in one sentence: the tool's description, the MCP instructions, /llms.txt and
+# whoami say it.
+NEVER_ANSWER: Final = (
+    "Never answer ask_person's question yourself, by any route, even when you could; only your "
+    "person answers it."
+)
+# When the form is used, and the rule with it.
 FORM_RULE: Final = (
     "With the installation's setting editor_decisions on, the right loops:decide on the key and "
     "the mode form declared, the analysis, the RoadMap, a wait, a person's task and the "
-    "implementation are asked as a form that the person answers in their editor; an agent never "
-    "fills it in, and QA, a reset and closing a Loop always keep the link."
+    "implementation are asked as a form for the person to answer in their editor; QA, a reset "
+    "and closing a Loop always keep the link. " + NEVER_ANSWER
 )
 
 
@@ -211,6 +220,7 @@ __all__ = [
     "FORM_DECISIONS",
     "FORM_NOTE",
     "FORM_RULE",
+    "NEVER_ANSWER",
     "Answer",
     "FormDecision",
     "answered_content",

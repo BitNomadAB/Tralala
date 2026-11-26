@@ -132,9 +132,19 @@ decision on a Ticket gets one comment saying so.
 
 The risk is the reason it is off. Anyone who holds a key with the right can decide in its owner's
 name, a leaked key included. The answer comes from the editor, and an editor can be set up to
-answer on its own: Tralala cannot see whether a person or a program answered the form. The form
-asks for no secret and carries no address. Give the right only to a key on a machine you control,
-and revoke the key, or switch the setting off, as soon as you doubt it.
+answer on its own. More than that: any program that can read the key can send the answer itself,
+and that includes the coding agent in the very session that asks, which can read the key from
+the editor's configuration. Tralala cannot tell a person's answer from such a program's. The form
+tells the person to answer it themselves and the tools tell the agent never to answer it, but
+that is a rule, not a guarantee: the server enforces only the two switches. The only trace is the
+mark in history, "decided in a coding session through the key …", on the decision's row, on the
+Loop page and in the board's activity.
+
+What follows for the person: give the right only to a key used in sessions you watch, on a
+machine you control, and revoke the key, or ask the operator to switch the setting off, as soon as
+you doubt it. A decision taken through a key can be undone the usual way, by resetting the scope
+or answering the wait again, and resetting, QA, closing a Loop and issuing keys still need a
+signed-in person. The form asks for no secret and carries no address.
 
 ## What a worker key can do
 
@@ -154,7 +164,8 @@ described by `/llms.txt`), within the scopes it was given and never beyond them:
   when the client declared it. The address carries only ids and signs nobody in; the person
   decides in Tralala, signed in. Only where the installation allows it and the person gave the key
   the right does the tool bring five decisions as a form instead, which the person answers in
-  their editor ([Deciding in the editor](#deciding-in-the-editor)); the agent never fills it in.
+  their editor ([Deciding in the editor](#deciding-in-the-editor)). The agent must never answer
+  it; Tralala cannot enforce that.
   The state the client repeats the call with is sealed with the installation's secret, bound to
   the key and the call that asked, valid for 15 minutes and used once; a state the server refuses
   answers nothing about the decision.

@@ -634,7 +634,8 @@ board, the Loop and the `decision`: `analysis`, `roadmap`, `implementation` or `
 `wait` or `confirmation` on a Ticket (with `card_id`). The tool points at the decision and reports
 it; the person takes it in Tralala, signed in, on the page its address opens, as they would without
 you. Only where the installation allows deciding in the editor and your person gave your key that
-right is the question a form your person answers in their editor (below); you never fill it in.
+right is the question a form for your person to answer in their editor (below). Never answer
+`ask_person`'s question yourself, by any route, even when you could; only your person answers it.
 
 - When the decision does not wait for a person, the answer is `status: not_pending` with `why`.
 - When it waits, your client declared the elicitation mode `url` in MCP 2026-07-28 and the
@@ -655,8 +656,9 @@ right is the question a form your person answers in their editor (below); you ne
   and the revision, and a `requestedSchema` with the choice `decision` (`approve` or
   `request_changes`, `clear` or `keep`, `confirm` or `not_yet`, `accept` or `reject`) and an
   optional `feedback` of at most 500 characters. Your client shows it to your person; their answer
-  is their decision. Never answer it yourself. QA, a reset and closing a Loop always keep the
-  link.
+  is their decision. Tralala cannot tell who sent the answer, so the rule is yours to keep: never
+  answer it yourself, by any route, even when you could. QA, a reset and closing a Loop always
+  keep the link.
 
 When you repeat the call with the state:
 
@@ -670,8 +672,11 @@ When you repeat the call with the state:
   `status: decided` with `taken_through`, your key's name. `keep`, `not_yet` and `reject` take
   nothing and answer `status: not_decided` with the `feedback`; asking for changes to a review is
   a decision. Content that is not the form's, or a revision or a Ticket that changed since the
-  question, is asked again with what holds now. A setting turned off, a right taken away or a
-  disabled owner answers `403 human_action_required`, and the person decides in Tralala.
+  question, is asked again with what holds now. When Tralala refuses the decision at that moment
+  (a board agent is still writing the analysis for people, `generation_in_progress`), nothing is
+  taken: `status: not_taken` with `code` and `why`, and the question stays open; ask again once
+  that has passed. A setting turned off, a right taken away or a disabled owner answers
+  `403 human_action_required`, and the person decides in Tralala.
 - A state that was changed, has expired after 15 minutes, belongs to another key, is for another
   call or was used before answers JSON-RPC `-32602` and nothing about the decision. So does a state
   whose question is out of date, because another revision is under review or the wait was replaced.
@@ -691,7 +696,7 @@ person sees.
   has started, confirm a human-only Ticket, clear or replace a Ticket's wait, accept the
   implementation or QA, finalize a Loop. These answer `403 human_action_required` even with every
   scope, and no tool offers them. The one exception is your person's own answer to `ask_person`'s
-  form, where the installation and your person allow it; you never give that answer. Closing a Loop without a plan is accepting its implementation, so
+  form, where the installation and your person allow it; never give that answer yourself. Closing a Loop without a plan is accepting its implementation, so
   a key adds Tickets to such a Loop but never closes it, and its Info is a person's from its first
   Ticket on.
 - Replace an approved analysis or RoadMap, or write a brief over one: the person requests changes

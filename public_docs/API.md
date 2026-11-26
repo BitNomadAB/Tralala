@@ -1266,14 +1266,15 @@ Deciding in the editor is the opt-in mode `form`. It is used only when the reque
 form), the installation's setting `TRALALA_EDITOR_DECISIONS` is on and the key holds
 `loops:decide`; and only for `analysis`, `roadmap`, `wait`, `confirmation` and the
 `implementation` of a Loop with a plan. QA, a reset and closing a Loop keep the link. The request
-is a flat form with no address in it, and the person answers it in their editor, never the agent:
+is a flat form with no address in it, for the person to answer in their editor. An agent must never
+answer it itself, by any route; Tralala cannot tell who sent the answer:
 
 ```json
 {
   "method": "elicitation/create",
   "params": {
     "mode": "form",
-    "message": "Approve revision 3 of the analysis of BE007, or ask for changes. Only you answer this; the agent never fills it in. Your answer is your decision in Tralala, recorded as taken in a coding session through this key.",
+    "message": "Approve revision 3 of the analysis of BE007, or ask for changes. Answer this yourself: an agent must never fill it in, and Tralala cannot tell who answered. Your answer is recorded as your decision, taken in a coding session through this key.",
     "requestedSchema": {
       "type": "object",
       "properties": {
@@ -1307,10 +1308,15 @@ the setting, the right on the key and the owner's account are checked again on t
 `owner_disabled` otherwise), the revisions, the Ticket's version or the Loop's version the
 question was about must still be in force, and content that is not the form's is asked again
 (`input_required` with what holds now). The answer is `status: decided` with `taken_through`, the
-key's name; `keep`, `not_yet` and `reject` take nothing (`status: not_decided`). The decision's
+key's name; `keep`, `not_yet` and `reject` take nothing (`status: not_decided`). A decision the
+service refuses at that moment with a `409` (a board agent writing the brief for people,
+`generation_in_progress`) is not taken either: `status: not_taken` with its `code` and `why`, and
+the question stays open. The decision's
 history row carries `taken_through` (`{credential_id, key_name, via: "form"}`) beside
-`asked_through`, and so does the implementation's approval row; a decision on a Ticket gets one
-comment saying it was decided in a coding session through that key.
+`asked_through`, and so does the implementation's approval row and the `loop.plan_published` row
+of a RoadMap approved so; a decision on a Ticket gets one comment saying it was decided in a coding
+session through that key. `GET …/documents` gives each current approval the same `taken_through`
+and `asked_through`, read from those rows when it answers.
 
 The flow a person and their worker use to plan is `create_loop` → `write_info` → `write_analysis`
 (or `run_analysis`) → the person approves the analysis → `write_roadmap` (or `run_roadmap`) → the

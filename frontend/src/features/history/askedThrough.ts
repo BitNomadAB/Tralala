@@ -57,6 +57,27 @@ export function decisionTrail(changes: Record<string, unknown>): string | null {
 }
 
 /**
+ * Who took a Loop's decision and how, for the Loop page while the Loop is live: "Approved by Ada",
+ * "Changes requested by Ada" or "Accepted by Ada" (the implementation), followed by the trail
+ * (`decisionTrail`) the documents route reads from the board's rows. Null when there is none.
+ */
+export function decidedByText(approval: Record<string, unknown> | null | undefined): string | null {
+  if (!approval) return null;
+  const name =
+    typeof approval.reviewer_name === "string" && approval.reviewer_name !== ""
+      ? approval.reviewer_name
+      : "a person";
+  const what =
+    approval.scope === "implementation" || approval.scope === "qa"
+      ? "Accepted"
+      : approval.decision === "changes_requested"
+        ? "Changes requested"
+        : "Approved";
+  const trail = decisionTrail(approval);
+  return trail ? `${what} by ${name}, ${trail}` : `${what} by ${name}`;
+}
+
+/**
  * The decisions of a completed Loop that answered a question a coding session asked its person,
  * read from the record's snapshot: the history rows of the reviews, the Ticket decisions and a
  * rejected QA, and the decision rows of the implementation and an accepted QA, which carry the

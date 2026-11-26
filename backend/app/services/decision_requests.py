@@ -50,7 +50,7 @@ from pydantic import JsonValue
 
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..db.generated.board import ActivityLogRow, CommentsRow
+from ..db.generated.board import ActivityLogRow, CommentsRow, LoopApprovalsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.registry import RegistryUnitOfWork
 from .activity import activity_entry
@@ -204,6 +204,43 @@ def open_questions(
             "via": via if isinstance(via, str) else VIA_LINK,
         }
     return list(found.values())
+
+
+class DecisionMarks(TypedDict, total=False):
+    """How a decision was asked for and taken, as its history row records it: ``asked_through``
+    when it answered a coding session's question, ``taken_through`` when it was taken in the
+    editor through a key."""
+
+    asked_through: JsonValue
+    taken_through: JsonValue
+
+
+def decision_marks(changes: Mapping[str, JsonValue]) -> DecisionMarks:
+    """The two marks of a decision's changes, those it carries."""
+    marks: DecisionMarks = {}
+    if "asked_through" in changes:
+        marks["asked_through"] = changes["asked_through"]
+    if "taken_through" in changes:
+        marks["taken_through"] = changes["taken_through"]
+    return marks
+
+
+def approval_marks(repos: BoardRepositories, approval: LoopApprovalsRow) -> DecisionMarks:
+    """The marks of a Loop's decision, read from the board's own rows when it is shown: a review
+    of the analysis or the RoadMap from its history row (``loop.<scope>_reviewed`` naming the
+    approval), the implementation and QA from the decision row itself, which carries them. The
+    approval's binding to its revisions is never touched."""
+    if approval.scope in ("analysis", "roadmap"):
+        for row in _rows(repos, ("loop", approval.loop_id), f"loop.{approval.scope}_reviewed"):
+            changes = _changes(row)
+            if changes.get("approval_id") == approval.id:
+                return decision_marks(changes)
+        return {}
+    try:
+        stored: JsonValue = json.loads(approval.revisions_json or "{}")
+    except ValueError:
+        return {}
+    return decision_marks(stored) if isinstance(stored, dict) else {}
 
 
 def with_asked_through(
@@ -419,10 +456,13 @@ __all__ = [
     "VIA_FORM",
     "VIA_LINK",
     "AskedThrough",
+    "DecisionMarks",
     "DecisionRequestService",
     "TakenThrough",
     "add_answer_comment",
     "answer_comment",
+    "approval_marks",
+    "decision_marks",
     "keys_text",
     "last_decided",
     "open_questions",

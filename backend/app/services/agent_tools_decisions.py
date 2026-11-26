@@ -60,12 +60,13 @@ from pydantic import JsonValue
 
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..core.errors import ValidationFailure
+from ..core.errors import ApiError, ValidationFailure
 from ..core.identifiers import canonical_board_id
 from ..schemas.cards import TicketWaitClear
 from ..schemas.loops import ApprovalRequest, HumanConfirmation, ImplementationAcceptance
 from .agent_tools_decide import (
     FORM_RULE,
+    NEVER_ANSWER,
     FormDecision,
     answered_content,
     form_decision,
@@ -135,6 +136,10 @@ _FORM_MARKS: Final = ("mode", "version")
 CALL_AGAIN: Final = (
     "A person takes this decision in Tralala at decision_link; call ask_person again later to "
     "learn what they decided."
+)
+NOT_TAKEN: Final = (
+    "Your person's answer could not be taken now, for the reason in why; nothing was decided. "
+    "Ask again with ask_person when that has passed, or your person decides at decision_link."
 )
 STILL_OPEN: Final = (
     "The decision is still open in Tralala at decision_link; ask again only when your person "
@@ -598,7 +603,21 @@ def _form_retry(
             "decision_link": _link(services, request, situation),
             "next_step": STILL_OPEN,
         }
-    _take_in_form(services, person, request, situation, opened, (chosen, feedback))
+    try:
+        _take_in_form(services, person, request, situation, opened, (chosen, feedback))
+    except ApiError as refusal:
+        if refusal.status_code != 409:
+            raise
+        # The service refuses the decision at this moment (a board agent is writing the brief
+        # for people, another version came in): nothing is taken and the question stays open.
+        return {
+            "status": "not_taken",
+            **_about(request, situation),
+            "code": refusal.code,
+            "why": refusal.message,
+            "decision_link": _link(services, request, situation),
+            "next_step": NOT_TAKEN,
+        }
     found = services.decision_outcome.taken(
         request.board_id,
         situation.loop_id,
@@ -687,10 +706,11 @@ def decision_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                 "gets the question as input_required with the decision's address; any other gets "
                 "status waiting_for_person with decision_link. With the installation's setting "
                 "editor_decisions on, the right loops:decide on your key and the mode form "
-                "declared, the five decisions other than QA come as a form instead, which your "
-                "person answers in their editor; you never fill it in. Call again (with the "
-                "requestState and inputResponses when you were asked) to get status decided "
-                "with the outcome, who decided and when."
+                "declared, the five decisions other than QA come as a form instead, for your "
+                "person to answer in their editor. "
+                + NEVER_ANSWER
+                + " Call again (with the requestState and inputResponses when you were asked) to "
+                "get status decided with the outcome, who decided and when."
             ),
             scopes=("loops:read", "cards:read"),
             input_schema=object_schema(
@@ -717,6 +737,7 @@ __all__ = [
     "ASK_PERSON",
     "ASK_PERSON_RULE",
     "CALL_AGAIN",
+    "NOT_TAKEN",
     "REQUEST_KEY",
     "STILL_OPEN",
     "DecisionAsking",

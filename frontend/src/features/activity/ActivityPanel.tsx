@@ -3,8 +3,15 @@ import { History, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { decisionTrail } from "@/features/history/askedThrough";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+
+/** How a decision was taken and asked for, when it was taken through a key or answered a question. */
+function DecisionTrail({ changes }: { changes: Record<string, unknown> | undefined }) {
+  const trail = changes ? decisionTrail(changes) : null;
+  return trail ? <p className="mt-1 text-xs text-[var(--foreground)]">{trail}</p> : null;
+}
 
 /**
  * The board's latest activity, a panel beside the Loop's tabs (below them on a narrow screen), so
@@ -90,6 +97,7 @@ export function ActivityPanel({ boardId, onClose }: { boardId: string; onClose: 
                   {entry.entity_type} · {entry.entity_id.slice(0, 8)}
                   {entry.actor_id ? ` · actor ${entry.actor_id.slice(0, 8)}` : ""}
                 </p>
+                <DecisionTrail changes={entry.changes} />
               </li>
             ))}
           </ul>

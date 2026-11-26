@@ -414,7 +414,10 @@ open question:
 When the person answered a form in their editor (deciding in the editor, see
 [Approval boundaries](#approval-boundaries)), the row also says "decided in a coding session through
 the key Laptop", naming the one key that brought the answer, and the comment on a Ticket says the
-same. Every other key that asked is still named as having asked.
+same. While the Loop is live the same words stand in the board's **Activity** panel, under the
+analysis and the RoadMap on the Loop page ("Approved by Ada, decided in a coding session through
+the key Laptop"), and in the completion dialog for the implementation. Every other key that asked
+is still named as having asked.
 
 A question stops being open when a decision answers it, when the person declines or cancels it in
 the coding session's editor, or 30 minutes after its row; a key that is still asking then gets a

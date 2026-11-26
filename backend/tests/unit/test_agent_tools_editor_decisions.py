@@ -20,6 +20,7 @@ from typing import TypeIs
 import pytest
 from pydantic import JsonValue
 
+from app.api.mcp import INSTRUCTIONS, render_bootstrap
 from app.core.config import Settings
 from app.core.context import DECIDE_SCOPE, ActorContext
 from app.core.errors import Forbidden
@@ -30,8 +31,16 @@ from app.services.agent_tools import (
     ToolResult,
     ask_person,
     ask_person_with_input,
+    tool_catalog,
+    whoami,
 )
-from app.services.agent_tools_decide import FEEDBACK_MAX, FORM_NOTE, FormDecision, form_schema
+from app.services.agent_tools_decide import (
+    FEEDBACK_MAX,
+    FORM_NOTE,
+    NEVER_ANSWER,
+    FormDecision,
+    form_schema,
+)
 from app.services.decision_outcomes import AskedDecision
 from app.services.decision_requests import CLOSED, REQUESTED
 from tests.unit.fakes.board import BOARD_ID, phase_row, plan_row
@@ -41,6 +50,7 @@ from tests.unit.test_agent_tools_decisions import (
     FORM,
     KEY,
     LOOP,
+    NOW,
     PERSON,
     PERSON_NAME,
     SCOPES,
@@ -53,6 +63,8 @@ from tests.unit.test_agent_tools_decisions import (
     params,
     world_for,
 )
+from tests.unit.test_agent_tools_identity import identity_world, key_of, section
+from tests.unit.test_loop_document_service import human_run
 
 RIGHT = KEY.__replace__(scopes=SCOPES | {DECIDE_SCOPE})
 FIVE: tuple[FormDecision, ...] = ("analysis", "roadmap", "wait", "confirmation", "implementation")
@@ -216,7 +228,8 @@ def test_the_message_names_the_keys_and_the_revision_in_plain_english(
     w = deciding(settings, decision)
     found = params(asked(ask(w, decision)))
     assert found["message"] == f"{question} {FORM_NOTE}"
-    assert "the agent never fills it in" in FORM_NOTE
+    assert FORM_NOTE.startswith("Answer this yourself: an agent must never fill it in")
+    assert "Tralala cannot tell who answered" in FORM_NOTE
     text = json.dumps(found)
     for forbidden in ("http", "/boards/", LOOP, CARD, BOARD_ID, "cred-1"):
         assert forbidden not in text
@@ -474,3 +487,71 @@ def test_a_decision_someone_took_in_tralala_meanwhile_is_reported(settings: Sett
     reply = complete(answer_with(w, "wait", state, "clear"))
     assert reply["status"] == "not_pending"
     assert w.state.comments == {}
+
+
+def test_every_text_for_the_agent_states_the_rule_and_the_form_tells_the_person(
+    settings: Settings,
+) -> None:
+    """The server cannot tell who answered, so the texts state a rule, never a guarantee."""
+    assert NEVER_ANSWER == (
+        "Never answer ask_person's question yourself, by any route, even when you could; only "
+        "your person answers it."
+    )
+    assert NEVER_ANSWER in tool_catalog()["ask_person"].description
+    assert NEVER_ANSWER in INSTRUCTIONS
+    assert NEVER_ANSWER in " ".join(render_bootstrap(settings).split())
+    note = section(whoami(identity_world(settings), key_of("laptop"), {}), "editor_decisions")
+    assert NEVER_ANSWER in str(note["note"])
+    for text in (FORM_NOTE, INSTRUCTIONS, render_bootstrap(settings)):
+        assert "never fills it in" not in text
+
+
+# --- the answer and the clock, and a decision the service refuses at that moment ----------------
+
+
+@pytest.mark.parametrize(
+    ("asked_at", "answered_at"),
+    [
+        (100_000, 800_000),  # the same second
+        (900_000, 1_100_000),  # straddling a second boundary
+        (999_999, 1_000_000),  # one microsecond apart, across the boundary
+    ],
+    ids=["same-second", "straddling", "one-microsecond"],
+)
+def test_an_answer_within_a_second_of_its_question_is_taken(
+    settings: Settings, asked_at: int, answered_at: int
+) -> None:
+    """Every time here is written in whole seconds, truncated: the state's issue time, the
+    question's row, the decision's row and the outcome's ``since`` agree at any sub-second
+    offset."""
+    w = deciding(settings, "analysis")
+    w.clock.moment = NOW + timedelta(microseconds=asked_at)
+    state = asked(ask(w, "analysis")).request_state
+    w.clock.moment = NOW + timedelta(microseconds=answered_at)
+    reply = complete(answer_with(w, "analysis", state, "approve"))
+    assert (reply["status"], reply["outcome"]) == ("decided", "approved")
+    assert logged(w, "loop.analysis_reviewed")["asked_through"] == [LAPTOP_TAKEN]
+
+
+def test_an_answer_while_a_board_agent_writes_the_brief_is_not_taken_and_says_why(
+    settings: Settings,
+) -> None:
+    """The cause of the journey that failed in the whole suite: an agent another journey left
+    behind writes the analysis for people, the review refuses the approval for as long, and the
+    tool used to fail with that refusal. Now it answers ``not_taken``, takes nothing and keeps the
+    question open, and the same answer once the run has ended is the person's approval."""
+    w = deciding(settings, "analysis")
+    state = asked(ask(w, "analysis")).request_state
+    w.state.generation_runs["run-9"] = human_run("running").__replace__(loop_id=LOOP)
+    reply = complete(answer_with(w, "analysis", state, "approve"))
+    assert reply["status"] == "not_taken"
+    assert reply["code"] == "generation_in_progress"
+    assert "writing the analysis for people" in str(reply["why"])
+    assert reply["decision_link"] is not None
+    nothing_decided(w)
+    assert [row.action for row in w.state.activity] == [REQUESTED]
+    w.state.generation_runs["run-9"] = w.state.generation_runs["run-9"].__replace__(
+        status="failed"
+    )
+    again = asked(ask(w, "analysis")).request_state
+    assert complete(answer_with(w, "analysis", again, "approve"))["status"] == "decided"

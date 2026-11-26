@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
+import { decidedByText } from "@/features/history/askedThrough";
 import { renderMarkdown } from "@/lib/markdown";
 import type { DocumentKind, LoopDocument } from "@/lib/types";
 import { showsAnalysisBrief, type BriefApproval } from "./briefApproval";
@@ -40,6 +41,7 @@ export function PlanDocumentPanel({
   technical,
   body,
   approval,
+  decision,
 }: {
   kind: DocumentKind;
   document: LoopDocument;
@@ -49,12 +51,15 @@ export function PlanDocumentPanel({
   body?: ReactNode;
   /** The approval an analysis brief carries at its end (`BriefApprove`). */
   approval?: BriefApproval | undefined;
+  /** The scope's current decision as the documents route gives it: who took it and how. */
+  decision?: Record<string, unknown> | null | undefined;
 }) {
   // Both approvals can supersede the same document, and one sentence says it once.
   const reasons = [...new Set(document.stale_reasons)];
   // A view written for people reads differently from one rendered from the structure.
   const human = kind === "analysis" || kind === "roadmap";
   const authorship = human ? viewAuthorship(document) : null;
+  const decided = human ? decidedByText(decision) : null;
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -81,6 +86,7 @@ export function PlanDocumentPanel({
           </span>
         ) : null}
       </div>
+      {decided ? <p className="text-xs text-[var(--foreground)]">{decided}</p> : null}
       {reasons.length > 0 ? (
         <p className="text-xs text-[var(--warning)]">
           {/* Written after its approval, it needs a review; any other reason, writing again. */}
