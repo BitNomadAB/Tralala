@@ -128,6 +128,10 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | `ask_agents` | `discussions:write` | ask the board's agents about a Ticket and run one round; your person sees it in the Ticket's Discussions tab |
 | `read_discussion` | `discussions:read` | read a thread: its synthesis and each agent's position, the reasoning with `include_prose` |
 | `reply_discussion` | `discussions:write` | add to a thread and let the agents answer in a new round |
+| `open_discussion` | `discussions:write` | open a discussion on the board, with a title and no Ticket, for people and other keys |
+| `list_discussions` | `discussions:read` | list a board's discussions and what is new for you, never their text |
+| `close_discussion` | `discussions:write` | close a discussion you opened |
+| `reopen_discussion` | `discussions:write` | open a closed discussion again |
 
 Tools are filtered by the key's scopes, so a key without `loops:generate` does not see
 `run_analysis` at all. Calling a tool the key may not use is refused rather than downgraded.

@@ -59,6 +59,7 @@ CATALOGUE_FILES = tuple(
         "agent_tools.py",
         "agent_tools_attachments.py",
         "agent_tools_discussions.py",
+        "agent_tools_board_discussions.py",
         "agent_tools_documents.py",
         "agent_tools_identity.py",
         "agent_tools_listing.py",

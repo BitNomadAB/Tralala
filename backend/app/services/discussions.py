@@ -432,14 +432,22 @@ class DiscussionService:
     # --- commands ------------------------------------------------------------
 
     def create(
-        self, actor: ActorContext, board_id: str, payload: DiscussionCreate
+        self,
+        actor: ActorContext,
+        board_id: str,
+        payload: DiscussionCreate,
+        *,
+        ticket: str | None = None,
     ) -> DiscussionEntry:
+        """Open a thread with its question as the first message, which may point at a Ticket on
+        the board (``ticket``, its id or key; unknown is ``422``)."""
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
         now = self._clock()
         discussion_id = self._new_id()
         with self.store.writer(board_id) as repos:
             title = self._title(repos, payload)
+            ref = resolve_ticket(repos, ticket) if ticket else None
             snapshots = self._snapshots(payload.participant_ids)
             thread = DiscussionThreadsRow(
                 id=discussion_id,
@@ -501,7 +509,7 @@ class DiscussionService:
                     content_sha256=None,
                     answer_json="{}",
                     after_closed=0,
-                    ref_card_id=None,
+                    ref_card_id=ref.id if ref is not None else None,
                 )
             )
             self._log(
