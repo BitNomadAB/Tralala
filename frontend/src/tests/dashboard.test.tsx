@@ -20,6 +20,7 @@ const AUTH = {
   login: () => Promise.resolve(MEMBER),
   logout: () => Promise.resolve(),
   refresh: () => Promise.resolve(MEMBER),
+  addressForgotten: false,
   signOutLocally: () => undefined,
 };
 

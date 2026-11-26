@@ -83,6 +83,7 @@ async function renderPage(repositories: Repository[]) {
     login: () => Promise.resolve(ADMIN),
     logout: () => Promise.resolve(),
     refresh: () => Promise.resolve(ADMIN),
+    addressForgotten: false,
     signOutLocally: () => undefined,
   };
   render(

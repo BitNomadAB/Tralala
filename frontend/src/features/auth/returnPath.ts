@@ -1,7 +1,9 @@
 /**
  * Where the sign-in goes once it went through: the address a signed-out person opened, kept whole,
  * so a link to a decision (`?dialog=completion`, `?focus=confirm`) still opens it after the sign-in.
- * `RequireAuth` keeps the address in the login page's location state as `from`.
+ * `RequireAuth` keeps the address in the login page's location state as `from`. After a sign-out
+ * the person asked for (Sign out, a password change) the login page drops it, so the next sign-in
+ * opens the dashboard; a session that ended by itself keeps it (`signOutLocally`).
  */
 
 /** Where the sign-in goes when no address inside Tralala was kept. */

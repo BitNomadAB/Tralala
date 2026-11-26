@@ -45,8 +45,9 @@ export function SecurityCard() {
         description: "Every session was signed out. Sign in again with the new password.",
         variant: "success",
       });
-      // The server ended every session, this one included.
-      signOutLocally();
+      // The server ended every session, this one included. The person asked for it, so the next
+      // sign-in opens the dashboard rather than these settings.
+      signOutLocally({ forgetAddress: true });
     },
     onError: (error) => {
       if (fields.report(refusalProblems(error))) return;

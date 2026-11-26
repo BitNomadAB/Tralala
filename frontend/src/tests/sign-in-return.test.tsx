@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "@/features/auth/AuthProvider";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { addressOf, returnPath, safeReturnPath } from "@/features/auth/returnPath";
+import { dashboardHandlers } from "./msw/boards";
 import { server } from "./msw/server";
 import { MEMBER_PASSWORD, memberSession } from "./msw/session";
 
@@ -148,5 +149,93 @@ describe("a signed-out person who opens an address in the app", () => {
       await screen.findByRole("heading", { name: "Settings" }, { timeout: 10_000 }),
     ).toBeInTheDocument();
     expect(addressOf(window.location)).toBe("/settings?section=keys#tokens");
+  });
+});
+
+describe("the sign-in after a session in the app ended", () => {
+  let session: ReturnType<typeof memberSession>["state"];
+
+  beforeEach(() => {
+    // App.tsx owns a module-level QueryClient: a fresh module graph gives each test a fresh cache.
+    vi.resetModules();
+    // The dashboard a sign-in may open; the member's session answers before it.
+    server.use(...dashboardHandlers([]).handlers);
+    const member = memberSession();
+    session = member.state;
+    server.use(...member.handlers);
+    window.history.replaceState(null, "", "/settings?section=keys#tokens");
+  });
+
+  async function openSettings() {
+    const { App } = await import("@/app/App");
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Settings" }, { timeout: 10_000 }),
+    ).toBeInTheDocument();
+    return userEvent.setup();
+  }
+
+  async function signInAgain(user: ReturnType<typeof userEvent.setup>, password: string) {
+    expect(
+      await screen.findByRole("form", { name: "Sign in" }, { timeout: 10_000 }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Username"), "ada");
+    await user.type(screen.getByLabelText("Password"), password);
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+  }
+
+  const dashboard = () =>
+    screen.findByRole("heading", { name: "Boards", level: 1 }, { timeout: 10_000 });
+
+  it("opens the dashboard after Sign out, not the page the person signed out from", async () => {
+    const user = await openSettings();
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(
+      await screen.findByRole("form", { name: "Sign in" }, { timeout: 10_000 }),
+    ).toBeInTheDocument();
+    // Forgotten, not only passed over: a reload of the login page has no address to go back to.
+    await waitFor(() => {
+      const entry: unknown = window.history.state;
+      expect(JSON.stringify(entry)).not.toContain("/settings");
+    });
+    expect(window.location.pathname).toBe("/login");
+
+    await signInAgain(user, MEMBER_PASSWORD);
+    expect(await dashboard()).toBeInTheDocument();
+    expect(addressOf(window.location)).toBe("/");
+  });
+
+  it("opens the dashboard after a password change, which signs the person out", async () => {
+    const user = await openSettings();
+    await user.type(screen.getByLabelText("Current password"), MEMBER_PASSWORD);
+    await user.type(screen.getByLabelText("New password"), "new-password-2");
+    await user.type(screen.getByLabelText("Repeat new password"), "new-password-2");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+
+    await signInAgain(user, "new-password-2");
+    expect(await dashboard()).toBeInTheDocument();
+    expect(addressOf(window.location)).toBe("/");
+  });
+
+  it("returns to the page after a session that ended by itself, also once Sign out forgot one", async () => {
+    const user = await openSettings();
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await signInAgain(user, MEMBER_PASSWORD);
+    expect(await dashboard()).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "Settings" }));
+    expect(
+      await screen.findByRole("heading", { name: "Settings" }, { timeout: 10_000 }),
+    ).toBeInTheDocument();
+    // The session ends on the server (it expired, or was revoked elsewhere); the next read is a 401.
+    session.signedIn = false;
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await signInAgain(user, MEMBER_PASSWORD);
+    expect(
+      await screen.findByRole("heading", { name: "Settings" }, { timeout: 10_000 }),
+    ).toBeInTheDocument();
+    expect(addressOf(window.location)).toBe("/settings");
   });
 });

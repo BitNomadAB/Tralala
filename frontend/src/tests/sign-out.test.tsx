@@ -148,20 +148,25 @@ describe("signing out in the app", () => {
 
 describe("signOutLocally", () => {
   function Session() {
-    const { actor, loading, login } = useAuth();
+    const { actor, loading, login, logout, addressForgotten } = useAuth();
     if (loading) return <p>Loading session</p>;
     return (
       <>
         <p>{actor ? `Signed in as ${actor.name}` : "Signed out"}</p>
+        <p>{addressForgotten ? "Address forgotten" : "Address kept"}</p>
         <button type="button" onClick={() => void login("ada", MEMBER_PASSWORD)}>
           Sign in
+        </button>
+        <button type="button" onClick={() => void logout().catch(() => undefined)}>
+          Sign out
         </button>
       </>
     );
   }
 
   function renderSession() {
-    server.use(...memberSession().handlers);
+    const member = memberSession();
+    server.use(...member.handlers);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
@@ -170,7 +175,7 @@ describe("signOutLocally", () => {
         </AuthProvider>
       </QueryClientProvider>,
     );
-    return client;
+    return { client, session: member.state };
   }
 
   const unauthorized = () => {
@@ -184,8 +189,41 @@ describe("signOutLocally", () => {
     server.events.removeAllListeners();
   });
 
+  it("forgets the address on a sign-out the person asked for, until the next sign-in", async () => {
+    renderSession();
+    expect(await screen.findByText("Signed in as Ada Member")).toBeInTheDocument();
+    expect(screen.getByText("Address kept")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(await screen.findByText("Signed out")).toBeInTheDocument();
+    expect(screen.getByText("Address forgotten")).toBeInTheDocument();
+    // A 401 while signed out (a wrong password on the login page) leaves it forgotten.
+    unauthorized();
+    expect(screen.getByText("Address forgotten")).toBeInTheDocument();
+
+    // The next session keeps the address again, so a session that ends by itself returns to it.
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByText("Signed in as Ada Member")).toBeInTheDocument();
+    expect(screen.getByText("Address kept")).toBeInTheDocument();
+    unauthorized();
+    expect(await screen.findByText("Signed out")).toBeInTheDocument();
+    expect(screen.getByText("Address kept")).toBeInTheDocument();
+  });
+
+  it("forgets the address on Sign out also when the session had already ended", async () => {
+    const { session } = renderSession();
+    expect(await screen.findByText("Signed in as Ada Member")).toBeInTheDocument();
+    // The server ended the session first, so the logout itself is answered with a 401.
+    session.signedIn = false;
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(await screen.findByText("Address forgotten")).toBeInTheDocument();
+    expect(screen.getByText("Signed out")).toBeInTheDocument();
+    expect(session.requests.at(-1)).toBe("POST /auth/logout");
+  });
+
   it("runs once for a burst of 401s, and again for the next session", async () => {
-    const client = renderSession();
+    const { client } = renderSession();
     expect(await screen.findByText("Signed in as Ada Member")).toBeInTheDocument();
     client.setQueryData(["boards"], []);
     const remove = vi.spyOn(client, "removeQueries");
@@ -212,7 +250,7 @@ describe("signOutLocally", () => {
   });
 
   it("does not let a read of the session still on its way sign the user back in", async () => {
-    const client = renderSession();
+    const { client } = renderSession();
     expect(await screen.findByText("Signed in as Ada Member")).toBeInTheDocument();
 
     // The next read of the session reaches the server and waits there until the test answers it.
