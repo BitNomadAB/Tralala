@@ -23,7 +23,8 @@ this module holds the catalogue and the dispatch and re-exports them.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, Final, Protocol
 
 from ..core.context import ActorContext
 from ..core.errors import Forbidden, NotFound
@@ -51,11 +52,13 @@ from .agent_tools_plan import (
 )
 from .agent_tools_read import (
     DECISION_LINK_RULE,
+    NOTICES_RULE,
     REPORT_RULE,
     ToolArguments,
     ToolResult,
     _read_board,
     _read_ticket,
+    _text,
     allowed_actions,
     list_boards,
     search_tickets,
@@ -82,7 +85,12 @@ from .agent_tools_write import (
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from . import Services
+    from .discussions import DiscussionService
 
+logger = logging.getLogger("tralala.agent_tools")
+
+# The tools without a board_id whose answer carries the notices of every board.
+EVERY_BOARD_TOOLS: Final = frozenset({"whoami", "list_boards"})
 
 _BOARD_ID = _string("Board identifier from list_boards")
 _CARD_ID = _string("Ticket identifier from list_tickets or search_tickets")
@@ -506,7 +514,7 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "decision), each agent's current position and the messages with their structured "
                 "answers, each saying whether it came after the close (after_closed) and which "
                 "Ticket it points at (ref_ticket). Reading marks the thread read for you. Use it "
-                "after ask_agents, or before replying. " + OTHERS_WORDS
+                "after ask_agents, or before replying. " + NOTICES_RULE + " " + OTHERS_WORDS
             ),
             scopes=("discussions:read",),
             input_schema=_object(
@@ -573,15 +581,56 @@ def run_tool(
             "Missing required scope: " + ", ".join(missing),
             details={"required_scopes": list(missing)},
         )
-    return tool.handler(services, actor, args or {})
+    arguments = args or {}
+    return with_notices(services, actor, name, arguments, tool.handler(services, actor, arguments))
+
+
+class NoticeReading(Protocol):
+    """What ``with_notices`` uses of the composition root."""
+
+    @property
+    def discussion(self) -> DiscussionService: ...
+
+
+def with_notices(
+    services: NoticeReading,
+    actor: ActorContext,
+    name: str,
+    args: ToolArguments,
+    result: ToolResult,
+) -> ToolResult:
+    """The tool's answer with ``notices`` when a discussion waits for the actor (NOTICES_RULE),
+    otherwise the answer untouched. The board is the call's ``board_id``; without one only
+    ``EVERY_BOARD_TOOLS`` read every board, for a key that may list them. It needs
+    ``discussions:read``. Reading notices never fails the tool: a failure is logged and the
+    answer goes out without them."""
+    if not actor.has_scope("discussions:read"):
+        return result
+    board_id = _text(args.get("board_id"))
+    if board_id is None and (name not in EVERY_BOARD_TOOLS or not actor.has_scope("boards:read")):
+        return result
+    try:
+        found = services.discussion.notices(actor, board_id)
+    except Exception as error:  # noqa: BLE001 - a notice is a courtesy and never fails the tool
+        logger.warning(
+            "tool_notices_failed",
+            extra={"tool": name, "board_id": board_id, "error": type(error).__name__},
+        )
+        return result
+    if found is None:
+        return result
+    return {**result, "notices": found}
 
 
 __all__ = [
     "DECISION_LINK_RULE",
+    "EVERY_BOARD_TOOLS",
+    "NOTICES_RULE",
     "REPORT_RULE",
     "AgentTool",
     "ArgumentSchema",
     "InputSchema",
+    "NoticeReading",
     "ToolArguments",
     "ToolResult",
     "_assign_ticket",
@@ -620,6 +669,7 @@ __all__ = [
     "set_ticket_wait",
     "tool_catalog",
     "whoami",
+    "with_notices",
     "write_analysis",
     "write_brief",
     "write_note",

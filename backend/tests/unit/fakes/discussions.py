@@ -17,13 +17,15 @@ from app.db.generated.board import (
     DiscussionThreadsRow,
     DiscussionVotesRow,
 )
-from app.repositories.discussions import InboxThread, NamedVote, ThreadState
+from app.repositories.discussions import InboxThread, NamedVote, NoticeThread, ThreadState
 from tests.unit.fakes.registry import ConstraintError
 
 if TYPE_CHECKING:
     from tests.unit.fakes.board import BoardState
 
 ACTIVE = ("running", "paused")
+# A thread on the board in one of these is no open question any more.
+OPEN_QUESTION_ENDS = frozenset({"closed", "cancelled", "approved", "vetoed"})
 
 
 class FakeDiscussionThreadRepository:
@@ -233,6 +235,50 @@ class FakeDiscussionReadRepository:
             if marker is None or row.created_at > marker.last_read_at:
                 unread.add(row.discussion_id)
         return unread
+
+    def notices(self, actor_id: str, *, limit: int) -> list[NoticeThread]:
+        found: list[NoticeThread] = []
+        for thread in self._state.discussions.values():
+            marker = self._state.discussion_reads.get((thread.id, actor_id))
+            read_at = None if marker is None else marker.last_read_at
+            messages = [m for m in self._state.discussion_messages if m.discussion_id == thread.id]
+            involved = thread.created_by_actor_id == actor_id or any(
+                m.author_actor_id == actor_id for m in messages
+            )
+            news = [
+                (m.created_at, position, m)
+                for position, m in enumerate(messages)
+                if m.deleted_at is None
+                and m.author_actor_id != actor_id
+                and (read_at is None or m.created_at > read_at)
+            ]
+            run_failed = any(
+                run.discussion_id == thread.id
+                and run.started_by_actor_id == actor_id
+                and run.status == "failed"
+                and (read_at is None or (run.finished_at or run.created_at) > read_at)
+                for run in self._state.runs.values()
+            )
+            open_question = (
+                thread.card_id is None
+                and thread.status not in OPEN_QUESTION_ENDS
+                and not involved
+                and marker is None
+            )
+            if (involved and news) or run_failed or open_question:
+                found.append(
+                    NoticeThread(
+                        thread=thread,
+                        involved=involved,
+                        marked=marker is not None,
+                        news=bool(news),
+                        news_after_closed=bool(news) and bool(max(news)[2].after_closed),
+                        run_failed=run_failed,
+                    )
+                )
+        found.sort(key=lambda entry: entry.thread.id)
+        found.sort(key=lambda entry: entry.thread.last_activity_at, reverse=True)
+        return found[:limit]
 
 
 class FakeDiscussionParticipantRepository:

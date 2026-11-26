@@ -26,6 +26,7 @@ from .agents import RoleSnapshot
 from .discussion_answers import read_answer
 from .discussion_closing import CLOSED, close_thread, reopen_thread
 from .discussion_inbox import InboxPage, decided_by, read_inbox
+from .discussion_notices import Notices, read_notices
 from .discussion_synthesis import latest_answers, positions, read_synthesis
 from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED, Event, EventService
 from .loops import ensure_ticket_writable
@@ -416,6 +417,15 @@ class DiscussionService:
         actor.require("boards:read")
         actor.require("discussions:read")
         return read_inbox(self.registry, self.store, actor)
+
+    def notices(self, actor: ActorContext, board_id: str | None) -> Notices | None:
+        """What waits for the actor in the discussions of one board, or without ``board_id`` of
+        every board that is not archived, which names the boards and so needs ``boards:read``
+        beside ``discussions:read``; ``None`` when nothing waits (``discussion_notices``)."""
+        actor.require("discussions:read")
+        if board_id is None:
+            actor.require("boards:read")
+        return read_notices(self.registry, self.store, actor, board_id)
 
     def mark_read(self, actor: ActorContext, board_id: str, discussion_id: str) -> ReadMarker:
         """The actor has read the thread now: its marker moves to now (made if it is new), so

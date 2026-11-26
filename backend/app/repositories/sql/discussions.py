@@ -32,7 +32,7 @@ from ...db.generated.board import (
     DiscussionVotesRow,
     LoopsRow,
 )
-from ..discussions import InboxThread, NamedVote, ThreadState
+from ..discussions import InboxThread, NamedVote, NoticeThread, ThreadState
 
 _THREADS = sql.column_list(DISCUSSION_THREADS_COLUMNS)
 _MESSAGES = sql.column_list(DISCUSSION_MESSAGES_COLUMNS)
@@ -287,6 +287,56 @@ _UNREAD = text(
     " WHERE m.discussion_id IN :ids AND m.deleted_at IS NULL AND m.author_actor_id != :actor"
     " AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)"
 ).bindparams(bindparam("ids", expanding=True))
+# What may wait for the actor, in one statement over the board's threads (one row each; who opened
+# one has no index, so they are scanned). The candidates are the threads the actor opened or wrote
+# in (``ix_discussion_messages_thread``), those with a run the actor started that failed
+# (``ix_discussion_runs_status``), and the open questions: threads on the board in a status that
+# still takes answers for which the actor holds no marker (``ix_discussion_reads_actor``). Each
+# candidate carries its marker (the reads' key), whether the actor is involved, the
+# ``after_closed`` of the newest message by someone else after the marker (NULL when there is
+# none) and whether a run the actor started failed after the marker; only the rows with a reason
+# are kept.
+_NOTICES = text(
+    "WITH facts AS ("  # noqa: S608 - generated
+    f" SELECT {sql.column_list(DISCUSSION_THREADS_COLUMNS, 't')},"
+    " r.last_read_at AS marker,"
+    " (t.created_by_actor_id = :actor OR EXISTS (SELECT 1 FROM discussion_messages w"
+    "   WHERE w.discussion_id = t.id AND w.author_actor_id = :actor)) AS involved,"
+    " (SELECT n.after_closed FROM discussion_messages n"
+    "   WHERE n.discussion_id = t.id AND n.deleted_at IS NULL AND n.author_actor_id != :actor"
+    "   AND (r.last_read_at IS NULL OR n.created_at > r.last_read_at)"
+    "   ORDER BY n.created_at DESC, n.rowid DESC LIMIT 1) AS news_after_closed,"
+    " EXISTS (SELECT 1 FROM discussion_runs f"
+    "   WHERE f.discussion_id = t.id AND f.started_by_actor_id = :actor AND f.status = 'failed'"
+    "   AND (r.last_read_at IS NULL OR COALESCE(f.finished_at, f.created_at) > r.last_read_at))"
+    " AS run_failed"
+    " FROM discussion_threads t"
+    " LEFT JOIN discussion_reads r ON r.discussion_id = t.id AND r.actor_id = :actor"
+    " WHERE t.created_by_actor_id = :actor"
+    " OR EXISTS (SELECT 1 FROM discussion_messages m"
+    "   WHERE m.discussion_id = t.id AND m.author_actor_id = :actor)"
+    " OR t.id IN (SELECT u.discussion_id FROM discussion_runs u"
+    "   WHERE u.status = 'failed' AND u.started_by_actor_id = :actor)"
+    " OR (t.card_id IS NULL AND t.status NOT IN ('closed', 'cancelled', 'approved', 'vetoed')"
+    "   AND t.id NOT IN (SELECT o.discussion_id FROM discussion_reads o WHERE o.actor_id = :actor))"
+    f") SELECT {_THREADS}, marker, involved, news_after_closed, run_failed FROM facts"
+    " WHERE (involved AND news_after_closed IS NOT NULL) OR run_failed"
+    " OR (card_id IS NULL AND status NOT IN ('closed', 'cancelled', 'approved', 'vetoed')"
+    "   AND NOT involved AND marker IS NULL)"
+    " ORDER BY last_activity_at DESC, id LIMIT :limit"
+)
+
+
+def _notice_thread(row: values.ColumnValues) -> NoticeThread:
+    after_closed = values.integer_or_none(row, "news_after_closed")
+    return NoticeThread(
+        thread=DiscussionThreadsRow.from_mapping(row),
+        involved=values.flag(row, "involved"),
+        marked=values.text_or_none(row, "marker") is not None,
+        news=after_closed is not None,
+        news_after_closed=bool(after_closed),
+        run_failed=values.flag(row, "run_failed"),
+    )
 
 
 class SqlDiscussionReadRepository:
@@ -308,6 +358,10 @@ class SqlDiscussionReadRepository:
         parameters = {"actor": actor_id, "ids": list(discussion_ids)}
         result = self._connection.execute(_UNREAD, parameters).mappings()
         return {values.text(row, "discussion_id") for row in result}
+
+    def notices(self, actor_id: str, *, limit: int) -> list[NoticeThread]:
+        result = self._connection.execute(_NOTICES, {"actor": actor_id, "limit": limit})
+        return [_notice_thread(row) for row in result.mappings()]
 
 
 # --- participants and votes ----------------------------------------------------------------------

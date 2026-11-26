@@ -26,6 +26,7 @@ from ..core.errors import ApiError
 from ..schemas.loops import CRITERION_MAX_CHARS
 from ..services.agent_tools import (
     DECISION_LINK_RULE,
+    NOTICES_RULE,
     REPORT_RULE,
     missing_scopes,
     tool_catalog,
@@ -63,7 +64,8 @@ INSTRUCTIONS = (
     "clearing a wait and accepting QA are human decisions that no token can perform. "
     + DECISION_LINK_RULE
     + " The Loop "
-    "is the plan: what you plan or log goes into the Loop, never into a file of a repository."
+    "is the plan: what you plan or log goes into the Loop, never into a file of a repository. "
+    + NOTICES_RULE
 )
 
 
