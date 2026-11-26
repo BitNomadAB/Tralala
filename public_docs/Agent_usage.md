@@ -427,11 +427,12 @@ person takes the decision; give it to them rather than asking them to look for i
 inside Tralala (`/boards/...`) unless the installation sets its public address
 (`TRALALA_PUBLIC_URL`, see [Installation](Installation.md)), and then a full address such as
 `https://tralala.example.com/boards/...`. It is `null` when nothing waits for a person. You find it
-in three places:
+in four places:
 
 - `loop_summaries`, on each Loop's row, and `read_loop` give the Loop's next decision, the same in
   both. An analysis or a RoadMap a person reviews opens in the Loop's Plan tab
-  (`?tab=plan&doc=analysis`, `?tab=plan&doc=roadmap`). The implementation a person accepts once
+  (`?tab=plan&doc=analysis`, `?tab=plan&doc=roadmap`); a RoadMap handed in waits for that review
+  while the Loop is still in `planning` too. The implementation a person accepts once
   every Ticket is done, and the result a person accepts or rejects in QA, open the completion
   dialog (`?dialog=completion`); in a Loop without a plan that one acceptance closes the Loop.
   Writing the Info, answering a Ticket's wait and doing a person's task are no single decision of
@@ -440,6 +441,8 @@ in three places:
   (`?focus=clear-wait` on the Ticket's page), and on the Ticket while it is a person's task, where a
   person confirms it (`?focus=confirm`). Both are `null` once the Ticket is done or archived, or its
   Loop is completed, cancelled or archived.
+- `write_analysis` and `write_roadmap` give it in their answer when what you handed in waits for a
+  person's review: that document in the Plan tab, where the person approves it or asks for changes.
 - A refusal of a person's decision (`403 human_action_required`, the code is unchanged) gives it
   under `details.decision_link`, and its message names the place: `complete_ticket` on a
   human-only Ticket (its confirmation), `set_ticket_wait` on a Ticket that already waits (the wait

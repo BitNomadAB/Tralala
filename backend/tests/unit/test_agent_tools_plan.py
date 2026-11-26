@@ -387,6 +387,26 @@ def test_a_document_over_an_approval_links_where_the_person_decides() -> None:
     assert "decision_link" not in (changed.value.details or {})
 
 
+def test_a_document_handed_in_for_review_links_where_the_person_reviews_it() -> None:
+    w = world()
+    loop_page = f"/boards/{BOARD_ID}/loops/{LOOP}"
+    analysis = write(w, "analysis", ANALYSIS)
+    assert field(analysis, "documents", "analysis", "state") == "ready_for_review"
+    assert analysis["decision_link"] == f"{loop_page}?tab=plan&doc=analysis"
+    w.review("analysis")
+    # The Loop stays in planning with the RoadMap handed in, and the RoadMap waits for a person;
+    # with the installation's public address the link is absolute.
+    public = w.__replace__(settings=unit_settings(PUBLIC))
+    roadmap = write(public, "plan", PLAN)
+    assert w.state.loops[LOOP].stage == "planning"
+    assert field(roadmap, "documents", "roadmap", "state") == "ready_for_review"
+    assert roadmap["decision_link"] == f"{PUBLIC}{loop_page}?tab=plan&doc=roadmap"
+    # Handed in again after the person asked for changes, it waits for that person once more.
+    w.review("roadmap", decision="changes_requested")
+    again = write(w, "plan", PLAN)
+    assert again["decision_link"] == f"{loop_page}?tab=plan&doc=roadmap"
+
+
 # --- write_roadmap -------------------------------------------------------------------------------
 
 

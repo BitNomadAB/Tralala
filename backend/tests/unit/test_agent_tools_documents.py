@@ -275,6 +275,40 @@ def test_read_loop_links_the_decision_a_person_takes_next_as_loop_summaries_does
     assert summary_link(world) == qa
 
 
+def test_read_loop_links_a_roadmap_handed_in_while_the_loop_is_planning(settings: Settings) -> None:
+    """An approved analysis keeps a Loop in ``planning`` once a RoadMap is handed in; the RoadMap
+    then waits for a person's review, and ``read_loop`` links it as ``loop_summaries`` does."""
+    world = document_world(settings)
+    world.state.loops[LOOP] = world.state.loops[LOOP].__replace__(stage="planning")
+    world.state.documents = [
+        document_row("i1", LOOP, "info"),
+        document_row("a1", LOOP, "analysis_ai", status="approved", info="i1"),
+        document_row("h1", LOOP, "analysis", status="approved", analysis_ai="a1"),
+    ]
+    # No RoadMap yet: an agent writes one, nothing for a person to decide.
+    assert read_loop(world, READER, ask())["decision_link"] is None
+    assert summary_link(world) is None
+    world.state.documents += [
+        document_row(
+            "r1",
+            LOOP,
+            "roadmap_ai",
+            status="ready_for_review",
+            info="i1",
+            analysis_ai="a1",
+            analysis="h1",
+        ),
+        document_row("m1", LOOP, "roadmap", status="ready_for_review", roadmap_ai="r1"),
+    ]
+    review = f"/boards/{BOARD_ID}/loops/{LOOP}?tab=plan&doc=roadmap"
+    answer = read_loop(world, READER, ask())
+    assert (section(answer, "loop")["stage"], answer["decision_link"]) == ("planning", review)
+    assert summary_link(world) == review
+    public = world.__replace__(settings=world.settings.model_copy(update={"public_url": PUBLIC}))
+    assert read_loop(public, READER, ask(loop_id="L-1"))["decision_link"] == f"{PUBLIC}{review}"
+    assert summary_link(public) == f"{PUBLIC}{review}"
+
+
 # --- read_document -------------------------------------------------------------------------------
 
 

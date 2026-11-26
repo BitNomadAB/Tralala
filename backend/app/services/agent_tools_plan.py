@@ -24,9 +24,11 @@ by a person. The tools only make that route usable for a model:
 A token never replaces an approved analysis or RoadMap: ``submit_candidate`` refuses it, so REST
 and MCP share the rule, and ``write_brief`` meets the same refusal over an approval. The tools
 answer it with ``details.decision_link``, the address of that document in the Loop's Plan tab,
-where the person requests changes or resets it (``_over_approval``). The handlers are public and
-typed on ``PlanWriting``, the attributes of the composition root they use, so a unit test runs them
-with the real service on the fakes.
+where the person requests changes or resets it (``_over_approval``). A document handed in that
+waits for a person's review is answered with ``decision_link`` too, the same address, where the
+person approves it or asks for changes (``_review_link``). The handlers are public and typed on
+``PlanWriting``, the attributes of the composition root they use, so a unit test runs them with the
+real service on the fakes.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, JsonValue, ValidationError
 
@@ -42,6 +44,7 @@ from ..core.context import ActorContext
 from ..core.errors import ApiError, ValidationFailure
 from ..schemas.briefs import BRIEF_KINDS, BriefWrite, HumanBrief, HumanBriefWriter, RoadmapBrief
 from ..schemas.loops import AnalysisPayload, CandidateSubmission, PlanPayload
+from .agent_tools_loops import review_step
 from .agent_tools_read import (
     ToolArguments,
     ToolResult,
@@ -382,6 +385,27 @@ def _over_approval(
     return refused_at(refusal, link, "The person does that in the Loop's Plan tab")
 
 
+def _review_link(
+    view: DocumentsView,
+    scope: Literal["analysis", "roadmap"],
+    *,
+    board_id: str,
+    loop_id: str,
+    public_url: str | None,
+) -> str | None:
+    """``decision_link`` of a hand-in: the document of ``scope`` (``analysis`` or ``roadmap``) in
+    the Loop's Plan tab while it waits for a person's review, as ``loop_summaries`` reads its
+    states (``review_step``); None when it waits for another hand-in. The service stored it after
+    it found the Loop's row by ``loop_id``, so the id is the row's own and no key reaches the
+    address."""
+    documents = view["documents"]
+    name = "analysis" if scope == "analysis" else "RoadMap"
+    states = [documents[f"{scope}_ai"]["state"], documents[scope]["state"]]
+    if review_step(name, states)[1] != "person":
+        return None
+    return tool_decision_link(scope, board_id=board_id, loop_id=loop_id, public_url=public_url)
+
+
 # --- handlers ------------------------------------------------------------------------------------
 
 
@@ -420,6 +444,13 @@ def write_analysis(services: PlanWriting, actor: ActorContext, args: ToolArgumen
         "next_step": (
             "A person reviews the analysis in the Loop's Analysis tab. Once it is approved, "
             "write_roadmap plans the work."
+        ),
+        "decision_link": _review_link(
+            view,
+            "analysis",
+            board_id=board_id,
+            loop_id=loop_id,
+            public_url=services.settings.public_url,
         ),
     }
 
@@ -473,6 +504,13 @@ def write_roadmap(services: PlanWriting, actor: ActorContext, args: ToolArgument
         "next_step": (
             "A person reviews the RoadMap in the Loop's RoadMap tab; the approval publishes the "
             "Tickets with their keys, which read_loop then lists."
+        ),
+        "decision_link": _review_link(
+            view,
+            "roadmap",
+            board_id=board_id,
+            loop_id=loop_id,
+            public_url=services.settings.public_url,
         ),
     }
 
@@ -616,7 +654,8 @@ def plan_tools(
             "instructions_id it answers. technical_detail is "
             "for engineers; plain_language is for a project manager and every risk, blocker, "
             "legal, security or question finding needs it. brief, your decision brief for "
-            "people, is required and is the human view. A person approves it; an approved "
+            "people, is required and is the human view. A person approves it, at the "
+            "decision_link the answer carries; an approved "
             "analysis is replaced only after that person requests changes or resets it."
         ),
         scopes=("loops:generate",),
@@ -654,8 +693,8 @@ def plan_tools(
             "or ids. "
             f'Step, good: "{FACE_STEP_GOOD}" Step, bad: "{FACE_STEP_BAD}" '
             "A face that breaks this is refused with face_invalid, one message per Ticket, "
-            "field and rule. A person approves it, and the approval publishes the Tickets with "
-            "their keys."
+            "field and rule. A person approves it, at the decision_link the answer carries, and "
+            "the approval publishes the Tickets with their keys."
         ),
         scopes=("loops:generate",),
         input_schema=object_schema(

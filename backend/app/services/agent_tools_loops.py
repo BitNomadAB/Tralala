@@ -17,7 +17,8 @@ asks for those reports first; it is empty for a person.
 
 When the next step is a person's decision, the row's ``decision_link`` is the address where the
 person takes it (``loop_decision_link``, which ``read_loop`` answers too): approving the analysis or
-the RoadMap under review, accepting the implementation once every Ticket is done (a Loop without a
+the RoadMap under review (a RoadMap handed in while the Loop is still in ``planning`` included),
+accepting the implementation once every Ticket is done (a Loop without a
 plan closes in that one decision) and accepting or rejecting the result in QA. It is null for
 everything else, a Ticket that waits for a person included: ``read_ticket`` links that one.
 
@@ -54,6 +55,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from .decision_links import Decision
     from .lists import ListEntry, ListService
     from .loops import LoopEntry, LoopService
+    from .loops_stage import DocumentState
     from .plan_views import LoopReadiness
 
 type WaitingOn = Literal["person", "agent", "anyone", "nobody"]
@@ -69,9 +71,11 @@ ALL_DONE_WITHOUT_PLAN: Final = (
 )
 """``next`` once every Ticket of a Loop without a plan is done: the same acceptance, which closes
 such a Loop."""
-# The review stages whose person's step is a decision in the Plan tab, and QA's in the dialog.
+# The stages whose person's step is a review in the Plan tab, and QA's in the dialog. In planning a
+# person's step is the review of a RoadMap handed in (next_step).
 _STAGE_DECISIONS: Final[dict[str, Decision]] = {
     "analysis_review": "analysis",
+    "planning": "roadmap",
     "roadmap_review": "roadmap",
     "awaiting_qa": "qa",
 }
@@ -135,8 +139,10 @@ def _tickets(count: int, one: str, many: str) -> str:
     return f"1 Ticket {one}" if count == 1 else f"{count} Tickets {many}"
 
 
-def _review(name: str, states: list[str]) -> tuple[str, WaitingOn]:
-    """A document waiting for its review: asked to change, out of date, or ready for a person."""
+def review_step(name: str, states: list[str]) -> tuple[str, WaitingOn]:
+    """A document waiting for its review: asked to change, out of date, or ready for a person.
+    ``next_step`` answers it for an analysis or a RoadMap under review, and ``write_analysis`` and
+    ``write_roadmap`` read it to say whether what they handed in waits for a person."""
     if "changes_requested" in states:
         return f"A person asked for changes to the {name}: hand in a new one.", "agent"
     if "stale" in states:
@@ -146,10 +152,21 @@ def _review(name: str, states: list[str]) -> tuple[str, WaitingOn]:
     return f"A person reviews the {name} and approves it or asks for changes.", "person"
 
 
+def _written(document: DocumentState) -> bool:
+    """Whether a document has a revision with text: not empty, and not the empty draft a reset of
+    its scope leaves (``loop_documents_review.reset_scope``), which is nothing to review."""
+    current = document["current"]
+    return current is not None and bool(current["content"].strip())
+
+
 def next_step(
     entry: LoopEntry, readiness: LoopReadiness, counts: TicketCounts
 ) -> tuple[str, WaitingOn]:
-    """What has to happen next in a Loop, in one sentence, and who does it."""
+    """What has to happen next in a Loop, in one sentence, and who does it.
+
+    A Loop whose analysis is approved stays in ``planning`` once a RoadMap is handed in
+    (``compute_stage``): until a RoadMap has text it is asked for, and then it is reviewed as in
+    ``roadmap_review``, by a person unless it was sent back or is out of date."""
     stage = entry["stage"]
     states = {kind: entry["documents"][kind]["state"] for kind in DOCUMENT_KINDS}
     if stage in _FINISHED:
@@ -169,15 +186,18 @@ def next_step(
             "agent",
         )
     if stage == "analysis_review":
-        return _review("analysis", [states["analysis_ai"], states["analysis"]])
+        return review_step("analysis", [states["analysis_ai"], states["analysis"]])
+    roadmap = [states["roadmap_ai"], states["roadmap"]]
     if stage == "planning":
-        return (
-            "Ask for the RoadMap (run_roadmap) or hand one in, written to a board agent's "
-            "instructions (read_instructions, then write_roadmap).",
-            "agent",
-        )
+        if not any(_written(entry["documents"][kind]) for kind in ("roadmap_ai", "roadmap")):
+            return (
+                "Ask for the RoadMap (run_roadmap) or hand one in, written to a board agent's "
+                "instructions (read_instructions, then write_roadmap).",
+                "agent",
+            )
+        return review_step("RoadMap", roadmap)
     if stage == "roadmap_review":
-        return _review("RoadMap", [states["roadmap_ai"], states["roadmap"]])
+        return review_step("RoadMap", roadmap)
     if stage == "replanning":
         return "The Info changed after planning: the RoadMap is planned again.", "agent"
     if stage == "awaiting_qa":
@@ -209,11 +229,12 @@ def next_decision(
     entry: LoopEntry, readiness: LoopReadiness, counts: TicketCounts
 ) -> Decision | None:
     """The decision ``next_step`` waits on a person for, read from its answer so the two never
-    disagree: the analysis or the RoadMap a person reviews, the result a person accepts or rejects
-    in QA, and the implementation a person accepts once every Ticket is done (``ALL_DONE``, or
-    ``ALL_DONE_WITHOUT_PLAN`` where that acceptance closes the Loop). None
-    when the next step is anyone's, an agent's or nobody's, and when the person's step is not one
-    decision of the Loop: writing the Info, answering a Ticket's wait or doing a person's task."""
+    disagree: the analysis or the RoadMap a person reviews (a RoadMap handed in while the Loop is
+    in ``planning`` too), the result a person accepts or rejects in QA, and the implementation a
+    person accepts once every Ticket is done (``ALL_DONE``, or ``ALL_DONE_WITHOUT_PLAN`` where that
+    acceptance closes the Loop). None when the next step is anyone's, an agent's or nobody's, and
+    when the person's step is not one decision of the Loop: writing the Info, answering a Ticket's
+    wait or doing a person's task."""
     sentence, waiting_on = next_step(entry, readiness, counts)
     if waiting_on != "person":
         return None
@@ -370,5 +391,6 @@ __all__ = [
     "loop_tools",
     "next_decision",
     "next_step",
+    "review_step",
     "ticket_counts",
 ]

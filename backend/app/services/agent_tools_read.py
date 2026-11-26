@@ -18,8 +18,9 @@ on under ``unreported`` (``unreported_rows``), and ``next_step`` asks for the re
 
 What waits for a person carries ``decision_link``, the address in the web UI where the person
 decides (``decision_links``): ``loop_summaries`` and ``read_loop`` for the Loop's next decision,
-``read_ticket`` for a wait to clear and a person's task to confirm (``ticket_decision_link``), and
-the refusals a tool meets on a person's decision (``refused_at``). ``tool_decision_link`` builds
+``read_ticket`` for a wait to clear and a person's task to confirm (``ticket_decision_link``),
+``write_analysis`` and ``write_roadmap`` for the document they handed in for review, and the
+refusals a tool meets on a person's decision (``refused_at``). ``tool_decision_link`` builds
 each from the ids the services read, with the address from the composition root
 (``Services.settings.public_url``); ``DECISION_LINK_RULE`` is the sentence the worker texts give it.
 """
