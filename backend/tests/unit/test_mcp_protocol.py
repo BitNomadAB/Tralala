@@ -1,9 +1,10 @@
-"""``/mcp`` speaks MCP revision 2026-07-28 and nothing older.
+"""``/mcp`` speaks MCP revision 2026-07-28, beside 2025-06-18 (``test_mcp_legacy``).
 
 Every rule of the revision is a pure function in ``app.api.mcp_protocol``: these tests hand it a
 request's header pairs, its parsed body and an actor, and check the HTTP status, the JSON-RPC code
 and the body that come back. Nothing builds the application, opens a database or sends a request;
-the route only resolves the actor, reads the body, calls ``dispatch`` and runs the handler.
+the route only resolves the actor, reads the body, chooses the revision, dispatches and runs the
+handler.
 """
 
 from __future__ import annotations
@@ -125,9 +126,10 @@ def call(name: str, arguments: dict[str, JsonValue] | None = None, **extra: Json
 # --- one revision --------------------------------------------------------------------------------
 
 
-def test_the_endpoint_speaks_only_revision_2026_07_28() -> None:
+def test_the_endpoint_speaks_revision_2026_07_28_and_2025_06_18() -> None:
     assert mcp.PROTOCOL_VERSION == "2026-07-28"
-    assert mcp.SUPPORTED_VERSIONS == ("2026-07-28",)
+    assert mcp.LEGACY_VERSION == "2025-06-18"
+    assert mcp.SUPPORTED_VERSIONS == ("2026-07-28", "2025-06-18")
 
 
 def _string_literals(path: Path) -> set[str]:
@@ -139,16 +141,18 @@ def _string_literals(path: Path) -> set[str]:
     }
 
 
-def test_no_branch_answers_initialize_or_ping() -> None:
-    """The route has no method branch at all, and the protocol module names ``initialize`` only to
-    refuse it; ``ping`` is a method like any other it does not know."""
+def test_only_the_older_revision_answers_initialize_or_ping() -> None:
+    """The route has no method branch at all, and revision 2026-07-28 has neither method; only the
+    module of 2025-06-18 names them."""
     assert {"initialize", "ping"}.isdisjoint(_string_literals(API_ROOT / "mcp.py"))
-    assert "ping" not in _string_literals(API_ROOT / "mcp_protocol.py")
+    assert {"initialize", "ping"}.isdisjoint(_string_literals(API_ROOT / "mcp_protocol.py"))
+    assert {"initialize", "ping"} <= _string_literals(API_ROOT / "mcp_legacy.py")
 
 
-def test_the_route_resolves_reads_dispatches_and_runs_the_handler_only() -> None:
-    """``mcp_endpoint`` calls nothing but the actor, the body, the pure functions and the thread
-    pool; ``test_async_routes`` keeps it the one async route of the file."""
+def test_the_route_resolves_reads_chooses_dispatches_and_runs_the_handler_only() -> None:
+    """``mcp_endpoint`` calls nothing but the actor, the body, the pure functions of the two
+    revisions and the thread pool; ``test_async_routes`` keeps it the one async route of the
+    file."""
     tree = ast.parse((API_ROOT / "mcp.py").read_text(encoding="utf-8"))
     (endpoint,) = [
         node
@@ -169,11 +173,13 @@ def test_the_route_resolves_reads_dispatches_and_runs_the_handler_only() -> None
         "send",
         "read_limited_json",
         "parse_error",
-        "dispatch",
         "request.headers.items",
+        "selects_legacy",
+        "dispatch_legacy",
+        "dispatch",
         "isinstance",
-        "tool_failure",
-        "tool_result",
+        "call_failure",
+        "call_result",
     }
 
 
@@ -189,7 +195,7 @@ def test_server_discover_names_the_version_the_tools_the_server_and_the_instruct
         "id": "discover-1",
         "result": {
             "resultType": "complete",
-            "supportedVersions": ["2026-07-28"],
+            "supportedVersions": ["2026-07-28", "2025-06-18"],
             "capabilities": {"tools": {"listChanged": False}},
             "instructions": mcp.INSTRUCTIONS,
             "ttlMs": 3_600_000,
@@ -378,7 +384,13 @@ def test_client_info_is_optional_and_never_an_identity() -> None:
     )
 
 
-# --- versions and initialize ---------------------------------------------------------------------
+# --- versions ------------------------------------------------------------------------------------
+
+UNSUPPORTED = (
+    "Unsupported protocol version: Tralala speaks MCP 2026-07-28, and MCP 2025-06-18 after "
+    "initialize"
+)
+SPOKEN = ["2026-07-28", "2025-06-18"]
 
 
 def test_a_version_the_server_does_not_speak_is_400_unsupported() -> None:
@@ -391,8 +403,8 @@ def test_a_version_the_server_does_not_speak_is_400_unsupported() -> None:
         "id": 1,
         "error": {
             "code": -32022,
-            "message": "Unsupported protocol version: Tralala speaks only MCP 2026-07-28",
-            "data": {"supported": ["2026-07-28"], "requested": "2025-11-25"},
+            "message": UNSUPPORTED,
+            "data": {"supported": SPOKEN, "requested": "2025-11-25"},
         },
     }
 
@@ -402,52 +414,8 @@ def test_the_version_is_checked_before_the_headers_of_a_revision_not_spoken() ->
     assert refusal(reply) == (400, -32022)
     assert decoded(reply)["error"] == {
         "code": -32022,
-        "message": "Unsupported protocol version: Tralala speaks only MCP 2026-07-28",
-        "data": {"supported": ["2026-07-28"], "requested": "2027-01-01"},
-    }
-
-
-LEGACY_INITIALIZE: JsonValue = {
-    "jsonrpc": "2.0",
-    "id": 0,
-    "method": "initialize",
-    "params": {
-        "protocolVersion": "2025-06-18",
-        "capabilities": {"elicitation": {}},
-        "clientInfo": {"name": "legacy-client", "version": "1.0.0"},
-    },
-}
-
-
-def test_initialize_from_an_older_client_names_the_version_spoken_here() -> None:
-    """A client of an older revision opens without headers or ``_meta``; what it is told is the
-    only diagnostic it can show its person, so it names 2026-07-28."""
-    legacy_headers = [("content-type", "application/json"), ("accept", "application/json")]
-    reply = answer(LEGACY_INITIALIZE, legacy_headers)
-    assert reply.status == 400
-    assert reply.body == {
-        "jsonrpc": "2.0",
-        "id": 0,
-        "error": {
-            "code": -32022,
-            "message": "Tralala speaks only MCP 2026-07-28, which has no initialize; connect "
-            "with a client that speaks MCP 2026-07-28",
-            "data": {"supported": ["2026-07-28"], "requested": "2025-06-18"},
-        },
-    }
-
-
-@pytest.mark.parametrize("params", [None, {}, {"protocolVersion": 2025}, "2025-06-18"])
-def test_initialize_without_a_version_requests_an_empty_one(params: JsonValue) -> None:
-    body: dict[str, JsonValue] = {"jsonrpc": "2.0", "id": 0, "method": "initialize"}
-    if params is not None:
-        body["params"] = params
-    error = decoded(answer(body, []))["error"]
-    assert error == {
-        "code": -32022,
-        "message": "Tralala speaks only MCP 2026-07-28, which has no initialize; connect "
-        "with a client that speaks MCP 2026-07-28",
-        "data": {"supported": ["2026-07-28"], "requested": ""},
+        "message": UNSUPPORTED,
+        "data": {"supported": SPOKEN, "requested": "2027-01-01"},
     }
 
 
@@ -735,8 +703,8 @@ def test_get_and_delete_are_405_with_allow_post() -> None:
         "jsonrpc": "2.0",
         "error": {
             "code": -32600,
-            "message": "Method not allowed: POST each JSON-RPC request to this endpoint; MCP "
-            "2026-07-28 has no stream to GET and no session to DELETE",
+            "message": "Method not allowed: POST each JSON-RPC request to this endpoint; Tralala "
+            "opens no stream to GET and keeps no session to DELETE",
         },
     }
 

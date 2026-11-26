@@ -122,10 +122,10 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
   https://<host>.<tailnet>.ts.net/mcp
 ```
 
-The first and the last print `200`. `/mcp` speaks MCP revision 2026-07-28 alone, so the request
-carries that version in its `_meta` and in its headers; without them it answers `400`, and with a
-wrong key `401`. [Agent usage](Agent_usage.md#2-connect) shows which coding agents can connect and
-how.
+The first and the last print `200`. `/mcp` speaks MCP revisions 2026-07-28 and 2025-06-18 on the
+same address; this request asks in 2026-07-28, so it carries that version in its `_meta` and in
+its headers, and with a wrong key it answers `401`. [Agent usage](Agent_usage.md#2-connect) shows
+the same request in 2025-06-18, which coding agents can connect and how.
 
 ### Reaching a model that runs on the host
 

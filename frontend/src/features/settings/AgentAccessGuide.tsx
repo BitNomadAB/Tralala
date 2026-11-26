@@ -1,5 +1,5 @@
 import { ChevronRight, Copy, Laptop } from "lucide-react";
-import { claudeCodeCommand, MCP_REVISION } from "@/lib/agentAccess";
+import { claudeCodeCommand, MCP_LEGACY_REVISION, MCP_REVISION } from "@/lib/agentAccess";
 
 /** The placeholder is the installation's own address, so the guide carries no host of its own. */
 const PLACEHOLDER_ORIGIN = "https://<Your URL>";
@@ -27,9 +27,10 @@ function Mono({ children }: { children: string }) {
  * The five steps between "I have a key" and "my agent is working".
  *
  * Deliberately short and self-contained: the person reading it is at their own machine, not in the
- * Tralala UI, so it names the exact command to run and what a failure looks like. The command is
- * Claude Code's, because `/mcp` speaks one MCP revision and Claude Code is the client whose own
- * documentation says it speaks it; the copy button copies the command exactly as it is shown.
+ * Tralala UI, so it names the exact command to run and what a failure looks like. `/mcp` speaks
+ * two MCP revisions on one address, so the agent needs no setting for either; the command is
+ * Claude Code's, Codex is named with where its configuration lives, and the copy button copies the
+ * command exactly as it is shown.
  */
 export function AgentAccessGuide({
   token,
@@ -67,13 +68,11 @@ export function AgentAccessGuide({
             repository.
           </li>
           <li>
-            <strong className="text-[var(--foreground)]">Add Tralala to Claude Code.</strong> Your
-            agent must speak MCP {MCP_REVISION}: Tralala speaks that revision of the Model Context
-            Protocol and no older one. Claude Code&apos;s own documentation says it does from
-            version 2.1.274; <Mono>claude --version</Mono> prints yours, and{" "}
-            <Mono>claude update</Mono> installs the newest. In the folder of the project you will
-            work on, run this command with <Mono>{PLACEHOLDER_ORIGIN}</Mono> replaced by the address
-            you use to open Tralala
+            <strong className="text-[var(--foreground)]">Add Tralala to Claude Code.</strong>{" "}
+            Tralala speaks MCP {MCP_REVISION} and the older {MCP_LEGACY_REVISION} of the Model
+            Context Protocol on the same address, so an agent that speaks either connects. In the
+            folder of the project you will work on, run this command with{" "}
+            <Mono>{PLACEHOLDER_ORIGIN}</Mono> replaced by the address you use to open Tralala
             {token ? null : (
               <>
                 {" "}
@@ -91,9 +90,10 @@ export function AgentAccessGuide({
               </button>
             ) : null}
             <p className="mt-2 text-xs">
-              Claude Code keeps the server for that folder; start a new session there. Another
-              client takes the same address and the same <Mono>Authorization</Mono> header in its
-              own configuration, once it speaks {MCP_REVISION}.
+              Claude Code keeps the server for that folder; start a new session there. Codex takes
+              the same address in <Mono>~/.codex/config.toml</Mono>, with the token in an
+              environment variable; another client takes the same address and the same{" "}
+              <Mono>Authorization</Mono> header in its own configuration.
             </p>
           </li>
           <li>
@@ -101,8 +101,8 @@ export function AgentAccessGuide({
             <Mono>claude mcp list</Mono> shows <Mono>tralala</Mono> as connected, and when you ask
             Claude to call Tralala&apos;s <Mono>whoami</Mono>, it answers with your key&apos;s name.
             When it does not connect: <Mono>401</Mono> means the token is wrong, revoked or expired;{" "}
-            <Mono>400</Mono> or <Mono>405</Mono> with a message that names MCP {MCP_REVISION} means
-            the client tried an older revision; <Mono>403</Mono> means the request carried an{" "}
+            <Mono>400</Mono> with <Mono>-32022</Mono> means the client named an MCP version that
+            Tralala does not speak; <Mono>403</Mono> means the request carried an{" "}
             <Mono>Origin</Mono> header that Tralala does not trust. A missing scope stops no
             connection: the agent does not see the tools that scope opens, and a call to one comes
             back with the error <Mono>Missing required scope: …</Mono> in its answer, not with a{" "}
@@ -115,10 +115,10 @@ export function AgentAccessGuide({
           </li>
         </ol>
         <p className="text-xs italic">
-          The endpoint is <Mono>{"<Your URL>/mcp"}</Mono> and speaks MCP {MCP_REVISION} alone; its
-          tool list is described in plain text at <Mono>{"<Your URL>/llms.txt"}</Mono>. Agent usage,
-          in Tralala&apos;s documentation, says which clients can connect and what to try when one
-          does not.
+          The endpoint is <Mono>{"<Your URL>/mcp"}</Mono> and speaks MCP {MCP_REVISION} and{" "}
+          {MCP_LEGACY_REVISION}; its tool list is described in plain text at{" "}
+          <Mono>{"<Your URL>/llms.txt"}</Mono>. Agent usage, in Tralala&apos;s documentation, says
+          how to connect Claude Code and Codex and what to try when one does not connect.
         </p>
       </div>
     </details>

@@ -104,8 +104,8 @@ decides for itself whether to believe the `X-Forwarded-For` header it receives:
 ## What a worker key can do
 
 A key a person issues for their coding agent works the boards through the tools of the worker
-catalogue (`/mcp`, which speaks MCP revision 2026-07-28 alone, described by `/llms.txt`), within the
-scopes it was given and never beyond them:
+catalogue (`/mcp`, which speaks MCP revisions 2026-07-28 and 2025-06-18 with the same scope checks,
+described by `/llms.txt`), within the scopes it was given and never beyond them:
 
 - read boards, Loops, documents, Tickets, their attached files and notes, and search them;
 - open a Loop and write its Info while the Loop is still `draft` or `analysis_review`;

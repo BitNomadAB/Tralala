@@ -9,7 +9,7 @@ Two more entry points live at the origin rather than under `/api/v1`:
 | Path | Auth | Purpose |
 | --- | --- | --- |
 | `/llms.txt` | public | Plain-text bootstrap: envelope, Loop lifecycle, rules and the worker tools. Contains no ids or data. |
-| `/mcp` | Bearer | The curated worker catalogue over MCP revision 2026-07-28 and no other (JSON-RPC 2.0 over Streamable HTTP, one JSON answer per POST): `server/discover`, `tools/list` and `tools/call`, each with `_meta` and the MCP headers; no `initialize`, `ping` or session ([The MCP endpoint](#the-mcp-endpoint)). The tool list is filtered to the scopes the token holds. |
+| `/mcp` | Bearer | The curated worker catalogue over MCP revisions 2026-07-28 and 2025-06-18 on the one address (JSON-RPC 2.0 over Streamable HTTP, one JSON answer per POST): `server/discover`, `tools/list` and `tools/call` with `_meta` and the MCP headers in 2026-07-28, `initialize`, `ping`, `tools/list` and `tools/call` in 2025-06-18; no session in either ([The MCP endpoint](#the-mcp-endpoint)). The tool list is filtered to the scopes the token holds. |
 
 ## Envelope
 
@@ -1120,7 +1120,7 @@ text and answers a blank `q` with `422 validation_failed`.
 
 `backend/app/services/agent_tools.py` holds one catalogue: a name, a description, a JSON Schema, the
 scope it needs and a handler that calls the same services as the routes above. `/mcp` serves it as
-MCP tools in revision 2026-07-28 (`server/discover`, `tools/list` and `tools/call`; see
+MCP tools in revisions 2026-07-28 and 2025-06-18 (`tools/list` and `tools/call` in both; see
 [The MCP endpoint](#the-mcp-endpoint)), and `/llms.txt` summarises it. The browser WebMCP adapter
 is a separate surface for a person's own session and is not generated from this catalogue yet. A
 tool is listed only when the calling token holds its scope, and `tools/call` re-checks it before
@@ -1234,12 +1234,24 @@ QA, finalizing a Loop).
 
 ### The MCP endpoint
 
-`POST /mcp` speaks MCP revision 2026-07-28 and no other, over Streamable HTTP: one JSON-RPC 2.0
-request per POST and one JSON answer (`application/json`), with no handshake, no session and no
-stream. A client of an older revision cannot connect: it opens with `initialize`, which this
-revision does not have. [Agent_usage.md](Agent_usage.md#2-connect) says how a client connects.
+`POST /mcp` speaks two MCP revisions on the one address, 2026-07-28 and 2025-06-18, over
+Streamable HTTP: one JSON-RPC 2.0 request per POST and one JSON answer (`application/json`), with
+no session and no stream in either. [Agent_usage.md](Agent_usage.md#2-connect) says how a client
+connects.
 
-Every request carries these, and the server compares each header with the body:
+Each request is judged by itself, since there is no session to remember a handshake by:
+
+- `initialize` is revision 2025-06-18;
+- a request with `io.modelcontextprotocol/protocolVersion` in `params._meta` follows the version
+  it names there: 2025-06-18 is the older revision, and any other is revision 2026-07-28, whose
+  rules refuse a version neither revision speaks;
+- any other request is revision 2026-07-28 when its `MCP-Protocol-Version` header is
+  `2026-07-28`, and 2025-06-18 otherwise, with that header or without it.
+
+#### Revision 2026-07-28
+
+This revision has no handshake. Every request carries these, and the server compares each header
+with the body:
 
 | Where | What |
 | --- | --- |
@@ -1253,7 +1265,7 @@ JSON. The three methods:
 
 | Method | Result |
 | --- | --- |
-| `server/discover` | `supportedVersions` (`["2026-07-28"]`), `capabilities` (`{"tools": {"listChanged": false}}`), `instructions` (how to start, the same text for every key) and the caching hints `ttlMs` (one hour) and `cacheScope: public` |
+| `server/discover` | `supportedVersions` (`["2026-07-28", "2025-06-18"]`), `capabilities` (`{"tools": {"listChanged": false}}`), `instructions` (how to start, the same text for every key) and the caching hints `ttlMs` (one hour) and `cacheScope: public` |
 | `tools/list` | `tools`: every tool the key's scopes open, each with `name`, `description` and `inputSchema`, in the catalogue's order; `ttlMs` (five minutes) and `cacheScope: private`, because the list depends on the key |
 | `tools/call` | the tool's answer as `structuredContent` and as one text item in `content` (its JSON), with `isError: false`; a refusal by the tool's service is a result too, with `isError: true` and the error's `code`, `message`, `details` and `retryable` as the text |
 
@@ -1272,18 +1284,43 @@ first rule a request breaks answers it:
 | `400` | `-32700` | The body is not JSON |
 | `400` | `-32600` | The body is not one JSON-RPC 2.0 request or notification, or a request has no method or an `id` that is neither a string nor an integer |
 | `202` | none | A notification (no `id`): accepted with no body, since this revision defines none to act on |
-| `400` | `-32022` | `initialize`: "Tralala speaks only MCP 2026-07-28, which has no initialize; connect with a client that speaks MCP 2026-07-28", with `data.supported` and `data.requested`, the version the client asked for |
 | `400` | `-32602` | `params` is not an object with `_meta`, or `_meta` lacks the version (a string) or the client's capabilities (an object) |
-| `400` | `-32022` | A version in `_meta` other than 2026-07-28: "Unsupported protocol version: Tralala speaks only MCP 2026-07-28", with `data.supported` and `data.requested` |
+| `400` | `-32022` | A version in `_meta` that neither revision speaks: "Unsupported protocol version: Tralala speaks MCP 2026-07-28, and MCP 2025-06-18 after initialize", with `data.supported` (both versions) and `data.requested` |
 | `400` | `-32020` | `MCP-Protocol-Version` or `Mcp-Method` is missing, repeated, holds characters a header may not, or differs from the body |
 | `404` | `-32601` | Any method but the three above, `ping` and `subscriptions/listen` among them |
 | `200` | `-32602` | On `tools/call`: `params.name` is not a string, or `arguments` is not an object |
 | `400` | `-32020` | On `tools/call`: `Mcp-Name` is missing, repeated or malformed, or differs from `params.name` |
 | `200` | `-32602` | On `tools/call`: `inputResponses` or `requestState` has the wrong type, the tool is unknown (`Unknown tool: …`) or the key lacks its scope (`Missing required scope: …`) |
 
-`GET` and `DELETE` answer `405` with `Allow: POST` and `-32600`: this revision has no stream to open
-and no session to end. An `Mcp-Session-Id` or `Last-Event-ID` header is ignored, and no session id
-is ever sent. The tools never change while the server runs (`listChanged: false`), so there is no
+#### Revision 2025-06-18
+
+A client of this revision opens with `initialize` and then sends `MCP-Protocol-Version: 2025-06-18`
+on every request, with no `_meta` version and none of the other MCP headers; a request without the
+version header is served as 2025-06-18 too. The methods:
+
+| Method | Result |
+| --- | --- |
+| `initialize` | `protocolVersion` (`"2025-06-18"`, whatever version the client asked for), `capabilities` (`{"tools": {"listChanged": false}}`), `serverInfo` (`name`, `version`) and `instructions`, the same text `server/discover` gives |
+| `ping` | an empty result |
+| `tools/list` | `tools`: every tool the key's scopes open, as in revision 2026-07-28, without the caching hints |
+| `tools/call` | the tool's answer as in revision 2026-07-28 |
+
+A result has no `resultType` and no `_meta`. Before the body is read the same `401`, `429`, `413`,
+`403` and `-32700` apply, and then:
+
+| HTTP | Code | When |
+| --- | --- | --- |
+| `400` | `-32600` | The body is not one JSON-RPC 2.0 request or notification |
+| `202` | none | A notification (no `id`), `notifications/initialized` among them |
+| `400` | `-32022` | The `MCP-Protocol-Version` header names a version neither revision speaks, with the same message and `data` as above |
+| `200` | `-32602` | On `tools/call`: `params` is not an object, `params.name` is not a string, `arguments` is not an object, the tool is unknown or the key lacks its scope |
+| `200` | `-32601` | Any method but the four above |
+
+#### Both revisions
+
+`GET` and `DELETE` answer `405` with `Allow: POST` and `-32600`: Tralala opens no stream and keeps
+no session. An `Mcp-Session-Id` or `Last-Event-ID` header is ignored, and no session id is ever
+sent, not even in the answer to `initialize`. The tools never change while the server runs (`listChanged: false`), so there is no
 change stream: a client keeps the list it read. A page in a browser on another origin cannot call
 `/mcp` today, because the server's CORS settings do not allow the MCP headers.
 

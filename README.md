@@ -98,10 +98,11 @@ Change it under **Settings → Your password**. More in
   sealed credential; OpenAI-compatible and A2A transports.
 - **People**: `admin`/`member` roles, invitation links instead of email, sessions that revoke on a
   password change, and self-service "interaction agent access" keys.
-- **One worker surface**: a curated tool catalogue behind `/mcp`, which speaks MCP revision
-  2026-07-28 alone, for a coding agent in a person's session (reading, planning a Loop, working its
-  Tickets, notes and discussions), with a public `/llms.txt` bootstrap generated from it so a URL
-  and a token are enough to start working for an agent that speaks that revision. The Loop is the
+- **One worker surface**: a curated tool catalogue behind `/mcp`, which speaks MCP revisions
+  2026-07-28 and 2025-06-18 on the one address, for a coding agent in a person's session (reading,
+  planning a Loop, working its Tickets, notes and discussions), with a public `/llms.txt` bootstrap
+  generated from it so a URL and a token are enough to start working for an agent that speaks
+  either revision. The Loop is the
   plan: nothing the agent plans or logs is a file in a repository.
 
 ## Layout

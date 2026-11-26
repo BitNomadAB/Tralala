@@ -70,18 +70,18 @@ facts that explain most surprises:
 
 ## Coding agents and `/mcp`
 
-`/mcp` speaks MCP revision 2026-07-28 and no other.
-[When it does not connect](Agent_usage.md#when-it-does-not-connect) has a request that tests the
-address and the key, and what each answer means.
+`/mcp` speaks MCP revisions 2026-07-28 and 2025-06-18 on the same address.
+[When it does not connect](Agent_usage.md#when-it-does-not-connect) has a request in each revision
+that tests the address and the key, and what each answer means.
 
-- **A coding agent cannot connect, and Tralala answers `400` with `-32022`** — the client opened
-  with `initialize`, the handshake of an older MCP revision, which 2026-07-28 does not have. The
-  message reads "Tralala speaks only MCP 2026-07-28, which has no initialize; connect with a client
-  that speaks MCP 2026-07-28", whatever scopes the key holds (a wrong key is answered `401` first),
-  and the client may show it only as a failed connection. No setting brings the older revision back: use a client that speaks 2026-07-28.
-  [Which clients can connect](Agent_usage.md#which-clients-can-connect) says which ones do, and
-  [When it does not connect](Agent_usage.md#when-it-does-not-connect) what keeps Claude Code on the
-  older revision.
+- **A coding agent cannot connect, and Tralala answers `400` with `-32022`** — the client named an
+  MCP version that neither revision is, in `params._meta` or in the `MCP-Protocol-Version` header
+  after `initialize`. The message reads "Unsupported protocol version: Tralala speaks MCP
+  2026-07-28, and MCP 2025-06-18 after initialize", whatever scopes the key holds (a wrong key is
+  answered `401` first), and the client may show it only as a failed connection. An `initialize`
+  itself is never refused: Tralala answers it with 2025-06-18, whatever version the client asked
+  for. [Which clients can connect](Agent_usage.md#which-clients-can-connect) says how the two
+  revisions are told apart.
 - **A tool is missing, or a call answers `Missing required scope: …`** — the key lacks a scope that
   tool needs. `tools/list` leaves out every tool the key's scopes do not open, and a call to one is
   answered with HTTP `200` and the JSON-RPC error `-32602`, not with `403`. Create a key with the

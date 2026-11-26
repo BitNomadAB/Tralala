@@ -1,20 +1,26 @@
 """MCP transport for the worker tool catalogue, plus the plain-text bootstrap.
 
-`/mcp` speaks MCP revision 2026-07-28, and only it, over the Streamable HTTP transport: a client
-POSTs one JSON-RPC 2.0 message and gets one JSON response, with no handshake, no session and no
-stream. The rules of the revision live in `mcp_protocol` as pure functions; this module resolves
-the actor, reads the body and runs the handler. The endpoint is authenticated with the same Bearer
-token as REST, and the tool list is filtered to the scopes the token actually holds, so a worker
-cannot even see a capability it may not use.
+`/mcp` speaks two MCP revisions on the one address, 2026-07-28 and 2025-06-18, over the
+Streamable HTTP transport: a client POSTs one JSON-RPC 2.0 message and gets one JSON response,
+with no session and no stream in either. The rules of each revision live as pure functions in
+`mcp_protocol` (2026-07-28) and `mcp_legacy` (2025-06-18), and `mcp_legacy.selects_legacy`
+chooses between them; this module resolves the actor, reads the body, chooses the revision and
+runs the handler. The endpoint is authenticated with the same Bearer token as REST, and the tool
+list is filtered to the scopes the token actually holds, so a worker cannot even see a capability
+it may not use.
 
-Every request carries ``params._meta`` with ``io.modelcontextprotocol/protocolVersion``
-(2026-07-28) and ``io.modelcontextprotocol/clientCapabilities``, and the headers
-``MCP-Protocol-Version`` and ``Mcp-Method``; a ``tools/call`` also names its tool in ``Mcp-Name``.
-The methods are ``server/discover`` (the supported version, the capabilities and the
-instructions), ``tools/list`` and ``tools/call``. There is no ``initialize`` and no ``ping``: a
-client of an older revision opens with ``initialize`` and gets 400 with -32022, in a message that
-names 2026-07-28, since that error is all such a client can show its person; ``ping`` is a method
-like any other the server does not know (404, -32601), and GET and DELETE answer 405.
+In 2026-07-28 every request carries ``params._meta`` with
+``io.modelcontextprotocol/protocolVersion`` (2026-07-28) and
+``io.modelcontextprotocol/clientCapabilities``, and the headers ``MCP-Protocol-Version`` and
+``Mcp-Method``; a ``tools/call`` also names its tool in ``Mcp-Name``. Its methods are
+``server/discover`` (the supported versions, the capabilities and the instructions),
+``tools/list`` and ``tools/call``; ``ping`` is a method it does not have (404, -32601).
+
+In 2025-06-18 a client opens with ``initialize``, whose answer names 2025-06-18 and carries the
+same instructions, and then sends ``MCP-Protocol-Version: 2025-06-18`` (or no such header) and no
+``_meta`` version; its methods are ``initialize``, ``ping``, ``tools/list`` and ``tools/call``. No
+session id is minted for it. A version neither revision speaks gets 400 with -32022 and the
+versions that are spoken, and GET and DELETE answer 405 in both.
 
 `/llms.txt` is public and deliberately boring: it names the envelope, the workflow and the tools,
 and contains no ids, no data and no secrets. It exists so that a URL plus a token is enough for an
@@ -41,7 +47,10 @@ from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
 from ..services.loop_notes import NOTE_MAX_CHARACTERS
 from .body import read_limited_json
 from .deps import get_context
+from .mcp_legacy import call_failure, call_result, selects_legacy
+from .mcp_legacy import dispatch as dispatch_legacy
 from .mcp_protocol import (
+    LEGACY_VERSION,
     PROTOCOL_VERSION,
     SUPPORTED_VERSIONS,
     Reply,
@@ -50,9 +59,7 @@ from .mcp_protocol import (
     method_not_allowed,
     origin_refusal,
     parse_error,
-    tool_failure,
     tool_list,
-    tool_result,
     trusted_origins,
 )
 
@@ -114,7 +121,12 @@ async def mcp_endpoint(request: Request) -> Response:
         message = await read_limited_json(request)
     except ValueError:
         return send(parse_error())
-    step = dispatch(request.headers.items(), message, ctx.actor, SERVER)
+    # The one choice this route makes: which revision's rules answer the message.
+    headers = request.headers.items()
+    if selects_legacy(headers, message):
+        step = dispatch_legacy(headers, message, ctx.actor, SERVER)
+    else:
+        step = dispatch(headers, message, ctx.actor, SERVER)
     if isinstance(step, Reply):
         return send(step)
     name, arguments = step.tool.name, step.arguments
@@ -123,14 +135,15 @@ async def mcp_endpoint(request: Request) -> Response:
         # The call goes through run_tool, which adds the notices that wait for the key.
         payload = await run_in_threadpool(run_tool, ctx.services, ctx.actor, name, arguments)
     except ApiError as error:
-        return send(tool_failure(step, SERVER, error))
-    return send(tool_result(step, SERVER, payload))
+        return send(call_failure(step, SERVER, error))
+    return send(call_result(step, SERVER, payload))
 
 
 @router.api_route("/mcp", methods=["GET", "DELETE"])
 def mcp_not_allowed() -> Response:
-    """Revision 2026-07-28 has no stream to GET and no session to DELETE. No session id is ever
-    minted, and ``Mcp-Session-Id`` and ``Last-Event-ID`` are never read."""
+    """Neither revision gets a stream to GET or a session to DELETE: 2026-07-28 has neither, and
+    in 2025-06-18 both are a server's choice. No session id is ever minted, and
+    ``Mcp-Session-Id`` and ``Last-Event-ID`` are never read."""
     return send(method_not_allowed())
 
 
@@ -332,22 +345,28 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "## 5. Tools",
         "",
-        "The same catalogue is exposed as MCP tools at `/mcp`, in MCP revision",
-        f"{PROTOCOL_VERSION} and no other: Streamable HTTP, one JSON-RPC 2.0 request per POST and",
-        "one JSON answer. A tool is offered only when the token holds its scope.",
+        "The same catalogue is exposed as MCP tools at `/mcp`, in two MCP revisions on the one",
+        f"address, {PROTOCOL_VERSION} and {LEGACY_VERSION}: Streamable HTTP, one JSON-RPC 2.0",
+        "request per POST and one JSON answer, with no session and no stream in either. A tool",
+        "is offered only when the token holds its scope.",
         "",
-        "There is no handshake, no session and no stream. Every request carries `params._meta`",
-        f"with `io.modelcontextprotocol/protocolVersion` (`{PROTOCOL_VERSION}`) and",
+        f"In {PROTOCOL_VERSION} there is no handshake. Every request carries `params._meta` with",
+        f"`io.modelcontextprotocol/protocolVersion` (`{PROTOCOL_VERSION}`) and",
         "`io.modelcontextprotocol/clientCapabilities` (an object, `{}` when you declare none),",
         f"and the headers `MCP-Protocol-Version: {PROTOCOL_VERSION}` and `Mcp-Method` (the",
         "method); a `tools/call` also sends `Mcp-Name` (the tool's name). The methods are",
-        "`server/discover` (the supported version, the capabilities and the server's",
+        "`server/discover` (the supported versions, the capabilities and the server's",
         "instructions), `tools/list` and `tools/call`, and every result carries `resultType`.",
-        "`initialize` and `ping` do not exist: a client that opens with `initialize` speaks an",
-        "older revision and is refused with HTTP 400 and `-32022`, in a message that names",
-        f"{PROTOCOL_VERSION}. A request without its `_meta` answers 400 with `-32602`, a missing",
-        "or unlike header 400 with `-32020`, and a method other than these three 404 with",
-        "`-32601`.",
+        "A request without its `_meta` answers 400 with `-32602`, a missing or unlike header 400",
+        "with `-32020`, and a method other than these three 404 with `-32601`.",
+        "",
+        f"In {LEGACY_VERSION} a client opens with `initialize`, whose answer names",
+        f"{LEGACY_VERSION} and carries the same instructions, and then sends",
+        f"`MCP-Protocol-Version: {LEGACY_VERSION}` and no `_meta` version. The methods are",
+        "`initialize`, `ping`, `tools/list` and `tools/call`.",
+        "",
+        "A version that neither revision speaks answers 400 with `-32022` and the versions that",
+        "are spoken.",
         "",
     ]
     for tool in tools.values():
@@ -436,6 +455,7 @@ def llms_txt(request: Request) -> Response:
 
 __all__ = [
     "INSTRUCTIONS",
+    "LEGACY_VERSION",
     "PROTOCOL_VERSION",
     "SERVER",
     "SUPPORTED_VERSIONS",

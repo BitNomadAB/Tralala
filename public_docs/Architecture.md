@@ -414,15 +414,17 @@ context registers only its tools through `createRegistry`, which uses an `AbortC
 scopes before registration, and every tool calls the typed REST client — never the database.
 
 An agent outside the browser cannot see WebMCP at all, so the same capability idea has a second
-transport: `POST /mcp` speaks MCP revision 2026-07-28 alone, with a bearer token, and `GET /llms.txt`
-is the public plain-text bootstrap that explains the product, the Loop lifecycle and the rules.
-That revision has no handshake and no session: each POST is one JSON-RPC 2.0 request that carries
-its version and its client's capabilities in `_meta`, with the version and the method mirrored into
-headers, and it gets one JSON answer. A client of an older revision, which opens with `initialize`,
-is refused with an error that names 2026-07-28; the older path is not kept beside the new one. The
-rules of the revision are pure functions in `backend/app/api/mcp_protocol.py`, and the route in
-`backend/app/api/mcp.py` only resolves the key, reads the body, applies those rules and runs the
-tool through `run_tool`. Both surfaces come from `services/agent_tools.py`, which is the one
+transport: `POST /mcp` speaks MCP revisions 2026-07-28 and 2025-06-18 on the same address, with a
+bearer token, and `GET /llms.txt` is the public plain-text bootstrap that explains the product, the
+Loop lifecycle and the rules. Each POST is one JSON-RPC 2.0 request and gets one JSON answer, with
+no session and no stream in either revision. In 2026-07-28 a request carries its version and its
+client's capabilities in `_meta`, with the version and the method mirrored into headers; in
+2025-06-18 a client opens with `initialize` and names the negotiated version in a header after
+that. The server tells them apart by how each request opens, so a client of either keeps its
+connection. The rules of each revision are pure functions, 2026-07-28 in
+`backend/app/api/mcp_protocol.py` and 2025-06-18 in `backend/app/api/mcp_legacy.py`, and the route
+in `backend/app/api/mcp.py` only resolves the key, reads the body, chooses the revision, applies
+its rules and runs the tool through `run_tool`. Both surfaces come from `services/agent_tools.py`, which is the one
 description of what a worker token may call: the key's identity (`whoami`); reading boards, Loops,
 documents, Tickets and their attached files; working a Ticket (summaries, a wait, assigning, moving,
 commenting, completing) and adding a follow-up outside the plan; planning a Loop (creating it,

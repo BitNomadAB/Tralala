@@ -21,19 +21,19 @@ installation.
 
 Read this one before upgrading an installation that a coding agent connects to:
 
-- **A coding agent that does not speak MCP 2026-07-28 loses its connection at the upgrade.**
-  `/mcp` spoke MCP revision 2025-06-18, which opens with an `initialize` handshake; it now speaks
-  revision 2026-07-28 alone, which has none: every request states its version in `_meta` and in
-  headers, and `server/discover` says what the server offers. The older path is removed, not kept
-  beside the new one: `initialize` answers `400` with `-32022` and a message that names
-  2026-07-28, and `ping` answers `404`. Nothing on Tralala's side brings the old revision back, so
-  update the agent first. According to their own documentation on 2026-11-25, Claude Code speaks
-  2026-07-28 from version 2.1.274 (2.1.232 in a session that fetches feature flags), and Codex
-  CLI, Cursor, VS Code with GitHub Copilot and Gemini CLI did not say that they do, so they cannot
-  connect until they do. None of them has been tried against Tralala yet.
-  [Connect](Agent_usage.md#2-connect) shows how to connect Claude Code and check the connection,
-  and **How do I connect my computer?** in Settings now gives the command for Claude Code instead
-  of a configuration block for VS Code.
+- **A coding agent keeps its connection at the upgrade, and `/mcp` also speaks MCP 2026-07-28.**
+  `/mcp` spoke MCP revision 2025-06-18, which opens with an `initialize` handshake, and it still
+  does, on the same address. Beside it, it now speaks revision 2026-07-28, which has none: every
+  request states its version in `_meta` and in headers, and `server/discover` says what the
+  server offers. Tralala tells the two apart by how each request opens, so nothing is set on
+  either side, and both see the same tools. A version neither revision speaks answers `400` with
+  `-32022` and the two that are spoken. On 2026-11-26 Claude Code (the VS Code extension) and
+  Codex each connected to a Tralala that spoke revision 2025-06-18 only, and called tools; no
+  client has been tried against the 2026-07-28 path. A client of 2025-06-18 has no way to be
+  asked a question without a stream; a later tool gives such a client the link to a decision as
+  text. [Connect](Agent_usage.md#2-connect) shows how to connect Claude Code and Codex and check
+  the connection, and **How do I connect my computer?** in Settings gives the command for Claude
+  Code instead of a configuration block for VS Code.
 
 Worth knowing when you look at the dashboard:
 
