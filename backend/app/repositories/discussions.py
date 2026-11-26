@@ -39,6 +39,23 @@ class InboxThread:
     participant_count: int
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NoticeThread:
+    """A thread that may wait for an actor, with the facts that say why.
+
+    ``involved``: the actor opened the thread or wrote a message in it. ``marked``: the actor has
+    a read marker for it. ``news``: someone else wrote a message, not deleted, newer than the
+    marker (or there is no marker); ``news_after_closed``: the newest such message came after the
+    close. ``run_failed``: a run the actor started failed after the marker (or there is none)."""
+
+    thread: DiscussionThreadsRow
+    involved: bool
+    marked: bool
+    news: bool
+    news_after_closed: bool
+    run_failed: bool
+
+
 class NamedVote(TypedDict):
     """A vote with the display name of the participant who cast it."""
 
@@ -143,6 +160,14 @@ class DiscussionReadRepository(Protocol):
         """Of ``discussion_ids``, the threads holding a message that is not deleted, that someone
         other than the actor wrote, and that is newer than the actor's marker for the thread or
         meets no marker at all."""
+        ...
+
+    def notices(self, actor_id: str, *, limit: int) -> list[NoticeThread]:
+        """The threads that may wait for the actor, newest activity first, at most ``limit``, in
+        one statement: one the actor is involved in that has news, one where a run the actor
+        started failed after its marker, and an open question: a thread on the board (no Ticket)
+        that is not closed, cancelled, approved or vetoed, the actor is not involved in and holds
+        no marker for."""
         ...
 
 

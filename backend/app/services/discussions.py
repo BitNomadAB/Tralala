@@ -26,6 +26,7 @@ from .agents import RoleSnapshot
 from .discussion_answers import read_answer
 from .discussion_closing import CLOSED, close_thread, reopen_thread
 from .discussion_inbox import InboxPage, decided_by, read_inbox
+from .discussion_notices import Notices, read_notices
 from .discussion_synthesis import latest_answers, positions, read_synthesis
 from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED, Event, EventService
 from .loops import ensure_ticket_writable
@@ -330,7 +331,7 @@ class DiscussionService:
                 repos, discussion_id, STATUS_CHANGED, {"status": target, "run_state": "idle"}, actor
             )
         self._publish(board_id, review_event, status_event)
-        return self.get(board_id, discussion_id)
+        return self.get(board_id, discussion_id, reader=actor)
 
     def close(self, actor: ActorContext, board_id: str, discussion_id: str) -> DiscussionEntry:
         """The opener closes the thread (``discussion_closing``)."""
@@ -346,7 +347,7 @@ class DiscussionService:
                 events=self.events,
             )
         self._publish(board_id, event)
-        return self.get(board_id, discussion_id)
+        return self.get(board_id, discussion_id, reader=actor)
 
     def reopen(self, actor: ActorContext, board_id: str, discussion_id: str) -> DiscussionEntry:
         """The opener, or a signed-in person, opens a closed thread again
@@ -363,7 +364,7 @@ class DiscussionService:
                 events=self.events,
             )
         self._publish(board_id, event)
-        return self.get(board_id, discussion_id)
+        return self.get(board_id, discussion_id, reader=actor)
 
     # --- queries -------------------------------------------------------------
 
@@ -417,6 +418,15 @@ class DiscussionService:
         actor.require("discussions:read")
         return read_inbox(self.registry, self.store, actor)
 
+    def notices(self, actor: ActorContext, board_id: str | None) -> Notices | None:
+        """What waits for the actor in the discussions of one board, or without ``board_id`` of
+        every board that is not archived, which names the boards and so needs ``boards:read``
+        beside ``discussions:read``; ``None`` when nothing waits (``discussion_notices``)."""
+        actor.require("discussions:read")
+        if board_id is None:
+            actor.require("boards:read")
+        return read_notices(self.registry, self.store, actor, board_id)
+
     def mark_read(self, actor: ActorContext, board_id: str, discussion_id: str) -> ReadMarker:
         """The actor has read the thread now: its marker moves to now (made if it is new), so
         only what someone else writes after it is new for the actor. It is the reader's own
@@ -432,14 +442,22 @@ class DiscussionService:
     # --- commands ------------------------------------------------------------
 
     def create(
-        self, actor: ActorContext, board_id: str, payload: DiscussionCreate
+        self,
+        actor: ActorContext,
+        board_id: str,
+        payload: DiscussionCreate,
+        *,
+        ticket: str | None = None,
     ) -> DiscussionEntry:
+        """Open a thread with its question as the first message, which may point at a Ticket on
+        the board (``ticket``, its id or key; unknown is ``422``)."""
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
         now = self._clock()
         discussion_id = self._new_id()
         with self.store.writer(board_id) as repos:
             title = self._title(repos, payload)
+            ref = resolve_ticket(repos, ticket) if ticket else None
             snapshots = self._snapshots(payload.participant_ids)
             thread = DiscussionThreadsRow(
                 id=discussion_id,
@@ -501,7 +519,7 @@ class DiscussionService:
                     content_sha256=None,
                     answer_json="{}",
                     after_closed=0,
-                    ref_card_id=None,
+                    ref_card_id=ref.id if ref is not None else None,
                 )
             )
             self._log(
@@ -512,7 +530,7 @@ class DiscussionService:
                 {"discussion_id": discussion_id, "title": title},
                 now,
             )
-        return self.get(board_id, discussion_id)
+        return self.get(board_id, discussion_id, reader=actor)
 
     @staticmethod
     def _title(repos: BoardRepositories, payload: DiscussionCreate) -> str:
@@ -630,7 +648,7 @@ class DiscussionService:
                 actor, board_id, discussion_id, thread.mode, payload.content, participants
             )
         )
-        detail = self.get(board_id, discussion_id)
+        detail = self.get(board_id, discussion_id, reader=actor)
         detail["auto_run"] = auto_run
         return detail
 

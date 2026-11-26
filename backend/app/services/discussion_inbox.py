@@ -9,7 +9,7 @@ reads the answer.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import TypedDict, TypeIs
 
 from pydantic import JsonValue
@@ -18,7 +18,7 @@ from ..core.context import ActorContext
 from ..core.errors import NotFound, ServiceUnavailable
 from ..db.generated.board import DiscussionOutcomesRow
 from ..db.generated.registry import BoardsRow
-from ..repositories.board import BoardUnitOfWork
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.discussions import InboxThread
 from ..repositories.registry import RegistryUnitOfWork
 from .discussion_synthesis import read_synthesis
@@ -200,27 +200,43 @@ def ordered(rows: Iterable[InboxRow], *, limit: int = INBOX_LIMIT) -> InboxPage:
     return {"items": items[:limit], "total": len(items)}
 
 
-def read_inbox(
-    registry: RegistryUnitOfWork, store: BoardUnitOfWork, reader: ActorContext
-) -> InboxPage:
-    """Every thread that is not cancelled, on every board that is not archived, as the inbox
-    orders them for ``reader``: what is new for the reader is read once per board. An archived
-    board is read-only: a decision there is refused (``board_archived``), so none of its threads
-    waits for anyone, and they are read on its Tickets. A board whose database cannot be read now
-    (missing, or its schema under repair) is left out."""
+def each_board[Read](
+    registry: RegistryUnitOfWork,
+    store: BoardUnitOfWork,
+    read: Callable[[BoardRepositories], Read],
+) -> list[tuple[BoardsRow, Read]]:
+    """``read`` on every board that is not archived, each in a reader of its own, with the board
+    it read. An archived board is read-only: a decision there is refused (``board_archived``), so
+    none of its threads waits for anyone. A board whose database cannot be read now (missing, or
+    its schema under repair) is left out."""
     with registry.reader() as repos:
         boards = repos.boards.all()
-    rows: list[InboxRow] = []
+    found: list[tuple[BoardsRow, Read]] = []
     for board in boards:
         if board.status == "archived":
             continue
         try:
             with store.reader(board.id) as repos:
-                threads = repos.threads.inbox(limit=BOARD_LIMIT)
-                ids = [entry.thread.id for entry in threads]
-                unread = repos.reads.unread_ids(reader.actor_id, ids) if ids else set[str]()
+                found.append((board, read(repos)))
         except (NotFound, ServiceUnavailable):
             continue
+    return found
+
+
+def read_inbox(
+    registry: RegistryUnitOfWork, store: BoardUnitOfWork, reader: ActorContext
+) -> InboxPage:
+    """Every thread that is not cancelled, on every board that is not archived (``each_board``),
+    as the inbox orders them for ``reader``: what is new for the reader is read once per board.
+    The threads of an archived board are read on its Tickets."""
+
+    def board_threads(repos: BoardRepositories) -> tuple[list[InboxThread], set[str]]:
+        threads = repos.threads.inbox(limit=BOARD_LIMIT)
+        ids = [entry.thread.id for entry in threads]
+        return threads, repos.reads.unread_ids(reader.actor_id, ids) if ids else set[str]()
+
+    rows: list[InboxRow] = []
+    for board, (threads, unread) in each_board(registry, store, board_threads):
         rows.extend(
             inbox_row(
                 board,
