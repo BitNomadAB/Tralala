@@ -379,6 +379,8 @@ def message(
         round_number=number,
         content_sha256=None,
         answer_json="{}" if answer is None else json.dumps(answer),
+        after_closed=0,
+        ref_card_id=None,
     )
 
 

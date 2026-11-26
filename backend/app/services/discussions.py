@@ -335,6 +335,8 @@ class DiscussionService:
                     run_state="idle",
                     tokens_used=0,
                     elapsed_ms=0,
+                    closed_at=None,
+                    closed_by_actor_id=None,
                 )
             )
             for snapshot in snapshots:
@@ -372,6 +374,8 @@ class DiscussionService:
                     round_number=0,
                     content_sha256=None,
                     answer_json="{}",
+                    after_closed=0,
+                    ref_card_id=None,
                 )
             )
             self._log(
@@ -433,6 +437,8 @@ class DiscussionService:
                     round_number=0,
                     content_sha256=None,
                     answer_json="{}",
+                    after_closed=0,
+                    ref_card_id=None,
                 )
             )
             repos.threads.note_message(discussion_id, now=now)

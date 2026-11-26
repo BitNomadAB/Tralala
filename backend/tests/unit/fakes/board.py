@@ -29,6 +29,7 @@ from app.db.generated.board import (
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
+    DiscussionReadsRow,
     DiscussionRoundsRow,
     DiscussionRunsRow,
     DiscussionThreadsRow,
@@ -77,6 +78,7 @@ from app.repositories.discussions import (
     DiscussionMessageRepository,
     DiscussionOutcomeRepository,
     DiscussionParticipantRepository,
+    DiscussionReadRepository,
     DiscussionRoundRepository,
     DiscussionRunRepository,
     DiscussionThreadRepository,
@@ -108,6 +110,7 @@ from tests.unit.fakes.discussions import (
     FakeDiscussionMessageRepository,
     FakeDiscussionOutcomeRepository,
     FakeDiscussionParticipantRepository,
+    FakeDiscussionReadRepository,
     FakeDiscussionRoundRepository,
     FakeDiscussionRunRepository,
     FakeDiscussionThreadRepository,
@@ -166,6 +169,9 @@ class BoardState:
     discussion_messages: list[DiscussionMessagesRow] = field(
         default_factory=list[DiscussionMessagesRow]
     )
+    discussion_reads: dict[tuple[str, str], DiscussionReadsRow] = field(
+        default_factory=dict[tuple[str, str], DiscussionReadsRow]
+    )
     votes: list[DiscussionVotesRow] = field(default_factory=list[DiscussionVotesRow])
     runs: dict[str, DiscussionRunsRow] = field(default_factory=dict[str, DiscussionRunsRow])
     rounds: list[DiscussionRoundsRow] = field(default_factory=list[DiscussionRoundsRow])
@@ -212,6 +218,7 @@ class BoardState:
             card_events=list(self.card_events),
             participants=list(self.participants),
             discussion_messages=list(self.discussion_messages),
+            discussion_reads=dict(self.discussion_reads),
             votes=list(self.votes),
             runs=dict(self.runs),
             rounds=list(self.rounds),
@@ -252,6 +259,7 @@ class BoardState:
         self.card_events = snapshot.card_events
         self.participants = snapshot.participants
         self.discussion_messages = snapshot.discussion_messages
+        self.discussion_reads = snapshot.discussion_reads
         self.votes = snapshot.votes
         self.runs = snapshot.runs
         self.rounds = snapshot.rounds
@@ -504,6 +512,8 @@ def discussion_row(
         run_state=run_state,
         tokens_used=0,
         elapsed_ms=0,
+        closed_at=None,
+        closed_by_actor_id=None,
     )
 
 
@@ -1710,9 +1720,18 @@ class FakeCardRepository:
             key: row for key, row in state.attachments.items() if row.card_id != card_id
         }
         state.card_notes = [row for row in state.card_notes if row.card_id != card_id]
+        gone = {key for key, row in state.discussions.items() if row.card_id == card_id}
         state.discussions = {
-            key: row for key, row in state.discussions.items() if row.card_id != card_id
+            key: row for key, row in state.discussions.items() if key not in gone
         }
+        # A read marker goes with its thread; a message that pointed at the card keeps its words.
+        state.discussion_reads = {
+            key: row for key, row in state.discussion_reads.items() if key[0] not in gone
+        }
+        state.discussion_messages = [
+            row.__replace__(ref_card_id=None) if row.ref_card_id == card_id else row
+            for row in state.discussion_messages
+        ]
         state.qa_cycles = {
             key: row.__replace__(card_id=None) if row.card_id == card_id else row
             for key, row in state.qa_cycles.items()
@@ -2274,6 +2293,7 @@ class FakeBoardRepositories:
         self.events: EventRepository = FakeEventRepository(state)
         self.threads: DiscussionThreadRepository = FakeDiscussionThreadRepository(state)
         self.messages: DiscussionMessageRepository = FakeDiscussionMessageRepository(state)
+        self.reads: DiscussionReadRepository = FakeDiscussionReadRepository(state)
         self.participants: DiscussionParticipantRepository = (
             FakeDiscussionParticipantRepository(state)
         )

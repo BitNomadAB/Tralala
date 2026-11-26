@@ -1,22 +1,28 @@
-"""Ticket-bound discussions: threads, messages, participants, votes, runs, rounds and outcomes,
-as ``DiscussionService``, ``RunService`` and the round engine use them."""
+"""Discussions on a Ticket or on the board: threads, messages, read markers, participants, votes,
+runs, rounds and outcomes, as ``DiscussionService``, ``RunService`` and the round engine use
+them."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, TypedDict
+from typing import Literal, Protocol, TypedDict
 
 from ..db.generated.board import (
     CardsRow,
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
+    DiscussionReadsRow,
     DiscussionRoundsRow,
     DiscussionRunsRow,
     DiscussionThreadsRow,
     DiscussionVotesRow,
     LoopsRow,
 )
+
+# A thread is closed when its status is ``closed``; every other status is open.
+ThreadState = Literal["open", "closed"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -48,9 +54,19 @@ class DiscussionThreadRepository(Protocol):
     def get(self, discussion_id: str) -> DiscussionThreadsRow | None: ...
 
     def newest(
-        self, *, status: str | None, card_id: str | None, limit: int
+        self,
+        *,
+        status: str | None,
+        card_id: str | None,
+        limit: int,
+        board_level: bool | None = None,
+        state: ThreadState | None = None,
     ) -> list[DiscussionThreadsRow]:
-        """Threads by most recent activity, optionally in one status and on one Ticket."""
+        """Threads by most recent activity, optionally in one status and on one Ticket.
+
+        ``board_level`` True keeps the threads on the board itself (no Ticket), False those on a
+        Ticket; ``state`` ``"open"`` keeps the threads that are not closed, ``"closed"`` the closed
+        ones. ``None`` filters nothing."""
         ...
 
     def inbox(self, *, limit: int) -> list[InboxThread]:
@@ -63,6 +79,14 @@ class DiscussionThreadRepository(Protocol):
 
     def decide(self, discussion_id: str, status: str, *, now: str) -> None:
         """Set the thread's status and mark it active now."""
+        ...
+
+    def close(self, discussion_id: str, *, actor_id: str, now: str) -> None:
+        """The thread is ``closed`` by ``actor_id`` now, and marked active now."""
+        ...
+
+    def reopen(self, discussion_id: str, *, now: str) -> None:
+        """The thread is ``discussing`` again, no longer closed by anyone, and marked active now."""
         ...
 
     def note_message(self, discussion_id: str, *, now: str) -> None:
@@ -104,6 +128,22 @@ class DiscussionMessageRepository(Protocol):
     def belongs(self, message_id: str, discussion_id: str) -> bool: ...
 
     def add(self, row: DiscussionMessagesRow) -> None: ...
+
+
+class DiscussionReadRepository(Protocol):
+    """When each actor last read each thread: what is new for a person or an API key."""
+
+    def get(self, discussion_id: str, actor_id: str) -> DiscussionReadsRow | None: ...
+
+    def mark(self, discussion_id: str, actor_id: str, *, now: str) -> None:
+        """The actor has read the thread now: its marker is set to ``now``, made if it is new."""
+        ...
+
+    def unread_ids(self, actor_id: str, discussion_ids: Sequence[str]) -> set[str]:
+        """Of ``discussion_ids``, the threads holding a message that is not deleted, that someone
+        other than the actor wrote, and that is newer than the actor's marker for the thread or
+        meets no marker at all."""
+        ...
 
 
 class DiscussionParticipantRepository(Protocol):

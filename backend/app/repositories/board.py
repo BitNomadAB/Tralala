@@ -23,6 +23,7 @@ from .discussions import (
     DiscussionMessageRepository,
     DiscussionOutcomeRepository,
     DiscussionParticipantRepository,
+    DiscussionReadRepository,
     DiscussionRoundRepository,
     DiscussionRunRepository,
     DiscussionThreadRepository,
@@ -132,6 +133,9 @@ class BoardRepositories(Protocol):
 
     @property
     def messages(self) -> DiscussionMessageRepository: ...
+
+    @property
+    def reads(self) -> DiscussionReadRepository: ...
 
     @property
     def participants(self) -> DiscussionParticipantRepository: ...

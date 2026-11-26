@@ -317,6 +317,8 @@ class Orchestrator:
                             round_number=round_number,
                             content_sha256=digest,
                             answer_json=json.dumps(structured),
+                            after_closed=0,
+                            ref_card_id=None,
                         )
                     )
                     message_event = self._record(
