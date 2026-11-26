@@ -73,10 +73,11 @@ Invoke-RestMethod http://localhost:8000/api/v1/boards -Headers @{ Authorization 
 ```
 
 Every scope, what it allows, and who may hold it. A session's scopes come from its account role and
-nothing is implicit: `admin` holds every scope, `member` every scope but `users:admin` and
-`credentials:admin`. A token holds only what it was granted: a member may grant the scopes in
-`member_token_scopes`, an administrator also those marked *admin-issued*, and the rest no token can
-hold (`GET /meta` publishes both lists as `member_token_scopes` and `token_scopes`).
+nothing is implicit: `admin` holds every scope but `loops:decide`, `member` every scope but
+`loops:decide`, `users:admin` and `credentials:admin`. A token holds only what it was granted: a
+member may grant the scopes in `member_token_scopes`, an administrator also those marked
+*admin-issued*, and the rest no token can hold (`GET /meta` publishes both lists as
+`member_token_scopes` and `token_scopes`). `loops:decide` lives only on a key.
 
 | Scope | Allows | A token |
 | --- | --- | --- |
@@ -90,6 +91,7 @@ hold (`GET /meta` publishes both lists as `member_token_scopes` and `token_scope
 | `loops:write` | create, change, cancel and archive a Loop; write its Info and notes; record QA results | member-issued |
 | `loops:generate` | start and cancel generation runs; hand in a candidate, a brief or QA instructions | member-issued |
 | `loops:review` | approve or reset an analysis or a RoadMap, accept the implementation, decide QA (a person only) | never |
+| `loops:decide` | the right to decide in the editor; given by the key's owner only while `editor_decisions` is on, and never alone. It opens no tool today | member-issued |
 | `history:read` | search and read the history of completed Loops | member-issued |
 | `agents:read` | read agents and role templates | never |
 | `agents:write` | create, change, duplicate and test agents and role templates | never |
@@ -112,7 +114,7 @@ same way even when it could hold the scope.
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/health` | Liveness |
-| GET | `/meta` | API version, `scopes`, `token_scopes` (the subset a token may hold), `member_token_scopes` and `member_token_limits` (what a person may grant themselves), feature flags, and for an administrator only `bootstrap_password_file_present` (authenticated) |
+| GET | `/meta` | API version, `scopes`, `token_scopes` (the subset a token may hold), `member_token_scopes` and `member_token_limits` (what a person may grant themselves), `editor_decisions` (whether `TRALALA_EDITOR_DECISIONS` is on, so a person may give their own key `loops:decide`), feature flags, and for an administrator only `bootstrap_password_file_present` (authenticated) |
 
 ### Auth and credentials
 
@@ -145,6 +147,13 @@ may only grant `member_token_scopes` (published by `GET /meta`), is capped at
 revoke only their own. Asking for a grantable but non-member scope is `422 forbidden_scope`; asking
 for one no token may hold is `422 validation_failed`; the cap answers `409 agent_access_limit` and a
 missing expiry `422 expiry_required`.
+
+`loops:decide`, the right to decide in the editor, has rules of its own. It is given only while
+`TRALALA_EDITOR_DECISIONS` is on (`422 editor_decisions_off` otherwise) and only beside another
+scope (`422 decide_needs_access`). The person who issues a key owns it, so the right only ever goes
+to one's own key, and a request that came through a key never issues or rotates one
+(`403 human_action_required`). A rotation by the owner keeps the right; one by an administrator of
+somebody else's key, or of a key nobody owns, issues the successor without it.
 
 An invitation link is the recommended way to hand over an account: the administrator creates the
 user, `POST /users/{id}/invite` returns a token that is stored only as a hash, and the link
@@ -1128,7 +1137,7 @@ the handler runs.
 
 | Tool | Scope | What it does |
 | --- | --- | --- |
-| `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, and the rule-11a decisions only a person makes; never the token or its hash |
+| `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, the rule-11a decisions only a person makes, and `editor_decisions` (`installation_allows`, `key_has_right`); never the token or its hash |
 | `list_boards` | `boards:read` | The boards the token may read, by name, with status and Loop count; a board id comes from here |
 | `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `without_plan`, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent` for a document, `anyone` or `nobody`; a Ticket never waits on an agent), `execution_allowed`, its Tickets by state (`ready`, `needs_input`, `blocked`, `not_done`, `completed`, `total`, `needs_person`) and by column, each document's state and revision, and `decision_link`, the address of the decision a person takes next or `null` (below). Computed from what the Loop records, never written by anyone |
 | `read_board` | `boards:read`, `loops:read` | The board's Loops by id, key, name and stage, the people you may assign, the agents you may ask |

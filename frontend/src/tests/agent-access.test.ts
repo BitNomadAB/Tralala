@@ -14,6 +14,7 @@ const meta: ApiMeta = {
   member_token_scopes: ["boards:read", "cards:read"],
   member_token_limits: { live: 10, default_days: 30, max_days: 365 },
   can_issue_tokens: true,
+  editor_decisions: false,
   features: {},
 };
 

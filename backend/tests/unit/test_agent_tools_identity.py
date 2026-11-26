@@ -12,7 +12,7 @@ from typing import TypeIs
 import pytest
 
 from app.core.config import Settings
-from app.core.context import ActorContext
+from app.core.context import DECIDE_SCOPE, ActorContext
 from app.core.errors import Forbidden
 from app.services.agent_tools import DECISION_LINK_RULE, tool_catalog, whoami
 from app.services.agent_tools_identity import HUMAN_DECISIONS
@@ -166,3 +166,39 @@ def test_whoami_is_offered_first_to_a_key_that_may_list_boards() -> None:
     catalogue = tool_catalog()
     assert next(iter(catalogue)) == "whoami"
     assert catalogue["whoami"].scopes == ("boards:read",)
+
+
+@pytest.mark.parametrize(
+    ("switched_on", "scopes", "allows", "has_right"),
+    [
+        (False, SCOPES, False, False),
+        (False, SCOPES | {DECIDE_SCOPE}, False, True),
+        (True, SCOPES, True, False),
+        (True, SCOPES | {DECIDE_SCOPE}, True, True),
+    ],
+    ids=["neither", "right-only", "setting-only", "both"],
+)
+def test_whoami_says_whether_the_installation_and_the_key_allow_deciding_in_the_editor(
+    settings: Settings,
+    switched_on: bool,
+    scopes: frozenset[str],
+    allows: bool,
+    has_right: bool,
+) -> None:
+    world = identity_world(settings.model_copy(update={"editor_decisions": switched_on}))
+    answer = whoami(world, key_of("laptop", scopes), {})
+    editor = section(answer, "editor_decisions")
+    assert (editor["installation_allows"], editor["key_has_right"]) == (allows, has_right)
+    assert editor["scope"] == DECIDE_SCOPE
+    assert "human_action_required" in str(editor["note"])
+    # The right opens no tool, so it is neither among the tools nor a gap that would open one.
+    assert DECIDE_SCOPE not in section(answer, "missing_scopes")
+    assert section(answer, "tools") == section(whoami(world, key_of("laptop"), {}), "tools")
+    # The decisions only a person makes are the same with or without the right.
+    assert section(answer, "human_only")["decisions"] == list(HUMAN_DECISIONS)
+
+
+def test_whoami_on_a_session_reports_no_right(settings: Settings) -> None:
+    world = identity_world(settings.model_copy(update={"editor_decisions": True}))
+    editor = section(whoami(world, key_of(None, SCOPES | {DECIDE_SCOPE}), {}), "editor_decisions")
+    assert (editor["installation_allows"], editor["key_has_right"]) == (True, False)

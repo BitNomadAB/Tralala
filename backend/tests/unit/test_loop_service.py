@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.core.config import Settings
-from app.core.context import ActorContext
+from app.core.context import DECIDE_SCOPE, ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
 from app.db.generated.board import (
     BoardLoopDefaultsRow,
@@ -1161,6 +1161,16 @@ def test_a_person_confirms_a_human_ticket_and_the_stage_moves_on(settings: Setti
         ("card.human_confirmed", "h")
     ]
     assert json.loads(w.state.activity[0].changes_json) == {"note": "Done", "ticket_key": None}
+
+
+def test_the_right_to_decide_in_the_editor_does_not_let_a_key_confirm(settings: Settings) -> None:
+    """The right alone opens nothing, even with the installation's setting on."""
+    w = _human_ticket(settings.model_copy(update={"editor_decisions": True}))
+    key = AGENT.__replace__(scopes=SCOPES | {DECIDE_SCOPE}, credential_id="key-1")
+    with pytest.raises(Forbidden) as refused:
+        w.service.confirm_human_ticket(key, BOARD_ID, LOOP, "h", HumanConfirmation(version=1))
+    assert refused.value.code == "human_action_required"
+    assert w.state.cards["h"].completed_at is None
 
 
 def test_a_confirmation_is_refused_to_an_agent_and_for_the_wrong_ticket(settings: Settings) -> None:

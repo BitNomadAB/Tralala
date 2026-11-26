@@ -4,7 +4,7 @@ import { useId, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/useToast";
-import { scopeChoicesFor } from "@/lib/agentAccess";
+import { offersDecide, scopeChoicesFor } from "@/lib/agentAccess";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import type { Credential } from "@/lib/types";
@@ -71,6 +71,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
     () => scopeChoicesFor(isAdmin, metaQuery.data),
     [isAdmin, metaQuery.data],
   );
+  const offerDecide = offersDecide(isAdmin, metaQuery.data);
   const limits = metaQuery.data?.member_token_limits;
   const defaultExpiry = String(isAdmin ? 90 : (limits?.default_days ?? 30));
   const expiryHint = isAdmin
@@ -245,6 +246,7 @@ export function InteractionAccessCard({ isAdmin, currentUserId }: InteractionAcc
         onOpenChange={setCreating}
         isAdmin={isAdmin}
         scopeChoices={scopeChoices}
+        offerDecide={offerDecide}
         defaultExpiry={defaultExpiry}
         expiryHint={expiryHint}
         onIssued={(credential) => {

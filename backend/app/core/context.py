@@ -16,6 +16,7 @@ SCOPES: tuple[str, ...] = (
     "loops:write",
     "loops:generate",
     "loops:review",
+    "loops:decide",
     "history:read",
     "agents:read",
     "agents:write",
@@ -28,6 +29,15 @@ SCOPES: tuple[str, ...] = (
     "users:admin",
 )
 
+DECIDE_SCOPE = "loops:decide"
+"""The right to decide in the editor: a person gives it to a key they own, and only while the
+installation's setting ``editor_decisions`` is on. On its own it opens no tool and changes no
+answer; every decision still asks for a person."""
+
+# Rights that exist only on a key. A session never holds them, so ``has_scope(DECIDE_SCOPE)`` is
+# true only for a request that came through a key its owner gave the right.
+KEY_ONLY_SCOPES: frozenset[str] = frozenset({DECIDE_SCOPE})
+
 ROLE_ADMIN = "admin"
 ROLE_MEMBER = "member"
 ROLES: tuple[str, ...] = (ROLE_ADMIN, ROLE_MEMBER)
@@ -35,9 +45,11 @@ ROLES: tuple[str, ...] = (ROLE_ADMIN, ROLE_MEMBER)
 # Every signed-in person shares the same working access; account administration and the global
 # API keys (installation-wide bearer tokens) stay with the admin role.
 ROLE_SCOPES: dict[str, frozenset[str]] = {
-    ROLE_ADMIN: frozenset(SCOPES),
+    ROLE_ADMIN: frozenset(SCOPES) - KEY_ONLY_SCOPES,
     ROLE_MEMBER: frozenset(
-        scope for scope in SCOPES if scope not in {"users:admin", "credentials:admin"}
+        scope
+        for scope in SCOPES
+        if scope not in {"users:admin", "credentials:admin"} and scope not in KEY_ONLY_SCOPES
     ),
 }
 
@@ -57,6 +69,7 @@ MEMBER_TOKEN_SCOPES: tuple[str, ...] = (
     "loops:read",
     "loops:write",
     "loops:generate",
+    DECIDE_SCOPE,
     "history:read",
     "discussions:read",
     "discussions:write",

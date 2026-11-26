@@ -46,13 +46,16 @@ each one opens (a tool that lists two scopes needs both):
 | `history:read` | no tool; the REST history of completed Loops | anyone signed in |
 | `boards:write` | no tool; the REST routes that change boards, templates and backups | an administrator |
 | `discussions:vote` | no tool and, today, no route | an administrator |
+| `loops:decide` | no tool: the right to decide in the editor, beside another scope | the key's owner, only while `TRALALA_EDITOR_DECISIONS` is on |
 
 No key can hold `loops:review` (the approvals), `boards:admin`, the `agents:*` scopes,
 `discussions:admin`, `credentials:admin` or `users:admin`, so a key cannot approve, administer
 agents or accounts, or issue another key. `whoami` tells a connected agent which scopes its key
-holds, what each missing one would open and which decisions only a person makes.
+holds, what each missing one would open, which decisions only a person makes, and whether the
+installation allows deciding in the editor and its key has that right (`editor_decisions`).
 
-A coding session's key takes every scope a member may grant (the first ten rows). A read-only
+A coding session's key takes every scope a member may grant (the first ten rows); the right to
+decide in the editor is a separate choice ([Security defaults](Security_defaults.md#deciding-in-the-editor)). A read-only
 reviewer needs `boards:read`, `loops:read`, `cards:read`, `discussions:read` and `history:read`.
 
 ## 2. Connect

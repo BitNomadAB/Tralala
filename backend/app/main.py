@@ -4,7 +4,6 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import get_args
 
 import anyio.to_thread
 from fastapi import FastAPI, Request, Response
@@ -215,27 +214,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/meta", response_model=dict, tags=["system"])
     def meta(request: Request) -> dict[str, object]:
         ctx = get_context(request)
-        from .core.context import MEMBER_TOKEN_SCOPES, SCOPES
-        from .schemas.auth import Scope
-
-        settings = request.app.state.settings
+        auth = ctx.services.auth
         # Only an administrator is told whether the generated password is still on disk.
-        bootstrap_file = request.app.state.services.auth.bootstrap_password_file_present(ctx.actor)
+        bootstrap_file = auth.bootstrap_password_file_present(ctx.actor)
         return {
             "success": True,
             "data": {
                 "api_version": "v1",
-                "scopes": list(SCOPES),
-                # The token schema is the only authority for what a token may hold, so the
-                # Settings page reads the grantable subset from here instead of keeping a copy.
-                "token_scopes": [str(scope) for scope in get_args(Scope)],
-                # A member manages their own agent access inside this narrower vocabulary.
-                "member_token_scopes": list(MEMBER_TOKEN_SCOPES),
-                "member_token_limits": {
-                    "live": settings.member_token_limit,
-                    "default_days": settings.member_token_default_days,
-                    "max_days": settings.member_token_max_days,
-                },
+                # scopes, token_scopes (what a token may hold, from the token schema),
+                # member_token_scopes and member_token_limits (what a person gives their own key),
+                # and editor_decisions (whether a person may give a key the right to decide in the
+                # editor), so the Settings page keeps no copy of them.
+                **auth.grant_vocabulary(),
                 "can_issue_tokens": ctx.actor.is_user,
                 "features": {
                     "webmcp": "client-side capability detection",

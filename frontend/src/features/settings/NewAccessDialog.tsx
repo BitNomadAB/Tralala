@@ -7,6 +7,7 @@ import { HeldButton } from "@/components/ui/held-button";
 import { Field, FieldMessage, Input } from "@/components/ui/input";
 import { useFieldErrors } from "@/components/ui/useFieldErrors";
 import { useToast } from "@/components/ui/useToast";
+import { DECIDE_LABEL, DECIDE_SCOPE, DECIDE_WARNING } from "@/lib/agentAccess";
 import { api, ApiError } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { fieldProblems, problemAt, type FieldProblem } from "@/lib/fieldProblems";
@@ -15,6 +16,10 @@ import type { Credential } from "@/lib/types";
 /** The first scope checkbox: where focus goes when the scopes are what is wrong. */
 const SCOPES_ID = "credential-scopes";
 const SCOPES_ERROR_ID = "credential-scopes-error";
+/** The right to decide in the editor, offered apart from the scopes with its warning. */
+const DECIDE_ID = "credential-decide";
+const DECIDE_WARNING_ID = "credential-decide-warning";
+const DECIDE_ERROR_ID = "credential-decide-error";
 
 /** The request fields of a new access, by the control that sends them, in the order they show. */
 const ACCESS_CONTROLS = {
@@ -28,6 +33,9 @@ function refusalProblems(error: unknown): FieldProblem[] {
   const named = fieldProblems(error, ACCESS_CONTROLS);
   if (named.length > 0 || !(error instanceof ApiError)) return named;
   if (error.code === "forbidden_scope") return [{ id: SCOPES_ID, message: error.message }];
+  if (error.code === "editor_decisions_off" || error.code === "decide_needs_access") {
+    return [{ id: DECIDE_ID, message: error.message }];
+  }
   if (error.code === "expiry_required") {
     return [{ id: "credential-expiry", message: error.message }];
   }
@@ -38,6 +46,8 @@ interface NewAccessProps {
   isAdmin: boolean;
   /** The scopes this person may grant. */
   scopeChoices: readonly string[];
+  /** Whether the installation lets this person give the key the right to decide in the editor. */
+  offerDecide: boolean;
   defaultExpiry: string;
   expiryHint: string;
   /** The created access, with its token shown once. */
@@ -48,6 +58,7 @@ interface NewAccessProps {
 function NewAccessForm({
   isAdmin,
   scopeChoices,
+  offerDecide,
   defaultExpiry,
   expiryHint,
   onIssued,
@@ -63,14 +74,17 @@ function NewAccessForm({
     return candidates.filter((scope) => known.includes(scope));
   });
   const [expires, setExpires] = useState(defaultExpiry);
+  // Never given by default: a person ticks it themselves, beside the warning.
+  const [decide, setDecide] = useState(false);
   const fields = useFieldErrors();
   const scopesError = fields.errorOf(SCOPES_ID);
+  const decideError = fields.errorOf(DECIDE_ID);
 
   const createMutation = useMutation({
     mutationFn: () =>
       api.createCredential({
         name: name.trim(),
-        scopes,
+        scopes: offerDecide && decide ? [...scopes, DECIDE_SCOPE] : scopes,
         expires_in_days: expires.trim() === "" ? undefined : Number(expires),
       }),
     onSuccess: onIssued,
@@ -141,6 +155,30 @@ function NewAccessForm({
         ))}
         {scopesError ? <FieldMessage id={SCOPES_ERROR_ID}>{scopesError}</FieldMessage> : null}
       </fieldset>
+      {offerDecide ? (
+        <div className="flex flex-col gap-1">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              id={DECIDE_ID}
+              checked={decide}
+              aria-describedby={
+                decideError ? `${DECIDE_ERROR_ID} ${DECIDE_WARNING_ID}` : DECIDE_WARNING_ID
+              }
+              aria-invalid={decideError ? true : undefined}
+              onChange={(event) => {
+                fields.set(DECIDE_ID, null);
+                setDecide(event.target.checked);
+              }}
+            />
+            {DECIDE_LABEL}
+          </label>
+          {decideError ? <FieldMessage id={DECIDE_ERROR_ID}>{decideError}</FieldMessage> : null}
+          <p id={DECIDE_WARNING_ID} className="text-xs text-[var(--foreground)]">
+            {DECIDE_WARNING}
+          </p>
+        </div>
+      ) : null}
       <Field
         label="Expires in days"
         htmlFor="credential-expiry"

@@ -101,6 +101,29 @@ decides for itself whether to believe the `X-Forwarded-For` header it receives:
   Cost is bounded per discussion instead: at most four rounds, with a default token and time budget
   per run, and every key belongs to the account that issued it.
 
+### Deciding in the editor
+
+Deciding in the editor is an opt-in with two switches, and with either one missing nothing changes:
+
+- **The installation's setting**, `TRALALA_EDITOR_DECISIONS`, is `false` by default. Only the
+  operator turns it on ([Installation](Installation.md#deciding-in-the-editor)); `/meta` reports it
+  as `editor_decisions`.
+- **The right on a key**, the scope `loops:decide`, shown as **Decide in the editor** with the
+  warning "Anyone who holds this key can then approve, clear a wait or confirm in your name." A
+  person may give it only while the setting is on, only when they create a key of their own, and
+  only beside another scope; asking for it while the setting is off is
+  `422 editor_decisions_off`. A person may hold any number of keys, and each of them has the right
+  or not; the list of keys shows which. No key can give itself or another key the right: issuing
+  and rotating refuse every request that came through a key (`403 human_action_required`). The
+  owner's rotation keeps the right; a rotation by an administrator of somebody else's key issues
+  the successor without it. A person's session never holds the scope, and `whoami` tells a coding
+  agent whether the installation allows deciding in the editor and whether its key has the right.
+
+The risk is the reason it is off: anyone who holds a key with the right can then decide in its
+owner's name, a leaked key included, and an editor can be set up to answer on its own, which
+Tralala cannot tell from a person's answer. In this release the right opens no tool and changes no
+answer: every decision below still refuses a key with `403 human_action_required`.
+
 ## What a worker key can do
 
 A key a person issues for their coding agent works the boards through the tools of the worker

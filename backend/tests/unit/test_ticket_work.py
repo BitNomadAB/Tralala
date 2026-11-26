@@ -19,7 +19,7 @@ from pydantic import JsonValue, ValidationError
 
 from app.api.mcp import render_bootstrap, tool_list
 from app.core.config import Settings
-from app.core.context import ActorContext
+from app.core.context import DECIDE_SCOPE, ActorContext
 from app.core.errors import Conflict, Forbidden, ValidationFailure, VersionConflict
 from app.db.generated.board import CARDS_COLUMNS, CardsRow, LabelsRow
 from app.repositories.cards import CardCounts
@@ -279,6 +279,19 @@ def test_a_token_sets_a_wait_with_its_reason_and_the_ticket_needs_input(
     # A third party blocks it; it does not need input.
     third = w.ticket_work.set_wait(WORKER, BOARD_ID, LOOP, "m", wait("third_party", "The key"))
     assert (third["state"], third["needs_person"]) == ("blocked", False)
+
+
+def test_the_right_to_decide_in_the_editor_does_not_let_a_key_clear_a_wait(
+    settings: Settings,
+) -> None:
+    """The right alone opens nothing, even with the installation's setting on."""
+    w = world(settings.model_copy(update={"editor_decisions": True}))
+    key = WORKER.__replace__(scopes=WORKER.scopes | {DECIDE_SCOPE}, credential_id="key-1")
+    w.ticket_work.set_wait(key, BOARD_ID, LOOP, "t", wait("third_party", "The supplier"))
+    with pytest.raises(Forbidden) as caught:
+        w.ticket_work.clear_wait(key, BOARD_ID, LOOP, "t", TicketWaitClear(version=2))
+    assert caught.value.code == "human_action_required"
+    assert w.state.cards["t"].waiting_for == "third_party"
 
 
 def test_clearing_or_replacing_a_wait_is_a_persons_act(settings: Settings) -> None:

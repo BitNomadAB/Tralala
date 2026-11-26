@@ -9,6 +9,9 @@ services:
       TRALALA_BOOTSTRAP_PASSWORD: ${TRALALA_BOOTSTRAP_PASSWORD:?set TRALALA_BOOTSTRAP_PASSWORD in .env}
       TRALALA_COOKIE_SECURE: ${TRALALA_COOKIE_SECURE:-false}
       TRALALA_PUBLIC_URL: ${TRALALA_PUBLIC_URL:-}
+      # Off unless the operator chooses it: whether a person may give a key of their own the right
+      # to decide in the editor (see .env.example and public_docs/Security_defaults.md).
+      TRALALA_EDITOR_DECISIONS: ${TRALALA_EDITOR_DECISIONS:-false}
       # Caddy is the only thing that talks to the backend, so trusting its X-Forwarded-For is what
       # keeps the sign-in throttle keyed on the real client instead of on the proxy.
       TRALALA_TRUST_PROXY_HEADERS: ${TRALALA_TRUST_PROXY_HEADERS:-true}

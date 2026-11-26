@@ -16,13 +16,16 @@ Scope = Literal[
     "loops:read",
     "loops:write",
     "loops:generate",
+    "loops:decide",
     "history:read",
     "discussions:read",
     "discussions:write",
     "discussions:vote",
 ]
 # ``loops:review`` is deliberately absent: approving plans, confirming human work and accepting QA
-# always require a human session, so a token can never hold a usable review grant.
+# always require a human session, so a token can never hold a usable review grant. ``loops:decide``
+# is the right to decide in the editor, which a person gives a key of their own only while the
+# installation's ``editor_decisions`` setting is on (``services/auth_tokens.py``).
 Role = Literal["admin", "member"]
 ThemeMode = Literal["dark", "light", "system"]
 ThemeKit = Literal["carenomad", "matchmap", "classic"]

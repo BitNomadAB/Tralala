@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.core.context import ActorContext
+from app.core.context import DECIDE_SCOPE, ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
 from app.db.generated.board import LoopGenerationRunsRow, LoopsRow
 from app.schemas.briefs import BriefWrite, HumanBrief, RoadmapBrief
@@ -660,6 +660,18 @@ def test_a_review_is_a_persons_decision_and_needs_the_review_scope() -> None:
         w.service.review(writer, BOARD_ID, LOOP, "analysis", request)
     with pytest.raises(ValidationFailure):
         w.service.review(HUMAN, BOARD_ID, LOOP, "qa", request)
+
+
+def test_the_right_to_decide_in_the_editor_does_not_let_a_key_review() -> None:
+    """The right alone opens nothing: a key that holds it is refused as every key is."""
+    w = world()
+    approved_analysis(w)
+    key = AGENT.__replace__(scopes=SCOPES | {DECIDE_SCOPE}, credential_id="key-1")
+    request = ApprovalRequest(decision="approved", version=w.loop.version)
+    for scope in ("analysis", "roadmap"):
+        with pytest.raises(Forbidden) as caught:
+            w.service.review(key, BOARD_ID, LOOP, scope, request)
+        assert caught.value.code == "human_action_required"
 
 
 def test_a_review_of_an_older_loop_version_is_refused() -> None:

@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     # decision that waits for a person absolute. The server never learns it from a request's Host
     # or X-Forwarded-* headers; unset (or empty), such a link is a path inside Tralala.
     public_url: str | None = None
+    # Deciding in the editor (TRALALA_EDITOR_DECISIONS), off unless the operator turns it on. Only
+    # while it is on may a person give a key of their own the right ``loops:decide``; with it off,
+    # or on a key without that right, every decision is a signed-in person's in Tralala.
+    editor_decisions: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     max_request_bytes: int = 8 * 1024 * 1024
     rate_limit_per_minute: int = 600

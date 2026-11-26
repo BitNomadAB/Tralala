@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue
 
-from app.core.context import ActorContext
+from app.core.context import DECIDE_SCOPE, ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, VersionConflict
 from app.schemas.loops import (
     GenerationRequest,
@@ -326,6 +326,16 @@ def test_acceptance_is_a_human_decision_on_the_current_version(tmp_path: Path) -
     assert refused.value.code == "human_action_required"
     with pytest.raises(VersionConflict):
         accept(service, version=3)
+
+
+def test_the_right_to_decide_in_the_editor_does_not_let_a_key_accept(tmp_path: Path) -> None:
+    """The right alone opens nothing: a key that holds it is refused as every key is."""
+    service, state, _ = make(tmp_path)
+    key = BOT.__replace__(scopes=SCOPES | {DECIDE_SCOPE}, credential_id="key-1")
+    with pytest.raises(Forbidden) as refused:
+        service.accept_implementation(key, BOARD_ID, LOOP, ImplementationAcceptance(version=1))
+    assert refused.value.code == "human_action_required"
+    assert state.qa_cycles == {}
 
 
 def test_an_external_qa_pass_finalizes_the_loop(tmp_path: Path) -> None:

@@ -18,7 +18,7 @@ import pytest
 
 from app.core import security
 from app.core.config import Settings
-from app.core.context import MEMBER_TOKEN_SCOPES, ActorContext, scopes_for_role
+from app.core.context import DECIDE_SCOPE, MEMBER_TOKEN_SCOPES, ActorContext, scopes_for_role
 from app.core.errors import Conflict, Forbidden, NotFound, Unauthorized, ValidationFailure
 from app.core.security import (
     BOOTSTRAP_PASSWORD_FILE_NAME,
@@ -1274,3 +1274,147 @@ def test_a_member_at_the_limit_cannot_rotate(registry: Registry) -> None:
         registry.service.rotate_credential(MEMBER, "t-0")
 
     assert registry.state.credentials["t-0"].revoked_at is None
+
+
+# --- the right to decide in the editor -----------------------------------------------------------
+
+
+@pytest.fixture
+def deciding(settings: Settings) -> Registry:
+    """The registry of an installation whose operator turned editor decisions on."""
+    return make_registry(settings.model_copy(update={"editor_decisions": True}))
+
+
+@pytest.mark.parametrize("person", [ADMIN, MEMBER], ids=["admin", "member"])
+def test_the_right_is_refused_while_the_installation_has_it_off(
+    registry: Registry, person: ActorContext
+) -> None:
+    with pytest.raises(ValidationFailure) as refused:
+        registry.service.create_credential(person, _create(["cards:read", DECIDE_SCOPE]))
+
+    assert refused.value.code == "editor_decisions_off"
+    assert refused.value.details == {"scope": DECIDE_SCOPE, "setting": "TRALALA_EDITOR_DECISIONS"}
+    assert registry.state.credentials == {}
+    # Without the right the same person issues the key as before.
+    issued = registry.service.create_credential(person, _create(["cards:read"]))
+    assert issued["scopes"] == ["cards:read"]
+
+
+def test_a_person_gives_the_right_to_any_number_of_their_own_keys(deciding: Registry) -> None:
+    """A person may hold several keys, for several agents; each one has the right or not."""
+    first = deciding.service.create_credential(
+        MEMBER, _create(["cards:read", DECIDE_SCOPE], name="Claude Code")
+    )
+    second = deciding.service.create_credential(
+        MEMBER, _create(["loops:read", DECIDE_SCOPE], name="Codex")
+    )
+    plain = deciding.service.create_credential(MEMBER, _create(["cards:read"], name="Laptop"))
+    admins = deciding.service.create_credential(ADMIN, _create(["boards:read", DECIDE_SCOPE]))
+
+    assert {first["owner_actor_id"], second["owner_actor_id"], plain["owner_actor_id"]} == {
+        MEMBER_ID
+    }
+    assert admins["owner_actor_id"] == ADMIN_ID
+    listed = {entry["name"]: entry["scopes"] for entry in deciding.service.list_credentials(MEMBER)}
+    assert listed == {
+        "Claude Code": ["cards:read", DECIDE_SCOPE],
+        "Codex": ["loops:read", DECIDE_SCOPE],
+        "Laptop": ["cards:read"],
+    }
+    key = deciding.service.actor_from_token(second["token"])
+    assert key.has_scope(DECIDE_SCOPE) is True
+    assert deciding.service.editor_decisions(key) == {
+        "installation_allows": True,
+        "key_has_right": True,
+        "scope": DECIDE_SCOPE,
+    }
+
+
+def test_the_right_alone_is_no_key(deciding: Registry) -> None:
+    with pytest.raises(ValidationFailure) as refused:
+        deciding.service.create_credential(MEMBER, _create([DECIDE_SCOPE]))
+
+    assert refused.value.code == "decide_needs_access"
+    assert deciding.state.credentials == {}
+
+
+@pytest.mark.parametrize("action", ["issue", "rotate"])
+def test_a_key_never_gives_itself_the_right(deciding: Registry, action: str) -> None:
+    """Whatever identity a request carries, one that came through a key issues nothing: neither
+    a key acting as its agent nor a context built for the key's owner."""
+    add_token(deciding, "t-1", scopes=f'["cards:read", "{DECIDE_SCOPE}"]')
+    agent = ActorContext(
+        actor_id="agent-t-1",
+        actor_type="agent",
+        actor_name="Agent t-1",
+        scopes=frozenset({"cards:read", DECIDE_SCOPE}),
+        credential_id="t-1",
+    )
+    as_owner = MEMBER.__replace__(credential_id="t-1")
+    for caller in (agent, as_owner):
+        with pytest.raises(Forbidden) as refused:
+            if action == "issue":
+                deciding.service.create_credential(caller, _create(["cards:read", DECIDE_SCOPE]))
+            else:
+                deciding.service.rotate_credential(caller, "t-1")
+        assert refused.value.code == "human_action_required"
+        assert refused.value.details is not None
+        assert refused.value.details["actor_type"] == caller.actor_type
+    assert list(deciding.state.credentials) == ["t-1"]
+    assert deciding.state.credentials["t-1"].revoked_at is None
+
+
+@pytest.mark.parametrize("switched_on", [True, False], ids=["setting-on", "setting-off"])
+def test_the_owners_rotation_keeps_the_right(settings: Settings, switched_on: bool) -> None:
+    """The successor is the same key with a new token; while the setting is off the right opens
+    nothing, so rotating does not have to take it away."""
+    registry = make_registry(settings.model_copy(update={"editor_decisions": switched_on}))
+    add_token(registry, "bobs", scopes=f'["cards:read", "{DECIDE_SCOPE}"]')
+    add_token(registry, "adas", owner=ADMIN_ID, scopes=f'["boards:read", "{DECIDE_SCOPE}"]')
+
+    bobs = registry.service.rotate_credential(MEMBER, "bobs")
+    adas = registry.service.rotate_credential(ADMIN, "adas")
+
+    assert (bobs["owner_actor_id"], bobs["scopes"]) == (MEMBER_ID, ["cards:read", DECIDE_SCOPE])
+    assert (adas["owner_actor_id"], adas["scopes"]) == (ADMIN_ID, ["boards:read", DECIDE_SCOPE])
+
+
+def test_a_rotation_by_anyone_but_the_owner_drops_the_right(deciding: Registry) -> None:
+    add_token(deciding, "bobs", scopes=f'["cards:read", "{DECIDE_SCOPE}", "loops:read"]')
+    add_token(deciding, "unowned", owner=None, scopes=f'["boards:read", "{DECIDE_SCOPE}"]')
+
+    rotated = deciding.service.rotate_credential(ADMIN, "bobs")
+    adopted = deciding.service.rotate_credential(ADMIN, "unowned")
+
+    assert rotated["owner_actor_id"] == MEMBER_ID
+    assert rotated["scopes"] == ["cards:read", "loops:read"]
+    assert (adopted["owner_actor_id"], adopted["scopes"]) == (ADMIN_ID, ["boards:read"])
+    assert deciding.state.credentials["bobs"].revoked_at == NOW_TEXT
+
+
+def test_a_key_left_with_nothing_but_the_right_is_not_rotated_by_another(
+    deciding: Registry,
+) -> None:
+    add_token(deciding, "bobs", scopes=f'["{DECIDE_SCOPE}"]')
+
+    with pytest.raises(ValidationFailure) as refused:
+        deciding.service.rotate_credential(ADMIN, "bobs")
+
+    assert refused.value.code == "decide_needs_access"
+    assert deciding.state.credentials["bobs"].revoked_at is None
+    assert list(deciding.state.credentials) == ["bobs"]
+
+
+def test_a_session_or_a_key_without_the_right_has_none(deciding: Registry) -> None:
+    key = ActorContext(
+        actor_id="agent-1",
+        actor_type="agent",
+        actor_name="Robot",
+        scopes=frozenset({"cards:read"}),
+        credential_id="t-1",
+    )
+    assert deciding.service.editor_decisions(key)["key_has_right"] is False
+    assert deciding.service.editor_decisions(MEMBER)["key_has_right"] is False
+    # A context that claims the scope without a key behind it has no right either.
+    claimed = MEMBER.__replace__(scopes=MEMBER.scopes | {DECIDE_SCOPE})
+    assert deciding.service.editor_decisions(claimed)["key_has_right"] is False

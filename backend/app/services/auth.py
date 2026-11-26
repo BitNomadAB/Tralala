@@ -499,6 +499,14 @@ class AuthService:
         """The key this request authenticated with, for its holder; None for a session cookie."""
         return auth_tokens.current_key(self.store, actor, now=self._clock())
 
+    def editor_decisions(self, actor: ActorContext) -> auth_tokens.EditorDecisions:
+        """Whether this installation allows deciding in the editor and the key holds the right."""
+        return auth_tokens.editor_decisions(self.settings, actor)
+
+    def grant_vocabulary(self) -> auth_tokens.GrantVocabulary:
+        """The scope lists and the editor-decisions setting, as ``/meta`` publishes them."""
+        return auth_tokens.grant_vocabulary(self.settings)
+
     def revoke_credential(self, actor: ActorContext, credential_id: str) -> bool:
         """Revoke the token and disable the agent actor it acted as."""
         return auth_tokens.revoke_credential(self.store, actor, credential_id, stamp=self._stamp)
