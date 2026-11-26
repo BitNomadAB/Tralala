@@ -49,6 +49,10 @@ _GET = text(
     f"SELECT {sql.column_list(CARDS_COLUMNS)} FROM cards"  # noqa: S608 - from CARDS_COLUMNS
     " WHERE id = :id"
 )
+_BY_KEY = text(
+    f"SELECT {sql.column_list(CARDS_COLUMNS)} FROM cards"  # noqa: S608 - from CARDS_COLUMNS
+    " WHERE ticket_key = :key"
+)
 _POSITIONS = text(
     "SELECT id, position FROM cards WHERE list_id = :list_id AND archived_at IS NULL"
     " ORDER BY position, id"
@@ -258,6 +262,10 @@ class SqlCardRepository:
 
     def get(self, card_id: str) -> CardsRow | None:
         row = self._connection.execute(_GET, {"id": card_id}).mappings().first()
+        return None if row is None else CardsRow.from_mapping(row)
+
+    def by_key(self, ticket_key: str) -> CardsRow | None:
+        row = self._connection.execute(_BY_KEY, {"key": ticket_key}).mappings().first()
         return None if row is None else CardsRow.from_mapping(row)
 
     def count(self, query: CardQuery) -> int:

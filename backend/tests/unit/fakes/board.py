@@ -1462,6 +1462,11 @@ class FakeCardRepository:
     def get(self, card_id: str) -> CardsRow | None:
         return self._state.cards.get(card_id)
 
+    def by_key(self, ticket_key: str) -> CardsRow | None:
+        return next(
+            (card for card in self._state.cards.values() if card.ticket_key == ticket_key), None
+        )
+
     def _label_matches(self, card_id: str, label: str) -> bool:
         for link in self._state.card_labels:
             row = self._state.labels.get(link.label_id)

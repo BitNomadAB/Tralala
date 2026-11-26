@@ -11,6 +11,7 @@ from ..core.context import ActorContext
 from ..core.dates import utcnow
 from ..core.errors import Conflict, Forbidden, NotFound, ValidationFailure
 from ..db.generated.board import (
+    CardsRow,
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
@@ -23,12 +24,13 @@ from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate, Dis
 from .activity import discussion_activity
 from .agents import RoleSnapshot
 from .discussion_answers import read_answer
+from .discussion_closing import CLOSED, close_thread, reopen_thread
 from .discussion_inbox import InboxPage, decided_by, read_inbox
 from .discussion_synthesis import latest_answers, positions, read_synthesis
 from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED, Event, EventService
 from .loops import ensure_ticket_writable
 from .mentions import extract_mentions
-from .runs import RunEntry, RunService, recent_runs
+from .runs import CLOSED_THREAD_STATUSES, RunEntry, RunService, recent_runs
 
 REVIEW_DECISIONS = {"approve": "approved", "veto": "vetoed", "rework": "rework_requested"}
 # A human message starts one round in these modes; manual threads wait for an explicit run.
@@ -73,12 +75,39 @@ def _thread(repos: BoardRepositories, discussion_id: str) -> DiscussionThreadsRo
     return thread
 
 
-def message_entry(row: DiscussionMessagesRow) -> dict[str, object]:
-    """A message as the API answers it: its columns, with the stored answer read as ``answer``."""
+def ref_ticket(card: CardsRow | None) -> dict[str, object] | None:
+    """The Ticket a message points at, as the message answers it."""
+    if card is None:
+        return None
+    return {
+        "card_id": card.id,
+        "ticket_key": card.ticket_key,
+        "title": card.title,
+        "loop_id": card.loop_id,
+    }
+
+
+def message_entry(row: DiscussionMessagesRow, ref: CardsRow | None = None) -> dict[str, object]:
+    """A message as the API answers it: its columns, with the stored answer read as ``answer``,
+    ``after_closed`` as a boolean and the Ticket it points at (``ref``) as ``ref_ticket``."""
     entry: dict[str, object] = dict(asdict(row))
     entry.pop("answer_json", None)
+    entry.pop("ref_card_id", None)
     entry["answer"] = read_answer(row.answer_json)
+    entry["after_closed"] = bool(row.after_closed)
+    entry["ref_ticket"] = ref_ticket(ref)
     return entry
+
+
+def resolve_ticket(repos: BoardRepositories, reference: str) -> CardsRow:
+    """The Ticket a message points at, by its id or its key, on this board; unknown is ``422``."""
+    card = repos.cards.get(reference) or repos.cards.by_key(reference)
+    if card is None:
+        raise ValidationFailure(
+            "The message points at a Ticket that is not on this board",
+            details={"field": "ticket", "ticket": reference},
+        )
+    return card
 
 
 def detail(repos: BoardRepositories, thread: DiscussionThreadsRow) -> DiscussionEntry:
@@ -92,9 +121,16 @@ def detail(repos: BoardRepositories, thread: DiscussionThreadsRow) -> Discussion
         stored = read_synthesis(newest.synthesis_json)
         synthesis = None if stored is None else {**stored, "round_id": newest.id}
     runs: list[RunEntry] = recent_runs(repos, thread.id)
+    refs = {
+        card_id: repos.cards.get(card_id)
+        for card_id in {row.ref_card_id for row in messages if row.ref_card_id is not None}
+    }
     return {
         "participants": [asdict(row) for row in participants],
-        "messages": [message_entry(row) for row in messages],
+        "messages": [
+            message_entry(row, refs.get(row.ref_card_id) if row.ref_card_id else None)
+            for row in messages
+        ],
         "positions": positions(participants, latest_answers(messages, participants)),
         "synthesis": synthesis,
         "votes": repos.votes.with_names(thread.id),
@@ -217,7 +253,7 @@ class DiscussionService:
         now = self._clock()
         with self.store.writer(board_id) as repos:
             thread = _thread(repos, discussion_id)
-            if thread.status in {"approved", "vetoed", "cancelled"}:
+            if thread.status in CLOSED_THREAD_STATUSES:
                 raise Conflict("Discussion is already closed", details={"status": thread.status})
             if repos.runs.active(discussion_id) is not None:
                 raise Conflict("A run is still active; stop it before reviewing")
@@ -262,6 +298,39 @@ class DiscussionService:
                 repos, discussion_id, STATUS_CHANGED, {"status": target, "run_state": "idle"}, actor
             )
         self._publish(board_id, review_event, status_event)
+        return self.get(board_id, discussion_id)
+
+    def close(self, actor: ActorContext, board_id: str, discussion_id: str) -> DiscussionEntry:
+        """The opener closes the thread (``discussion_closing``)."""
+        actor.require("discussions:write")
+        self.board_service.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            event = close_thread(
+                repos,
+                actor,
+                discussion_id,
+                now=self._clock(),
+                new_id=self._new_id,
+                events=self.events,
+            )
+        self._publish(board_id, event)
+        return self.get(board_id, discussion_id)
+
+    def reopen(self, actor: ActorContext, board_id: str, discussion_id: str) -> DiscussionEntry:
+        """The opener, or a signed-in person, opens a closed thread again
+        (``discussion_closing``)."""
+        actor.require("discussions:write")
+        self.board_service.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            event = reopen_thread(
+                repos,
+                actor,
+                discussion_id,
+                now=self._clock(),
+                new_id=self._new_id,
+                events=self.events,
+            )
+        self._publish(board_id, event)
         return self.get(board_id, discussion_id)
 
     # --- queries -------------------------------------------------------------
@@ -431,6 +500,9 @@ class DiscussionService:
         discussion_id: str,
         payload: DiscussionMessageCreate,
     ) -> DiscussionEntry:
+        """Post a message, which may point at a Ticket (``payload.ticket``). A closed thread takes
+        it as a comment after the close (``after_closed``), stays closed and never starts a round;
+        ``auto_run`` then reads ``thread_closed``."""
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
         now = self._clock()
@@ -440,6 +512,8 @@ class DiscussionService:
                 payload.parent_message_id, discussion_id
             ):
                 raise ValidationFailure("Parent message does not belong to this discussion")
+            ref = resolve_ticket(repos, payload.ticket) if payload.ticket else None
+            closed = thread.status == CLOSED
             message_id = self._new_id()
             repos.messages.add(
                 DiscussionMessagesRow(
@@ -458,10 +532,11 @@ class DiscussionService:
                     round_number=0,
                     content_sha256=None,
                     answer_json="{}",
-                    after_closed=0,
-                    ref_card_id=None,
+                    after_closed=int(closed),
+                    ref_card_id=ref.id if ref is not None else None,
                 )
             )
+            # A closed thread keeps its status: only an open one becomes ``discussing``.
             repos.threads.note_message(discussion_id, now=now)
             self._log(
                 repos,
@@ -486,12 +561,18 @@ class DiscussionService:
                     "author_type": actor.actor_type,
                     "author_name": actor.actor_name,
                     "content": payload.content,
+                    "after_closed": closed,
+                    "ref_ticket": ref_ticket(ref),
                 },
                 actor,
             )
         self._publish(board_id, message_event)
-        auto_run = self._auto_run(
-            actor, board_id, discussion_id, thread.mode, payload.content, participants
+        auto_run = (
+            "thread_closed"
+            if closed
+            else self._auto_run(
+                actor, board_id, discussion_id, thread.mode, payload.content, participants
+            )
         )
         detail = self.get(board_id, discussion_id)
         detail["auto_run"] = auto_run

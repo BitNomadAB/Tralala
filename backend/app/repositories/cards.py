@@ -132,6 +132,10 @@ class UnreportedTicket:
 class CardRepository(Protocol):
     def get(self, card_id: str) -> CardsRow | None: ...
 
+    def by_key(self, ticket_key: str) -> CardsRow | None:
+        """The card that carries this Ticket key (unique on the board), archived or not."""
+        ...
+
     def count(self, query: CardQuery) -> int: ...
 
     def page(

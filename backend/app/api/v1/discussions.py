@@ -231,6 +231,32 @@ def review_discussion(
 
 
 @router.post(
+    "/boards/{board_id}/discussions/{discussion_id}/close",
+    response_model=Envelope[DiscussionOut],
+)
+def close_discussion(
+    board_id: str,
+    discussion_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    return ok(request, ctx.services.discussion.close(ctx.actor, board_id, discussion_id))
+
+
+@router.post(
+    "/boards/{board_id}/discussions/{discussion_id}/reopen",
+    response_model=Envelope[DiscussionOut],
+)
+def reopen_discussion(
+    board_id: str,
+    discussion_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    return ok(request, ctx.services.discussion.reopen(ctx.actor, board_id, discussion_id))
+
+
+@router.post(
     "/boards/{board_id}/discussions/{discussion_id}/messages",
     response_model=Envelope[DiscussionOut],
     status_code=201,

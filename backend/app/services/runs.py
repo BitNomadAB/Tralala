@@ -54,7 +54,8 @@ __all__ = [
 logger = logging.getLogger("tralala.runs")
 
 ACTIVE_RUN_STATUSES = ("running", "paused")
-CLOSED_THREAD_STATUSES = {"approved", "vetoed", "cancelled"}
+# A thread in one of these starts no run and takes no review; ``closed`` is its opener's word.
+CLOSED_THREAD_STATUSES = frozenset({"approved", "vetoed", "cancelled", "closed"})
 WORKER_THREADS = 4
 
 

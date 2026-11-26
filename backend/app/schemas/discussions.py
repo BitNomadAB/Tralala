@@ -54,6 +54,8 @@ class DiscussionRunStart(StrictModel):
 class DiscussionMessageCreate(StrictModel):
     content: LongText = Field(min_length=1)
     parent_message_id: Id | None = None
+    # The Ticket the message is about, by its id or its key, on the same board.
+    ticket: Id | None = None
 
 
 class DiscussionReview(StrictModel):
@@ -144,6 +146,15 @@ class DiscussionVoteOut(OutModel):
     created_at: str
 
 
+class DiscussionRefTicketOut(OutModel):
+    """The Ticket a message points at."""
+
+    card_id: str
+    ticket_key: str | None = None
+    title: str
+    loop_id: str
+
+
 class DiscussionMessageOut(OutModel):
     id: str
     parent_message_id: str | None = None
@@ -158,6 +169,10 @@ class DiscussionMessageOut(OutModel):
     created_at: str
     # A participant's structured answer; null for a person's message and an answer before it.
     answer: DiscussionAnswerOut | None = None
+    # Written while the thread was closed: a comment after its opener closed it.
+    after_closed: bool = False
+    # The Ticket the message points at; null when it points at none (or that Ticket is gone).
+    ref_ticket: DiscussionRefTicketOut | None = None
 
 
 class DiscussionRoundOut(OutModel):
@@ -240,6 +255,8 @@ class DiscussionOut(OutModel):
     created_at: str
     updated_at: str
     last_activity_at: str
+    # When the opener closed the thread; null while it is not closed.
+    closed_at: str | None = None
     participant_count: int = 0
     message_count: int = 0
     # Who recorded the newest outcome (approve, veto or rework); null before any decision.
