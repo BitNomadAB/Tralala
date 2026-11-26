@@ -3,8 +3,11 @@ import { expect, type Page } from "playwright/test";
 /** A tool's answer: the `structuredContent` of a successful `tools/call`. */
 export type ToolAnswer = Record<string, unknown>;
 
-/** The one MCP revision `/mcp` speaks; every request states it, in `_meta` and in a header. */
+/** The MCP revision these helpers speak; every request states it, in `_meta` and in a header. */
 const PROTOCOL_VERSION = "2026-07-28";
+
+/** The older revision `/mcp` speaks on the same address; its client opens with `initialize`. */
+export const LEGACY_VERSION = "2025-06-18";
 
 let nextId = 1;
 
@@ -93,6 +96,81 @@ export async function mcpRefusal(
   const text = result.content[0]?.text ?? "";
   expect(result.isError, `${name} was not refused: ${text}`).toBe(true);
   return (JSON.parse(text) as { error: ToolRefusal }).error;
+}
+
+/** What `initialize` answers a client of revision 2025-06-18. */
+export interface LegacyInitialize {
+  protocolVersion: string;
+  capabilities: Record<string, unknown>;
+  serverInfo: { name: string; version: string };
+  instructions: string;
+}
+
+/**
+ * One POST as a client of revision 2025-06-18 sends it: no `_meta`, no `Mcp-Method`, and after
+ * `initialize` the version it negotiated in `MCP-Protocol-Version`.
+ */
+export async function legacyPost(
+  page: Page,
+  token: string,
+  message: Record<string, unknown>,
+  version?: string,
+) {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json, text/event-stream",
+  };
+  if (version !== undefined) headers["MCP-Protocol-Version"] = version;
+  return page.request.post("/mcp", { headers, data: { jsonrpc: "2.0", ...message } });
+}
+
+/** One 2025-06-18 request after the handshake; its `result`, or a failed expectation. */
+export async function legacyRpc(
+  page: Page,
+  token: string,
+  method: string,
+  params?: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const message = { id: nextId++, method, ...(params ? { params } : {}) };
+  const response = await legacyPost(page, token, message, LEGACY_VERSION);
+  expect(response.status(), await response.text()).toBe(200);
+  const answer = (await response.json()) as {
+    result?: Record<string, unknown>;
+    error?: { message: string };
+  };
+  if (answer.error) throw new Error(`${method} failed: ${answer.error.message}`);
+  expect(answer.result, `${method} has no result`).toBeDefined();
+  return answer.result ?? {};
+}
+
+/**
+ * Connects as a client of revision 2025-06-18 does: `initialize` without any MCP header, then
+ * `notifications/initialized` with the negotiated version. Returns what `initialize` answered
+ * and the session id the server sent, which must be none.
+ */
+export async function legacyConnect(
+  page: Page,
+  token: string,
+): Promise<{ initialize: LegacyInitialize; sessionId: string | undefined }> {
+  const opened = await legacyPost(page, token, {
+    id: nextId++,
+    method: "initialize",
+    params: {
+      protocolVersion: LEGACY_VERSION,
+      capabilities: {},
+      clientInfo: { name: "tralala-e2e-legacy", version: "1.0.0" },
+    },
+  });
+  expect(opened.status(), await opened.text()).toBe(200);
+  const initialize = ((await opened.json()) as { result: LegacyInitialize }).result;
+  const initialized = await legacyPost(
+    page,
+    token,
+    { method: "notifications/initialized" },
+    initialize.protocolVersion,
+  );
+  expect(initialized.status()).toBe(202);
+  return { initialize, sessionId: opened.headers()["mcp-session-id"] };
 }
 
 /** A list in a tool's answer, as rows of the given shape. */
