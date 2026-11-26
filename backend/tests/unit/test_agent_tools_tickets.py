@@ -51,7 +51,13 @@ from tests.unit.fakes.board import (
     list_row,
     loop_row,
 )
-from tests.unit.fakes.plans import BLOCKER, FakePlanViews, plan_views, readiness_item
+from tests.unit.fakes.plans import (
+    BLOCKER,
+    CONFIRMATION,
+    FakePlanViews,
+    plan_views,
+    readiness_item,
+)
 from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState
 
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
@@ -168,10 +174,18 @@ def test_complete_ticket_completes_a_ready_ticket_and_comments_the_summary_and_e
     (comment_id,) = world.state.comments
     loop = world.loop.get(BOARD_ID, LOOP)
     assert answer == {
-        "ticket": {"id": "t", "key": "K-1", "completed_at": STAMP, "version": 2},
+        "ticket": {
+            "id": "t",
+            "key": "K-1",
+            "completed_at": STAMP,
+            "version": 2,
+            "awaiting_confirmation": False,
+            "confirmations": [],
+        },
         "comment_id": comment_id,
         "loop": {"stage": loop["stage"], "progress": loop["progress"]},
     }
+    assert "message" not in answer
     assert (loop["progress"]["ticket_total"], loop["progress"]["ticket_completed"]) == (1, 1)
 
 
@@ -318,6 +332,29 @@ def test_complete_ticket_refuses_a_blocked_ticket_and_a_loop_that_is_not_executi
     assert replanning.value.code == "plan_change_required"
     assert world.state.cards["t"].completed_at is None
     assert comments(world, "t") == ["Shipped.", "Waiting for the new plan."]
+
+
+def test_complete_ticket_completes_a_ticket_awaiting_confirmation_and_says_what_is_missing(
+    settings: Settings,
+) -> None:
+    world = ticket_world(settings)
+    world.views.items = [
+        readiness_item("t", ready=False, blockers=(BLOCKER,), confirmations=(CONFIRMATION,))
+    ]
+    answer = complete_ticket(world, WORKER, done("t"))
+    assert world.state.cards["t"].completed_at == STAMP
+    ticket = answer["ticket"]
+    assert isinstance(ticket, dict)
+    assert (ticket["awaiting_confirmation"], ticket["confirmations"]) == (True, [CONFIRMATION])
+    assert answer["message"] == (
+        "K-1 is done. A person's confirmation of K-first is still missing, so it shows as done, "
+        "awaiting confirmation, until a person confirms it."
+    )
+    assert comments(world, "t") == ["Shipped."]
+    # Called again, the answer still carries the mark.
+    again = complete_ticket(world, WORKER, done("t", "Shipped, again."))
+    assert again["already_completed"] is True
+    assert "message" in again
 
 
 def test_complete_ticket_writes_nothing_in_a_loop_that_is_read_only(settings: Settings) -> None:
@@ -520,6 +557,15 @@ def test_allowed_actions_offer_complete_ticket_only_for_a_ready_open_ticket_of_a
     assert not offered(HUMAN_TASK)
     world.views.items = [readiness_item("t", ready=False, blockers=(BLOCKER,))]
     assert not offered("t")
+    card = world.card.get(BOARD_ID, LOOP, "t")
+    assert "move_ticket" not in allowed_actions(card, execution_allowed=True)
+    # Held up only by a person's confirmation, it may be worked and completed.
+    world.views.items = [
+        readiness_item("t", ready=False, blockers=(BLOCKER,), confirmations=(CONFIRMATION,))
+    ]
+    assert offered("t")
+    card = world.card.get(BOARD_ID, LOOP, "t")
+    assert "move_ticket" in allowed_actions(card, execution_allowed=True)
     world.state.cards["m"] = world.state.cards["m"].__replace__(completed_at=CREATED)
     assert not offered("m")
     card = world.card.get(BOARD_ID, LOOP, "m")

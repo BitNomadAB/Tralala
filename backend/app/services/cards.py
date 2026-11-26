@@ -69,7 +69,7 @@ from .loops import (
     refresh_stage,
     require_loop,
 )
-from .plan_views import PlanViews, ReadinessItem
+from .plan_views import PlanViews, ReadinessItem, plan_blocks
 from .subresources import label_entries
 from .ticket_state import ensure_not_waiting, loop_closed
 
@@ -539,7 +539,10 @@ class CardService:
     ) -> None:
         """Completing a Ticket faces the rules an agent's start would: stage, human, readiness.
 
-        The Loop is writable here (``update`` checked it), so it is neither archived nor done.
+        The Loop is writable here (``update`` checked it), so it is neither archived nor done. A
+        Ticket held up only by human-only Tickets a person has not confirmed
+        (``awaiting_confirmation``) may be completed, by a key or a person alike; it is then done,
+        awaiting their confirmation. Any other blocker refuses it (``409 ticket_blocked``).
         """
         if payload.completed is not True:
             return
@@ -557,7 +560,7 @@ class CardService:
             actor.require_human(f"Confirming {existing.ticket_key or 'this Ticket'}")
         ensure_not_waiting(existing)
         item = self._readiness_for(repos, loop, existing.id)
-        if item is not None and not item["ready"]:
+        if item is not None and plan_blocks(item):
             raise Conflict(
                 "This Ticket is blocked by unresolved prerequisites",
                 code="ticket_blocked",

@@ -29,6 +29,15 @@ class Blocker(TypedDict):
     title: NotRequired[str]
 
 
+class Confirmation(TypedDict):
+    """A human-only Ticket a person has not confirmed yet, as the planned Ticket's id, key and
+    title: one of the Tickets a Ticket awaiting confirmation is held up by."""
+
+    id: str
+    key: str
+    title: str
+
+
 class ReadinessItem(TypedDict):
     """A planned Ticket and whether it may start."""
 
@@ -51,13 +60,28 @@ class ReadinessItem(TypedDict):
     completed_at: str | None
     ready: bool
     blockers: list[Blocker]
+    awaiting_confirmation: bool
+    """Its blockers are held up only by human-only Tickets a person has not confirmed
+    (``confirmations``): it may be worked and completed, and once completed it is done, awaiting
+    confirmation. ``ready`` stays false and ``blockers`` stay as they are."""
+    confirmations: list[Confirmation]
+    """The unconfirmed human-only Tickets behind its blockers; empty unless
+    ``awaiting_confirmation``."""
     human_action_required: bool
     downstream_phase_numbers: list[int]
     workplace: str
     waiting_for: str
     state: TicketState | None
     """ready, needs_input or blocked from the card's wait and the blockers, or not_done once the
-    Loop is closed (``ticket_state``)."""
+    Loop is closed (``ticket_state``); a Ticket awaiting confirmation is not blocked
+    (``plan_blocks``)."""
+
+
+def plan_blocks(item: ReadinessItem) -> bool:
+    """Whether the plan holds a Ticket up: it has blockers and they are not only human-only Tickets
+    a person has not confirmed (``awaiting_confirmation``). Its state, its completion and a
+    person's confirmation all read this one rule."""
+    return not item["ready"] and not item["awaiting_confirmation"]
 
 
 class PhaseView(TypedDict):

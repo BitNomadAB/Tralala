@@ -406,18 +406,21 @@ def allowed_actions(
     completed, archived or cancelled Loop too, as the service allows (only an archived board
     refuses it); nothing else in such a Loop; ``set_ticket_wait`` while it is open and waits for
     nothing (clearing a wait is a person's act); ``complete_ticket`` only while the Ticket is ready
-    (no blocker, no wait), open and not a person's, and for a planned one only while the Loop
-    executes. ``move_ticket`` is left out while the key has another Ticket it took and has not
-    reported on (``others_unreported``), which ``409 report_required`` would refuse."""
+    (no blocker, or only unconfirmed human-only Tickets behind it, and no wait), open and not a
+    person's, and for a planned one only while the Loop executes. ``move_ticket`` is left out
+    while the key has another Ticket it took and has not reported on (``others_unreported``),
+    which ``409 report_required`` would refuse."""
     if card["archived_at"] or loop_read_only:
         return ["comment_ticket"]
     may_wait = not card["completed_at"] and card["waiting_for"] == "nothing"
     if card["human_action_required"] and not card["completed_at"]:
         return ["comment_ticket", "ask_agents", *(["set_ticket_wait"] if may_wait else [])]
     allowed = ["comment_ticket", "assign_ticket", "move_ticket", "ask_agents"]
-    # A planned Ticket waits for its phase entry conditions, a manual one does not; and while the
-    # key owes a report on another Ticket, 409 report_required would refuse the move.
-    if (card["plan_item_id"] and not card["ready"]) or others_unreported:
+    # A planned Ticket waits for its phase entry conditions, a manual one does not, and one held
+    # up only by a person's confirmation may be worked; while the key owes a report on another
+    # Ticket, 409 report_required would refuse the move.
+    held = not card["ready"] and not card["awaiting_confirmation"]
+    if (card["plan_item_id"] and held) or others_unreported:
         allowed.remove("move_ticket")
     if may_wait:
         allowed.append("set_ticket_wait")
@@ -484,6 +487,8 @@ def _read_ticket(
             "workplace": card["workplace"],
             "wait": ticket_wait(card, loop_read_only=loop_read_only, public_url=public_url),
             "blockers": card["blockers"],
+            "awaiting_confirmation": card["awaiting_confirmation"],
+            "confirmations": card["confirmations"],
             "human_action_required": card["human_action_required"],
             # Where a person confirms a person's task.
             "decision_link": ticket_decision_link(

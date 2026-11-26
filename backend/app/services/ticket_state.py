@@ -12,7 +12,9 @@ plan's blockers and the Loop on every read and is never stored or set by hand:
   and it waits for nobody;
 - ``needs_input``: it waits for a decision, information or access, which a person can give now;
 - ``blocked``: the plan's blockers are not empty (an earlier Ticket, a Phase, a pre-Phase gate),
-  or it waits for a third party;
+  or it waits for a third party. Blockers that lead only to human-only Tickets a person has not
+  confirmed do not block (``plan_views.plan_blocks``): such a Ticket is ``ready``, may be
+  completed, and is then done, awaiting confirmation;
 - ``ready``: none of them.
 
 ``not_done`` wins over the rest, since nothing in a closed Loop goes on. ``needs_input`` wins over

@@ -6,13 +6,15 @@ edges. ``loop_plans`` re-exports every name here, so callers keep importing them
 from __future__ import annotations
 
 import json
+from collections import deque
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from pydantic import JsonValue
 
 from ..db.generated.board import LoopDependenciesRow, LoopPhasesRow
 from ..repositories.loop_plans import PlannedItem
-from .plan_views import Blocker, PhaseView, ReadinessItem
+from .plan_views import Blocker, Confirmation, PhaseView, ReadinessItem
 from .ticket_state import ticket_state
 
 # --- readiness -----------------------------------------------------------------------------------
@@ -152,12 +154,51 @@ def phase_views(
 
     downstream = downstream_phase_numbers(phases, grouped, edges)
 
-    views: list[PhaseView] = []
+    # Each Phase's entry blockers and each planned Ticket's blockers, before any view is built:
+    # whether a Ticket awaits only a confirmation follows the blockers of the Tickets behind it.
+    phase_entry: dict[str, list[Blocker]] = {}
+    item_blockers: dict[str, list[Blocker]] = {}
     for phase in phases:
         prerequisites = phase_prerequisites(phase.id)
         entry_blockers = blockers_for(
             prerequisites.phases, prerequisites.tickets, include_gates_of=phase.id
         )
+        phase_entry[phase.id] = entry_blockers
+        for entry in grouped.get(phase.id, []):
+            explicit = item_prerequisites(entry.item.id)
+            blockers = blockers_for(explicit.phases, explicit.tickets, include_gates_of=None)
+            if entry.item.execution_mode == "normal" and entry_blockers:
+                blockers.extend(
+                    [blocker for blocker in entry_blockers if blocker not in blockers]
+                )
+            item_blockers[entry.item.id] = blockers
+    # What keeps each incomplete Phase incomplete: its open Tickets, or, for a Phase without
+    # Tickets, its incomplete prerequisite Phases.
+    phase_holds: dict[str, list[Blocker]] = {}
+    for phase in phases:
+        if phase_complete.get(phase.id, False):
+            continue
+        entries = grouped.get(phase.id, [])
+        if not entries:
+            phase_holds[phase.id] = blockers_for(
+                phase_prerequisites(phase.id).phases, [], include_gates_of=None
+            )
+            continue
+        open_ids = dict.fromkeys(e.item.id for e in entries if e.item.id not in completed_items)
+        phase_holds[phase.id] = [
+            {"type": "ticket", "id": item_id, "reason": "phase_ticket_open"}
+            for item_id in open_ids
+        ]
+    open_human: dict[str, Confirmation] = {
+        item_id: {"id": item_id, "key": entry.item.key, "title": entry.item.title}
+        for item_id, entry in item_lookup.items()
+        if entry.item.required_actor == "human" and item_id not in completed_items
+    }
+
+    views: list[PhaseView] = []
+    for phase in phases:
+        prerequisites = phase_prerequisites(phase.id)
+        entry_blockers = phase_entry[phase.id]
         entered = not entry_blockers
         if compute_phase_complete(phase.id):
             state = "complete"
@@ -169,11 +210,10 @@ def phase_views(
         for entry in grouped.get(phase.id, []):
             item = entry.item
             explicit = item_prerequisites(item.id)
-            blockers = blockers_for(explicit.phases, explicit.tickets, include_gates_of=None)
-            if item.execution_mode == "normal" and not entered:
-                blockers.extend(
-                    [blocker for blocker in entry_blockers if blocker not in blockers]
-                )
+            blockers = list(item_blockers[item.id])
+            confirmations = confirmations_behind(
+                blockers, phase_holds=phase_holds, item_holds=item_blockers, open_human=open_human
+            )
             tickets.append(
                 {
                     "id": item.id,
@@ -195,6 +235,8 @@ def phase_views(
                     "completed_at": entry.completed_at,
                     "ready": not blockers,
                     "blockers": blockers,
+                    "awaiting_confirmation": bool(confirmations),
+                    "confirmations": confirmations,
                     "human_action_required": (
                         item.required_actor == "human" and entry.completed_at is None
                     ),
@@ -206,7 +248,7 @@ def phase_views(
                     "state": ticket_state(
                         completed=entry.completed_at is not None,
                         waiting_for=entry.waiting_for if entry.card_id else item.waiting_for,
-                        blocked=bool(blockers),
+                        blocked=bool(blockers) and not confirmations,
                         loop_closed=loop_closed,
                     ),
                 }
@@ -272,3 +314,43 @@ def downstream_phase_numbers(
             stack.extend(dependents.get(current, ()))
         result[node] = numbers
     return result
+
+
+def confirmations_behind(
+    blockers: Sequence[Blocker],
+    *,
+    phase_holds: Mapping[str, Sequence[Blocker]],
+    item_holds: Mapping[str, Sequence[Blocker]],
+    open_human: Mapping[str, Confirmation],
+) -> list[Confirmation]:
+    """The human-only Tickets a person has not confirmed that hold a Ticket up through its
+    ``blockers``, when nothing else does; empty when real ordering holds it up, or nothing does.
+
+    Every open Ticket behind the blockers is followed to its leaves: through a Phase to what keeps
+    it incomplete (``phase_holds``: its open Tickets, or for a Phase without Tickets its incomplete
+    prerequisite Phases), and through a Ticket, a pre-Phase gate included, to what holds that one
+    up in turn (``item_holds``, by planned id). Each Ticket met must be in ``open_human``, the open
+    human-only Tickets by planned id: a single unfinished Ticket that is not, or a Phase or Ticket
+    that is gone, is real ordering and the answer is empty. ``phase_views`` computes the maps once
+    for every planned Ticket."""
+    found: dict[str, Confirmation] = {}
+    seen: set[str] = set()
+    pending = deque(blockers)
+    while pending:
+        blocker = pending.popleft()
+        node = f"{blocker['type']}:{blocker['id']}"
+        if node in seen:
+            continue
+        seen.add(node)
+        if blocker["type"] == "phase":
+            holds = phase_holds.get(blocker["id"])
+            if holds is None:
+                return []
+            pending.extend(holds)
+            continue
+        person = open_human.get(blocker["id"])
+        if person is None:
+            return []
+        found.setdefault(blocker["id"], person)
+        pending.extend(item_holds.get(blocker["id"], ()))
+    return list(found.values())
