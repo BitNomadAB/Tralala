@@ -5,6 +5,13 @@ import { describeError } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { Card, CardDetail, Wait } from "@/lib/types";
 
+/** A wait as a person sets it: its kind, its reason and, optionally, the stop-list line it is for. */
+export interface WaitValue {
+  waiting_for: Wait;
+  reason: string;
+  stop?: string | undefined;
+}
+
 /** What a refused change reads as under the section. */
 export function workErrorText(error: unknown): string {
   if (error instanceof ApiError && error.code === "version_conflict") {
@@ -50,7 +57,7 @@ export function useCardWork({
   };
 
   const wait = useMutation({
-    mutationFn: (value: { waiting_for: Wait; reason: string }) =>
+    mutationFn: (value: WaitValue) =>
       api.setWait(boardId, loopId, card.id, { version: card.version, ...value }),
     ...settled,
   });
@@ -64,7 +71,7 @@ export function useCardWork({
     error,
     pending: wait.isPending || clear.isPending,
     /** Resolves true once the wait is saved, so the form can close. */
-    setWait: async (value: { waiting_for: Wait; reason: string }): Promise<boolean> => {
+    setWait: async (value: WaitValue): Promise<boolean> => {
       try {
         await wait.mutateAsync(value);
         return true;

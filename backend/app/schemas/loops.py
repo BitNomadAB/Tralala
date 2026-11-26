@@ -157,7 +157,11 @@ class PlanTicket(StrictModel):
     # Where the work is done and what it waits for describe the work and assign nothing.
     workplace: Workplace = Field(default="unknown", description="codebase, outside or unknown")
     waiting_for: WaitingFor = Field(
-        default="nothing", description="nothing, decision, information, access or third_party"
+        default="nothing",
+        description=(
+            "nothing, decision, information, access or third_party; a wait only for a stop on "
+            "the Loop's stop list"
+        ),
     )
     waiting_reason: WaitingReason = Field(default="", description="What is needed, with a wait")
     labels: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(

@@ -9,7 +9,8 @@ asking Tralala's agent for an analysis is decision support), ``anyone`` or ``nob
 is finished). Delivery never waits on an agent: a person owns every Ticket, and a ready one is
 ``anyone``'s to take. The Tickets count by state: ready, needs input, blocked, completed, and
 ``needs_person``. The documents, the Tickets and the notes themselves are read with ``read_loop``,
-``list_tickets`` and ``read_document``.
+``list_tickets`` and ``read_document``. ``poc_decisions`` counts the Loop's POC decisions and what
+is missing from a person (``poc_decision_rules.poc_counts``), read for the whole board at once.
 
 Beside the rows, ``unreported`` names the Tickets on the board the calling key took and has not
 reported on since (``CardService.unreported``), whatever the stage asked for, and ``next_step`` then
@@ -32,11 +33,13 @@ runs it with the real services on the typed fakes. Its catalogue entry is built 
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from ..core.context import ActorContext
 from ..core.errors import ValidationFailure
+from ..repositories.poc_decisions import PocDecisionMark
 from ..schemas.loops import DOCUMENT_KINDS, LOOP_STAGES
 from .agent_tools_read import (
     ToolArguments,
@@ -48,6 +51,7 @@ from .agent_tools_read import (
     unreported_rows,
 )
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
+from .poc_decision_rules import PocCounts, loop_progress, poc_counts
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from ..core.config import Settings
@@ -57,6 +61,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from .loops import LoopEntry, LoopService
     from .loops_stage import DocumentState
     from .plan_views import LoopReadiness
+    from .poc_decisions import PocDecisionService
 
 type WaitingOn = Literal["person", "agent", "anyone", "nobody"]
 
@@ -96,12 +101,17 @@ class LoopSummarising(Protocol):
     @property
     def settings(self) -> Settings: ...
 
+    @property
+    def poc_decisions(self) -> PocDecisionService: ...
+
 
 @dataclass(frozen=True, slots=True)
 class TicketCounts:
     """A Loop's Tickets by state (``ticket_state``): open ones are ready, need input or are
     blocked, and in a closed Loop what was never done is not done; ``needs_person`` counts what
-    waits for a person now (needs input, or ready and a person's task)."""
+    waits for a person now (needs input, or ready and a person's task). ``awaiting_confirmation``
+    counts the completed Tickets that are done, awaiting a person's confirmation of a human-only
+    Ticket before them; they count in ``completed`` too."""
 
     total: int = 0
     completed: int = 0
@@ -110,12 +120,13 @@ class TicketCounts:
     blocked: int = 0
     not_done: int = 0
     needs_person: int = 0
+    awaiting_confirmation: int = 0
 
 
 def ticket_counts(readiness: LoopReadiness) -> TicketCounts:
     """The planned Tickets by state, plus the ones added by hand (outside the plan, or every
     Ticket of a Loop without one; archived ones left out), which only their own wait can hold
-    up."""
+    up. An open Ticket held up only by a person's confirmation is ready (``ticket_state``)."""
     items = readiness["items"]
     unplanned = [ticket for ticket in readiness["unplanned"] if ticket["archived_at"] is None]
     states = [item["state"] for item in items] + [ticket["state"] for ticket in unplanned]
@@ -131,6 +142,9 @@ def ticket_counts(readiness: LoopReadiness) -> TicketCounts:
         blocked=states.count("blocked"),
         not_done=states.count("not_done"),
         needs_person=needs_input + person_tasks,
+        awaiting_confirmation=sum(
+            1 for item in items if item["completed_at"] and item["awaiting_confirmation"]
+        ),
     )
 
 
@@ -222,6 +236,12 @@ def next_step(
         return _tickets(counts.ready - person_tasks, "is", "are") + " ready to start.", "anyone"
     if person_tasks:
         ready = _tickets(person_tasks, "is ready and needs", "are ready and need")
+        if counts.awaiting_confirmation:
+            # Work done after a person's task waits for that task's confirmation, not for an agent.
+            done = _tickets(
+                counts.awaiting_confirmation, "is done and awaits", "are done and await"
+            )
+            return f"{ready} a person. {done} that confirmation.", "person"
         return f"{ready} a person.", "person"
     if counts.blocked:
         blocked = _tickets(counts.blocked, "waits", "wait")
@@ -281,16 +301,52 @@ def _goal(goal: str) -> str:
     return text if len(text) <= GOAL_CHARS else text[: GOAL_CHARS - 1].rstrip() + "…"
 
 
+def poc_summary(marks: Sequence[PocDecisionMark], readiness: LoopReadiness) -> PocCounts:
+    """A Loop's POC decisions and what is missing from a person, counted against its progress,
+    as ``loop_summaries`` and ``read_loop`` both answer them."""
+    return poc_counts(marks, loop_progress(readiness, readiness["unplanned"]))
+
+
+def _count(count: int, one: str, many: str) -> str:
+    return f"1 {one}" if count == 1 else f"{count} {many}"
+
+
+def review_waiting(open_count: int, missing_open: int) -> str:
+    """The sentence ``next`` adds once every Ticket is done while records wait for a person's
+    review, or "" when none does."""
+    decisions = open_count - missing_open
+    parts = [
+        *([_count(decisions, "POC decision", "POC decisions")] if decisions else []),
+        *(
+            [_count(missing_open, "report of something missing", "reports of something missing")]
+            if missing_open
+            else []
+        ),
+    ]
+    if not parts:
+        return ""
+    verb = "waits" if open_count == 1 else "wait"
+    return f"{' and '.join(parts)} {verb} for the person's review."
+
+
 def loop_row(
     entry: LoopEntry,
     readiness: LoopReadiness,
     columns: list[ListEntry],
     *,
     public_url: str | None,
+    poc_marks: Sequence[PocDecisionMark] = (),
 ) -> ToolResult:
-    """One Loop as ``loop_summaries`` shows it."""
+    """One Loop as ``loop_summaries`` shows it; ``poc_marks`` are the Loop's POC decisions and
+    what is missing from a person, counted against the Loop's progress. Once every Ticket is done
+    (``ALL_DONE``, ``ALL_DONE_WITHOUT_PLAN``), ``next`` also says how many of them wait for the
+    person's review (``review_waiting``); the decision link stays the implementation's."""
     counts = ticket_counts(readiness)
     sentence, waiting_on = next_step(entry, readiness, counts)
+    poc = poc_summary(poc_marks, readiness)
+    if sentence in (ALL_DONE, ALL_DONE_WITHOUT_PLAN):
+        waiting = review_waiting(poc["open"], poc["missing_open"])
+        sentence = f"{sentence} {waiting}" if waiting else sentence
     return {
         "id": entry["id"],
         "key": entry["key"],
@@ -310,9 +366,11 @@ def loop_row(
             "completed": counts.completed,
             "total": counts.total,
             "needs_person": counts.needs_person,
+            "awaiting_confirmation": counts.awaiting_confirmation,
             "by_column": {column["name"]: column["card_count"] for column in columns},
         },
         "documents": {kind: _document(entry, kind) for kind in DOCUMENT_KINDS},
+        "poc_decisions": poc,
     }
 
 
@@ -330,12 +388,14 @@ def loop_summaries(
     include_completed = args.get("include_completed") is True or stage in _FINISHED
     loops = services.loop.list(board_id, include_completed=include_completed, stage=stage)
     public_url = services.settings.public_url
+    marks = services.poc_decisions.board_marks(actor, board_id)
     rows = [
         loop_row(
             entry,
             services.loop.readiness(board_id, entry["id"]),
             services.list.list(board_id, entry["id"]),
             public_url=public_url,
+            poc_marks=marks.get(entry["id"], ()),
         )
         for entry in loops
     ]
@@ -366,7 +426,10 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                 "completed, total, needs_person) and by column, and each document's state. Open "
                 "Loops unless include_completed is true. unreported names the Tickets on the "
                 "board this key took and has not reported on yet. without_plan is true for a "
-                "Loop that runs its Tickets without a plan, which a person closes in one decision."
+                "Loop that runs its Tickets without a plan, which a person closes in one decision. "
+                "poc_decisions counts its POC decisions and what is missing from a person (open, "
+                "built_on_open, missing_open, due for review, answered); list_poc_decisions "
+                "lists them."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(
@@ -398,6 +461,8 @@ __all__ = [
     "loop_tools",
     "next_decision",
     "next_step",
+    "poc_summary",
     "review_step",
+    "review_waiting",
     "ticket_counts",
 ]

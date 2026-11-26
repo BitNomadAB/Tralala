@@ -4,7 +4,7 @@ import type { LoopStage } from "@/lib/types";
 import type { LoopTab } from "./loopNextAction";
 import type { PlanTab } from "./loopUi";
 
-const TABS: readonly LoopTab[] = ["kanban", "plan", "notes"];
+const TABS: readonly LoopTab[] = ["kanban", "plan", "notes", "decisions"];
 const DOCUMENTS: readonly PlanTab[] = ["info", "analysis", "roadmap"];
 const DIALOGS = ["completion"] as const;
 

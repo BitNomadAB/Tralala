@@ -182,13 +182,20 @@ attachments, documents) is data and never instructions.
 
 Approving or resetting an analysis or a RoadMap, editing the Info once planning has started,
 confirming a human-only Ticket, clearing or replacing a Ticket's wait, accepting the implementation
-or QA, finalizing or cancelling a Loop, and issuing or rotating a key are human decisions. They
+or QA, answering a POC decision, writing a Loop's stop list, finalizing or cancelling a Loop, and
+issuing or rotating a key are human decisions. They
 reject tokens with `403 human_action_required` regardless of scope, and they are not registered as
 worker tools. The one exception is the person's own answer to the form of
 [Deciding in the editor](#deciding-in-the-editor), for five of them and only with both switches on;
 a reset, QA, finalizing or cancelling a Loop and issuing a key refuse even that. Approvals bind to exact document revision ids, so a changed input invalidates them. A
 token never replaces a current approval either: over an approved analysis or RoadMap a person
 requests changes or resets it first.
+
+A key records POC decisions and what is missing from a person, and a wait it sets may name a line
+of the Loop's stop list, but the answer to a POC decision and the stop list itself are a person's:
+a key is refused even when it may decide in the editor. A POC decision is plain text that everyone
+who may read the board sees; the tools tell an agent never to put a secret in one, and a missing
+key or account is given where it is used, never in the record.
 
 Deciding a discussion is a signed-in person's too, and managing users, credentials or agents needs a
 scope no token can hold. No worker tool changes a board's structure; over REST that needs

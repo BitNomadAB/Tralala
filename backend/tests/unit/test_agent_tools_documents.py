@@ -18,6 +18,7 @@ from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Forbidden, NotFound, ValidationFailure
 from app.db.generated.board import LoopNotesRow
+from app.schemas.poc_decisions import PocDecisionCreate
 from app.services.agent_tools import loop_summaries, read_document, read_loop
 from app.services.agent_tools_documents import PAGE_CHARS
 from app.services.cards import CardService
@@ -25,7 +26,9 @@ from app.services.lists import ListService
 from app.services.loop_documents import LoopDocumentService
 from app.services.loop_notes import LoopNoteService
 from app.services.loop_plans import LoopPlanService
+from app.services.loop_stops import DEFAULT_STOPS, LoopStopService
 from app.services.loops import LoopService
+from app.services.poc_decisions import PocDecisionService
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -82,6 +85,8 @@ class DocumentWorld:
     list: ListService
     card: CardService
     settings: Settings
+    poc_decisions: PocDecisionService
+    loop_stops: LoopStopService
     state: BoardState
 
 
@@ -139,6 +144,8 @@ def document_world(settings: Settings, *, public_url: str | None = None) -> Docu
         list=ListService(checks, store),
         card=cards,
         settings=settings.model_copy(update={"public_url": public_url}),
+        poc_decisions=PocDecisionService(checks, store, cards, plans=views),
+        loop_stops=LoopStopService(checks, store),
         state=state,
     )
 
@@ -236,6 +243,43 @@ def test_read_loop_cuts_a_long_note_and_refuses_document_kinds(settings: Setting
         read_loop(world, READER, ask(document_kinds=["info"]))
     with pytest.raises(Forbidden):
         read_loop(world, READER.__replace__(scopes=frozenset()), ask())
+
+
+def test_read_loop_gives_the_stop_list_and_the_poc_decision_counts(settings: Settings) -> None:
+    world = document_world(settings)
+    answer = read_loop(world, READER, ask())
+    assert answer["stops"] == {"lines": list(DEFAULT_STOPS), "is_default": True}
+    assert answer["poc_decisions"] == {
+        "open": 0,
+        "built_on_open": 0,
+        "missing_open": 0,
+        "due": 0,
+        "answered": 0,
+    }
+    person = ActorContext(
+        actor_id="user-ada",
+        actor_type="user",
+        actor_name="Ada",
+        scopes=frozenset({"loops:read", "loops:write", "cards:read", "cards:write"}),
+    )
+    world.loop_stops.write(person, BOARD_ID, LOOP, ["Deleting data", "Money"])
+    world.poc_decisions.record(
+        person,
+        BOARD_ID,
+        LOOP,
+        PocDecisionCreate(
+            kind="missing",
+            title="No mail account",
+            missing="An account for the mail service.",
+            reason="The invitation mail needs it.",
+            chosen="Invitations are shown as a link to copy.",
+            change_path="Send the mail once the account is there.",
+        ),
+    )
+    written = read_loop(world, READER, ask())
+    assert written["stops"] == {"lines": ["Deleting data", "Money"], "is_default": False}
+    assert section(written, "poc_decisions")["missing_open"] == 1
+    assert section(written, "poc_decisions")["open"] == 1
 
 
 def summary_link(world: DocumentWorld) -> object:

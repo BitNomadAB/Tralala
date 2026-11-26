@@ -21,6 +21,14 @@ import type { LoopView } from "./useLoopView";
 import { WithoutPlanChip } from "./WithoutPlanChip";
 
 /**
+ * What a person's task not confirmed yet means for the Phases after it: their work goes on, and a
+ * Ticket done there stays awaiting confirmation until the person confirms the task.
+ */
+function dependentPhasesText(phases: readonly number[]): string {
+  return `Phases ${phases.join(", ")} depend on it: their work need not wait for it, and stays awaiting confirmation until a person confirms this.`;
+}
+
+/**
  * The Loop's header: its name as the page title, the key and the stage under it (with "Without a
  * plan" for a Loop that runs without one), what the Loop waits for (from the board's Loop
  * summaries) and the one primary button for the person's next decision. Everything else is in the
@@ -59,7 +67,10 @@ export function LoopHeader({
   const decision = decisionShown(loopDecision(next), view);
 
   const humanActions = useMemo(
-    () => (readiness.data?.items ?? []).filter((item) => item.human_action_required && item.ready),
+    () =>
+      (readiness.data?.items ?? []).filter(
+        (item) => item.human_action_required && (item.ready || item.awaiting_confirmation),
+      ),
     [readiness.data],
   );
 
@@ -140,8 +151,7 @@ export function LoopHeader({
               <span>
                 <strong>{item.key}</strong> {item.title} — human action required.
                 {item.downstream_phase_numbers.length > 0
-                  ? ` Phases ${item.downstream_phase_numbers.join(", ")} cannot start until a human
-                     confirms this.`
+                  ? ` ${dependentPhasesText(item.downstream_phase_numbers)}`
                   : ""}
               </span>
             </li>
@@ -157,6 +167,7 @@ export function LoopHeader({
         isHuman={actor?.type === "user"}
         columnCount={columnCount}
         onChanged={onChanged}
+        openDecisions={summary?.poc_decisions.open ?? 0}
       />
     </header>
   );

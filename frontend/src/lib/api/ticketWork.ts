@@ -42,7 +42,8 @@ export const ticketWorkApi = {
     boardId: string,
     loopId: string,
     cardId: string,
-    payload: { version: number; waiting_for: Wait; reason: string },
+    /** `stop`: a line of the Loop's stop list the wait is for (`422 not_a_stop` otherwise). */
+    payload: { version: number; waiting_for: Wait; reason: string; stop?: string | undefined },
   ): Promise<Card> {
     return json(
       await request<Card>(`${cardPath(boardId, loopId, cardId)}/wait`, {

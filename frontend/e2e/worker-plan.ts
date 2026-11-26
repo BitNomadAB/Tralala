@@ -158,6 +158,8 @@ export const ROADMAP_BRIEF = { goal: ROADMAP_GOAL };
 
 export const WAIT_REASON = "Should a warning show one minute before the session ends?";
 export const COMMENT = "The guard now reads the last-seen time on every call.";
+export const POC_TITLE = "The warning shows one minute before the end";
+export const MISSING_TITLE = "The sender of the announcement";
 export const FOLLOW_UP = "Show the remaining session time";
 export const NOTE = "Baseline: the unit suite passed before the idle check went in.";
 export const FILE_NAME = "timeout-notes.txt";

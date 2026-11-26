@@ -56,7 +56,8 @@ export const PEOPLE: BoardPerson[] = [
 export const PHASE_NAME = "Session limits";
 export const PREREQUISITE_KEY = "SES-1-PH01-000";
 
-function planItem(id: string, key: string, extra: Partial<PlanTicketView>): PlanTicketView {
+/** A planned Ticket as readiness serves it, with what `extra` changes. */
+export function planItem(id: string, key: string, extra: Partial<PlanTicketView>): PlanTicketView {
   return {
     id,
     key,
@@ -77,6 +78,8 @@ function planItem(id: string, key: string, extra: Partial<PlanTicketView>): Plan
     completed_at: null,
     ready: true,
     blockers: [],
+    awaiting_confirmation: false,
+    confirmations: [],
     human_action_required: false,
     downstream_phase_numbers: [],
     workplace: "unknown",

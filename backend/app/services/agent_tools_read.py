@@ -48,6 +48,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from .lists import ListEntry, ListService
     from .loops import LoopService
     from .plan_views import Readiness
+    from .poc_decisions import PocDecisionList
     from .search import SearchHit, SearchService
 
 # A tool's arguments: the JSON object an MCP ``tools/call`` carried, untrusted.
@@ -406,18 +407,21 @@ def allowed_actions(
     completed, archived or cancelled Loop too, as the service allows (only an archived board
     refuses it); nothing else in such a Loop; ``set_ticket_wait`` while it is open and waits for
     nothing (clearing a wait is a person's act); ``complete_ticket`` only while the Ticket is ready
-    (no blocker, no wait), open and not a person's, and for a planned one only while the Loop
-    executes. ``move_ticket`` is left out while the key has another Ticket it took and has not
-    reported on (``others_unreported``), which ``409 report_required`` would refuse."""
+    (no blocker, or only unconfirmed human-only Tickets behind it, and no wait), open and not a
+    person's, and for a planned one only while the Loop executes. ``move_ticket`` is left out
+    while the key has another Ticket it took and has not reported on (``others_unreported``),
+    which ``409 report_required`` would refuse."""
     if card["archived_at"] or loop_read_only:
         return ["comment_ticket"]
     may_wait = not card["completed_at"] and card["waiting_for"] == "nothing"
     if card["human_action_required"] and not card["completed_at"]:
         return ["comment_ticket", "ask_agents", *(["set_ticket_wait"] if may_wait else [])]
     allowed = ["comment_ticket", "assign_ticket", "move_ticket", "ask_agents"]
-    # A planned Ticket waits for its phase entry conditions, a manual one does not; and while the
-    # key owes a report on another Ticket, 409 report_required would refuse the move.
-    if (card["plan_item_id"] and not card["ready"]) or others_unreported:
+    # A planned Ticket waits for its phase entry conditions, a manual one does not, and one held
+    # up only by a person's confirmation may be worked; while the key owes a report on another
+    # Ticket, 409 report_required would refuse the move.
+    held = not card["ready"] and not card["awaiting_confirmation"]
+    if (card["plan_item_id"] and held) or others_unreported:
         allowed.remove("move_ticket")
     if may_wait:
         allowed.append("set_ticket_wait")
@@ -484,6 +488,11 @@ def _read_ticket(
             "workplace": card["workplace"],
             "wait": ticket_wait(card, loop_read_only=loop_read_only, public_url=public_url),
             "blockers": card["blockers"],
+            "awaiting_confirmation": card["awaiting_confirmation"],
+            "confirmations": card["confirmations"],
+            "poc_decisions": ticket_poc_decisions(
+                services.poc_decisions.list(actor, board_id, loop_id, card_id=card_id)
+            ),
             "human_action_required": card["human_action_required"],
             # Where a person confirms a person's task.
             "decision_link": ticket_decision_link(
@@ -514,11 +523,12 @@ def ticket_wait(
     card: CardEntry, *, loop_read_only: bool, public_url: str | None
 ) -> ToolResult | None:
     """What the Ticket waits for as ``read_ticket`` shows it, None while it waits for nothing:
-    the kind, the reason, who set it and when, and ``decision_link``, where the person who
-    answers clears it (``ticket_decision_link``)."""
+    the kind, the reason, who set it and when, ``decision_link``, where the person who answers
+    clears it (``ticket_decision_link``), and ``stop``, the line of the stop list it is for, when
+    the wait names one."""
     if card["waiting_for"] == "nothing":
         return None
-    return {
+    wait: ToolResult = {
         "waiting_for": card["waiting_for"],
         "reason": card["waiting_reason"],
         "set_by": card["waiting_set_by"],
@@ -526,6 +536,22 @@ def ticket_wait(
         "decision_link": ticket_decision_link(
             card, "wait", loop_read_only=loop_read_only, public_url=public_url
         ),
+    }
+    if card["waiting_stop"] is not None:
+        # The line of the Loop's stop list the wait is for; a wait that names none has no key.
+        wait["stop"] = card["waiting_stop"]
+    return wait
+
+
+def ticket_poc_decisions(listing: PocDecisionList) -> ToolResult:
+    """The POC decisions and reports of something missing taken on the Ticket, as ``read_ticket``
+    names them: how many, how many still wait for a person's review, and their keys in review
+    order; ``list_poc_decisions`` with the Ticket's id reads them."""
+    items = listing["items"]
+    return {
+        "count": len(items),
+        "open": sum(1 for item in items if item["status"] == "open"),
+        "keys": [item["key"] for item in items],
     }
 
 
@@ -591,6 +617,7 @@ __all__ = [
     "ticket_attachments",
     "ticket_decision_link",
     "ticket_plan",
+    "ticket_poc_decisions",
     "ticket_wait",
     "tool_decision_link",
     "unreported_besides",

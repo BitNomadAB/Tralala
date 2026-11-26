@@ -169,6 +169,8 @@ def test_a_ticket_from_before_the_revision_reads_unknown_and_waits_for_nothing()
         **new,
         "waiting_set_at": None,
         "waiting_set_by": None,
+        # Revision 0023 adds the stop a wait names, NULL for every row already there.
+        "waiting_stop": None,
     }
     assert set(mapping) == set(CARDS_COLUMNS)
     row = CardsRow.from_mapping(mapping)

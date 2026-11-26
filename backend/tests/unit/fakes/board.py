@@ -51,6 +51,7 @@ from app.db.generated.board import (
     LoopQaCyclesRow,
     LoopQaResultsRow,
     LoopsRow,
+    PocDecisionsRow,
 )
 from app.repositories.activity import ActivityQuery, ActivityRepository
 from app.repositories.attachments import AttachmentRepository
@@ -104,6 +105,7 @@ from app.repositories.loop_plans import (
 from app.repositories.loop_qa import LoopQaRepository
 from app.repositories.loops import ApprovalColumn, LoopChanges, LoopRepository
 from app.repositories.mention_jobs import MentionJobRepository
+from app.repositories.poc_decisions import PocDecisionRepository
 from app.repositories.search import CardSearch, CardSearchRepository
 from tests.unit.fakes.card_notes import FakeCardNoteRepository
 from tests.unit.fakes.discussions import (
@@ -120,6 +122,7 @@ from tests.unit.fakes.discussions import (
 from tests.unit.fakes.generation import FakeGenerationRunRepository
 from tests.unit.fakes.history import FakeLoopArchiveRepository, FakeLoopHistoryRepository
 from tests.unit.fakes.loop_notes import FakeLoopNoteRepository
+from tests.unit.fakes.poc_decisions import FakePocDecisionRepository
 from tests.unit.fakes.registry import ConstraintError, like
 
 BOARD_ID = "0b6f3c1e-7a52-4d8e-9c41-2f5a6b7c8d9e"
@@ -189,6 +192,7 @@ class BoardState:
     )
     notes: list[LoopNotesRow] = field(default_factory=list[LoopNotesRow])
     card_notes: list[CardNotesRow] = field(default_factory=list[CardNotesRow])
+    poc_decisions: list[PocDecisionsRow] = field(default_factory=list[PocDecisionsRow])
 
     def snapshot(self) -> BoardState:
         return BoardState(
@@ -230,6 +234,7 @@ class BoardState:
             artifacts=list(self.artifacts),
             notes=list(self.notes),
             card_notes=list(self.card_notes),
+            poc_decisions=list(self.poc_decisions),
         )
 
     def restore(self, snapshot: BoardState) -> None:
@@ -271,6 +276,7 @@ class BoardState:
         self.artifacts = snapshot.artifacts
         self.notes = snapshot.notes
         self.card_notes = snapshot.card_notes
+        self.poc_decisions = snapshot.poc_decisions
 
 
 # --- rows for a test to start from ---------------------------------------------------------------
@@ -308,6 +314,7 @@ def loop_row(
         archived_at=archived_at,
         cancelled_at=cancelled_at,
         completed_at=completed_at,
+        stops_json=None,
     )
 
 
@@ -372,6 +379,7 @@ def card_row(
         waiting_set_at=None,
         waiting_set_by=None,
         face="",
+        waiting_stop=None,
     )
 
 
@@ -839,6 +847,9 @@ class FakeLoopRepository:
         self._change(
             loop_id, lambda loop: loop.__replace__(active_qa_cycle_id=cycle_id, updated_at=now)
         )
+
+    def set_stops(self, loop_id: str, stops_json: str | None, *, now: str) -> None:
+        self._change(loop_id, lambda loop: loop.__replace__(stops_json=stops_json, updated_at=now))
 
     def bump_version(self, loop_id: str, *, now: str) -> None:
         self._change(
@@ -1725,6 +1736,16 @@ class FakeCardRepository:
             key: row for key, row in state.attachments.items() if row.card_id != card_id
         }
         state.card_notes = [row for row in state.card_notes if row.card_id != card_id]
+        # A POC decision outlives the Ticket it was taken on and the one its feedback became.
+        state.poc_decisions = [
+            row.__replace__(
+                card_id=None if row.card_id == card_id else row.card_id,
+                feedback_card_id=(
+                    None if row.feedback_card_id == card_id else row.feedback_card_id
+                ),
+            )
+            for row in state.poc_decisions
+        ]
         gone = {key for key, row in state.discussions.items() if row.card_id == card_id}
         state.discussions = {
             key: row for key, row in state.discussions.items() if key not in gone
@@ -2292,6 +2313,7 @@ class FakeBoardRepositories:
         self.comments: CommentRepository = FakeCommentRepository(state)
         self.card_notes: CardNoteRepository = FakeCardNoteRepository(state.card_notes, state.cards)
         self.notes: LoopNoteRepository = FakeLoopNoteRepository(state.notes)
+        self.poc_decisions: PocDecisionRepository = FakePocDecisionRepository(state)
         self.attachments: AttachmentRepository = FakeAttachmentRepository(state)
         self.search: CardSearchRepository = FakeCardSearchRepository(state)
         self.loop_agents: LoopAgentRepository = FakeLoopAgentRepository(state)

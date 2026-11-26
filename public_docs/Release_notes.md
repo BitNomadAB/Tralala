@@ -34,6 +34,22 @@ Read this one before upgrading an installation that a coding agent connects to:
   text. [Connect](Agent_usage.md#2-connect) shows how to connect Claude Code and Codex and check
   the connection, and **How do I connect my computer?** in Settings gives the command for Claude
   Code instead of a configuration block for VS Code.
+- **A coding agent goes on instead of waiting: POC decisions and what is missing.** What stands
+  in the way of work is now one of three kinds, and only the last stops it. A choice that can be
+  changed afterwards is a POC decision: the agent takes the one good practice points to, records
+  it (`record_poc_decision`) and goes on, and you review it in the Loop's new **Decisions** tab
+  with **OK** or with feedback, which becomes a new Ticket. Something only you can provide, such
+  as an API key or an account, is reported (`report_missing`) while the work goes around it. A real
+  stop is only what the Loop's stop list names, which you write under **Info** in **Stops**; until
+  then a Loop has a default list (deployment to production, deleting data, money, something sent
+  to people outside, a new kind of personal data). A wait may name its stop, and one that names
+  something else is refused (`422 not_a_stop`). The server's instructions to a coding agent say
+  this, so expect fewer waits and more decisions to review. Answering a POC decision and writing
+  the stop list are a person's, never a key's. Every existing tool and argument is unchanged; a
+  wait without a stop works as before.
+- **A Ticket that only waits for your confirmation of earlier work can be done.** It is ready, may
+  be completed, and then shows as done, awaiting confirmation, until you confirm the earlier
+  Ticket.
 - **A coding agent can ask its person for a decision: `ask_person`.** It names an analysis or a
   RoadMap to approve, a wait to clear, a person's task to confirm, or the implementation or QA to
   accept. A client of MCP 2026-07-28 that declared the elicitation mode `url` shows its person the

@@ -40,9 +40,11 @@ from .loop_links import LoopWorkflowLinks
 from .loop_notes import LoopNoteService
 from .loop_plans import LoopPlanService
 from .loop_qa import LoopQaService
+from .loop_stops import LoopStopService
 from .loops import LoopService
 from .mentions import MentionService
 from .orchestrator import Orchestrator
+from .poc_decisions import PocDecisionService
 from .repo_archive_cache import ArchiveCache, ArchiveFilesOnDisk
 from .repo_mirror import MirrorService
 from .repo_mirror_files import DiskMirrorFiles
@@ -130,6 +132,12 @@ class Services:
         self.loop_agents = LoopAgentService(self.board_store, self.agent)
         self.loop_notes = LoopNoteService(self.board, self.board_store)
         self.ticket_work = TicketWorkService(self.board, self.board_store, self.card)
+        # Choices taken while the work goes on, and what is missing from a person; a person
+        # answers them afterwards, and the stop list names the only things that stop work.
+        self.poc_decisions = PocDecisionService(
+            self.board, self.board_store, self.card, plans=self.loop_plan
+        )
+        self.loop_stops = LoopStopService(self.board, self.board_store)
         self.loop_history = LoopHistoryService(
             self.board, self.board_store, self.boards, self.boards
         )

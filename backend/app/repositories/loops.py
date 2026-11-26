@@ -105,6 +105,11 @@ class LoopRepository(Protocol):
         """The Loop's active QA cycle; it is not an edit, so the version stays."""
         ...
 
+    def set_stops(self, loop_id: str, stops_json: str | None, *, now: str) -> None:
+        """The Loop's stop list as a JSON array of strings, or NULL for the default list; it is a
+        setting beside the Loop, not an edit, so the version stays."""
+        ...
+
     def bump_version(self, loop_id: str, *, now: str) -> None:
         """The next version, as a person's decision about the Loop's documents makes it."""
         ...

@@ -4,6 +4,9 @@ import type { Card, TicketState, Wait, Workplace } from "@/lib/types";
 /** Why a button cannot be pressed while the change before it is still being saved. */
 export const SAVING = "Saving…";
 
+/** Why Save the wait cannot be pressed yet. */
+export const WAIT_REASON_FIRST = "Write why it waits first.";
+
 /** Why the head's Mark as waiting cannot be pressed: the Ticket waits already. */
 export const ALREADY_WAITS = "It already waits; clear the wait in the rail.";
 

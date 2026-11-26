@@ -336,6 +336,7 @@ def insert_card(
             waiting_set_at=None if payload.waiting_for == "nothing" else timestamp,
             waiting_set_by=None if payload.waiting_for == "nothing" else actor.actor_id,
             face=face,
+            waiting_stop=None,
         )
     )
     if labels is None and payload.labels:

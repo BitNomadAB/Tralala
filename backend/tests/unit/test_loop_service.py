@@ -68,7 +68,13 @@ from tests.unit.fakes.board import (
     plan_row,
     qa_cycle_row,
 )
-from tests.unit.fakes.plans import BLOCKER, FakePlanViews, plan_views, readiness_item
+from tests.unit.fakes.plans import (
+    BLOCKER,
+    CONFIRMATION,
+    FakePlanViews,
+    plan_views,
+    readiness_item,
+)
 from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState
 
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
@@ -1204,6 +1210,15 @@ def test_a_confirmation_needs_an_executing_unblocked_writable_loop(settings: Set
         w.service.confirm_human_ticket(HUMAN, BOARD_ID, LOOP, "h", confirm)
     assert blocked.value.code == "ticket_blocked"
     assert blocked.value.details == {"blockers": [BLOCKER]}
+    # Held up only by another person's task not yet confirmed, it may be confirmed now.
+    w.views.items = [
+        readiness_item(
+            "h", ready=False, blockers=(BLOCKER,), human=True, confirmations=(CONFIRMATION,)
+        )
+    ]
+    w.service.confirm_human_ticket(HUMAN, BOARD_ID, LOOP, "h", confirm)
+    assert w.state.cards["h"].completed_at is not None
+    w = _human_ticket(settings)
     w.state.loops[LOOP] = w.state.loops[LOOP].__replace__(archived_at=STAMP)
     with pytest.raises(Conflict) as archived:
         w.service.confirm_human_ticket(HUMAN, BOARD_ID, LOOP, "h", confirm)

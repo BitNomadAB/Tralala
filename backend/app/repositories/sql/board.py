@@ -47,6 +47,7 @@ from ..loop_plans import (
 from ..loop_qa import LoopQaRepository
 from ..loops import LoopRepository
 from ..mention_jobs import MentionJobRepository
+from ..poc_decisions import PocDecisionRepository
 from ..search import CardSearchRepository, FullTextIndex
 from .activity import SqlActivityRepository
 from .attachments import SqlAttachmentRepository
@@ -84,6 +85,7 @@ from .loop_plans import (
 from .loop_qa import SqlLoopQaRepository
 from .loops import SqlLoopRepository
 from .mention_jobs import SqlMentionJobRepository
+from .poc_decisions import SqlPocDecisionRepository
 from .search import SqlCardSearchRepository
 
 
@@ -115,6 +117,7 @@ class SqlBoardRepositories:
         self.comments: CommentRepository = SqlCommentRepository(connection)
         self.card_notes: CardNoteRepository = SqlCardNoteRepository(connection)
         self.notes: LoopNoteRepository = SqlLoopNoteRepository(connection)
+        self.poc_decisions: PocDecisionRepository = SqlPocDecisionRepository(connection)
         self.attachments: AttachmentRepository = SqlAttachmentRepository(connection)
         self.search: CardSearchRepository = SqlCardSearchRepository(connection)
         self.loop_agents: LoopAgentRepository = SqlLoopAgentRepository(connection)

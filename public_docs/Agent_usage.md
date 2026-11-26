@@ -36,8 +36,8 @@ each one opens (a tool that lists two scopes needs both):
 | --- | --- | --- |
 | `boards:read` | `whoami`, `list_boards`, and with `loops:read` `read_board` | anyone signed in |
 | `loops:read` | `loop_summaries`, `read_loop`, `read_document`, `read_notes`, and with `cards:read` `list_tickets` | anyone signed in |
-| `cards:read` | `read_ticket`, `list_attachments`, `read_attachment`, `search_tickets` | anyone signed in |
-| `cards:write` | `write_ticket_summaries`, `set_ticket_wait`, `assign_ticket`, `move_ticket`, and with `comments:write` `create_ticket` and `complete_ticket` | anyone signed in |
+| `cards:read` | `read_ticket`, `list_attachments`, `read_attachment`, `search_tickets`, `list_poc_decisions` | anyone signed in |
+| `cards:write` | `write_ticket_summaries`, `set_ticket_wait`, `record_poc_decision`, `report_missing`, `assign_ticket`, `move_ticket`, and with `comments:write` `create_ticket` and `complete_ticket` | anyone signed in |
 | `comments:write` | `comment_ticket` | anyone signed in |
 | `loops:write` | `create_loop`, `write_info`, `write_note` | anyone signed in |
 | `loops:generate` | `run_analysis`, `read_instructions`, `write_analysis`, `run_roadmap`, `write_roadmap`, `write_brief` | anyone signed in |
@@ -231,22 +231,25 @@ In the order the catalogue, `tools/list` and `/llms.txt` give them:
 | --- | --- | --- |
 | `whoami` | `boards:read` | your key, when it expires, what your scopes open, what you lack and what only a person decides |
 | `list_boards` | `boards:read` | the boards you may read, by name, with status and Loop count: the way in |
-| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked, not done), and `decision_link`, where a person takes the decision it waits for; `unreported` names the Tickets you took and have not reported on |
+| `loop_summaries` | `loops:read` | where each Loop of a board stands: what has to happen next, who it waits for, its Tickets by state (ready, needs input, blocked, not done), its POC decisions by state (`poc_decisions`), and `decision_link`, where a person takes the decision it waits for; `unreported` names the Tickets you took and have not reported on |
 | `read_board` | `boards:read`, `loops:read` | a board's Loops by id and key, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | a Loop's overview (by id or key): documents' state and size, Phases, columns, unplanned Tickets, newest notes, and the same `decision_link` as `loop_summaries` |
+| `read_loop` | `loops:read` | a Loop's overview (by id or key): documents' state and size, Phases, columns, unplanned Tickets, newest notes, its stop list (`stops`), its POC decisions by state, and the same `decision_link` as `loop_summaries` |
 | `read_document` | `loops:read` | one document's text a page at a time, or the technical analysis and RoadMap as an outline |
-| `read_ticket` | `cards:read` | one Ticket in full: its face for people, summary, description, criteria, state, wait, a person's notes (`person_notes`), its newest 50 files and what you may do next; `decision_link` where a person clears its wait or confirms it |
+| `read_ticket` | `cards:read` | one Ticket in full: its face for people, summary, description, criteria, state, wait (with its `stop`), a person's notes (`person_notes`), its newest 50 files, the keys of the POC decisions taken on it and what you may do next; `decision_link` where a person clears its wait or confirms it |
 | `list_attachments` | `cards:read` | every file attached to a Ticket, newest first; `text` says whether `read_attachment` can read it |
 | `read_attachment` | `cards:read` | a `.txt`, `.md` or `.json` file as text, a page at a time; for any other file, the route that downloads it |
 | `search_tickets` | `cards:read` | find Tickets by words: in one Loop, a board's open Loops or every active board |
 | `list_tickets` | `cards:read`, `loops:read` | which Tickets there are and where they stand, never their text; filter by column, `assignee: me`, Phase, `state`, `workplace`, `needs_person` and more; `unreported` names the Tickets you took and have not reported on, whatever the filters |
 | `write_ticket_summaries` | `cards:write` | write the short summaries `read_ticket` shows first, up to 100 at a time |
-| `set_ticket_wait` | `cards:write` | say what a Ticket waits for (a decision, information, access or a third party) and why; a person clears it |
+| `set_ticket_wait` | `cards:write` | stop a Ticket for a real stop, a line of the Loop's stop list given in `stop`, with what is needed; a person clears it |
+| `record_poc_decision` | `cards:write` | write down a choice you took that can be changed afterwards, and go on at once; a person answers OK or with feedback that becomes a Ticket |
+| `report_missing` | `cards:write` | say what only a person can provide (a key, an account, access, a file, a fact) and how the work goes around it, and go on |
+| `list_poc_decisions` | `cards:read` | a Loop's POC decisions and what is missing, in review order, with each answer and the Ticket a feedback became |
 | `assign_ticket` | `cards:write` | set or clear the person who owns a Ticket |
 | `move_ticket` | `cards:write` | move a Ticket to another column of its Loop (version-checked); refused with `409 report_required` while another Ticket you took has no report from you (a comment, a wait or a completion) |
 | `create_ticket` | `cards:write`, `comments:write` | add a follow-up outside the plan while the Loop executes, or a Ticket to a Loop without a plan; keyed `<LoopKey>-UNP-<nnn>`, optionally with its face |
 | `comment_ticket` | `comments:write` | add a comment, done or not, in a completed Loop too: progress, findings, a blocker, the Loop that replaced it |
-| `complete_ticket` | `cards:write`, `comments:write` | finish a Ticket: your summary and evidence as a comment, then completed |
+| `complete_ticket` | `cards:write`, `comments:write` | finish a Ticket: your summary and evidence as a comment, then completed (done, awaiting confirmation, when it only waited for a person to confirm earlier work) |
 | `create_loop` | `loops:write` | open a Loop for an agreed intent (idempotent) |
 | `write_info` | `loops:write` | write the Info while the Loop is `draft` or `analysis_review`, so not once a Loop without a plan has a Ticket |
 | `write_note` | `loops:write` | add a note to the Loop's log: baseline, checks, merge, deploy, what is open |
@@ -441,8 +444,11 @@ search_tickets                  -> find a Ticket by words when you know what, no
 move_ticket                     -> to the column that means "in progress"
   ... the work, in the person's session ...
 comment_ticket                  -> what you found or what you changed, as you go
-set_ticket_wait                 -> when you cannot go on without an answer
+record_poc_decision             -> a choice that can be changed afterwards: take it and go on
+report_missing                  -> what only a person can provide: go around it and go on
+set_ticket_wait(stop)           -> only for a line of the Loop's stop list
 complete_ticket(summary)        -> done: the summary and evidence as a comment, completed_at set
+list_poc_decisions              -> what your person answered; feedback is a new Ticket
 create_ticket(follow_up_of)     -> anything you found that is not this Ticket's work
 write_note                      -> what belongs to the Loop: checks, merge, deploy, what is open
 ```
@@ -476,10 +482,58 @@ list_tickets(workplace: codebase, state: ready, human_action_required: false)
 list_tickets(needs_person: true) -> what needs a person now: an answer, or a person's task
 ```
 
-When you cannot go on without an answer, `set_ticket_wait(waiting_for, reason)` says so ("I need
-this answered"); the Ticket then needs input until the person who answers clears the wait in the
-Ticket view. You cannot clear or replace a wait, and a Ticket that waits is not completed
-(`409 ticket_waiting`).
+### What stands in your way
+
+What stands in your way is one of three kinds, and only the last stops you. An obstacle that is
+not on the Loop's stop list is never a reason to wait or to ask first.
+
+1. **A POC decision**: a choice that can be changed afterwards (two reasonable solutions, a name, a
+   default, a layout, an order of work, how to read an unclear requirement). Take the one good
+   practice points to, write it down with `record_poc_decision` and go on at once. Say what you
+   chose (`chosen`), why (`reason`), the alternative you did not choose (`alternative`) and how it
+   is changed afterwards (`change_path`), with the Ticket you took it on (`card_id`) when there is
+   one. `builds_on` says what other work builds on it, empty when nothing does: those decisions
+   are shown to your person first, and they are due for review as soon as the Phase of their
+   Ticket is complete. The rest are due once every Ticket of the Loop is done.
+2. **Something missing from a person**: what only a person can provide, such as an API key, an
+   account, access, a file or a fact about their business. Go around it and go on with everything
+   that does not need it; `report_missing` says what is missing (`missing`), why it is needed
+   (`reason`), how you went around it (`went_around`) and what is done once it is there
+   (`when_provided`). Never put a secret in any field.
+3. **A real stop**: only what the Loop's stop list names. `read_loop` gives the list under
+   `stops` (`lines`, and `is_default` while no person has written one; the default list is
+   "Deployment to production", "Deleting data", "Money", "Something sent to people outside" and
+   "A new kind of personal data"). A person writes it, and you never decide that something else is
+   a stop. Then `set_ticket_wait(waiting_for, reason, stop)` with that line, word for word or by
+   its number, and work on other Tickets meanwhile. A `stop` the list does not name is refused
+   with `422 not_a_stop`, the list and the two tools to use instead; a wait without `stop` works
+   as it always did. The Ticket then needs input (or is blocked, for a third party) until the
+   person who answers clears the wait in the Ticket view. You cannot clear or replace a wait, and
+   a Ticket that waits is not completed (`409 ticket_waiting`).
+
+Both records are text for a person: plain, a title of at most 120 characters and at most three
+sentences (400 characters) a field, with no file paths, file names, code, code symbols or ids;
+those go in `details`, the text for the AI. A record that breaks a rule is refused whole with
+`422 poc_decision_invalid`, whose `details.fields` names each field and rule (`missing`, `chars`,
+`sentences`, `code_span`, `file_path` and so on) under the argument you sent, so rewrite those
+fields and send it again. Recording the same open record again (the same title and choice)
+answers the first one with `deduplicated: true`. Neither record ever blocks anything, in any stage
+of a Loop that still takes writes. Each is keyed `<LoopKey>-POC-<nnn>`.
+
+Your person answers each one in the Loop's **Decisions** tab, with OK or with feedback; you cannot
+answer one. Feedback becomes a new Ticket in the Loop's first column, with the record as its
+basis. `list_poc_decisions` shows the records in the order a person reviews them (open ones other
+work builds on first, then what is missing, then the other open ones, then the answered ones),
+each with its `status` (`open`, `ok`, `feedback`), the `feedback` and the `feedback_ticket` it
+became, and the counts; `card_id` or `status` narrow it, and `include_details` adds each record's
+`details`. Work a feedback Ticket like any other. `loop_summaries` and `read_loop` count them under
+`poc_decisions` (`open`, `built_on_open`, `missing_open`, `due`, `answered`), and once every Ticket
+is done `loop_summaries`' `next` says how many wait for the person's review.
+
+A Ticket held up only by a person's confirmation of earlier work (a human-only Ticket before it
+that nobody confirmed yet) is `ready`: do it and complete it. It then shows as done, awaiting
+confirmation (`awaiting_confirmation: true`, with the `confirmations` it waits for), and the mark
+goes once the person confirms.
 
 A person may attach files to a Ticket: a specification, a log, a JSON sample, a screenshot.
 `read_ticket` lists the newest 50 (`attachments`, with `attachment_count`) and `list_attachments`
@@ -694,7 +748,8 @@ person sees.
 
 - Take a planning decision: approve or reset an analysis or a RoadMap, edit the Info once planning
   has started, confirm a human-only Ticket, clear or replace a Ticket's wait, accept the
-  implementation or QA, finalize a Loop. These answer `403 human_action_required` even with every
+  implementation or QA, answer a POC decision, write a Loop's stop list, finalize a Loop. These
+  answer `403 human_action_required` even with every
   scope, and no tool offers them. The one exception is your person's own answer to `ask_person`'s
   form, where the installation and your person allow it; never give that answer yourself. Closing a Loop without a plan is accepting its implementation, so
   a key adds Tickets to such a Loop but never closes it, and its Info is a person's from its first

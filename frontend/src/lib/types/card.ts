@@ -1,5 +1,5 @@
 import type { Label, Priority } from "./board";
-import type { LoopBlocker } from "./loop";
+import type { Confirmation, LoopBlocker } from "./loop";
 import type { TicketState, WaitingFor, Workplace } from "./work";
 
 /**
@@ -65,6 +65,12 @@ export interface Card {
   expected_evidence: string[];
   ready: boolean;
   blockers: LoopBlocker[];
+  /**
+   * Held up only by persons' tasks not confirmed yet (`confirmations`): open, it can be worked and
+   * completed; completed, it is done, awaiting their confirmation.
+   */
+  awaiting_confirmation: boolean;
+  confirmations: Confirmation[];
   downstream_phase_numbers: number[];
   plan_item_id: string | null;
   workplace: Workplace;
@@ -74,6 +80,8 @@ export interface Card {
   waiting_set_at: string | null;
   /** The actor id of whoever set the wait. */
   waiting_set_by: string | null;
+  /** The line of the Loop's stop list the wait names; null for none. */
+  waiting_stop: string | null;
   /** Null on a completed Ticket. */
   state: TicketState | null;
   /** It needs input, or it is ready and the task itself is a person's. */

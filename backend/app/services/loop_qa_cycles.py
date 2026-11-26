@@ -160,6 +160,7 @@ def ensure_qa_cycle(
             waiting_set_at=None,
             waiting_set_by=None,
             face="",
+            waiting_stop=None,
         )
     )
     cycle = LoopQaCyclesRow(

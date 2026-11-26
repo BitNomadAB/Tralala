@@ -58,6 +58,7 @@ export function summary(
       roadmap_ai: "empty",
       roadmap: "empty",
     },
+    poc_decisions: { open: 0, built_on_open: 0, missing_open: 0, due: 0, answered: 0 },
     ...rest,
     tickets: {
       ready: 0,
@@ -67,6 +68,7 @@ export function summary(
       completed: 0,
       total: 0,
       needs_person: 0,
+      awaiting_confirmation: 0,
       by_column: {},
       ...tickets,
     },

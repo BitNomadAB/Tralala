@@ -127,6 +127,7 @@ def ticket_row(card: CardEntry, *, loop_key: str, column: str, brief: bool = Fal
         "column": column,
         "phase": card["phase_number"],
         "state": card["state"],
+        "awaiting_confirmation": card["awaiting_confirmation"],
         "workplace": card["workplace"],
         "human_action_required": card["human_action_required"],
         "assignee": card["assignee_name"],

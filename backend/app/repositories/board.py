@@ -47,6 +47,7 @@ from .loop_plans import (
 from .loop_qa import LoopQaRepository
 from .loops import LoopRepository
 from .mention_jobs import MentionJobRepository
+from .poc_decisions import PocDecisionRepository
 from .search import CardSearchRepository
 
 
@@ -115,6 +116,9 @@ class BoardRepositories(Protocol):
 
     @property
     def notes(self) -> LoopNoteRepository: ...
+
+    @property
+    def poc_decisions(self) -> PocDecisionRepository: ...
 
     @property
     def attachments(self) -> AttachmentRepository: ...

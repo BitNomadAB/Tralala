@@ -64,6 +64,16 @@ export function dependencies(card: Card, readiness: LoopReadiness | undefined): 
   });
 }
 
+/** Whether the Ticket is done while a person's task before it is not confirmed yet. */
+export function doneAwaiting(card: Pick<Card, "completed_at" | "awaiting_confirmation">): boolean {
+  return card.completed_at !== null && card.awaiting_confirmation;
+}
+
+/** The keys of the persons' tasks a Ticket awaiting confirmation waits for: "PLN-2, PLN-3". */
+export function confirmationKeys(card: Pick<Card, "confirmations">): string {
+  return card.confirmations.map((entry) => entry.key).join(", ");
+}
+
 /**
  * What follows the state word: "nothing holds it up", or what it waits for. A set wait names only
  * its kind here; the wait block under the state line shows the reason, who set it and the way to
@@ -74,6 +84,8 @@ export function stateReason(card: Card): string {
   if (card.state === "not_done") return "the Loop was closed before it was done";
   const kind = WAITS.find((wait) => wait === card.waiting_for);
   if (kind) return `waits for ${WAIT_LABELS[kind].toLowerCase()}`;
+  // Held up only by persons' tasks not confirmed yet: it can be worked, so it reads as Ready.
+  if (card.awaiting_confirmation) return `waits for a person to confirm ${confirmationKeys(card)}`;
   if (!card.ready && card.blockers.length > 0) {
     const names = card.blockers.map((blocker) =>
       blocker.type === "phase"
@@ -104,11 +116,14 @@ export function priorityLabel(priority: Priority): string {
   return PRIORITY_LABELS[priority];
 }
 
-/** Why "Mark complete" cannot be pressed yet, or null when it can. */
+/**
+ * Why "Mark complete" cannot be pressed yet, or null when it can. A Ticket held up only by persons'
+ * tasks not confirmed yet can be completed; it is then done, awaiting their confirmation.
+ */
 export function completeBlocked(card: Card): string | null {
   if (card.completed_at !== null) return null;
   if (card.waiting_for !== "nothing") return "Clear the wait first";
-  if (card.kind !== "manual" && !card.ready) {
+  if (card.kind !== "manual" && !card.ready && !card.awaiting_confirmation) {
     const names = card.blockers.map((blocker) => blocker.key ?? blocker.title ?? blocker.reason);
     return names.length > 0 ? `Blocked by ${names.join(", ")}` : "Earlier work comes first";
   }

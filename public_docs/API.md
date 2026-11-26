@@ -311,6 +311,11 @@ document slots; there is no Board-level Kanban.
 | POST | `/boards/{board_id}/loops/{loop_id}/qa/results` | Records scenario outcomes; agents may submit |
 | POST | `/boards/{board_id}/loops/{loop_id}/qa/decision` | Human-only acceptance; finalizes atomically |
 | POST | `/boards/{board_id}/loops/{loop_id}/cards/{card_id}/confirm` | Human-only confirmation of a human Ticket |
+| GET | `/boards/{board_id}/loops/{loop_id}/poc-decisions` | The Loop's POC decisions and what is missing from a person, in review order, with `counts`; `card_id` and `status` (`open`, `ok`, `feedback`) narrow the list, never the counts ([POC decisions and the stop list](#poc-decisions-and-the-stop-list)) |
+| POST | `/boards/{board_id}/loops/{loop_id}/poc-decisions` | Records one (`cards:write`, a key as much as a person; `201`); `422 poc_decision_invalid`, the same open record again answers the first with `deduplicated: true` |
+| POST | `/boards/{board_id}/loops/{loop_id}/poc-decisions/{decision_id}/answer` | Human-only: `ok`, or `feedback` that becomes a Ticket; `409 poc_decision_answered`, `404 poc_decision_not_found` |
+| GET | `/boards/{board_id}/loops/{loop_id}/stops` | The Loop's stop list (`loops:read`) |
+| PUT | `/boards/{board_id}/loops/{loop_id}/stops` | Human-only: replaces the stop list (`loops:write`); `422 stops_invalid` |
 | GET | `/boards/{board_id}/tickets` | Explicit Board-level aggregate read; each row names its Loop |
 | GET | `/boards/{board_id}/history` | History search (`q`, `source_kind`, `loop_key`, `qa_status`, dates); each record says `without_plan`, and a Loop closed without a plan has `qa_status` `not_run` |
 | GET | `/boards/{board_id}/history/{history_id}` | Immutable record with its envelope and artifacts |
@@ -321,6 +326,62 @@ number, then the Ticket sequence within that Phase. They are allocated by the se
 allocation and unique within the Board. A Ticket added by hand (`POST .../cards`, `create_ticket`)
 is keyed `<LoopKey>-UNP-<nnn>` instead, such as `AC004-UNP-001`, whether it is work outside a plan
 or a Ticket of a Loop without a plan; the number is never used again in that Loop.
+
+#### POC decisions and the stop list
+
+What stands in the way of work is one of three kinds, and only the last stops it: a POC decision
+(a choice that can be changed afterwards, taken and recorded while the work goes on), something
+missing from a person (recorded while the work goes around it), and a real stop, which only the
+Loop's stop list names and which is a wait on a Ticket (below, under the wait). Neither record ever
+blocks anything.
+
+`POST .../poc-decisions` takes `kind` (`decision` or `missing`), an optional `card_id` (a Ticket
+of this Loop, else `409 loop_mismatch`), and the text fields: `title`, `chosen`, `reason`,
+`alternative`, `change_path`, `missing`, `builds_on` and `details`. A `decision` needs `title`,
+`chosen`, `reason`, `alternative` and `change_path`; a `missing` one needs `title`, `missing` (what
+a person has to provide), `reason` (why it is needed), `chosen` (how the work goes around it) and
+`change_path` (what is done once it is there). `builds_on` says what other work builds on it,
+empty when nothing does. Every field but `details` is text for a person: the title at most 120
+characters, every other field at most 3 sentences and 400 characters, and none holds a code fence
+or span, a file path or file name, an id or a code symbol. `details` is the text for the AI, at
+most 20 000 characters. A breach is `422 poc_decision_invalid` with `details.errors` (one sentence
+each, at most 20), `details.error_count` and `details.fields`, each `{field, rule}` with the rule
+`missing`, `chars`, `sentences`, `code_fence`, `code_span`, `file_path`, `id`, `finding_id` or
+`code_symbol`; nothing is stored. Recording works in every stage of a Loop that still takes
+writes (`409 loop_read_only` otherwise) and never looks at a Ticket's wait, state or completion.
+
+A record answers `id`, `key` (`<LoopKey>-POC-<nnn>`, never reused in the Loop), `loop_id`,
+`card_id`, `ticket_key`, `ticket_title`, `phase_number` and `phase_complete` of its Ticket's Phase,
+`kind`, the text fields, `built_on` (`builds_on` is not empty), `status` (`open`, `ok`,
+`feedback`), `feedback`, `feedback_ticket` (`{id, key}` of the Ticket feedback became, else
+`null`), `due`, `created_at`, `created_by` (`{name, type}`), `answered_at` and
+`answered_by_name`; the record route adds `deduplicated`. An open record is `due` once every
+Ticket of the Loop is completed, or, when other work builds on it, once the Phase of its Ticket is
+complete. The list orders them for review: open ones other work builds on first, then the open
+`missing` ones, then the other open ones, then the answered ones, by key within each group.
+`counts` is `{open, built_on_open, missing_open, due, answered}` over the whole Loop.
+
+`POST .../poc-decisions/{decision_id}/answer` takes `answer` (`ok` or `feedback`) and, with
+`feedback` only, `feedback` (1 to 2 000 characters). It is a signed-in person's (`403
+human_action_required` for a key, even one that may decide in the editor). `ok` answers an open
+record (an OK one again changes nothing); `feedback` answers an open or OK one and creates a Ticket
+in the Loop's first column, titled `Feedback on <key>: <title>`, with the feedback and the record
+as its description, in the same transaction: a Loop whose stage takes no new Ticket refuses the
+answer with that Ticket's error and stores nothing. A record answered with feedback is
+`409 poc_decision_answered`. Every record and answer is an activity entry on the Loop.
+
+`GET .../stops` answers `{stops, is_default}`: the Loop's lines, and `is_default: true` while no
+person has written a list, when the lines are the default ones ("Deployment to production",
+"Deleting data", "Money", "Something sent to people outside", "A new kind of personal data").
+`PUT .../stops` with `{stops: [...]}` replaces the list: 0 to 12 lines, each one line of 1 to 140
+characters once trimmed and none twice (case-insensitive), else `422 stops_invalid` naming each
+line and rule; an empty list means nothing stops the Loop's work. It is a signed-in person's at
+every stage of a Loop that still takes writes (`403 human_action_required` for a key).
+
+A Loop summary row (`GET .../loop-summaries`, `loop_summaries`) carries `poc_decisions` with the
+same five counts, and its `tickets` count `awaiting_confirmation`: the completed Tickets that are
+done while a human-only Ticket before them waits for a person's confirmation (they count in
+`completed` too).
 
 #### A Loop without a plan
 
@@ -983,7 +1044,13 @@ A person owns every Ticket; nothing here names who does it. A Ticket answers:
   (no blocker in the plan) and `blockers` stay as they were. In a Loop that was completed or
   cancelled, a Ticket that was never completed is `not_done`, whatever it waited for: the Loop is
   read-only, so nobody starts it, it waits for nobody and it never counts as done.
+- `waiting_stop`: the line of the Loop's stop list the wait is for, as the list holds it, or
+  `null` when the wait names none.
 - `needs_person`: `state` `needs_input`, or `ready` with `human_action_required`.
+- `awaiting_confirmation` and `confirmations`: a Ticket held up only by human-only Tickets a person
+  has not confirmed is `ready` and may be completed; `awaiting_confirmation` is true while that
+  holds, and `confirmations` names those Tickets (`id`, `key`, `title`). Completed, it is done,
+  awaiting confirmation, until the person confirms them.
 - `unreported_since`, computed on every read and never stored: when a key (an API token) took the
   Ticket and has not reported on it since, the time of that key's first move (the earliest, when
   several keys have); `null` otherwise, and always once the Ticket is completed. Taken and reported
@@ -998,12 +1065,16 @@ A person owns every Ticket; nothing here names who does it. A Ticket answers:
 | Method | Path | Scope |
 | --- | --- | --- |
 | PATCH | `.../cards/{card_id}/workplace` (`version`, `workplace`) | `cards:write` |
-| PATCH | `.../cards/{card_id}/wait` (`version`, `waiting_for` other than `nothing`, `reason`) | `cards:write`; replacing another wait is a person's act (`403 human_action_required` for a token) |
+| PATCH | `.../cards/{card_id}/wait` (`version`, `waiting_for` other than `nothing`, `reason`, optional `stop`) | `cards:write`; replacing another wait is a person's act (`403 human_action_required` for a token) |
 | POST | `.../cards/{card_id}/wait/clear` (`version`) | `cards:write`, as a signed-in person, never a token (`403 human_action_required`) |
 
 Each is version-checked (`409 version_conflict`), refused on a read-only Loop (`409 loop_read_only`)
 and on a completed Ticket (`409 ticket_completed`); writing what the Ticket already says keeps the
-version. `POST .../cards` takes `workplace`, `waiting_for` and `waiting_reason` (required with a
+version. A wait is for a real stop: `stop` names the line of the Loop's stop list it falls under,
+by its text (trimmed, case-insensitive) or by its 1-based number, and is stored as `waiting_stop`;
+a `stop` the list does not name is `422 not_a_stop` with the Loop's list in `details.stops`. A
+wait without `stop` works as it always did, and the same wait again without it keeps the stop it
+has. `POST .../cards` takes `workplace`, `waiting_for` and `waiting_reason` (required with a
 wait). Completing a Ticket, or confirming a human-only one, while it waits answers
 `409 ticket_waiting` naming the wait: a person clears it first. A RoadMap's planned Ticket may give
 `workplace`, `waiting_for`, `waiting_reason` and `labels` (names the board has); the card it
@@ -1139,17 +1210,20 @@ the handler runs.
 | --- | --- | --- |
 | `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, the rule-11a decisions only a person makes, and `editor_decisions` (`installation_allows`, `key_has_right`); never the token or its hash |
 | `list_boards` | `boards:read` | The boards the token may read, by name, with status and Loop count; a board id comes from here |
-| `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `without_plan`, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent` for a document, `anyone` or `nobody`; a Ticket never waits on an agent), `execution_allowed`, its Tickets by state (`ready`, `needs_input`, `blocked`, `not_done`, `completed`, `total`, `needs_person`) and by column, each document's state and revision, and `decision_link`, the address of the decision a person takes next or `null` (below). Computed from what the Loop records, never written by anyone |
+| `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `without_plan`, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent` for a document, `anyone` or `nobody`; a Ticket never waits on an agent), `execution_allowed`, its Tickets by state (`ready`, `needs_input`, `blocked`, `not_done`, `completed`, `total`, `needs_person`) and by column, each document's state and revision, `poc_decisions` (`open`, `built_on_open`, `missing_open`, `due`, `answered`; once every Ticket is done `next` also says how many wait for the person's review), and `decision_link`, the address of the decision a person takes next or `null` (below). Computed from what the Loop records, never written by anyone |
 | `read_board` | `boards:read`, `loops:read` | The board's Loops by id, key, name and stage, the people you may assign, the agents you may ask |
-| `read_loop` | `loops:read` | The Loop's overview, by its id or its key: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases and the columns with their Ticket counts, the work outside the plan, the newest five notes cut to 500 characters and the `decision_link` `loop_summaries` gives the Loop; the Tickets themselves are `list_tickets`' answer |
+| `read_loop` | `loops:read` | The Loop's overview, by its id or its key: goal and stage, `execution_allowed`, each document's state, revision, provenance and size (never its text), the Phases and the columns with their Ticket counts, the work outside the plan, the newest five notes cut to 500 characters, `stops` (`lines`, `is_default`: the Loop's stop list), `poc_decisions` (the counts `loop_summaries` gives) and the `decision_link` `loop_summaries` gives the Loop; the Tickets themselves are `list_tickets`' answer |
 | `read_document` | `loops:read` | One document of a Loop named by its id or its key, by `kind` (`info`, `analysis`, `analysis_ai`, `roadmap`, `roadmap_ai`): as numbered lines, at most 60 000 characters, with `continue_from` for the rest; `analysis_ai` and `roadmap_ai` also as `view: structured`, an outline of the findings or the Phases and Tickets, and one of them in full with `item` |
-| `read_ticket` | `cards:read` | The Ticket's `face` (its summary, why, if skipped, for and against and steps; `null` without one), summary (with `summary_source` and `summary_stale`), `person_notes` (a person's notes, oldest first: `author`, `written_at`, `text`), description, acceptance criteria, evidence, checklist, comments, column, version, `state`, `workplace`, `wait` (what it waits for, the reason, who set it and when, and `decision_link`, where the person who answers clears it; `null` without one), the plan's `blockers`, `needs_person`, `decision_link` (where a person confirms a person's task, else `null`), `attachments` (the newest 50 files, one row each: `id`, `filename`, `content_type`, `size_bytes`, `uploaded_at` and `text`) with `attachment_count`, and `allowed_actions` (only `comment_ticket` in a completed, archived or cancelled Loop) |
+| `read_ticket` | `cards:read` | The Ticket's `face` (its summary, why, if skipped, for and against and steps; `null` without one), summary (with `summary_source` and `summary_stale`), `person_notes` (a person's notes, oldest first: `author`, `written_at`, `text`), description, acceptance criteria, evidence, checklist, comments, column, version, `state`, `workplace`, `wait` (what it waits for, the reason, who set it and when, `stop` when the wait names one, and `decision_link`, where the person who answers clears it; `null` without one), the plan's `blockers`, `awaiting_confirmation` and `confirmations`, `poc_decisions` (`count`, `open` and `keys` of the records taken on it), `needs_person`, `decision_link` (where a person confirms a person's task, else `null`), `attachments` (the newest 50 files, one row each: `id`, `filename`, `content_type`, `size_bytes`, `uploaded_at` and `text`) with `attachment_count`, and `allowed_actions` (only `comment_ticket` in a completed, archived or cancelled Loop) |
 | `list_attachments` | `cards:read` | Every live file of one Ticket, newest first, in the rows `read_ticket` shows; `text` is true for `.txt`, `.md` and `.json`. `next_step` names `read_attachment` for a text file and the download route for the rest |
 | `read_attachment` | `cards:read` | One file by `attachment_id`. A text file answers as numbered lines by `read_document`'s rule: at most 60 000 characters a page, `lines`, `text` and `continue_from` (the next `start_line`); a file whose bytes are not UTF-8 is refused with `422 attachment_not_text` naming it. Any other file answers its metadata, `text: false` and `download`, the route that answers its bytes with the same key; no tool answer carries a binary file |
 | `search_tickets` | `cards:read` | Tickets by words in one Loop, a board's open Loops or every active board, each with board, Loop key, key and column |
 | `list_tickets` | `cards:read`, `loops:read` | Which Tickets there are and where each stands, never what one says: id, key, title, Loop key, column, Phase, `state`, `workplace`, `human_action_required`, assignee and `completed` (`fields: brief` keeps id, key and title). Column by column, then by Phase and key. Filters: `loop_id` (an id or a key), `column` (names), `assignee` (`me`, `none` or an id), `phase`, `state` (one or more of `ready`, `needs_input`, `blocked`, `not_done`), `workplace`, `waiting_for`, `needs_person`, `human_action_required`, `label`, `priority`, `due_before`, `overdue`, `summary` (`missing` or `stale`), `query`; completed Tickets and Loops only with `include_completed`. The answer repeats the filters, maps each Loop key to its id and pages with `limit` (at most 200) and `continue_from`; an unknown column is refused with the column names there are, and an empty answer's `next_step` names the filters it applied and how to widen it. Work for a coding session: `workplace: codebase`, `state: ready`, `human_action_required: false`; what needs a person: `needs_person: true` |
 | `write_ticket_summaries` | `cards:write` | Write up to 100 Ticket summaries; each is a versioned edit that reads the version itself and retries once on a race, and each Ticket answers `written` or its refusal |
-| `set_ticket_wait` | `cards:write` | Say what an open Ticket that waits for nothing now waits for (`decision`, `information`, `access` or `third_party`) and why (`reason`); the version is read for the caller. Clearing or replacing a wait is a person's act and never a tool: on a Ticket that already waits the call answers `403 human_action_required` with `decision_link`, where the person clears that wait |
+| `set_ticket_wait` | `cards:write` | Stop an open Ticket that waits for nothing for a real stop: what it waits for (`decision`, `information`, `access` or `third_party`), why (`reason`) and, optionally, `stop`, the line of the Loop's stop list (its text or its number); the version is read for the caller. With a stop the answer's `wait` carries `stop`; a `stop` the list does not name is `422 not_a_stop` with `details.stops` and `details.use_instead` (`record_poc_decision`, `report_missing`). Clearing or replacing a wait is a person's act and never a tool: on a Ticket that already waits the call answers `403 human_action_required` with `decision_link`, where the person clears that wait |
+| `record_poc_decision` | `cards:write` | Record a POC decision on a Loop (by its id or its key) through the record route: `title`, `chosen`, `reason`, `alternative`, `change_path`, optional `card_id`, `builds_on` and `details`. Answers `id`, `key`, `kind`, `status`, `card_id`, `ticket_key`, `built_on`, `deduplicated` and `next_step` (go on: nothing waits for it). `422 poc_decision_invalid` names each field and rule under the argument sent |
+| `report_missing` | `cards:write` | Record something missing from a person: `title`, `missing`, `reason`, `went_around` (stored as `chosen`), `when_provided` (stored as `change_path`), optional `card_id`, `builds_on` and `details`; the answer and the refusal as `record_poc_decision`'s, a refusal naming `went_around` and `when_provided` |
+| `list_poc_decisions` | `cards:read` | The Loop's records in review order, narrowed by `card_id` or `status`: each with `id`, `key`, `kind`, `title`, its text fields (`chosen`, `reason`, `alternative`, `change_path` for a decision; `missing`, `reason`, `went_around`, `when_provided` for something missing), `builds_on`, `card_id`, `ticket_key`, `status`, `due`, `feedback`, `feedback_ticket`, `answered_by`, `answered_at`, `created_by`, `created_at` and `has_details` (`details` itself with `include_details`), plus `counts` and `next_step` |
 | `assign_ticket` | `cards:write` | Set or clear the owner; the current version is read for the caller |
 | `move_ticket` | `cards:write` | Move to another column by id or name; the version is read and one retry absorbs a race. A key that has not reported on another Ticket it took is refused with `409 report_required` naming those Tickets, as the move route is, and the refusal is never retried |
 | `create_ticket` | `cards:write`, `comments:write` | Add a Ticket outside the plan while the Loop executes, or to a Loop without a plan, where the first one starts the fast track ([A Loop without a plan](#a-loop-without-a-plan)); in its first column, keyed `<LoopKey>-UNP-<nnn>`, with an optional `summary`, face (`why`, `if_skipped`, `pros`, `cons`, `steps`; any one given checks the whole face, `422 face_invalid`), `workplace`, `waiting_for` with `waiting_reason`, and `labels` the board has (an unknown one is refused with the names there are, never created); `follow_up_of` prefixes the description and comments on the origin Ticket; the same request again answers the first Ticket |

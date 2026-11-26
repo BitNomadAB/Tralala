@@ -56,6 +56,7 @@ from .loop_plans_canonical import (
 from .loop_plans_readiness import (
     Dependencies,
     Prerequisites,
+    confirmations_behind,
     dependencies,
     downstream_phase_numbers,
     items_by_phase,
@@ -624,6 +625,7 @@ def _planned_card(
                 ticket.get("steps", []),
             )
         ),
+        waiting_stop=None,
     )
 
 
@@ -649,6 +651,7 @@ __all__ = [
     "Withdrawal",
     "canonical_phase",
     "canonical_ticket",
+    "confirmations_behind",
     "dependencies",
     "downstream_phase_numbers",
     "items_by_phase",

@@ -54,6 +54,15 @@ def format_unplanned_key(loop_key: str, sequence: int) -> str:
     return f"{loop_key}-{UNPLANNED_MARK}-{sequence:03d}"
 
 
+POC_MARK = "POC"
+
+
+def format_poc_key(loop_key: str, sequence: int) -> str:
+    """The key of a POC decision, or of something missing from a person, recorded in a Loop:
+    ``<LoopKey>-POC-<nnn>``."""
+    return f"{loop_key}-{POC_MARK}-{sequence:03d}"
+
+
 def next_unplanned_sequence(loop_key: str, keys: list[str | None]) -> int:
     """One more than the highest unplanned sequence among ``keys``, so a key is never reused."""
     prefix = f"{loop_key}-{UNPLANNED_MARK}-"

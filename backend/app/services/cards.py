@@ -69,7 +69,7 @@ from .loops import (
     refresh_stage,
     require_loop,
 )
-from .plan_views import PlanViews, ReadinessItem
+from .plan_views import PlanViews, ReadinessItem, plan_blocks
 from .subresources import label_entries
 from .ticket_state import ensure_not_waiting, loop_closed
 
@@ -396,6 +396,18 @@ class CardService:
                 self._remember(repos, actor, idempotency_key, fingerprint, entry)
         return entry, False
 
+    def add_in_writer(
+        self, repos: BoardRepositories, actor: ActorContext, loop_id: str, payload: CardCreate
+    ) -> CardsRow:
+        """A new Ticket inside the caller's writer, through the checks and writes ``create`` makes
+        (a Loop that takes new work in its stage, the column, the key, the activity entry, the
+        stage of a Loop without a plan), so a caller that stores something with the Ticket keeps
+        both or neither. The caller checks ``cards:write`` and that the board takes writes."""
+        loop = self._loop_taking_new_work(repos, loop_id)
+        row = self._insert_card(repos, actor, loop, payload)
+        self._refresh_without_plan(repos, loop)
+        return row
+
     def bulk_create(
         self,
         actor: ActorContext,
@@ -539,7 +551,10 @@ class CardService:
     ) -> None:
         """Completing a Ticket faces the rules an agent's start would: stage, human, readiness.
 
-        The Loop is writable here (``update`` checked it), so it is neither archived nor done.
+        The Loop is writable here (``update`` checked it), so it is neither archived nor done. A
+        Ticket held up only by human-only Tickets a person has not confirmed
+        (``awaiting_confirmation``) may be completed, by a key or a person alike; it is then done,
+        awaiting their confirmation. Any other blocker refuses it (``409 ticket_blocked``).
         """
         if payload.completed is not True:
             return
@@ -557,7 +572,7 @@ class CardService:
             actor.require_human(f"Confirming {existing.ticket_key or 'this Ticket'}")
         ensure_not_waiting(existing)
         item = self._readiness_for(repos, loop, existing.id)
-        if item is not None and not item["ready"]:
+        if item is not None and plan_blocks(item):
             raise Conflict(
                 "This Ticket is blocked by unresolved prerequisites",
                 code="ticket_blocked",

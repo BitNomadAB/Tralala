@@ -12,6 +12,7 @@ import {
   uniqueName,
 } from "./support";
 import * as plan from "./worker-plan";
+import { obstaclesNeverStop } from "./worker-poc";
 
 /**
  * The shared workspace as `/llms.txt` section 3 describes it: a worker key starts a Loop over
@@ -227,6 +228,10 @@ test.describe("the planning journey over /mcp", () => {
       await expect(dialog.getByText("Ready", { exact: true })).toBeVisible();
       await expect(dialog.getByRole("button", { name: "Clear the wait" })).toHaveCount(0);
       await closeDialog(page);
+    });
+
+    await test.step("a POC decision and something missing never stop the work; a wait needs a stop on the list", async () => {
+      await obstaclesNeverStop(page, token, { boardId, loopId, loopKey, cardId: ids.t1 ?? "" });
     });
 
     await test.step("comment_ticket and complete_ticket show in the dialog and on the Kanban", async () => {

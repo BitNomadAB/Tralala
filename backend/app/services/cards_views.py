@@ -13,7 +13,7 @@ from pydantic import JsonValue
 
 from ..db.generated.board import CardsRow, LabelsRow
 from ..repositories.cards import CardCounts, CardSort, UnreportedTicket
-from .plan_views import Blocker, ReadinessItem
+from .plan_views import Blocker, Confirmation, ReadinessItem, plan_blocks
 from .subresources import ChecklistEntry, CommentEntry, LabelEntry, label_entries
 from .ticket_face import FaceView, face_view
 from .ticket_state import TicketState, needs_person, ticket_state
@@ -61,6 +61,8 @@ class CardRecord(TypedDict):
     waiting_reason: str
     waiting_set_at: str | None
     waiting_set_by: str | None
+    waiting_stop: str | None
+    """The stop-list line the wait names; ``None`` for a wait without one and for no wait."""
 
 
 class CardEntry(CardRecord):
@@ -75,6 +77,10 @@ class CardEntry(CardRecord):
     ready: bool
     """No blocker in the plan; ``state`` also counts the Ticket's own wait."""
     blockers: list[Blocker]
+    awaiting_confirmation: bool
+    """Held up only by human-only Tickets a person has not confirmed (``confirmations``): it may
+    be worked and completed, and once completed it is done, awaiting their confirmation."""
+    confirmations: list[Confirmation]
     downstream_phase_numbers: list[int]
     acceptance_criteria: JsonValue
     expected_evidence: JsonValue
@@ -167,6 +173,7 @@ def card_record(row: CardsRow) -> CardRecord:
         "waiting_reason": row.waiting_reason,
         "waiting_set_at": row.waiting_set_at,
         "waiting_set_by": row.waiting_set_by,
+        "waiting_stop": row.waiting_stop,
     }
 
 
@@ -191,7 +198,7 @@ def card_entry(
     state = ticket_state(
         completed=row.completed_at is not None,
         waiting_for=row.waiting_for,
-        blocked=item is not None and not item["ready"],
+        blocked=item is not None and plan_blocks(item),
         loop_closed=loop_closed,
     )
     return {
@@ -204,6 +211,8 @@ def card_entry(
         "human_action_required": human_action_required,
         "ready": bool(item["ready"]) if item is not None else True,
         "blockers": blockers,
+        "awaiting_confirmation": item is not None and item["awaiting_confirmation"],
+        "confirmations": item["confirmations"] if item is not None else [],
         "downstream_phase_numbers": item["downstream_phase_numbers"] if item is not None else [],
         "acceptance_criteria": item["acceptance_criteria"] if item is not None else [],
         "expected_evidence": item["expected_evidence"] if item is not None else [],
