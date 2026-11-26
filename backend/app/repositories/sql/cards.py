@@ -72,14 +72,14 @@ _ADD = text(
     " plan_item_id, ticket_key, kind, required_actor, execution_mode, human_action_reason,"
     " human_instructions, human_confirmed_at, human_confirmed_by_actor_id, plan_revision_id,"
     " summary, summary_source, summary_basis_sha256, workplace, waiting_for, waiting_reason,"
-    " waiting_set_at, waiting_set_by, face)"
+    " waiting_set_at, waiting_set_by, face, waiting_stop)"
     " VALUES (:id, :list_id, :title, :description, :position, :priority, :due_at,"
     " :completed_at, :created_at, :updated_at, :archived_at, :version, :assignee_actor_id,"
     " :assignee_type, :assignee_name, :assigned_at, :assigned_by_actor_id, :loop_id, :phase_id,"
     " :plan_item_id, :ticket_key, :kind, :required_actor, :execution_mode, :human_action_reason,"
     " :human_instructions, :human_confirmed_at, :human_confirmed_by_actor_id, :plan_revision_id,"
     " :summary, :summary_source, :summary_basis_sha256, :workplace, :waiting_for,"
-    " :waiting_reason, :waiting_set_at, :waiting_set_by, :face)"
+    " :waiting_reason, :waiting_set_at, :waiting_set_by, :face, :waiting_stop)"
 )
 _SYNC_PLAN_ITEM = text(
     "UPDATE cards SET title = :title, description = :instructions,"
@@ -406,6 +406,7 @@ class SqlCardRepository:
                 "waiting_set_at": row.waiting_set_at,
                 "waiting_set_by": row.waiting_set_by,
                 "face": row.face,
+                "waiting_stop": row.waiting_stop,
             },
         )
 

@@ -5,7 +5,11 @@
 answered"): anyone with ``cards:write`` may set one on a Ticket that waits for nothing, with a
 reason. Clearing a wait, or replacing one with another, is a person's act (``403
 human_action_required`` for a token, AGENTS.md rule 11a): the person who answers the question
-closes it, whether it waited for a decision, information, access or a third party.
+closes it, whether it waited for a decision, information, access or a third party. A wait may name
+the line of the Loop's stop list it is for (``stop``, by the line's text or its number,
+``loop_stops.match_stop``); the line is stored in ``waiting_stop`` and cleared with the wait, and
+a wait that names something not on the list is ``422 not_a_stop``. A wait without a stop works as
+it always did.
 
 Every write is version-checked (``409 version_conflict``), refused on a read-only Loop (``409
 loop_read_only``) and on a completed Ticket (``409 ticket_completed``), and logged on the card.
@@ -25,7 +29,7 @@ from uuid import uuid4
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
 from ..core.errors import Conflict
-from ..db.generated.board import CardsRow
+from ..db.generated.board import CardsRow, LoopsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.cards import CardChanges
 from ..schemas.cards import TicketWaitClear, TicketWaitSet, TicketWorkplaceUpdate
@@ -34,6 +38,7 @@ from .cards_writes import check_version, log_card, require_writable, ticket_in_l
 from .decision_outcomes import AskedDecision
 from .decision_requests import add_answer_comment, open_questions, with_asked_through
 from .lists import BoardChecks
+from .loop_stops import require_stop
 from .loops import require_loop
 
 
@@ -75,7 +80,7 @@ class TicketWorkService:
         """Where the work is done: ``codebase``, ``outside`` or ``unknown``."""
         actor.require("cards:write")
 
-        def change(card: CardsRow) -> CardChanges:
+        def change(_loop: LoopsRow, card: CardsRow) -> CardChanges:
             return {} if card.workplace == payload.workplace else {"workplace": payload.workplace}
 
         return self._write(
@@ -95,12 +100,20 @@ class TicketWorkService:
         card_id: str,
         payload: TicketWaitSet,
     ) -> CardEntry:
-        """The Ticket waits for ``payload.waiting_for`` because of ``payload.reason``; replacing
-        another wait is a person's act."""
+        """The Ticket waits for ``payload.waiting_for`` because of ``payload.reason``, for the
+        stop-list line ``payload.stop`` names when it names one; replacing another wait is a
+        person's act."""
         actor.require("cards:write")
+        logged: dict[str, object] = {"waiting_for": payload.waiting_for, "reason": payload.reason}
 
-        def change(card: CardsRow) -> CardChanges:
-            if (card.waiting_for, card.waiting_reason) == (payload.waiting_for, payload.reason):
+        def change(loop: LoopsRow, card: CardsRow) -> CardChanges:
+            stop = require_stop(loop, payload.stop) if payload.stop else None
+            if stop is not None:
+                logged["stop"] = stop
+            # The same wait again changes nothing; one that names no stop keeps the stop the wait
+            # has, so a caller that never names one retries as it always did.
+            same = (card.waiting_for, card.waiting_reason) == (payload.waiting_for, payload.reason)
+            if same and stop in (None, card.waiting_stop):
                 return {}
             if card.waiting_for != "nothing":
                 actor.require_human("Replacing a Ticket's wait")
@@ -109,15 +122,11 @@ class TicketWorkService:
                 "waiting_reason": payload.reason,
                 "waiting_set_at": self._now(),
                 "waiting_set_by": actor.actor_id,
+                "waiting_stop": stop,
             }
 
         return self._write(
-            actor,
-            (board_id, loop_id, card_id),
-            payload.version,
-            change,
-            "card.wait_set",
-            {"waiting_for": payload.waiting_for, "reason": payload.reason},
+            actor, (board_id, loop_id, card_id), payload.version, change, "card.wait_set", logged
         )
 
     def clear_wait(
@@ -133,7 +142,7 @@ class TicketWorkService:
         actor.require_person_or_editor_decision("Clearing a Ticket's wait")
         actor.require("cards:write")
 
-        def change(card: CardsRow) -> CardChanges:
+        def change(_loop: LoopsRow, card: CardsRow) -> CardChanges:
             if card.waiting_for == "nothing":
                 return {}
             return {
@@ -141,6 +150,7 @@ class TicketWorkService:
                 "waiting_reason": "",
                 "waiting_set_at": None,
                 "waiting_set_by": None,
+                "waiting_stop": None,
             }
 
         return self._write(
@@ -158,16 +168,17 @@ class TicketWorkService:
         actor: ActorContext,
         address: tuple[str, str, str],
         version: int,
-        change: Callable[[CardsRow], CardChanges],
+        change: Callable[[LoopsRow, CardsRow], CardChanges],
         action: str,
         logged: Mapping[str, object],
         *,
         answers: AskedDecision | None = None,
     ) -> CardEntry:
-        """Write ``change`` to the Ticket in one writer. A write that takes a person's decision
-        (``answers``) answers the questions a coding session has open about it: its history row
-        carries ``asked_through`` and the Ticket gets one comment by the person, in the same writer
-        (``decision_requests``)."""
+        """Write ``change`` (of the Loop and the Ticket as the writer reads them) to the Ticket in
+        one writer; ``logged`` is read after ``change`` ran, so it may add to it. A write that
+        takes a person's decision (``answers``) answers the questions a coding session has open
+        about it: its history row carries ``asked_through`` and the Ticket gets one comment by the
+        person, in the same writer (``decision_requests``)."""
         board_id, loop_id, card_id = address
         self.boards.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
@@ -181,7 +192,7 @@ class TicketWorkService:
                     code="ticket_completed",
                     details={"ticket_id": card.id, "ticket_key": card.ticket_key},
                 )
-            changes = change(card)
+            changes = change(loop, card)
             if changes:
                 now = self._now()
                 through = (

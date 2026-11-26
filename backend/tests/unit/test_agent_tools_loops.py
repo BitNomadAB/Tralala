@@ -18,6 +18,7 @@ from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Forbidden, ValidationFailure
 from app.db.generated.board import CardsRow, LoopDocumentsRow, LoopsRow
+from app.schemas.poc_decisions import PocDecisionAnswerCreate, PocDecisionCreate
 from app.services.agent_tools import ToolResult, loop_summaries, tool_catalog
 from app.services.agent_tools_loops import ALL_DONE, ALL_DONE_WITHOUT_PLAN, ticket_counts
 from app.services.agent_tools_read import REPORT_FIRST
@@ -25,6 +26,7 @@ from app.services.cards import CardService
 from app.services.lists import ListService
 from app.services.loops import LoopService
 from app.services.plan_views import LoopReadiness, ReadinessItem
+from app.services.poc_decisions import PocDecisionService
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
@@ -77,6 +79,7 @@ class LoopWorld:
     list: ListService
     card: CardService
     settings: Settings
+    poc_decisions: PocDecisionService
     state: BoardState
 
 
@@ -112,6 +115,7 @@ def loop_world(
         list=ListService(checks, store),
         card=cards,
         settings=settings.model_copy(update={"public_url": public_url}),
+        poc_decisions=PocDecisionService(checks, store, cards, plans=views, clock=lambda: NOW),
         state=board,
     )
 
@@ -234,6 +238,7 @@ def test_a_loop_in_delivery_counts_its_tickets_by_state(settings: Settings) -> N
         "completed": 1,
         "total": 6,
         "needs_person": 2,
+        "awaiting_confirmation": 0,
         "by_column": {"Todo": 2, "Doing": 2},
     }
     ready = loop_world(settings, [loop("run", "ready", 1)], items=items[1:])
@@ -286,6 +291,7 @@ def test_a_completed_loop_counts_what_was_never_done_as_not_done(settings: Setti
         "completed": 1,
         "total": 2,
         "needs_person": 0,
+        "awaiting_confirmation": 0,
         "by_column": {"Todo": 0, "Doing": 2},
     }
 
@@ -311,6 +317,7 @@ def test_a_loop_without_a_plan_counts_its_tickets_as_its_work(settings: Settings
         "completed": 1,
         "total": 2,
         "needs_person": 0,
+        "awaiting_confirmation": 0,
         "by_column": {"Todo": 1, "Doing": 1},
     }
     assert (row["next"], row["waiting_on"]) == ("1 Ticket is ready to start.", "anyone")
@@ -753,6 +760,7 @@ def test_loop_summaries_names_the_tickets_the_key_took_and_has_not_reported_on(
                     "completed": 0,
                     "total": 1,
                     "needs_person": 0,
+                    "awaiting_confirmation": 0,
                     "by_column": {"Todo": 0, "Doing": 1},
                 },
                 "documents": {
@@ -761,6 +769,13 @@ def test_loop_summaries_names_the_tickets_the_key_took_and_has_not_reported_on(
                     "analysis": "empty",
                     "roadmap_ai": "empty",
                     "roadmap": "empty",
+                },
+                "poc_decisions": {
+                    "open": 0,
+                    "built_on_open": 0,
+                    "missing_open": 0,
+                    "due": 0,
+                    "answered": 0,
                 },
             }
         ],
@@ -804,3 +819,62 @@ def test_loop_summaries_is_offered_to_loops_read_and_documented(settings: Settin
     assert tool_catalog()["loop_summaries"].scopes == ("loops:read",)
     assert "loop_summaries" in {tool["name"] for tool in tool_list(READER)}
     assert "### loop_summaries (requires `loops:read`)" in render_bootstrap(settings)
+
+
+# --- the POC decisions a Loop holds --------------------------------------------------------------
+
+
+def test_each_loop_row_counts_its_poc_decisions_read_for_the_whole_board(
+    settings: Settings,
+) -> None:
+    """Every planned Ticket is done, so every open record is due; a Loop without records counts
+    none, and the counts come from one read for the board."""
+    writer = ActorContext(
+        actor_id="user-ada",
+        actor_type="user",
+        actor_name="Ada",
+        scopes=frozenset({"cards:read", "cards:write", "loops:read"}),
+    )
+    loops = [loop(uid(1), "in_progress", 1), loop(uid(2), "in_progress", 2)]
+    world = loop_world(settings, loops, items=[done(readiness_item("c1"))])
+    common = {"reason": "It is quick.", "change_path": "Change it later."}
+    built = PocDecisionCreate.model_validate(
+        {
+            "kind": "decision",
+            "title": "Keep the list local",
+            "chosen": "In the browser.",
+            "alternative": "On the server.",
+            "builds_on": "The export reads it.",
+            **common,
+        }
+    )
+    gone = PocDecisionCreate.model_validate(
+        {
+            "kind": "missing",
+            "title": "No mail account",
+            "missing": "An account.",
+            "chosen": "Show a link.",
+            **common,
+        }
+    )
+    answered = PocDecisionCreate.model_validate(
+        {
+            "kind": "decision",
+            "title": "Name the column",
+            "chosen": "Todo.",
+            "alternative": "Backlog.",
+            **common,
+        }
+    )
+    for payload in (built, gone, answered):
+        world.poc_decisions.record(writer, BOARD_ID, uid(1), payload)
+    last = world.state.poc_decisions[-1].id
+    world.poc_decisions.answer(
+        writer, BOARD_ID, uid(1), last, PocDecisionAnswerCreate(answer="ok")
+    )
+    summaries = rows(loop_summaries(world, READER, ask()))
+    by_key = {row["key"]: row["poc_decisions"] for row in summaries}
+    assert by_key == {
+        "L-1": {"open": 2, "built_on_open": 1, "missing_open": 1, "due": 2, "answered": 1},
+        "L-2": {"open": 0, "built_on_open": 0, "missing_open": 0, "due": 0, "answered": 0},
+    }

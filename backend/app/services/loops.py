@@ -301,6 +301,7 @@ class LoopService:
                 archived_at=None,
                 cancelled_at=None,
                 completed_at=None,
+                stops_json=None,
             )
         )
         names = payload.column_names or self._default_columns(repos)

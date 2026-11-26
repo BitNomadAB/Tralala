@@ -28,6 +28,7 @@ from .api.v1 import labels as label_routes
 from .api.v1 import lists as list_routes
 from .api.v1 import loop_notes as loop_note_routes
 from .api.v1 import loops as loop_routes
+from .api.v1 import poc_decisions as poc_decision_routes
 from .api.v1 import repositories as repository_routes
 from .api.v1 import search as search_routes
 from .api.v1 import templates as template_routes
@@ -247,6 +248,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         board_routes.router,
         loop_routes.router,
         loop_note_routes.router,
+        poc_decision_routes.router,
         history_routes.router,
         list_routes.router,
         card_routes.router,

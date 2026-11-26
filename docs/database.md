@@ -64,6 +64,7 @@ Indexes: `boards(status)`, `api_credentials(actor_id)`.
 | `discussion_runs` | id, discussion_id → discussion_threads, status, autonomy, rounds_requested, rounds_completed, token_budget, tokens_used, time_budget_seconds, elapsed_ms, stop_reason, error, started_by_*, created_at, started_at, finished_at |
 | `discussion_rounds` | id, discussion_id, run_id → discussion_runs, round_number, status, answers, failures, repeats, tokens_used, elapsed_ms, synthesis_json (the decision support, `{}` for none), created_at, finished_at |
 | `discussion_events` | seq (autoincrement), id, discussion_id → discussion_threads, type, payload_json, actor_*, created_at |
+| `poc_decisions` (STRICT) | id, loop_id → loops (CASCADE), card_id → cards (SET NULL: the Ticket it was taken on), sequence (unique per Loop), key (`<LoopKey>-POC-<nnn>`, unique), kind (`decision`, `missing`), title, chosen, reason, alternative, change_path, missing, builds_on, details, status (`open`, `ok`, `feedback`), feedback, feedback_card_id → cards (SET NULL: the Ticket the feedback became), created_by_actor_id, created_by_type, created_by_name, created_at, answered_by_actor_id, answered_by_name, answered_at (NULL exactly while the status is `open`) |
 | `idempotency_records` | actor_id, idempotency_key, request_hash, response_json, created_at, expires_at |
 | `cards_fts` | FTS5 external-content index over `cards.title`/`cards.description` (when supported) |
 
@@ -77,7 +78,14 @@ Indexes: `lists(position,id)`, `cards(list_id,position,id)`, `cards(updated_at)`
 `discussion_votes(discussion_id)`, `discussion_runs(discussion_id,created_at)`,
 `discussion_runs(status)`, `discussion_rounds(run_id,round_number)` (unique),
 `discussion_events(discussion_id,seq)`, `comment_mention_jobs(card_id,created_at)`,
-`comment_mention_jobs(comment_id,agent_id)` (unique), `card_events(card_id,seq)`.
+`comment_mention_jobs(comment_id,agent_id)` (unique), `card_events(card_id,seq)`,
+`poc_decisions(loop_id,sequence)` (unique), `poc_decisions(key)` (unique),
+`poc_decisions(card_id)`, `poc_decisions(feedback_card_id)`.
+
+Revision `0023_poc_decisions` also adds `loops.stops_json` (TEXT, NULL): the Loop's stop list as a
+JSON array of strings, NULL for the default list and `[]` for a list a person emptied (nothing
+stops); and `cards.waiting_stop` (TEXT, NULL): the stop-list line a Ticket's wait names, NULL for a
+wait that names none and for no wait.
 
 ### Schema migrations (Alembic)
 

@@ -216,6 +216,8 @@ CROSS_DATABASE: Final = _board(
         ("loop_qa_results", "actor_id"): REGISTRY,
         ("loop_qa_results", "disposition_approved_by_actor_id"): REGISTRY,
         ("loops", "created_by_actor_id"): REGISTRY,
+        ("poc_decisions", "answered_by_actor_id"): REGISTRY,
+        ("poc_decisions", "created_by_actor_id"): REGISTRY,
     }
 )
 

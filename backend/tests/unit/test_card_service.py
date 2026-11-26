@@ -171,12 +171,13 @@ def test_an_entry_is_the_row_its_labels_counts_and_readiness_in_the_former_key_o
     }
     entry = w.service.get(BOARD_ID, LOOP, "c")
     assert list(entry)[:2] == ["id", "list_id"]
-    assert list(entry)[-22:] == [
+    assert list(entry)[-23:] == [
         "workplace",
         "waiting_for",
         "waiting_reason",
         "waiting_set_at",
         "waiting_set_by",
+        "waiting_stop",
         "board_id",
         "labels",
         "checklist_total",

@@ -26,6 +26,7 @@ from app.services.loop_documents import LoopDocumentService
 from app.services.loop_notes import LoopNoteService
 from app.services.loop_plans import LoopPlanService
 from app.services.loops import LoopService
+from app.services.poc_decisions import PocDecisionService
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -82,6 +83,7 @@ class DocumentWorld:
     list: ListService
     card: CardService
     settings: Settings
+    poc_decisions: PocDecisionService
     state: BoardState
 
 
@@ -139,6 +141,7 @@ def document_world(settings: Settings, *, public_url: str | None = None) -> Docu
         list=ListService(checks, store),
         card=cards,
         settings=settings.model_copy(update={"public_url": public_url}),
+        poc_decisions=PocDecisionService(checks, store, cards, plans=views),
         state=state,
     )
 

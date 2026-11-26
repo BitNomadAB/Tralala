@@ -23,6 +23,11 @@ WAITING_REASON_CHARS = 500
 WaitingReason = Annotated[
     str, StringConstraints(strip_whitespace=True, max_length=WAITING_REASON_CHARS)
 ]
+# The stop-list line a wait names, by its text or its 1-based number (``services/loop_stops.py``).
+WAITING_STOP_CHARS = 140
+WaitingStop = Annotated[
+    str, StringConstraints(strip_whitespace=True, max_length=WAITING_STOP_CHARS)
+]
 
 
 # The face for people on a create or an edit: each field is optional, and when any is given the
@@ -99,6 +104,13 @@ class TicketWaitSet(StrictModel):
     version: int = Field(ge=1, description="Expected current version for optimistic concurrency")
     waiting_for: Wait
     reason: WaitingReason = Field(min_length=1, description="What is needed, at most 500 chars")
+    stop: WaitingStop | None = Field(
+        default=None,
+        description=(
+            "Optional: the line of the Loop's stop list the wait is for, by its text or its "
+            "number; without it the wait names no stop"
+        ),
+    )
 
 
 class TicketWaitClear(StrictModel):
@@ -218,6 +230,9 @@ class CardOut(OutModel):
     waiting_reason: str = ""
     waiting_set_at: str | None = None
     waiting_set_by: str | None = None
+    waiting_stop: str | None = Field(
+        default=None, description="The stop-list line the wait names; null for none"
+    )
     state: str | None = Field(
         default=None,
         description=(
