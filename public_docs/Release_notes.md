@@ -30,10 +30,17 @@ Read this one before upgrading an installation that a coding agent connects to:
   `-32022` and the two that are spoken. On 2026-11-26 Claude Code (the VS Code extension) and
   Codex each connected to a Tralala that spoke revision 2025-06-18 only, and called tools; no
   client has been tried against the 2026-07-28 path. A client of 2025-06-18 has no way to be
-  asked a question without a stream; a later tool gives such a client the link to a decision as
+  asked a question without a stream; `ask_person` gives such a client the link to a decision as
   text. [Connect](Agent_usage.md#2-connect) shows how to connect Claude Code and Codex and check
   the connection, and **How do I connect my computer?** in Settings gives the command for Claude
   Code instead of a configuration block for VS Code.
+- **A coding agent can ask its person for a decision: `ask_person`.** It names an analysis or a
+  RoadMap to approve, a wait to clear, a person's task to confirm, or the implementation or QA to
+  accept. A client of MCP 2026-07-28 that declared the elicitation mode `url` shows its person the
+  question with the decision's address, once the installation sets `TRALALA_PUBLIC_URL`; any other
+  client gets the address as text. The person decides in Tralala, signed in, as before, and the
+  agent's next call says what they decided, who decided and when. The tool never takes the
+  decision.
 
 Worth knowing when you look at the dashboard:
 

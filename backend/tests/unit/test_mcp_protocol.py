@@ -24,12 +24,15 @@ from app.api.mcp_protocol import (
     InputContext,
     Reply,
     ToolInvocation,
+    asked_result,
     dispatch,
     elicitation_modes,
     header_text,
     origin_refusal,
     parse_error,
+    state_refused,
     tool_failure,
+    tool_input,
     tool_list,
     tool_result,
     trusted_origins,
@@ -37,6 +40,7 @@ from app.api.mcp_protocol import (
 from app.core.config import Settings
 from app.core.context import SCOPES, ActorContext
 from app.core.errors import Forbidden
+from app.services.agent_tools import InputRequired, ToolInput
 
 VERSION = "2026-07-28"
 WORKER = ActorContext(
@@ -180,6 +184,11 @@ def test_the_route_resolves_reads_chooses_dispatches_and_runs_the_handler_only()
         "isinstance",
         "call_failure",
         "call_result",
+        # A tool that asks for input (ask_person): what the call brought for it, and its answer.
+        "tool_input",
+        "tool_failure",
+        "state_refused",
+        "asked_result",
     }
 
 
@@ -799,6 +808,95 @@ def test_a_tool_call_carries_its_modes_answers_and_state_as_one_value() -> None:
     assert step.input_context == InputContext(
         ElicitationModes(url=True), {"decision": {"action": "accept"}}, "opaque-state"
     )
-    # Nothing answers input_required yet: the call runs its handler as before.
+    # whoami asks for nothing: the route runs its handler as before, and never hands it this.
     assert step.tool.name == "whoami"
+    assert step.tool.asks is None
     assert step.arguments == {}
+
+
+# --- ask_person: input_required -----------------------------------------------------------------
+
+
+def _ask_person(**extra: JsonValue) -> ToolInvocation:
+    arguments: dict[str, JsonValue] = {"board_id": "b", "loop_id": "l", "decision": "analysis"}
+    params: dict[str, JsonValue] = {"name": "ask_person", "arguments": arguments, **extra}
+    message = request("tools/call", params, capabilities={"elicitation": {"url": {}}})
+    return invocation(message, headers("tools/call", "ask_person"))
+
+
+MESSAGE = "Open Tralala to approve the analysis of L-1 or ask for changes."
+ADDRESS = "https://tralala.example.com/boards/b/loops/l?tab=plan&doc=analysis"
+QUESTION = InputRequired(
+    {
+        "decision": {
+            "method": "elicitation/create",
+            "params": {"mode": "url", "message": MESSAGE, "url": ADDRESS},
+        }
+    },
+    "sealed-state",
+)
+
+
+def test_only_ask_person_is_handed_what_the_call_brought_for_it() -> None:
+    step = _ask_person(inputResponses={"decision": {"action": "accept"}}, requestState="s")
+    assert step.tool.asks is not None
+    assert tool_input(step.input_context) == ToolInput(
+        form=False, url=True, responses={"decision": {"action": "accept"}}, request_state="s"
+    )
+
+
+def test_a_question_is_an_input_required_result_with_its_requests_and_state() -> None:
+    reply = asked_result(_ask_person(), mcp.SERVER, QUESTION)
+    assert reply.status == 200
+    assert decoded(reply) == {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "resultType": "input_required",
+            "inputRequests": {
+                "decision": {
+                    "method": "elicitation/create",
+                    "params": {
+                        "mode": "url",
+                        "message": MESSAGE,
+                        "url": ADDRESS,
+                    },
+                }
+            },
+            "requestState": "sealed-state",
+            "_meta": SERVER_META,
+        },
+    }
+
+
+def test_a_complete_answer_of_ask_person_is_a_complete_result() -> None:
+    reply = asked_result(_ask_person(), mcp.SERVER, {"status": "waiting_for_person"})
+    assert reply == tool_result(_ask_person(), mcp.SERVER, {"status": "waiting_for_person"})
+
+
+def test_a_refused_state_is_invalid_params_and_says_nothing_about_the_decision() -> None:
+    reply = state_refused(7, "ask_person", "expired")
+    assert reply.status == 200
+    assert decoded(reply) == {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "error": {
+            "code": -32602,
+            "message": (
+                "Invalid params: the requestState cannot be used (expired). Call ask_person again "
+                "without requestState and inputResponses."
+            ),
+            "data": {"reason": "expired"},
+        },
+    }
+
+
+def test_only_tools_call_can_answer_input_required() -> None:
+    """``server/discover`` and ``tools/list`` are answered complete by ``dispatch`` itself, and
+    the only reply builder that writes ``input_required`` takes a tool call."""
+    for method in ("server/discover", "tools/list"):
+        result = decoded(answer(request(method), headers(method)))["result"]
+        assert isinstance(result, dict)
+        assert result["resultType"] == "complete"
+    source = (API_ROOT / "mcp_protocol.py").read_text(encoding="utf-8")
+    assert source.count('"resultType": "input_required"') == 1

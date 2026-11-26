@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import JsonValue
 
 from app.core.context import ActorContext
 from app.core.errors import ValidationFailure
@@ -322,3 +323,37 @@ def test_a_refusal_is_a_validation_failure_that_names_only_the_reason() -> None:
 def test_the_service_needs_a_secret() -> None:
     with pytest.raises(ValueError, match="secret"):
         RequestStateService("", clock=Clock(START))
+
+
+SUBJECT: dict[str, JsonValue] = {"revisions": {"analysis": "77777777-7777-4777-8777-777777777777"}}
+
+
+def test_the_subject_comes_back_sealed_and_hashed_with_the_call() -> None:
+    service = _service()
+    state = service.seal(_key(), CALL, SUBJECT)
+    assert "77777777" not in state
+    opened = service.open(_key(), CALL, state)
+    assert opened.subject == SUBJECT
+    assert opened.call_digest == CALL.digest(SUBJECT)
+    assert CALL.digest(SUBJECT) != CALL.digest()
+
+
+def test_a_state_without_a_subject_opens_with_an_empty_one() -> None:
+    service = _service()
+    assert service.open(_key(), CALL, service.seal(_key(), CALL)).subject == {}
+
+
+def test_a_sealed_subject_that_is_not_an_object_is_refused() -> None:
+    payload = {
+        "v": 1,
+        "actor": PERSON,
+        "credential": KEY,
+        "tool": "ask_person",
+        "call": CALL.digest(),
+        "issued": 2_000_000_000,
+        "expires": 2_000_000_900,
+        "nonce": "n",
+        "subject": ["not", "an", "object"],
+    }
+    state = seal_for_purpose(SECRET, "tralala-request-state-v1", json.dumps(payload).encode())
+    assert _refused(_service(), _key(), CALL, state) == "invalid"

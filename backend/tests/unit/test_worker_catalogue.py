@@ -8,7 +8,10 @@ and of the service methods it calls, and holds each entry to five rules:
 1. **Handler.** The handler is a module-level function of the catalogue module taking
    ``(services, actor, args)``, so the guard can read it. The handlers are defined in
    ``agent_tools_read.py``, ``agent_tools_write.py`` and ``agent_tools_plan.py`` and re-exported by
-   ``agent_tools.py``, so the guard reads those four files as the catalogue module's source.
+   ``agent_tools.py``, so the guard reads those four files as the catalogue module's source. A
+   tool that asks the client for input (``AgentTool.asks``, only ``ask_person``) keeps such a
+   handler, which runs the asking function with no input, so the guard reads what the asking
+   function does through it; the rule is not widened.
 2. **Documented.** ``/llms.txt`` has a ``### name (requires ...)`` section with exactly the entry's
    scopes and its description, and ``tools/list`` for an actor holding every scope carries the
    entry's name, description and input schema. Neither lists a tool the catalogue lacks, and both
@@ -60,6 +63,7 @@ CATALOGUE_FILES = tuple(
         "agent_tools_attachments.py",
         "agent_tools_discussions.py",
         "agent_tools_board_discussions.py",
+        "agent_tools_decisions.py",
         "agent_tools_documents.py",
         "agent_tools_identity.py",
         "agent_tools_listing.py",

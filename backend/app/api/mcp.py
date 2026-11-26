@@ -41,10 +41,13 @@ from ..services.agent_tools import (
     NOTICES_RULE,
     REPORT_RULE,
     run_tool,
+    run_tool_with_input,
     tool_catalog,
 )
+from ..services.agent_tools_decisions import ASK_PERSON_RULE
 from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
 from ..services.loop_notes import NOTE_MAX_CHARACTERS
+from ..services.request_state import RequestStateRefused
 from .body import read_limited_json
 from .deps import get_context
 from .mcp_legacy import call_failure, call_result, selects_legacy
@@ -55,10 +58,15 @@ from .mcp_protocol import (
     SUPPORTED_VERSIONS,
     Reply,
     ServerIdentity,
+    ToolInvocation,
+    asked_result,
     dispatch,
     method_not_allowed,
     origin_refusal,
     parse_error,
+    state_refused,
+    tool_failure,
+    tool_input,
     tool_list,
     trusted_origins,
 )
@@ -89,6 +97,8 @@ INSTRUCTIONS = (
     + " Approving plans, confirming human work, "
     "clearing a wait and accepting QA are human decisions that no token can perform. "
     + DECISION_LINK_RULE
+    + " "
+    + ASK_PERSON_RULE
     + " The Loop "
     "is the plan: what you plan or log goes into the Loop, never into a file of a repository. "
     + NOTICES_RULE
@@ -130,6 +140,20 @@ async def mcp_endpoint(request: Request) -> Response:
     if isinstance(step, Reply):
         return send(step)
     name, arguments = step.tool.name, step.arguments
+    if isinstance(step, ToolInvocation) and step.tool.asks is not None:
+        # Only a tool that asks for input (ask_person) is given what the call brought for it: the
+        # client's elicitation modes, its inputResponses and the requestState. Its answer carries
+        # notices as every tool's does (run_tool_with_input).
+        given = tool_input(step.input_context)
+        try:
+            answer = await run_in_threadpool(
+                run_tool_with_input, ctx.services, ctx.actor, name, arguments, given
+            )
+        except RequestStateRefused as refusal:
+            return send(state_refused(step.message_id, name, refusal.reason))
+        except ApiError as error:
+            return send(tool_failure(step, SERVER, error))
+        return send(asked_result(step, SERVER, answer))
     try:
         # Handlers touch SQLite and may poll a generation run, so they never run on the event loop.
         # The call goes through run_tool, which adds the notices that wait for the key.
@@ -367,6 +391,16 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "A version that neither revision speaks answers 400 with `-32022` and the versions that",
         "are spoken.",
+        "",
+        f"`ask_person` asks your person for a decision. In {PROTOCOL_VERSION}, when the request",
+        "declares the elicitation mode `url` in its client capabilities and the installation has",
+        "its public address, it answers `resultType: input_required` with `inputRequests`",
+        "(`decision`: `elicitation/create` in mode `url`, a message and the decision's address)",
+        "and a `requestState`; repeat the call with `inputResponses` and that `requestState`. Any",
+        f"other call, every {LEGACY_VERSION} call among them, gets the address as text",
+        "(`status: waiting_for_person`, `decision_link`). The mode `form` is never used. A",
+        "`requestState` that is changed, expired, another key's, for another call or used before",
+        "answers `-32602`: call again without it.",
         "",
     ]
     for tool in tools.values():

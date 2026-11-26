@@ -113,7 +113,13 @@ described by `/llms.txt`), within the scopes it was given and never beyond them:
   for a person's approval like any other;
 - assign, move and comment on Tickets, write their summaries, say what a Ticket waits for, complete
   a Ticket that is ready and not a person's, and add a follow-up outside the plan;
-- write notes on a Loop and ask the board's agents for advice in a discussion.
+- write notes on a Loop and ask the board's agents for advice in a discussion;
+- ask its person for a decision only a person takes (`ask_person`) and learn what they decided:
+  the tool hands over the decision's address, in MCP 2026-07-28 as an elicitation in mode `url`
+  when the client declared it, and never takes the decision. The address carries only ids and
+  signs nobody in; the person decides in Tralala, signed in. The state the client repeats the call
+  with is sealed with the installation's secret, bound to the key and the call that asked, valid
+  for 15 minutes and used once; a state the server refuses answers nothing about the decision.
 
 Every one of these runs through the same services and checks as the REST API, so a key can do
 nothing over `/mcp` that the same key could not do over REST. The text it reads (Tickets, comments,

@@ -27,6 +27,7 @@ from .board_stats import BoardStatsCache
 from .boards import BoardSchema, BoardService
 from .card_notes import CardNoteService
 from .cards import CardService
+from .decision_outcomes import DecisionOutcomeService
 from .discussions import DiscussionService
 from .events import EventService
 from .lists import ListService
@@ -197,6 +198,8 @@ class Services:
         # The sealed state of a question a key asks its person: the installation secret and the
         # system clock.
         self.request_state = RequestStateService(self.auth.secret_key, clock=system_clock)
+        # What a person decided after a key asked them (ask_person); it reads and decides nothing.
+        self.decision_outcome = DecisionOutcomeService(self.board_store, self.registry_store)
         self.discussion = DiscussionService(
             self.board, self.agent, self.board_store, self.registry_store
         )

@@ -6,11 +6,12 @@ repeats the call with ``inputResponses`` and that state. The state passes throug
 it is attacker-controlled input when it comes back. This module seals it and opens it again.
 
 A state holds who asked (the actor's id and the id of the key, ``credential_id``, it authenticated
-with), the tool, a hash of the call's decisive arguments, when it was issued, when it stops being
-valid and a random nonce. It is sealed with the installation secret (``AuthService.secret_key``)
-through ``core/secrets.py``: encrypted and authenticated, so only this installation can read or
-check it. A person may hold any number of keys; a state is bound to the one key that asked, never
-to the person alone.
+with), the tool, a hash of the call's decisive arguments, what the question was about when it was
+asked (its ``subject``: the revision ids or the wait in force then, hashed with the call), when it
+was issued, when it stops being valid and a random nonce. It is sealed with the installation
+secret (``AuthService.secret_key``) through ``core/secrets.py``: encrypted and authenticated, so
+only this installation can read or check it. A person may hold any number of keys; a state is
+bound to the one key that asked, never to the person alone.
 
 Opening a state refuses it with a typed reason (``RequestStateRefused.reason``) when it was changed
 or is not a state at all, has expired, comes from another actor or key, belongs to another call, or
@@ -89,18 +90,25 @@ class RequestStateRefused(ValidationFailure):
 class PendingCall:
     """The call a state belongs to: the tool and its decisive arguments.
 
-    ``arguments`` are what decides which decision the question is about (for example the decision,
-    ``board_id``, ``loop_id``, ``card_id`` and the revision ids or the Ticket version in force when
-    the question was asked). The state keeps only their hash, so a retry must name the same call.
+    ``arguments`` are what the caller names and names again on the retry (for example the
+    decision, ``board_id``, ``loop_id`` and ``card_id``). What the question was about when it was
+    asked and the retry cannot name again (the revision ids or a wait in force then) is the
+    state's ``subject``: ``RequestStateService.seal`` seals it inside the state and hashes it with
+    the call, and ``open`` hands it back.
     """
 
     tool: str
     arguments: Mapping[str, JsonValue]
 
-    def digest(self) -> str:
-        """SHA-256 of the tool and arguments as canonical JSON (sorted keys, no spaces)."""
+    def digest(self, subject: Mapping[str, JsonValue] | None = None) -> str:
+        """SHA-256 of the tool, the arguments and ``subject`` as canonical JSON (sorted keys, no
+        spaces)."""
         canonical = json.dumps(
-            {"tool": self.tool, "arguments": dict(self.arguments)},
+            {
+                "tool": self.tool,
+                "arguments": dict(self.arguments),
+                "subject": dict(subject or {}),
+            },
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=True,
@@ -120,6 +128,7 @@ class OpenedState:
     issued_at: datetime
     expires_at: datetime
     nonce: str
+    subject: Mapping[str, JsonValue]
 
 
 def system_clock() -> datetime:
@@ -167,6 +176,9 @@ def _decode(secret: str, state: str) -> OpenedState:
     issued, expires = _integer(payload, "issued"), _integer(payload, "expires")
     if expires <= issued:
         raise RequestStateRefused("invalid")
+    subject = payload.get("subject", {})
+    if not isinstance(subject, dict):
+        raise RequestStateRefused("invalid")
     return OpenedState(
         actor_id=_text(payload, "actor"),
         credential_id=credential,
@@ -175,6 +187,7 @@ def _decode(secret: str, state: str) -> OpenedState:
         issued_at=_moment(issued),
         expires_at=_moment(expires),
         nonce=_text(payload, "nonce"),
+        subject=subject,
     )
 
 
@@ -195,8 +208,14 @@ class RequestStateService:
         for nonce in [nonce for nonce, expires in self._used.items() if expires <= now]:
             del self._used[nonce]
 
-    def seal(self, actor: ActorContext, call: PendingCall) -> str:
-        """A new state for ``call``, asked by ``actor`` with the key it authenticated with.
+    def seal(
+        self,
+        actor: ActorContext,
+        call: PendingCall,
+        subject: Mapping[str, JsonValue] | None = None,
+    ) -> str:
+        """A new state for ``call``, asked by ``actor`` with the key it authenticated with, about
+        ``subject`` (what the question was about when it was asked; empty when the call says it).
 
         Every state is new: a fresh nonce, issued now and valid for ``REQUEST_STATE_TTL``.
         """
@@ -208,7 +227,8 @@ class RequestStateService:
             "actor": actor.actor_id,
             "credential": actor.credential_id,
             "tool": call.tool,
-            "call": call.digest(),
+            "call": call.digest(subject),
+            "subject": dict(subject or {}),
             "issued": issued,
             "expires": issued + int(REQUEST_STATE_TTL.total_seconds()),
             "nonce": secrets.token_urlsafe(16),
@@ -221,8 +241,9 @@ class RequestStateService:
         :class:`RequestStateRefused`.
 
         The checks run in this order: ``invalid``, ``expired``, ``wrong_actor``,
-        ``wrong_credential``, ``wrong_call``, ``reused``. A refused state is not used up, so a
-        state shown by someone else stays the asker's; only a state that opens is.
+        ``wrong_credential``, ``wrong_call``, ``reused``. ``call`` is checked with the subject the
+        state was sealed with, which comes back as ``OpenedState.subject``. A refused state is not
+        used up, so a state shown by someone else stays the asker's; only a state that opens is.
         """
         opened = _decode(self._secret, state)
         now = _epoch(self._clock())
@@ -232,7 +253,8 @@ class RequestStateService:
             raise RequestStateRefused("wrong_actor")
         if opened.credential_id != actor.credential_id:
             raise RequestStateRefused("wrong_credential")
-        if opened.tool != call.tool or not hmac.compare_digest(opened.call_digest, call.digest()):
+        expected = call.digest(opened.subject)
+        if opened.tool != call.tool or not hmac.compare_digest(opened.call_digest, expected):
             raise RequestStateRefused("wrong_call")
         with self._lock:
             self._forget_expired(now)

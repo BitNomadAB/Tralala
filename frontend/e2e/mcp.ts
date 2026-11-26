@@ -18,6 +18,11 @@ function headerValue(value: string): string {
   return `=?base64?${Buffer.from(value, "utf8").toString("base64")}?=`;
 }
 
+/** What a request declares and brings beyond its params: its client's capabilities. */
+interface RequestOptions {
+  capabilities?: Record<string, unknown>;
+}
+
 /** One JSON-RPC request to `/mcp` with the worker's key; the `result`, or a failed expectation. */
 async function rpc(
   page: Page,
@@ -25,6 +30,32 @@ async function rpc(
   method: string,
   params: Record<string, unknown>,
 ): Promise<unknown> {
+  const result = (await rpcResult(page, token, method, params)) as { resultType?: string };
+  expect(result.resultType, `${method} did not complete`).toBe("complete");
+  return result;
+}
+
+/** One JSON-RPC request to `/mcp`: the `result` whatever its `resultType`, or a failed step. */
+async function rpcResult(
+  page: Page,
+  token: string,
+  method: string,
+  params: Record<string, unknown>,
+  options: RequestOptions = {},
+): Promise<unknown> {
+  const message = await rpcMessage(page, token, method, params, options);
+  if (message.error) throw new Error(`${method} failed: ${message.error.message}`);
+  return message.result;
+}
+
+/** One JSON-RPC request to `/mcp` and the whole answer, an error included. */
+async function rpcMessage(
+  page: Page,
+  token: string,
+  method: string,
+  params: Record<string, unknown>,
+  options: RequestOptions = {},
+): Promise<{ result?: unknown; error?: { code: number; message: string; data?: unknown } }> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     Accept: "application/json, text/event-stream",
@@ -37,20 +68,17 @@ async function rpc(
   const _meta = {
     "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
     "io.modelcontextprotocol/clientInfo": { name: "tralala-e2e", version: "1.0.0" },
-    "io.modelcontextprotocol/clientCapabilities": {},
+    "io.modelcontextprotocol/clientCapabilities": options.capabilities ?? {},
   };
   const response = await page.request.post("/mcp", {
     headers,
     data: { jsonrpc: "2.0", id: nextId++, method, params: { ...params, _meta } },
   });
   expect(response.status(), await response.text()).toBe(200);
-  const message = (await response.json()) as {
-    result?: { resultType?: string };
-    error?: { message: string };
+  return (await response.json()) as {
+    result?: unknown;
+    error?: { code: number; message: string; data?: unknown };
   };
-  if (message.error) throw new Error(`${method} failed: ${message.error.message}`);
-  expect(message.result?.resultType, `${method} did not complete`).toBe("complete");
-  return message.result;
 }
 
 /** The names `tools/list` offers this key. */
@@ -73,6 +101,71 @@ export async function mcpCall(
   };
   if (result.isError) throw new Error(`${name} failed: ${result.content[0]?.text ?? ""}`);
   return result.structuredContent ?? {};
+}
+
+/** What a tool that asks for input answers: a complete result, or `input_required`. */
+export interface AskedResult {
+  resultType: "complete" | "input_required";
+  inputRequests?: Record<string, { method: string; params: Record<string, unknown> }>;
+  requestState?: string;
+  structuredContent?: ToolAnswer;
+  isError?: boolean;
+}
+
+/** What a client of 2026-07-28 brings to a tool that may ask: its modes, answers and state. */
+export interface AskOptions {
+  /** The elicitation modes the client declares, e.g. `{ url: {} }`; none when absent. */
+  elicitation?: Record<string, unknown>;
+  inputResponses?: Record<string, Record<string, unknown>>;
+  requestState?: string;
+}
+
+function askParams(name: string, args: Record<string, unknown>, options: AskOptions) {
+  return {
+    name,
+    arguments: args,
+    ...(options.inputResponses ? { inputResponses: options.inputResponses } : {}),
+    ...(options.requestState !== undefined ? { requestState: options.requestState } : {}),
+  };
+}
+
+function askCapabilities(options: AskOptions): RequestOptions {
+  return options.elicitation ? { capabilities: { elicitation: options.elicitation } } : {};
+}
+
+/**
+ * Calls a tool that may ask the client for input (`ask_person`), declaring the elicitation modes
+ * and repeating a call with `inputResponses` and `requestState`; the result as it came.
+ */
+export async function mcpAsk(
+  page: Page,
+  token: string,
+  name: string,
+  args: Record<string, unknown>,
+  options: AskOptions = {},
+): Promise<AskedResult> {
+  const params = askParams(name, args, options);
+  return (await rpcResult(
+    page,
+    token,
+    "tools/call",
+    params,
+    askCapabilities(options),
+  )) as AskedResult;
+}
+
+/** Calls a tool that may ask and must be refused at the protocol level; the JSON-RPC error. */
+export async function mcpAskError(
+  page: Page,
+  token: string,
+  name: string,
+  args: Record<string, unknown>,
+  options: AskOptions = {},
+): Promise<{ code: number; message: string; data?: unknown }> {
+  const params = askParams(name, args, options);
+  const message = await rpcMessage(page, token, "tools/call", params, askCapabilities(options));
+  expect(message.error, `${name} was not refused: ${JSON.stringify(message.result)}`).toBeDefined();
+  return message.error ?? { code: 0, message: "" };
 }
 
 /** The error a refused tool call answers with: its code, its message and its details. */

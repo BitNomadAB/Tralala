@@ -20,7 +20,14 @@ from app.core.config import Settings
 from app.core.context import ActorContext
 from app.repositories.discussions import NoticeThread
 from app.schemas.discussions import DiscussionCreate, DiscussionMessageCreate
-from app.services.agent_tools import NOTICES_RULE, ToolResult, read_discussion, with_notices
+from app.services.agent_tools import (
+    NOTICES_RULE,
+    InputRequired,
+    ToolResult,
+    answer_with_notices,
+    read_discussion,
+    with_notices,
+)
 from app.services.discussion_notices import NOTICE_THREADS, TITLE_CHARS, Notices, reason_of
 from app.services.discussions import DiscussionService
 from tests.unit.fakes.board import BOARD_ID, FakeBoardUnitOfWork, discussion_row
@@ -314,7 +321,24 @@ def test_the_service_reads_every_board_without_a_board_id() -> None:
 
 
 def test_the_mcp_route_calls_a_tool_through_run_tool_so_its_answer_carries_notices() -> None:
-    """The route once called the handler itself, and no key ever saw ``notices``."""
+    """The route once called the handler itself, and no key ever saw ``notices``. A tool that
+    asks for input (``ask_person``) goes through ``run_tool_with_input``, whose complete answers
+    carry them the same way (``answer_with_notices``, below)."""
     source = inspect.getsource(mcp)
     assert "run_in_threadpool(run_tool, ctx.services, ctx.actor, name, arguments)" in source
+    assert "run_tool_with_input, ctx.services, ctx.actor, name, arguments, given" in source
     assert "tool.handler" not in source
+    assert "tool.asks(" not in source
+
+
+def test_a_complete_answer_of_an_asking_tool_carries_notices_and_a_question_does_not() -> None:
+    w = quiet()
+    open_on_board(w, CLAUDE)
+    args: dict[str, JsonValue] = {"board_id": BOARD_ID}
+    carried = answer_with_notices(Tools(w.discussions), CODEX, "ask_person", args, dict(ANSWER))
+    assert isinstance(carried, dict)
+    assert _is_mapping(carried["notices"])
+    question = InputRequired({"decision": {"method": "elicitation/create"}}, "state")
+    assert answer_with_notices(Tools(w.discussions), CODEX, "ask_person", args, question) is (
+        question
+    )

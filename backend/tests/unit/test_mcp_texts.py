@@ -68,7 +68,7 @@ TRIED = (
 UNTRIED = "No client has been tried against the 2026-07-28 path."
 NO_STREAM = (
     "A client of 2025-06-18 has no way to be asked a question without a stream, and Tralala opens "
-    "none; a later tool gives such a client the link to a decision as text."
+    "none; ask_person gives such a client the link to a decision as text."
 )
 UNCHECKED_CLAIMS = re.compile(
     r"2\.1\.274|2\.1\.232|Cursor|GitHub Copilot|Gemini CLI|MCP_SDK_GENERATION|"

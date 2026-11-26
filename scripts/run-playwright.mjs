@@ -154,9 +154,14 @@ if (process.argv[2] === "test" && process.env.E2E_KEEP_DATA !== "1") {
   rmSync(path.join(frontendDir, "e2e", ".data"), { recursive: true, force: true });
 }
 
+// The isolated stack's public address, the one a person opens it at (playwright.config.ts starts
+// the frontend there), so every decision_link and ask_person's question carry a full address.
+const frontendPort = process.env.E2E_FRONTEND_PORT ?? "5273";
+
 const env = {
   ...process.env,
   NODE_PATH: [nodeModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter),
+  TRALALA_PUBLIC_URL: `http://127.0.0.1:${frontendPort}`,
 };
 
 const child = spawn(process.execPath, [cli, ...process.argv.slice(2)], {

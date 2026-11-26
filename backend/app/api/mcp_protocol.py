@@ -34,6 +34,15 @@ Every result carries ``resultType`` and the server's identity in ``_meta``. What
 params get wrong (no name, arguments that are not an object, an unknown tool, a scope the key
 lacks) stays a -32602 error with HTTP 200, and a handler's refusal is a tool result with
 ``isError`` true. Header names are compared without regard to case; header values exactly.
+
+A multi round-trip request (the revision's MRTR pattern) is a ``tools/call`` of a tool that asks
+for input, and only ``ask_person`` does. Such a tool alone is handed the call's ``InputContext``
+(the client's elicitation modes, ``inputResponses`` and ``requestState``) as a ``ToolInput``
+(``tool_input``), and its question becomes a result with ``resultType`` ``input_required``,
+``inputRequests`` and ``requestState`` (``asked_result``). No other method answers
+``input_required``: ``server/discover`` and ``tools/list`` are answered here, complete. A state
+that the tool's service refuses is -32602 with HTTP 200 and the reason alone (``state_refused``),
+never anything about what the state was about.
 """
 
 from __future__ import annotations
@@ -48,7 +57,14 @@ from pydantic import JsonValue
 
 from ..core.context import ActorContext
 from ..core.errors import ApiError
-from ..services.agent_tools import AgentTool, missing_scopes, tool_catalog
+from ..services.agent_tools import (
+    AgentTool,
+    InputRequired,
+    ToolInput,
+    ToolResult,
+    missing_scopes,
+    tool_catalog,
+)
 
 PROTOCOL_VERSION = "2026-07-28"
 # The older revision, spoken after ``initialize``; its rules live in ``mcp_legacy``.
@@ -133,8 +149,8 @@ class InputContext:
     """What a tool call brings for a multi round-trip request: the modes its client can be asked
     in, and a retry's answers (``inputResponses``) and opaque state (``requestState``).
 
-    The state is attacker-controlled input: whoever reads it verifies it first. No tool reads any
-    of this yet, and no answer is ``input_required``.
+    The state is attacker-controlled input: whoever reads it verifies it first. Only a tool that
+    asks for input (``AgentTool.asks``, ``ask_person``) is handed it, as ``tool_input`` makes it.
     """
 
     elicitation: ElicitationModes
@@ -524,6 +540,60 @@ def dispatch(
     return _tool_call(found, message_id, params, meta, actor)
 
 
+def tool_input(context: InputContext) -> ToolInput:
+    """What a call brings for a tool that asks for input, as the services type it."""
+    return ToolInput(
+        form=context.elicitation.form,
+        url=context.elicitation.url,
+        responses=context.input_responses,
+        request_state=context.request_state,
+    )
+
+
+def input_required(
+    invocation: ToolInvocation, server: ServerIdentity, required: InputRequired
+) -> Reply:
+    """A tool's question as a ``tools/call`` result: ``resultType`` ``input_required``, the
+    requests and the state the client repeats the call with, and the server in ``_meta``."""
+    return Reply(
+        200,
+        {
+            "jsonrpc": "2.0",
+            "id": invocation.message_id,
+            "result": {
+                "resultType": "input_required",
+                "inputRequests": {
+                    key: dict(value) for key, value in required.input_requests.items()
+                },
+                "requestState": required.request_state,
+                "_meta": {META_SERVER_INFO: {"name": server.name, "version": server.version}},
+            },
+        },
+    )
+
+
+def asked_result(
+    invocation: ToolInvocation, server: ServerIdentity, answer: ToolResult | InputRequired
+) -> Reply:
+    """The answer of a tool that asks for input: its question, or its complete result."""
+    if isinstance(answer, InputRequired):
+        return input_required(invocation, server, answer)
+    return tool_result(invocation, server, answer)
+
+
+def state_refused(message_id: RequestId, tool: str, reason: str) -> Reply:
+    """-32602 for a ``requestState`` the tool's service refused: the reason and how to go on,
+    nothing about what the state was about."""
+    return _error(
+        200,
+        message_id,
+        INVALID_PARAMS,
+        f"Invalid params: the requestState cannot be used ({reason}). Call {tool} again without "
+        "requestState and inputResponses.",
+        {"reason": reason},
+    )
+
+
 def tool_result(
     invocation: ToolInvocation, server: ServerIdentity, payload: Mapping[str, object]
 ) -> Reply:
@@ -576,6 +646,7 @@ __all__ = [
     "RequestMeta",
     "ServerIdentity",
     "ToolInvocation",
+    "asked_result",
     "discover_result",
     "dispatch",
     "elicitation_modes",
@@ -585,13 +656,16 @@ __all__ = [
     "header_text",
     "header_values",
     "input_context",
+    "input_required",
     "method_not_allowed",
     "origin_refusal",
     "parse_error",
     "request_meta",
+    "state_refused",
     "tool_call",
     "tool_content",
     "tool_failure",
+    "tool_input",
     "tool_list",
     "tool_result",
     "trusted_origins",

@@ -377,3 +377,22 @@ def test_a_call_of_the_newer_revision_is_answered_in_its_own_shape() -> None:
     assert call_result(step, mcp.SERVER, payload) == tool_result(step, mcp.SERVER, payload)
     error = Forbidden("no", code="human_action_required")
     assert call_failure(step, mcp.SERVER, error) == tool_failure(step, mcp.SERVER, error)
+
+
+def test_a_2025_06_18_call_of_ask_person_brings_no_input_and_is_never_asked() -> None:
+    """A client of 2025-06-18 has no stream to be asked on: its call of ``ask_person`` carries no
+    modes, answers or state (``LegacyToolCall`` has none), the route runs the catalogue handler
+    through ``run_tool``, and that handler answers with the decision's address as text
+    (``test_agent_tools_decisions``). Even ``inputResponses`` and ``requestState`` in its params
+    are not read."""
+    params: JsonValue = {
+        "name": "ask_person",
+        "arguments": {"board_id": "b", "loop_id": "l", "decision": "analysis"},
+        "inputResponses": {"decision": {"action": "accept"}},
+        "requestState": "state",
+    }
+    step = tool(request("tools/call", params), headers())
+    assert step.tool.name == "ask_person"
+    assert step.tool.asks is not None
+    assert not hasattr(step, "input_context")
+    assert step.arguments == {"board_id": "b", "loop_id": "l", "decision": "analysis"}
