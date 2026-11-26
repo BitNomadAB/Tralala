@@ -48,6 +48,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from .lists import ListEntry, ListService
     from .loops import LoopService
     from .plan_views import Readiness
+    from .poc_decisions import PocDecisionList
     from .search import SearchHit, SearchService
 
 # A tool's arguments: the JSON object an MCP ``tools/call`` carried, untrusted.
@@ -489,6 +490,9 @@ def _read_ticket(
             "blockers": card["blockers"],
             "awaiting_confirmation": card["awaiting_confirmation"],
             "confirmations": card["confirmations"],
+            "poc_decisions": ticket_poc_decisions(
+                services.poc_decisions.list(actor, board_id, loop_id, card_id=card_id)
+            ),
             "human_action_required": card["human_action_required"],
             # Where a person confirms a person's task.
             "decision_link": ticket_decision_link(
@@ -519,11 +523,12 @@ def ticket_wait(
     card: CardEntry, *, loop_read_only: bool, public_url: str | None
 ) -> ToolResult | None:
     """What the Ticket waits for as ``read_ticket`` shows it, None while it waits for nothing:
-    the kind, the reason, who set it and when, and ``decision_link``, where the person who
-    answers clears it (``ticket_decision_link``)."""
+    the kind, the reason, who set it and when, ``decision_link``, where the person who answers
+    clears it (``ticket_decision_link``), and ``stop``, the line of the stop list it is for, when
+    the wait names one."""
     if card["waiting_for"] == "nothing":
         return None
-    return {
+    wait: ToolResult = {
         "waiting_for": card["waiting_for"],
         "reason": card["waiting_reason"],
         "set_by": card["waiting_set_by"],
@@ -531,6 +536,22 @@ def ticket_wait(
         "decision_link": ticket_decision_link(
             card, "wait", loop_read_only=loop_read_only, public_url=public_url
         ),
+    }
+    if card["waiting_stop"] is not None:
+        # The line of the Loop's stop list the wait is for; a wait that names none has no key.
+        wait["stop"] = card["waiting_stop"]
+    return wait
+
+
+def ticket_poc_decisions(listing: PocDecisionList) -> ToolResult:
+    """The POC decisions and reports of something missing taken on the Ticket, as ``read_ticket``
+    names them: how many, how many still wait for a person's review, and their keys in review
+    order; ``list_poc_decisions`` with the Ticket's id reads them."""
+    items = listing["items"]
+    return {
+        "count": len(items),
+        "open": sum(1 for item in items if item["status"] == "open"),
+        "keys": [item["key"] for item in items],
     }
 
 
@@ -596,6 +617,7 @@ __all__ = [
     "ticket_attachments",
     "ticket_decision_link",
     "ticket_plan",
+    "ticket_poc_decisions",
     "ticket_wait",
     "tool_decision_link",
     "unreported_besides",

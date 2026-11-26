@@ -17,7 +17,9 @@ The handlers live beside this module, in ``agent_tools_read``, ``agent_tools_wri
 ``agent_tools_tickets``, ``agent_tools_work``, ``agent_tools_plan`` and
 ``agent_tools_discussions``, among others (``agent_tools_attachments`` reads a Ticket's files,
 ``agent_tools_board_discussions`` opens, lists, closes and reopens discussions on the board,
-``agent_tools_decisions`` asks a person for a decision and reports it), and the argument schemas
+``agent_tools_decisions`` asks a person for a decision and reports it,
+``agent_tools_poc_decisions`` records a POC decision or something missing from a person and lists
+what the person answered), and the argument schemas
 in ``agent_tools_schema``;
 this module holds the catalogue and the dispatch and re-exports them.
 """
@@ -51,6 +53,14 @@ from .agent_tools_plan import (
     write_analysis,
     write_brief,
     write_roadmap,
+)
+from .agent_tools_poc_decisions import (
+    CONFIRMATION_RULE,
+    OBSTACLE_RULE,
+    list_poc_decisions,
+    poc_decision_tools,
+    record_poc_decision,
+    report_missing,
 )
 from .agent_tools_read import (
     DECISION_LINK_RULE,
@@ -193,7 +203,8 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "Read one Ticket with acceptance criteria, evidence, checklist, comments, the "
                 "notes a person wrote on it (person_notes, which no key can write), its "
                 "newest 50 attachments (read_attachment reads a text one), current column, "
-                "version and the actions that are allowed right now."
+                "version, the keys of the POC decisions recorded on it (poc_decisions) and the "
+                "actions that are allowed right now."
             ),
             scopes=("cards:read",),
             input_schema=_object(
@@ -233,6 +244,7 @@ def tool_catalog() -> dict[str, AgentTool]:
         ),
         *listing_tools(_BOARD_ID),
         *work_tools(_BOARD_ID, _CARD_ID),
+        *poc_decision_tools(_BOARD_ID, _LOOP_REF),
         AgentTool(
             name="assign_ticket",
             description=(
@@ -302,7 +314,8 @@ def tool_catalog() -> dict[str, AgentTool]:
                     "workplace": _string("Optional: codebase, outside or unknown (the default)"),
                     "waiting_for": _string(
                         "Optional: nothing (the default), decision, information, access or "
-                        "third_party; a wait needs waiting_reason"
+                        "third_party; a wait needs waiting_reason, and is only for a stop on the "
+                        "Loop's stop list (read_loop)"
                     ),
                     "waiting_reason": _string("What the wait needs, at most 500 characters"),
                     "labels": {
@@ -348,7 +361,9 @@ def tool_catalog() -> dict[str, AgentTool]:
                 "Finish a Ticket: marks it completed and comments your summary and evidence. This "
                 "is the only way a Ticket is done; a column named Done completes nothing. The "
                 "summary is kept as a comment even when the Ticket is already done or the "
-                "completion is refused (human-only, blocked), and the refusal says why."
+                "completion is refused (human-only, blocked), and the refusal says why. A "
+                "Ticket held up only by a person's confirmation of earlier work is completed all "
+                "the same and shows as done, awaiting confirmation."
             ),
             scopes=("cards:write", "comments:write"),
             input_schema=_object(
@@ -667,10 +682,12 @@ def with_notices(
 
 
 __all__ = [
+    "CONFIRMATION_RULE",
     "DECISION_LINK_RULE",
     "EVERY_BOARD_TOOLS",
     "NOTICES_RULE",
     "NO_INPUT",
+    "OBSTACLE_RULE",
     "REPORT_RULE",
     "AgentTool",
     "ArgumentSchema",
@@ -701,6 +718,7 @@ __all__ = [
     "list_attachments",
     "list_boards",
     "list_discussions",
+    "list_poc_decisions",
     "list_tickets",
     "loop_summaries",
     "map_plan_ids",
@@ -712,8 +730,10 @@ __all__ = [
     "read_instructions",
     "read_loop",
     "read_notes",
+    "record_poc_decision",
     "reopen_discussion",
     "reply_discussion",
+    "report_missing",
     "run_tool",
     "run_tool_with_input",
     "search_tickets",

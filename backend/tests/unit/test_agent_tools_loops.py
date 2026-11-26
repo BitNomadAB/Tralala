@@ -20,7 +20,12 @@ from app.core.errors import Forbidden, ValidationFailure
 from app.db.generated.board import CardsRow, LoopDocumentsRow, LoopsRow
 from app.schemas.poc_decisions import PocDecisionAnswerCreate, PocDecisionCreate
 from app.services.agent_tools import ToolResult, loop_summaries, tool_catalog
-from app.services.agent_tools_loops import ALL_DONE, ALL_DONE_WITHOUT_PLAN, ticket_counts
+from app.services.agent_tools_loops import (
+    ALL_DONE,
+    ALL_DONE_WITHOUT_PLAN,
+    review_waiting,
+    ticket_counts,
+)
 from app.services.agent_tools_read import REPORT_FIRST
 from app.services.cards import CardService
 from app.services.lists import ListService
@@ -878,3 +883,22 @@ def test_each_loop_row_counts_its_poc_decisions_read_for_the_whole_board(
         "L-1": {"open": 2, "built_on_open": 1, "missing_open": 1, "due": 2, "answered": 1},
         "L-2": {"open": 0, "built_on_open": 0, "missing_open": 0, "due": 0, "answered": 0},
     }
+    # Every Ticket is done: next also says what waits for the person's review, and the decision
+    # it links stays the implementation's.
+    nexts = {row["key"]: row["next"] for row in summaries}
+    assert nexts == {
+        "L-1": f"{ALL_DONE_WITHOUT_PLAN} 1 POC decision and 1 report of something missing "
+        "wait for the person's review.",
+        "L-2": ALL_DONE_WITHOUT_PLAN,
+    }
+    links = {row["key"]: str(row["decision_link"]) for row in summaries}
+    assert links["L-1"].replace(uid(1), uid(2)) == links["L-2"]
+
+
+def test_the_review_sentence_counts_decisions_and_what_is_missing() -> None:
+    assert review_waiting(0, 0) == ""
+    assert review_waiting(1, 0) == "1 POC decision waits for the person's review."
+    assert review_waiting(1, 1) == "1 report of something missing waits for the person's review."
+    assert review_waiting(5, 2) == (
+        "3 POC decisions and 2 reports of something missing wait for the person's review."
+    )

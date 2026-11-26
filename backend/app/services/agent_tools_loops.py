@@ -51,7 +51,7 @@ from .agent_tools_read import (
     unreported_rows,
 )
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
-from .poc_decision_rules import loop_progress, poc_counts
+from .poc_decision_rules import PocCounts, loop_progress, poc_counts
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from ..core.config import Settings
@@ -301,6 +301,34 @@ def _goal(goal: str) -> str:
     return text if len(text) <= GOAL_CHARS else text[: GOAL_CHARS - 1].rstrip() + "…"
 
 
+def poc_summary(marks: Sequence[PocDecisionMark], readiness: LoopReadiness) -> PocCounts:
+    """A Loop's POC decisions and what is missing from a person, counted against its progress,
+    as ``loop_summaries`` and ``read_loop`` both answer them."""
+    return poc_counts(marks, loop_progress(readiness, readiness["unplanned"]))
+
+
+def _count(count: int, one: str, many: str) -> str:
+    return f"1 {one}" if count == 1 else f"{count} {many}"
+
+
+def review_waiting(open_count: int, missing_open: int) -> str:
+    """The sentence ``next`` adds once every Ticket is done while records wait for a person's
+    review, or "" when none does."""
+    decisions = open_count - missing_open
+    parts = [
+        *([_count(decisions, "POC decision", "POC decisions")] if decisions else []),
+        *(
+            [_count(missing_open, "report of something missing", "reports of something missing")]
+            if missing_open
+            else []
+        ),
+    ]
+    if not parts:
+        return ""
+    verb = "waits" if open_count == 1 else "wait"
+    return f"{' and '.join(parts)} {verb} for the person's review."
+
+
 def loop_row(
     entry: LoopEntry,
     readiness: LoopReadiness,
@@ -310,10 +338,15 @@ def loop_row(
     poc_marks: Sequence[PocDecisionMark] = (),
 ) -> ToolResult:
     """One Loop as ``loop_summaries`` shows it; ``poc_marks`` are the Loop's POC decisions and
-    what is missing from a person, counted against the Loop's progress."""
+    what is missing from a person, counted against the Loop's progress. Once every Ticket is done
+    (``ALL_DONE``, ``ALL_DONE_WITHOUT_PLAN``), ``next`` also says how many of them wait for the
+    person's review (``review_waiting``); the decision link stays the implementation's."""
     counts = ticket_counts(readiness)
     sentence, waiting_on = next_step(entry, readiness, counts)
-    poc = poc_counts(poc_marks, loop_progress(readiness, readiness["unplanned"]))
+    poc = poc_summary(poc_marks, readiness)
+    if sentence in (ALL_DONE, ALL_DONE_WITHOUT_PLAN):
+        waiting = review_waiting(poc["open"], poc["missing_open"])
+        sentence = f"{sentence} {waiting}" if waiting else sentence
     return {
         "id": entry["id"],
         "key": entry["key"],
@@ -337,13 +370,7 @@ def loop_row(
             "by_column": {column["name"]: column["card_count"] for column in columns},
         },
         "documents": {kind: _document(entry, kind) for kind in DOCUMENT_KINDS},
-        "poc_decisions": {
-            "open": poc["open"],
-            "built_on_open": poc["built_on_open"],
-            "missing_open": poc["missing_open"],
-            "due": poc["due"],
-            "answered": poc["answered"],
-        },
+        "poc_decisions": poc,
     }
 
 
@@ -399,7 +426,10 @@ def loop_tools(board_id: ArgumentSchema) -> list[AgentTool]:
                 "completed, total, needs_person) and by column, and each document's state. Open "
                 "Loops unless include_completed is true. unreported names the Tickets on the "
                 "board this key took and has not reported on yet. without_plan is true for a "
-                "Loop that runs its Tickets without a plan, which a person closes in one decision."
+                "Loop that runs its Tickets without a plan, which a person closes in one decision. "
+                "poc_decisions counts its POC decisions and what is missing from a person (open, "
+                "built_on_open, missing_open, due for review, answered); list_poc_decisions "
+                "lists them."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(
@@ -431,6 +461,8 @@ __all__ = [
     "loop_tools",
     "next_decision",
     "next_step",
+    "poc_summary",
     "review_step",
+    "review_waiting",
     "ticket_counts",
 ]

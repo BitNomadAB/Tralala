@@ -62,12 +62,15 @@ message broker.
     working document) that proves a requirement.
 11a. **Planning decisions are human decisions.** Approving analysis or a RoadMap, resetting a scope,
     editing Info, confirming a human-only Ticket, clearing a Ticket's wait, accepting implementation
-    or QA, and finalizing a Loop reject agent tokens (`403 human_action_required`) regardless of
-    scope, and are never registered as WebMCP tools. Approvals bind to exact document revision ids;
+    or QA, answering a POC decision, writing a Loop's stop list, and finalizing a Loop reject agent
+    tokens (`403 human_action_required`) regardless of scope, and are never registered as WebMCP
+    tools. Approvals bind to exact document revision ids;
     a changed input invalidates them. A reset supersedes the approval and replaces the scope's
     documents with an empty draft, so nothing downstream executes against text nobody stands behind;
     a RoadMap reset also withdraws the plan in force and takes its Tickets off the Kanban.
     A token may set a wait on a Ticket that waits for nothing; the person who answers it clears it.
+    A token records a POC decision or something missing from a person and reads the answers; the
+    answer (OK, or feedback that becomes a Ticket) is a signed-in person's, and so is the stop list.
     Info has one speculative-stage exception: while the Loop is `draft` or `analysis_review`
     (`WORKER_INFO_STAGES` in `services/loop_documents.py`) a token may write it (`write_info`),
     because that is the intent it agreed with its person; from planning on, editing Info is a
@@ -112,7 +115,9 @@ message broker.
     Tickets by filter, attachments, search), work on a Ticket (summaries, a wait, assigning,
     moving, commenting, completing), work outside the plan (`create_ticket`, an unplanned Ticket),
     planning (a Loop, its Info, the instructions a board agent writes to, a worker's own analysis
-    and RoadMap as candidates, the briefs for people), the Loop's notes, discussions on a
+    and RoadMap as candidates, the briefs for people), what stands in the way of work (recording a
+    POC decision, reporting what is missing from a person, listing both with their answers), the
+    Loop's notes, discussions on a
     Ticket or on the board (asking the local agents, opening, listing, replying, closing and
     reopening), and asking the key's person for a decision (`ask_person`: in the link mode it
     points at the decision and reports what the person decided in Tralala; in rule 11a's form mode
@@ -307,6 +312,21 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   `services/plain_text.py`; change a limit there, with its unit tests, and nowhere else. Files,
   routes and symbols belong in the text for the AI (acceptance criteria, evidence, findings, a
   discussion answer's reasoning), which the UI shows as it is behind Raw text.
+- What stands in the way of work is one of three kinds, and only the last stops it. A choice that
+  can be changed afterwards is a POC decision: whoever works takes the one good practice points to,
+  records it and goes on. Something only a person can provide (a key, an account, access, a file, a
+  fact) is reported as missing while the work goes around it. Neither ever blocks anything; a
+  signed-in person answers each one afterwards with OK or with feedback that becomes a Ticket. A
+  real stop is only what the Loop's stop list names (a person writes it; a default list until
+  then), and it is a wait on a Ticket that names that line. A Ticket held up only by a person's
+  confirmation of earlier work is ready, may be completed, and is then done, awaiting
+  confirmation. A record's text for people keeps the plain-text rules above (`422
+  poc_decision_invalid` names each field and rule). The rules (limits, review order, due, counts)
+  live in `services/poc_decision_rules.py`, the service in `services/poc_decisions.py`, the stop
+  list and its match in `services/loop_stops.py`, and the worker tools with the words that steer an
+  agent (`OBSTACLE_RULE`) in `services/agent_tools_poc_decisions.py`. The server's instructions and
+  the tool descriptions are all an agent reads, so they put the POC decision first and the wait
+  last.
 
 ## Verification contract
 

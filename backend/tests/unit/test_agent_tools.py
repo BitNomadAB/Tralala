@@ -100,6 +100,7 @@ def test_a_token_sees_only_the_tools_its_scopes_cover() -> None:
         "list_attachments",
         "read_attachment",
         "search_tickets",
+        "list_poc_decisions",
     ]
     assert _visible(_token(*MEMBER_TOKEN_SCOPES)) == list(CATALOGUE)
 

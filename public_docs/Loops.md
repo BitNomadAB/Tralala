@@ -29,8 +29,8 @@ without a plan; when it is not the primary button),
 **Save columns as template**, **Board activity**, **Export board** and **Cancel Loop**. A completed
 Loop greys out what would change it ("The Loop is read-only").
 
-Three tabs follow, each kept in the address (`?tab=kanban`, `?tab=plan`, `?tab=notes`), so a link
-opens the same view:
+Four tabs follow, each kept in the address (`?tab=kanban`, `?tab=plan`, `?tab=notes`, and the
+Decisions tab likewise), so a link opens the same view:
 
 - **Kanban**: the Loop's columns and their Tickets. A column's heading is its name with its count;
   **Rename column** and **Archive column** sit in its quiet menu, and **Add card** and **Add
@@ -38,6 +38,10 @@ opens the same view:
 - **Plan**: **Planning documents** (**Info**, **Analysis**, **RoadMap**; `?doc=` names the one
   shown, by default the one the stage is about). The plan's Tickets are on the **Kanban**; the
   Loop's header names the human Tickets that hold a Phase up, and a Ticket shows what it waits for.
+  Under **Info**, **Stops** is the Loop's stop list: the only things that stop its work
+  ([POC decisions and the stop list](#poc-decisions-and-the-stop-list)).
+- **Decisions**: the POC decisions taken while the work went on and what is missing from a person,
+  for you to answer ([POC decisions and the stop list](#poc-decisions-and-the-stop-list)).
 - **Notes**: the Loop's log of notes ([Notes](#notes)).
 
 `?card=<card_id>` opens a Ticket over any tab ([The Ticket view](#the-ticket-view)), and
@@ -263,7 +267,9 @@ with what holds it up), and **Work is done** under Details says where the work i
 code base*, *Outside the code base*, *Not decided*). **Mark as waiting** in the actions row, or
 *Mark as waiting…* in the rail, asks what it waits for (*A decision*, *Information*, *Access*, *A
 third party*) and why (required, at most 500 characters). A worker marks one with
-`set_ticket_wait` when it cannot go on without an answer. **Clear the wait** is a person's: a token
+`set_ticket_wait` only for a line of the Loop's stop list, which the wait then names
+([POC decisions and the stop list](#poc-decisions-and-the-stop-list)). **Clear the wait** is a
+person's: a token
 can neither clear nor replace a wait (`403 human_action_required`), and **Mark complete** stays off
 while one is open ("Clear the wait first"). The Kanban card shows *Needs input* or *Blocked*.
 
@@ -274,6 +280,48 @@ button for what it needs now. That is **Confirm** for a person's task, **Complet
 for earlier work itself keeps its button off, with the reason beside it, below the ones that can be
 pressed, so the list is worked from the top. The buttons are the other Ticket's own actions: the
 plan's order and every other rule hold as they do in that Ticket's view.
+
+## POC decisions and the stop list
+
+What stands in the way of work is one of three kinds, and only the last stops it.
+
+- **A POC decision** is a choice that can be changed afterwards: two reasonable solutions, a name,
+  a default, a layout, an order of work, how to read an unclear requirement. The one who works
+  takes the one good practice points to, writes it down and goes on, so you judge it when there is
+  a result to look at instead of answering a question before anything exists. Each says what was
+  chosen, why, the alternative and how it is changed afterwards, and what other work builds on it.
+- **Something missing from a person** is what only you can provide: an API key, an account,
+  access, a file, a fact about your business. The work goes around it and says how, and what is
+  done once it is there. A secret never belongs in it; give the key where it is used.
+- **A real stop** is only what the Loop's stop list names. Until you write one, a Loop has the
+  default list: *Deployment to production*, *Deleting data*, *Money*, *Something sent to people
+  outside* and *A new kind of personal data*. A worker never decides that something else is a
+  stop. A stop is a wait on a Ticket that names its line, and it stays until you clear it.
+
+Neither a POC decision nor something missing ever blocks anything. Each is keyed
+`<LoopKey>-POC-<nnn>` and, when it was taken on a Ticket, names that Ticket. They are written as
+plain text for you, at most three sentences a field; the technical detail is behind it for the
+AI.
+
+**Decisions** on the Loop page lists them in the order to review them: open ones other work builds
+on first, then what is missing, then the other open ones, then the answered ones. One is due for
+review once every Ticket of the Loop is done, or, when other work builds on it, once the Phase of
+its Ticket is complete. Answer each one with **OK** or with feedback. Feedback becomes a new Ticket
+in the Loop's first column, with the decision as its basis, and the worker picks it up like any
+other; a decision answered with feedback is answered for good, while one answered OK can still get
+feedback later. Only a signed-in person answers: a key is refused (`403 human_action_required`),
+even one that may decide in the editor. Once every Ticket is done, the Loop's summary says how many
+wait for your review.
+
+**Stops**, under **Info** on the Plan tab, is the Loop's stop list. Write it as one line a stop, at
+most 12 lines of at most 140 characters each and no line twice; an empty list means nothing stops
+this Loop's work. Writing it is a person's at every stage of a Loop that still takes writes, and
+every change is in the Loop's activity.
+
+A Ticket held up only by your confirmation of earlier work, a human-only Ticket before it that you
+have not confirmed yet, is ready: it can be worked and completed. It then shows as done, awaiting
+your confirmation (*Awaiting confirmation* on its card, and in its status the Ticket it waits for),
+until you confirm that earlier Ticket.
 
 ## A Ticket's face for people
 
@@ -579,6 +627,8 @@ each with **Open discussion**.
 | Clear (or replace) a Ticket's wait | Signed-in person | `POST …/cards/{card_id}/wait/clear` |
 | Accept implementation (in a Loop without a plan, this closes it) | Signed-in person | `POST …/completion` |
 | Accept QA and finalize | Signed-in person | `POST …/qa/decision` |
+| Answer a POC decision (OK, or feedback that becomes a Ticket) | Signed-in person | `POST …/poc-decisions/{decision_id}/answer` |
+| Write the Loop's stop list | Signed-in person | `PUT …/stops` |
 
 Where the installation's setting `TRALALA_EDITOR_DECISIONS` is on and the person gave a key the
 right **Decide in the editor**, five of these may also be taken in the person's editor, as a form a
@@ -595,7 +645,8 @@ started a new Info revision would invalidate approvals, so the edit returns
 leaves `draft` with its first Ticket, so from then on its Info is a person's too.
 
 A worker token may write the Info while the Loop is speculative, hand in or ask for candidates and
-briefs, set a wait on a Ticket that waits for nothing, move and complete eligible Tickets, add
+briefs, record a POC decision or something missing, set a wait for a stop on a Ticket that waits
+for nothing, move and complete eligible Tickets, add
 Tickets outside the plan or to a Loop without a plan, write notes, record QA results and comment.
 It is rejected with `403 human_action_required` for every other action in the table, even when it
 holds the scope.
