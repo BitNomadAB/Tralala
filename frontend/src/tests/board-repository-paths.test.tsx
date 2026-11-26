@@ -82,6 +82,7 @@ describe("the focus and exclude globs of a board's repositories", { timeout: 15_
       http.get(apiPath("/boards/board-1/loop-summaries"), () =>
         ok({ board_id: "board-1", loops: [], count: 0 }),
       ),
+      http.get(apiPath("/boards/board-1/discussions"), () => ok({ items: [], total: 0 })),
       http.get(apiPath("/agents"), () => ok([])),
       http.get(apiPath("/repositories"), () => ok(REPOSITORIES)),
       http.patch(apiPath("/boards/board-1"), async ({ request }) => {

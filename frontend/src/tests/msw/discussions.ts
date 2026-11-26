@@ -2,7 +2,6 @@ import { http } from "msw";
 import type {
   Discussion,
   DiscussionAnswer,
-  DiscussionEvent,
   DiscussionMessage,
   DiscussionParticipant,
   DiscussionPosition,
@@ -11,6 +10,7 @@ import type {
   DiscussionSynthesis,
 } from "@/lib/types";
 import { CARD_ID, isRecord } from "./cards";
+import { after, threadHandlers, type DiscussionApiState } from "./discussionThread";
 import { apiPath, ok } from "./envelope";
 import { BOARD_ID, LOOP, LOOP_ID } from "./loops";
 import { MEMBER } from "./session";
@@ -85,6 +85,8 @@ function agentMessage(
     round_number: round,
     created_at: at(minute),
     answer: structured,
+    after_closed: false,
+    ref_ticket: null,
   };
 }
 
@@ -242,6 +244,9 @@ export function discussion(extra: Partial<Discussion> = {}): Discussion {
     last_activity_at: at(7),
     participant_count: 4,
     message_count: messages.length,
+    closed_at: null,
+    unread: false,
+    opened_by_me: true,
     participants: [
       participant("Alpha", "Product Owner"),
       participant("Bravo", "Backend Developer"),
@@ -266,27 +271,17 @@ export function discussion(extra: Partial<Discussion> = {}): Discussion {
   };
 }
 
-/**
- * What the discussion's API answers and has been sent: the thread, its stored events, every write
- * in `bodies`, and in `next` the thread a write turns it into, by route ("messages", "start",
- * "pause", "resume", "stop").
- */
-export interface DiscussionApiState {
-  discussion: Discussion;
-  events: DiscussionEvent[];
-  bodies: { route: string; body: unknown; csrf: string | null }[];
-  next: Partial<Record<string, Discussion>>;
-}
+export { after, type DiscussionApiState } from "./discussionThread";
 
-/** The thread after a write to `route`: what the test set in `next`, or as it was. */
-export function after(state: DiscussionApiState, route: string): Discussion {
-  state.discussion = state.next[route] ?? state.discussion;
-  return state.discussion;
-}
-
-/** The discussion's API: the thread, its events, the review and the reply. */
+/** The discussion's API: the thread, its events, the review, the reply, read, close and reopen. */
 export function discussionHandlers(initial: Discussion = discussion()) {
-  const state: DiscussionApiState = { discussion: initial, events: [], bodies: [], next: {} };
+  const state: DiscussionApiState = {
+    discussion: initial,
+    events: [],
+    bodies: [],
+    next: {},
+    reads: 0,
+  };
   const handlers = [
     http.get(apiPath(DISCUSSION_PATH), () => ok(state.discussion)),
     http.get(apiPath(`${DISCUSSION_PATH}/events/history`), () =>
@@ -303,9 +298,12 @@ export function discussionHandlers(initial: Discussion = discussion()) {
       const body: unknown = await request.json();
       state.bodies.push({ route: "messages", body, csrf: request.headers.get("X-CSRF-Token") });
       const thread = after(state, "messages");
-      // The server answers every reply on a roundtable thread; a manual one leaves it to the UI.
-      return ok({ ...thread, auto_run: thread.mode === "manual" ? null : "started" });
+      // The server answers every reply on a roundtable thread; a manual one leaves it to the UI,
+      // and a closed one keeps the reply as a comment that starts nothing.
+      const auto = thread.status === "closed" ? "thread_closed" : "started";
+      return ok({ ...thread, auto_run: thread.mode === "manual" ? null : auto });
     }),
+    ...threadHandlers(state, DISCUSSION_PATH),
   ];
   return { state, handlers };
 }

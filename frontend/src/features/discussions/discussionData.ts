@@ -7,6 +7,7 @@ import type {
   DiscussionStance,
 } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
+import { AFTER_CLOSING, ticketRefText } from "./closingRules";
 import { countText, positionLabel } from "./discussionRules";
 import type { RunFailure } from "./runEvents";
 
@@ -115,11 +116,17 @@ export function roundLines(discussion: Discussion, actorId: string | null): Roun
   });
 }
 
-/** A message's heading in the transcript: author, role, round, time. */
+/**
+ * A message's heading in the transcript: author, role, round, time, then "After closing" on a
+ * comment written while the thread was closed and the Ticket a message points at.
+ */
 export function messageHeading(message: DiscussionMessage): string {
   const parts = [message.author_name, message.author_role ?? message.author_type];
   if (message.round_number > 0) parts.push(`round ${String(message.round_number)}`);
   parts.push(formatDateTime(message.created_at));
+  if (message.after_closed) parts.push(AFTER_CLOSING);
+  const ref = ticketRefText(message);
+  if (ref) parts.push(`about ${ref}`);
   return parts.join(" · ");
 }
 

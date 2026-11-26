@@ -58,6 +58,9 @@ export const keys = {
   /** Under `["discussions", boardId]`, so a board's thread events refresh the Ticket's tab too. */
   ticketDiscussions: (boardId: string, cardId: string) =>
     ["discussions", boardId, "card", cardId] as const,
+  /** The board's own threads, open or closed; under `["discussions", boardId]` as well. */
+  boardDiscussions: (boardId: string, state: "open" | "closed") =>
+    ["discussions", boardId, "board", state] as const,
   discussion: (boardId: string, discussionId: string) =>
     ["discussion", boardId, discussionId] as const,
   /** Under the thread's key, so invalidating the thread refetches its events too. */

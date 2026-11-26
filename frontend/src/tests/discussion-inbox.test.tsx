@@ -61,7 +61,7 @@ describe("the Discussions inbox", () => {
     expect(screen.getByRole("heading", { name: "Discussions", level: 1 })).toBeVisible();
     expect(
       screen.getByText(
-        "Where the agents advise. You decide. A discussion starts from a Ticket: open one and choose Ask the agents.",
+        "Where the agents advise. You decide. A discussion starts from a Ticket with Ask the agents, or from a board with New discussion.",
       ),
     ).toBeVisible();
     await screen.findByRole("list", { name: "Waits for your decision" });
@@ -102,6 +102,27 @@ describe("the Discussions inbox", () => {
     expect(screen.getByRole("status", { name: "Location" })).toHaveTextContent(ROUTE);
   });
 
+  it("marks a row with something new for the person Unread, and opens a board's discussion", async () => {
+    const onBoard = inboxRow("board-d", {
+      question: "Where should the export live?",
+      unread: true,
+      loop_id: null,
+      loop_key: null,
+      loop_name: null,
+      card_id: null,
+      ticket_key: null,
+      card_title: null,
+    });
+    renderInbox([onBoard, WAITING]);
+    const waiting = within(await screen.findByRole("list", { name: "Waits for your decision" }));
+    const unread = waiting.getByRole("link", { name: /Where should the export live\?/ });
+    expect(unread).toHaveAccessibleName(/^Unread /);
+    expect(unread).toHaveAttribute("href", "/boards/board-1/discussions/board-d");
+    expect(unread).toHaveTextContent("Platform · 3 agents");
+    const read = waiting.getByRole("link", { name: new RegExp(WAITING.question.slice(0, 20)) });
+    expect(read).not.toHaveTextContent("Unread");
+  });
+
   it("says so in a section that has no row", async () => {
     renderInbox([DECIDED]);
 
@@ -116,7 +137,9 @@ describe("the Discussions inbox", () => {
 
     expect(await screen.findByText("No discussions yet.")).toBeInTheDocument();
     expect(
-      screen.getByText("When you ask the agents about a Ticket, the discussion shows up here."),
+      screen.getByText(
+        "When you ask the agents about a Ticket or start a discussion on a board, it shows up here.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /Waits for your decision/ })).toBeNull();
   });
