@@ -47,6 +47,7 @@ from .repo_mirror_files import DiskMirrorFiles
 from .repo_mirror_git import SubprocessGit
 from .repo_snapshot import RepositorySnapshotService
 from .repositories import RepositoryService
+from .request_state import RequestStateService, system_clock
 from .runs import RunService
 from .search import SearchService
 from .subresources import ChecklistService, CommentService, LabelService
@@ -193,6 +194,9 @@ class Services:
                 settings.data_dir, profile=settings.file_profile
             ),
         )
+        # The sealed state of a question a key asks its person: the installation secret and the
+        # system clock.
+        self.request_state = RequestStateService(self.auth.secret_key, clock=system_clock)
         self.discussion = DiscussionService(
             self.board, self.agent, self.board_store, self.registry_store
         )
