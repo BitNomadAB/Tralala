@@ -41,7 +41,7 @@ describe("the notice above the tabs", () => {
       { poc_decisions: COUNTS },
       poc.handlers,
     );
-    const notice = await screen.findByRole("region", { name: "POC decisions" });
+    const notice = await screen.findByRole("region", { name: "Decisions to review" });
     expect(
       await within(notice).findByText(
         "2 POC decisions wait for your review; other work builds on 1 of them.",
@@ -59,7 +59,7 @@ describe("the notice above the tabs", () => {
   it("is not there while nothing is due or missing", async () => {
     await renderLoopPage("", "in_progress", { poc_decisions: { ...NONE, open: 3 } });
     await screen.findByRole("tab", { name: "Decisions 3" });
-    expect(screen.queryByRole("region", { name: "POC decisions" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Decisions to review" })).toBeNull();
   });
 });
 

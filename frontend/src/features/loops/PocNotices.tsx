@@ -40,7 +40,7 @@ export function PocNotices({
 
   return (
     <section
-      aria-label="POC decisions"
+      aria-label="Decisions to review"
       className="grid gap-1.5 rounded-lg border border-[var(--warning)] p-2 text-sm text-[var(--foreground)]"
     >
       {due > 0 ? line(dueNotice(due, builtOn), "Review decisions") : null}
