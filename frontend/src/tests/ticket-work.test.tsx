@@ -4,7 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
-import { TicketState, WAIT_REASON_FIRST } from "@/features/cards/TicketState";
+import { TicketState } from "@/features/cards/TicketState";
+import { WAIT_REASON_FIRST } from "@/features/cards/ticketWork";
 import { TicketCard } from "@/features/loops/TicketCard";
 import { api } from "@/lib/api";
 import { keys } from "@/lib/queries";
@@ -62,6 +63,7 @@ const DECISION = {
   waiting_reason: "Which key store do we use?",
   waiting_set_at: NOW,
   waiting_set_by: PERSON_ID,
+  waiting_stop: null,
   state: "needs_input",
   needs_person: true,
 } as const;
@@ -137,6 +139,28 @@ describe("where a Ticket's work is done and what it waits for", () => {
       {
         route: `PATCH ${CARD_PATH}/wait`,
         body: { version: 3, waiting_for: "information", reason: "The token's lifetime" },
+      },
+    ]);
+  });
+
+  it("shows the line of the stop list a wait names", async () => {
+    const { section } = await renderSection(ticketCard({ ...DECISION, waiting_stop: "Money" }));
+    expect(section).toHaveTextContent("Stop: Money");
+  });
+
+  it("lets a person name a line of the Loop's stop list for a wait, or none", async () => {
+    const { work, section, user } = await renderSection(ticketCard());
+    await user.click(within(section).getByRole("button", { name: "Mark as waiting…" }));
+    await user.type(within(section).getByLabelText("Why (required)"), "Payments go live.");
+    const stop = await within(section).findByLabelText("Stop (optional)");
+    expect(stop).toHaveValue("");
+    await user.selectOptions(stop, "Money");
+    await user.click(within(section).getByRole("button", { name: "Save the wait" }));
+    await waitFor(() => expect(section).toHaveTextContent("Stop: Money"));
+    expect(work.state.bodies).toEqual([
+      {
+        route: `PATCH ${CARD_PATH}/wait`,
+        body: { version: 3, waiting_for: "decision", reason: "Payments go live.", stop: "Money" },
       },
     ]);
   });

@@ -12,4 +12,5 @@ export type * from "./summary";
 export type * from "./card";
 export type * from "./discussion";
 export type * from "./notes";
+export type * from "./poc";
 export type * from "./work";

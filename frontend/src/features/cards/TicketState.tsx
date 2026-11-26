@@ -1,23 +1,19 @@
 import { CircleCheck } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { useRef, type ReactNode } from "react";
 import { StateChip } from "@/components/ui/chip";
-import { Field, Select, Textarea } from "@/components/ui/input";
 import { ReasonButton } from "@/components/ui/reason-button";
 import { useAnnounce } from "@/components/ui/useAnnounce";
-import type { Card, Wait } from "@/lib/types";
+import type { Card } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { DoneAwaitingLine } from "./AwaitingConfirmation";
 import { doneAwaiting, stateReason } from "./ticketRules";
-import { SAVING, WAIT_HINTS, WAIT_LABELS, WAITING_REASON_MAX, WAITS } from "./ticketWork";
-import { useCardWork } from "./useCardWork";
+import { WaitForm } from "./TicketWaitForm";
+import { SAVING, WAIT_LABELS, WAITS } from "./ticketWork";
+import { useCardWork, type WaitValue } from "./useCardWork";
 import { focusTarget, useFocusAfter } from "./useFocusAfter";
 
 const LINK =
   "w-fit rounded text-[13px] text-[var(--primary)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--ring)] disabled:opacity-50";
-
-/** Why Save the wait cannot be pressed yet. */
-export const WAIT_REASON_FIRST = "Write why it waits first.";
 
 /**
  * Where the Ticket stands, under its column in the rail: the state with what holds it up, the wait
@@ -68,7 +64,7 @@ export function TicketState({
   const waiting = card.waiting_for !== "nothing";
   const markWaiting = () => focusTarget(root.current, "mark-waiting");
 
-  async function save(value: { waiting_for: Wait; reason: string }): Promise<boolean> {
+  async function save(value: WaitValue): Promise<boolean> {
     const saved = await work.setWait(value);
     if (saved) {
       announce("Wait saved");
@@ -107,6 +103,8 @@ export function TicketState({
         <CurrentWait card={card} pending={work.pending} onClear={() => void clear()} />
       ) : completed || readOnly ? null : waitOpen ? (
         <WaitForm
+          boardId={boardId}
+          loopId={loopId}
           pending={work.pending}
           onSave={save}
           onCancel={(opener) => {
@@ -152,7 +150,10 @@ export function TicketState({
   );
 }
 
-/** The wait that is set: its kind, its reason, who set it and when, and the way to clear it. */
+/**
+ * The wait that is set: its kind, its reason, the line of the Loop's stop list it names (when it
+ * names one), who set it and when, and the way to clear it.
+ */
 function CurrentWait({
   card,
   pending,
@@ -171,6 +172,12 @@ function CurrentWait({
       </p>
       {card.waiting_reason ? (
         <p className="m-0 whitespace-pre-wrap">{card.waiting_reason}</p>
+      ) : null}
+      {card.waiting_stop ? (
+        <p className="m-0">
+          <span className="font-medium">Stop: </span>
+          {card.waiting_stop}
+        </p>
       ) : null}
       <p className="m-0 text-xs text-[var(--muted-foreground)]">
         Set by {card.waiting_set_by ?? "unknown"} · {formatDateTime(card.waiting_set_at)}
@@ -193,79 +200,6 @@ function CurrentWait({
           </ReasonButton>
         </>
       )}
-    </div>
-  );
-}
-
-/**
- * "Mark as waiting": the kind and a required reason, saved together. The kind takes the focus when
- * the form opens; Cancel hands `onCancel` what had the focus before, so it can go back there.
- */
-function WaitForm({
-  pending,
-  onSave,
-  onCancel,
-}: {
-  pending: boolean;
-  onSave: (value: { waiting_for: Wait; reason: string }) => Promise<boolean>;
-  onCancel: (opener: HTMLElement | null) => void;
-}) {
-  const [kind, setKind] = useState<Wait>("decision");
-  const [reason, setReason] = useState("");
-  // Read while the form is first drawn, before its field takes the focus: the control that opened it.
-  const [opener] = useState(() =>
-    document.activeElement instanceof HTMLElement ? document.activeElement : null,
-  );
-  const trimmed = reason.trim();
-
-  return (
-    <div className="grid gap-2 rounded-md bg-[var(--surface-raised)] p-2.5">
-      <Field label="It waits for" htmlFor="ticket-wait-kind" hint={WAIT_HINTS[kind]}>
-        <Select
-          id="ticket-wait-kind"
-          autoFocus
-          value={kind}
-          onChange={(event) => {
-            const value = WAITS.find((wait) => wait === event.target.value);
-            if (value) setKind(value);
-          }}
-        >
-          {WAITS.map((wait) => (
-            <option key={wait} value={wait}>
-              {WAIT_LABELS[wait]}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <Field
-        label="Why (required)"
-        htmlFor="ticket-wait-reason"
-        hint={`What has to be answered, at most ${WAITING_REASON_MAX} characters.`}
-      >
-        <Textarea
-          id="ticket-wait-reason"
-          className="min-h-16"
-          maxLength={WAITING_REASON_MAX}
-          required
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </Field>
-      <div className="flex flex-wrap items-start gap-2">
-        <ReasonButton
-          variant="secondary"
-          size="sm"
-          disabledReason={!trimmed ? WAIT_REASON_FIRST : pending ? SAVING : null}
-          onClick={() => {
-            void onSave({ waiting_for: kind, reason: trimmed });
-          }}
-        >
-          Save the wait
-        </ReasonButton>
-        <Button variant="ghost" size="sm" onClick={() => onCancel(opener)}>
-          Cancel
-        </Button>
-      </div>
     </div>
   );
 }

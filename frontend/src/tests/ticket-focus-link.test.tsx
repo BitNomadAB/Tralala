@@ -24,6 +24,7 @@ const WAITING = {
   waiting_for: "decision",
   waiting_reason: "Which key store?",
   waiting_set_by: "Ada Member",
+  waiting_stop: null,
   waiting_set_at: NOW,
   state: "needs_input",
 } satisfies Partial<CardDetail>;

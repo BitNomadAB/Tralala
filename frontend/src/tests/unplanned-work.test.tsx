@@ -107,6 +107,7 @@ function card(extra: Partial<Card>): Card {
     waiting_reason: "",
     waiting_set_at: null,
     waiting_set_by: null,
+    waiting_stop: null,
     state: "ready",
     needs_person: false,
     unreported_since: null,

@@ -10,6 +10,7 @@ import { InfoEditor } from "./InfoEditor";
 import { InfoSaveGuard } from "./InfoSaveGuard";
 import { KeptCandidate } from "./KeptCandidate";
 import { LoopPlanTabs } from "./LoopPlanTabs";
+import { LoopStops } from "./LoopStops";
 import { FOR_PEOPLE_PURPOSE, rewriteBlockedReason, type PlanScope, type PlanTab } from "./loopUi";
 import { PlanDocumentPanel } from "./PlanDocumentPanel";
 import { approvalLine, approveRoadmapLabel, reviewPlan, ticketCount } from "./roadmapPlan";
@@ -21,8 +22,9 @@ import { useGenerationRun } from "./useGenerationRun";
 import { usePlanReview } from "./usePlanReview";
 
 /**
- * The Loop's planning documents on the Plan tab: Info, Analysis and RoadMap with their generation
- * controls, the run's progress, the kept candidate and the person's review. `tab` is the open
+ * The Loop's planning documents on the Plan tab: Info (with the Loop's stop list under it), Analysis
+ * and RoadMap with their generation controls, the run's progress, the kept candidate and the
+ * person's review. `tab` is the open
  * document, which the page keeps in the URL (`?doc=`).
  */
 export function LoopDocumentsPanel({
@@ -252,25 +254,28 @@ export function LoopDocumentsPanel({
           })}
 
           {tab === "info" ? (
-            <InfoEditor
-              value={planReview.infoDraft ?? documents?.info.current_content ?? ""}
-              onChange={planReview.setInfoDraft}
-              isHuman={isHuman}
-              readOnly={readOnly}
-              saving={planReview.saveInfo.isPending}
-              changed={planReview.infoDraft !== null}
-              onSave={requestInfoSave}
-              saveGuard={
-                confirmInfoSave && activeRunId !== null ? (
-                  <InfoSaveGuard
-                    pending={generation.cancelRun.isPending || planReview.saveInfo.isPending}
-                    onCancelRunFirst={cancelRunThenSave}
-                    onSaveAnyway={saveInfoNow}
-                    onBack={() => setConfirmInfoSave(false)}
-                  />
-                ) : undefined
-              }
-            />
+            <>
+              <InfoEditor
+                value={planReview.infoDraft ?? documents?.info.current_content ?? ""}
+                onChange={planReview.setInfoDraft}
+                isHuman={isHuman}
+                readOnly={readOnly}
+                saving={planReview.saveInfo.isPending}
+                changed={planReview.infoDraft !== null}
+                onSave={requestInfoSave}
+                saveGuard={
+                  confirmInfoSave && activeRunId !== null ? (
+                    <InfoSaveGuard
+                      pending={generation.cancelRun.isPending || planReview.saveInfo.isPending}
+                      onCancelRunFirst={cancelRunThenSave}
+                      onSaveAnyway={saveInfoNow}
+                      onBack={() => setConfirmInfoSave(false)}
+                    />
+                  ) : undefined
+                }
+              />
+              <LoopStops boardId={boardId} loopId={loop.id} canEdit={isHuman && !readOnly} />
+            </>
           ) : (
             <ScopeReview
               scopeLabel={scopeLabel}

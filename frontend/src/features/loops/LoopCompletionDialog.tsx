@@ -8,9 +8,9 @@ import { decidedByText } from "@/features/history/askedThrough";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { keys, useLoopDocuments, useReadiness } from "@/lib/queries";
-import type { Loop } from "@/lib/types";
 import { LoopCloseDialog, type CompletionDialogProps } from "./LoopCloseDialog";
 import { OpenDelivery } from "./OpenDelivery";
+import { PocUnanswered } from "./PocUnanswered";
 import { QaDecision } from "./QaDecision";
 import { UnplannedWarning } from "./Unplanned";
 
@@ -35,14 +35,8 @@ function PlannedCompletionDialog({
   isHuman,
   onClose,
   onChanged,
-}: {
-  boardId: string;
-  loop: Loop;
-  open: boolean;
-  isHuman: boolean;
-  onClose: () => void;
-  onChanged: () => void;
-}) {
+  openDecisions = 0,
+}: CompletionDialogProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [qaStatus, setQaStatus] = useState<QaStatus>("not_tested");
@@ -107,6 +101,12 @@ function PlannedCompletionDialog({
           </p>
         ) : (
           <div className="flex flex-col gap-4">
+            <PocUnanswered
+              boardId={boardId}
+              loopId={loop.id}
+              open={openDecisions}
+              onLeave={onClose}
+            />
             <section className="flex flex-col gap-2">
               <h2 className="text-sm font-medium">1. Accept the implementation</h2>
               {accepted ? <p className="text-xs text-[var(--foreground)]">{accepted}</p> : null}

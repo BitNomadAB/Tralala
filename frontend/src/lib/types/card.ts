@@ -80,6 +80,8 @@ export interface Card {
   waiting_set_at: string | null;
   /** The actor id of whoever set the wait. */
   waiting_set_by: string | null;
+  /** The line of the Loop's stop list the wait names; null for none. */
+  waiting_stop: string | null;
   /** Null on a completed Ticket. */
   state: TicketState | null;
   /** It needs input, or it is ready and the task itself is a person's. */

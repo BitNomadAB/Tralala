@@ -11,6 +11,7 @@ import { discussionsApi } from "./discussions";
 import { loopsApi } from "./loops";
 import { loopWorkflowApi } from "./loopWorkflow";
 import { notesApi } from "./notes";
+import { pocApi } from "./poc";
 import { templatesApi } from "./templates";
 import { ticketWorkApi } from "./ticketWork";
 
@@ -30,4 +31,5 @@ export const api = {
   ...notesApi,
   ...attachmentsApi,
   ...discussionsApi,
+  ...pocApi,
 };

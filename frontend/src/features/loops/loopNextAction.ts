@@ -1,7 +1,7 @@
 import type { LoopStage, LoopSummary } from "@/lib/types";
 
 /** The Loop page's tabs (`?tab=`; the Kanban is the default and needs none). */
-export type LoopTab = "kanban" | "plan" | "notes";
+export type LoopTab = "kanban" | "plan" | "notes" | "decisions";
 
 /** What a Loop needs next, worded for a person: the line, the button and where it leads. */
 export interface LoopNextAction {
