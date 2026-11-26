@@ -181,7 +181,9 @@ Every Ticket can have **discussions**: ask the agents a question about it, read 
 let them answer again, then decide ([Ask the agents](#ask-the-agents) below). A discussion is
 capped at four rounds, with a token and time budget per run, so a question cannot quietly spend the
 afternoon. Use one when you want the agents' opinion before you settle the plan; use `@Agent` in a
-comment when you want one answer next to the work.
+comment when you want one answer next to the work. A question that is about no single Ticket goes
+in the board's own **Discussions**
+([Discussions on the board](Loops.md#discussions-on-the-board)).
 
 ### Plan with your coding agent
 

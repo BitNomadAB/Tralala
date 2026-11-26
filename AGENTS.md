@@ -101,8 +101,10 @@ message broker.
     Tickets by filter, attachments, search), work on a Ticket (summaries, a wait, assigning,
     moving, commenting, completing), work outside the plan (`create_ticket`, an unplanned Ticket),
     planning (a Loop, its Info, the instructions a board agent writes to, a worker's own analysis
-    and RoadMap as candidates, the briefs for people), the Loop's notes and discussions; the
-    handlers live in `services/agent_tools_*.py`.
+    and RoadMap as candidates, the briefs for people), the Loop's notes, and discussions on a
+    Ticket or on the board (asking the local agents, opening, listing, replying, closing and
+    reopening), with the `notices` every answer carries while a discussion waits for the key
+    (`services/discussion_notices.py`); the handlers live in `services/agent_tools_*.py`.
     `tests/unit/test_worker_catalogue.py` holds every entry to this: a handler it can read, a
     section in `/llms.txt` and an entry in the MCP tool list, declared scopes that the opening
     `actor.require` checks of the handler (or of what it hands the actor to) cover and do not

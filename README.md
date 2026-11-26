@@ -86,7 +86,8 @@ Change it under **Settings → Your password**. More in
   signed-in person approves plans, confirms human-only actions, accepts QA and finalizes a Loop.
 - **QA handover** with one QA Task carrying an agent view and a human view of the same scenarios,
   scenario-level results, and a human acceptance decision.
-- **Discussions** per Ticket with the role agents: asked from the Ticket and read as a short sign
+- **Discussions** per Ticket or on the board, closed by the one who opened them and never deleted,
+  with the role agents: asked from the Ticket or the board and read as a short sign
   (a verdict, one sentence, each agent's position and one recommendation, with the reasoning as raw
   text), sequential rounds, a duplicate guard, consensus that needs an actual review round,
   pause/resume/stop, a cap of four rounds plus a default token and time budget per run, and an

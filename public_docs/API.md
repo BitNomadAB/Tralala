@@ -94,8 +94,8 @@ hold (`GET /meta` publishes both lists as `member_token_scopes` and `token_scope
 | `agents:read` | read agents and role templates | never |
 | `agents:write` | create, change, duplicate and test agents and role templates | never |
 | `agents:admin` | delete agents and role templates, restore the factory roles | never |
-| `discussions:read` | read discussions | member-issued |
-| `discussions:write` | open, continue and run discussions | member-issued |
+| `discussions:read` | read discussions and mark them read | member-issued |
+| `discussions:write` | open, continue, run, close and reopen discussions | member-issued |
 | `discussions:admin` | record the decision on a discussion (a person only) | never |
 | `discussions:vote` | reserved; no route requires it today | admin-issued |
 | `credentials:admin` | manage the installation-wide API keys | never |
@@ -650,10 +650,13 @@ Editing a template therefore changes future work and never rewrites a past discu
 | Method | Path | Scope |
 | --- | --- | --- |
 | GET | `/discussions/inbox` (the threads that are not cancelled on every board that is not archived, by who they wait for) | `boards:read` + `discussions:read` |
-| GET | `/boards/{board_id}/discussions?status=&card_id=&limit=` | `discussions:read` |
-| POST | `/boards/{board_id}/discussions` | `discussions:write` |
+| GET | `/boards/{board_id}/discussions?status=&card_id=&scope=&state=&limit=` | `discussions:read` |
+| POST | `/boards/{board_id}/discussions` (on a Ticket with `card_id`, on the board with a `title` and no `card_id`) | `discussions:write` |
 | GET | `/boards/{board_id}/discussions/{id}` (participants, messages with their answers, positions, synthesis, votes, runs) | `discussions:read` |
+| POST | `/boards/{board_id}/discussions/{id}/read` (sets the caller's read marker to now) | `discussions:read` |
 | POST | `/boards/{board_id}/discussions/{id}/messages` | `discussions:write` |
+| POST | `/boards/{board_id}/discussions/{id}/close` (the opener only) | `discussions:write` |
+| POST | `/boards/{board_id}/discussions/{id}/reopen` (the opener or a signed-in person) | `discussions:write` |
 | POST | `/boards/{board_id}/discussions/{id}/start` (runs one round inline by default) | `discussions:write` |
 | POST | `/boards/{board_id}/discussions/{id}/runs` (`202`, always background) | `discussions:write` |
 | GET | `/boards/{board_id}/discussions/{id}/runs` / `.../runs/{run_id}` | `discussions:read` |
@@ -662,27 +665,60 @@ Editing a template therefore changes future work and never rewrites a past discu
 | GET | `/boards/{board_id}/discussions/{id}/events` (`text/event-stream`) | `discussions:read` |
 | GET | `/boards/{board_id}/discussions/{id}/events/history?after=&limit=` | `discussions:read` |
 
-A discussion references exactly one existing ticket and resolves its Loop through that ticket: every
-thread carries `loop_id`, `loop_key`, `loop_name` and `ticket_key`, so the client shows the owning
-Loop and deep-links the Ticket as `/boards/{board_id}/loops/{loop_id}?card={card_id}`. Participants
-keep an immutable role snapshot, so later template edits never rewrite what an agent was told.
+A discussion lives on one existing Ticket or on the board itself. One on a Ticket resolves its Loop
+through that Ticket: the thread carries `card_id`, `loop_id`, `loop_key`, `loop_name` and
+`ticket_key`, so the client shows the owning Loop and deep-links the Ticket as
+`/boards/{board_id}/loops/{loop_id}?card={card_id}`. One on the board is created without `card_id`
+and needs a `title` (`422 validation_failed` without one); those fields are `null`, and a round
+briefs its agents with the board's name, its description and the title in place of a Ticket.
+Opening a thread on a Ticket of a completed, archived or cancelled Loop answers
+`409 loop_read_only`.
+Participants keep an immutable role snapshot, so later template edits never rewrite what an agent
+was told.
+
+A message's body is `{content, parent_message_id, ticket}`: `ticket` is the Ticket it points at, by
+its id or its key on the same board (`422 validation_failed` when it is not there), and the message
+answers it as `ref_ticket` (`{card_id, ticket_key, title, loop_id}`, or `null`). Every message
+carries `after_closed`, true for one written while the thread was closed.
+
+**Closing.** `POST .../close` is for the one who opened the thread, a person or a key alike;
+anyone else, a signed-in person included, is refused with `403 not_opener`. A thread already
+closed or cancelled answers `409`, and so does one with a run running or paused. A closed thread
+has `status: closed` and `closed_at`; it stays readable, still takes messages (each
+`after_closed: true`, the thread stays closed, and `auto_run` reads `thread_closed`), never starts a
+round (`start` and `runs` answer `409`) and takes no review (`409`). `POST .../reopen` is for the
+opener or a signed-in person (`403 not_opener` for another key) and only for a closed thread
+(`409` otherwise); the thread is `discussing` again and `closed_at` is `null`. Both answer the
+thread, need an active board (`409 board_archived`) and, on a Ticket, a Loop that takes writes
+(`409 loop_read_only`). Nothing deletes a thread or a message.
+
+**Read markers.** Every thread in the board's list, its detail and every inbox row carry two fields
+for the caller: `unread`, true when someone else wrote a message after the caller's read marker,
+or wrote one at all when the caller has none, and `opened_by_me`. Reading with `GET` never moves a
+marker. `POST .../read` sets it to now and answers `{discussion_id, actor_id, last_read_at}`; it is
+the reader's own bookkeeping, so it needs only `discussions:read` and works on an archived board
+too. The worker tool `read_discussion` sets it as it reads.
 
 `GET /discussions/inbox` is the Discussions page: every thread that is not cancelled, on every
 board that is not archived, as `{items, total}`. An archived board refuses a decision
 (`409 board_archived`), so none of its threads waits for anyone; they are read on its Tickets. A row is `{discussion_id, board_id, board_name, loop_id, loop_key,
 loop_name, card_id, ticket_key, card_title, question, status, run_state, verdict, counts,
 participant_count, round_count, max_rounds, asked_by_name, last_activity_at, decided_by_name,
-waits_for}`: `question` is the thread's goal, `verdict` the newest round's suggested verdict (`null`
-before a round), `counts` how its answers stand (`go`, `stop`, `unclear`, `missing`), and
-`waits_for` is `your_decision` (no run active and not decided, a thread without a round included),
-`agents` (a run is running or paused) or `nobody` (approved, vetoed or rework requested). The rows
-come in that order, each group newest activity first, at most 200 of them with `total` counting
-all; a board whose database cannot be opened is left out. It discloses board metadata, so it
+waits_for, unread, opened_by_me}`: `question` is the thread's goal, `verdict` the newest round's
+suggested verdict (`null` before a round), `counts` how its answers stand (`go`, `stop`, `unclear`,
+`missing`), and `waits_for` is `nobody` (closed by its opener, without any of the board's agents,
+or approved, vetoed or rework requested), `agents` (a run is running or paused) or
+`your_decision` (otherwise, a thread without a round included). A thread on the board has `null`
+for its Loop and Ticket fields. The rows come `your_decision` first, then `agents`, then `nobody`,
+in each group the unread ones first and then newest activity first, at most 200 of them with
+`total` counting all; a board whose database cannot be opened is left out. It discloses board metadata, so it
 requires both `boards:read` and `discussions:read`. It replaces `GET /discussions/overview`, which
 is gone, as is the per-board summary it answered.
 
-`card_id` on the board's list narrows it to one Ticket's threads (the Ticket's Discussions tab), and
-every thread carries `decided_by_name`, the person who recorded its newest decision, or `null`.
+`card_id` on the board's list narrows it to one Ticket's threads (the Ticket's Discussions tab),
+`scope` to the threads on the board itself (`board`) or on a Ticket (`ticket`), and `state` to the
+`closed` ones or the `open` ones (every other status). Every thread carries `decided_by_name`, the
+person who recorded its newest decision, or `null`, and `closed_at`.
 
 `start` and `runs` take the same body:
 
@@ -805,7 +841,8 @@ Event types: `message_created`, `agent_started`, `agent_completed`, `agent_faile
 `run_finished` and `round_completed`. Every event is committed in the same transaction as the change
 it describes, so the log is always ahead of (never behind) the stream. `message_created` carries a
 participant's `answer`, `agent_completed` its `position` and `format`, and `round_completed` the
-round's `synthesis`.
+round's `synthesis`. `message_created` also carries `after_closed` and `ref_ticket`, and closing or
+reopening a thread records `discussion_status_changed` with its `status` and `closed_at`.
 
 ### Attachments
 
@@ -1116,9 +1153,22 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
 | `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Every Ticket carries its face, or the RoadMap answers `422 face_invalid` naming each Ticket, field and rule. The answer's `decision_link` is the RoadMap in the Plan tab, where a person reviews it. Both take an optional `brief`, stored as the human view instead of asking a board agent; an analysis brief that breaks the sign answers `422 brief_invalid`. Over an approved RoadMap `403 human_action_required` with `decision_link`, the RoadMap in the Plan tab |
 | `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval (`403 human_action_required` with `decision_link`, that document in the Plan tab); an analysis brief keeps the sign (`422 brief_invalid`) |
-| `ask_agents` | `discussions:write` | Create a `roundtable` discussion on the Ticket (the board's askable agents, or `agent_ids`; at most 12) and run one round; returns the synthesis, the positions and the structured answers, which the person sees in the Ticket's Discussions tab as the sign; without an askable agent `422 no_agents_available` |
-| `read_discussion` | `discussions:read` | Read a thread: the newest round's synthesis, each agent's position and the messages with their structured answers (the reasoning, which the person reads as raw text, with `include_prose`) |
-| `reply_discussion` | `discussions:write` | Post a follow-up and, unless `run=false`, let the agents answer it in the same thread |
+| `ask_agents` | `discussions:write` | Create a `roundtable` discussion with the board's askable agents (or `agent_ids`; at most 12) on the Ticket (`card_id`) or, without one, on the board under a `title`, and run one round; returns the synthesis, the positions and the structured answers, which the person sees as the sign; with `background` it answers at once with the `discussion_id` and `next_step`; without an askable agent `422 no_agents_available` |
+| `read_discussion` | `discussions:read` | Read a thread: its `title`, `state` (`open` or `closed`) and `closed_at`, the newest round's synthesis, each agent's position and the messages with their structured answers, `after_closed` and `ref_ticket` (the reasoning, which the person reads as raw text, with `include_prose`); sets the caller's read marker |
+| `reply_discussion` | `discussions:write` | Post a message, in a closed thread too (`after_closed`), optionally pointing at a `ticket` (id or key); a round runs by default in a thread on a Ticket and only with `run: true` on the board, and never in a thread without agents or one that is closed, cancelled, approved or vetoed, where `run_skipped` (`no_participants`, `thread_closed`, `thread_decided`) says why; `background` as for `ask_agents` |
+| `open_discussion` | `discussions:write` | Open a discussion on the board with a `title`, the `question` and an optional `ticket` it points at: no agent and no round; others answer with `reply_discussion` |
+| `list_discussions` | `discussions:read` | A board's threads, newest activity first, never their text: `scope` (`board`, `ticket`), `state` (`open`, `closed`), `unread`, `mine` and `limit` (50, at most 100); each row with its id, title, status, state, Ticket, opener, `opened_by_me`, last activity, message count and `unread`, and `more` |
+| `close_discussion` | `discussions:write` | Close a thread the caller opened; anyone else `403 not_opener` |
+| `reopen_discussion` | `discussions:write` | Open a closed thread again; the opener or a signed-in person, another key `403 not_opener` |
+
+Every successful tool answer carries `notices` when a discussion waits for the key, read on the
+call's `board_id` (every board that is not archived for `whoami` and `list_boards`, with
+`boards:read`) and only with `discussions:read`: `{count, threads, more, next_step}`, at most five
+threads `{discussion_id, board_id, title, reason}` newest activity first, the title cut to 80
+characters and never a message's text. `reason` is `comment_after_close`, `answer`, `run_failed`
+or `open_question`; [Agent usage](Agent_usage.md) gives each rule. A thread leaves once the key
+reads it with `read_discussion`. Reading the notices never fails the tool: a failure is logged
+(`tool_notices_failed`) and the answer goes out without them.
 
 What waits for a person carries `decision_link`, the address of the tab, dialog or button in the
 web UI where that person takes the decision. It is a path inside Tralala, or a full address on
