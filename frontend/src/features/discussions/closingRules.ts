@@ -13,11 +13,16 @@ export function isThreadClosed(discussion: Discussion): boolean {
   return discussion.status === "closed";
 }
 
-/** Whether "Close discussion" is offered: to the opener, on a thread not closed or cancelled. */
+/** The statuses that end a thread without its opener: cancelled, or decided by a person. */
+const FINISHED = new Set(["cancelled", "approved", "vetoed"]);
+
+/**
+ * Whether "Close discussion" is offered: to the opener, on a thread that is not closed, cancelled
+ * or decided. A person's approval or veto has finished the thread, and the server refuses to close
+ * it, since opening it again would undo that decision.
+ */
 export function mayClose(discussion: Discussion): boolean {
-  return (
-    discussion.opened_by_me && !isThreadClosed(discussion) && discussion.status !== "cancelled"
-  );
+  return discussion.opened_by_me && !isThreadClosed(discussion) && !FINISHED.has(discussion.status);
 }
 
 /** Why "Close discussion" cannot be pressed now, or null when it can (the server's rule). */

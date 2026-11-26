@@ -30,12 +30,14 @@ import { discussion } from "./msw/discussions";
 const CLOSED = discussion({ status: "closed", closed_at: "2026-11-08T12:00:00Z" });
 
 describe("closing a discussion", () => {
-  it("is offered to the opener of a thread that is neither closed nor cancelled", () => {
+  it("is offered to the opener of a thread that is neither closed, cancelled nor decided", () => {
     expect(mayClose(discussion())).toBe(true);
     expect(mayClose(discussion({ opened_by_me: false }))).toBe(false);
     expect(mayClose(CLOSED)).toBe(false);
     expect(mayClose(discussion({ status: "cancelled" }))).toBe(false);
-    expect(mayClose(discussion({ status: "approved" }))).toBe(true);
+    expect(mayClose(discussion({ status: "approved" }))).toBe(false);
+    expect(mayClose(discussion({ status: "vetoed" }))).toBe(false);
+    expect(mayClose(discussion({ status: "rework_requested" }))).toBe(true);
   });
 
   it("waits for a run to stop and for a change on its way", () => {

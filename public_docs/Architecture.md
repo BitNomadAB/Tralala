@@ -341,9 +341,12 @@ one publish path covers both streams.
 
 ## Discussion navigation
 
-A thread belongs to one Ticket and therefore to one Loop, so every thread records `loop_id`,
-`loop_key`, `loop_name` and `ticket_key`, and a discussion is only ever reached through its Ticket.
-Nothing infers a default Loop from a board.
+A thread belongs to one Ticket, and through it to one Loop, or to the board itself. A thread on a
+Ticket records `loop_id`, `loop_key`, `loop_name` and `ticket_key` and is reached through its
+Ticket. A thread on the board has none of them: it is reached at
+`/boards/:boardId/discussions/:discussionId`, from the board page's Discussions
+(`features/discussions/BoardDiscussions.tsx`, where **New discussion** starts one) and from the
+inbox. Nothing infers a default Loop from a board.
 
 - **The Ticket's Discussions tab** (`features/cards/TicketDiscussions.tsx`) reads
   `GET /boards/{board_id}/discussions?card_id=` as the Ticket opens, so its count is right at once.
