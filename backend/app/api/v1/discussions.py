@@ -12,6 +12,7 @@ from ...schemas.discussions import (
     DiscussionListOut,
     DiscussionMessageCreate,
     DiscussionOut,
+    DiscussionReadOut,
     DiscussionReview,
     DiscussionRunListOut,
     DiscussionRunOut,
@@ -47,7 +48,13 @@ def list_discussions(
 ) -> dict[str, object]:
     ctx.actor.require("discussions:read")
     items = ctx.services.discussion.list(
-        board_id, status=status, card_id=card_id, limit=limit, scope=scope, state=state
+        board_id,
+        status=status,
+        card_id=card_id,
+        limit=limit,
+        scope=scope,
+        state=state,
+        reader=ctx.actor,
     )
     return ok(request, {"items": items, "total": len(items)})
 
@@ -75,7 +82,20 @@ def get_discussion(
     request: Request,
 ) -> dict[str, object]:
     ctx.actor.require("discussions:read")
-    return ok(request, ctx.services.discussion.get(board_id, discussion_id))
+    return ok(request, ctx.services.discussion.get(board_id, discussion_id, reader=ctx.actor))
+
+
+@router.post(
+    "/boards/{board_id}/discussions/{discussion_id}/read",
+    response_model=Envelope[DiscussionReadOut],
+)
+def mark_discussion_read(
+    board_id: str,
+    discussion_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    return ok(request, ctx.services.discussion.mark_read(ctx.actor, board_id, discussion_id))
 
 
 @router.post(

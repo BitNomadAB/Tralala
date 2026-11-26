@@ -257,6 +257,10 @@ class DiscussionOut(OutModel):
     last_activity_at: str
     # When the opener closed the thread; null while it is not closed.
     closed_at: str | None = None
+    # For the one who asks: someone else wrote something after their read marker (or they have
+    # none), and whether they opened the thread. Both false where no reader is known.
+    unread: bool = False
+    opened_by_me: bool = False
     participant_count: int = 0
     message_count: int = 0
     # Who recorded the newest outcome (approve, veto or rework); null before any decision.
@@ -281,6 +285,14 @@ class DiscussionListOut(OutModel):
     total: int
 
 
+class DiscussionReadOut(OutModel):
+    """The reader's marker on a thread: everything written until ``last_read_at`` is read."""
+
+    discussion_id: str
+    actor_id: str
+    last_read_at: str
+
+
 class DiscussionInboxCountsOut(OutModel):
     """How the newest round's answers stand; before a round every participant is missing."""
 
@@ -293,9 +305,11 @@ class DiscussionInboxCountsOut(OutModel):
 class DiscussionInboxRowOut(OutModel):
     """One thread in the Discussions inbox, on any board the person may read.
 
-    ``waits_for``: ``your_decision`` (no run active and not decided), ``agents`` (a run is running
-    or paused) or ``nobody`` (approved, vetoed or rework requested). ``verdict`` is the newest
-    round's suggested verdict, null before a round.
+    ``waits_for``: ``nobody`` (closed by its opener, or no local agent takes part, or approved,
+    vetoed or rework requested), ``agents`` (a run is running or paused) or ``your_decision``
+    (otherwise). ``verdict`` is the newest round's suggested verdict, null before a round.
+    ``unread``: someone else wrote after the reader's marker, or the reader has none;
+    ``opened_by_me``: the reader opened the thread.
     """
 
     discussion_id: str
@@ -319,11 +333,14 @@ class DiscussionInboxRowOut(OutModel):
     last_activity_at: str
     decided_by_name: str | None = None
     waits_for: str
+    unread: bool = False
+    opened_by_me: bool = False
 
 
 class DiscussionInboxOut(OutModel):
     """At most 200 rows: those that wait for a decision, then those the agents are talking in,
-    then the decided ones, each newest activity first; ``total`` counts every row."""
+    then those that wait for nobody, each group unread first, then newest activity first;
+    ``total`` counts every row."""
 
     items: list[DiscussionInboxRowOut]
     total: int

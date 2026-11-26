@@ -4,7 +4,7 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
-from typing import Protocol
+from typing import Protocol, TypedDict
 from uuid import uuid4
 
 from ..core.context import ActorContext
@@ -41,6 +41,14 @@ DiscussionEntry = dict[str, object]
 """A thread as the API answers it: its columns plus counts, its ticket and, in detail, its
 participants, messages (each with its structured ``answer``), the newest round's ``synthesis``,
 each participant's current ``positions``, the votes and the runs."""
+
+
+class ReadMarker(TypedDict):
+    """When an actor last read a thread."""
+
+    discussion_id: str
+    actor_id: str
+    last_read_at: str
 
 
 class BoardChecks(Protocol):
@@ -139,10 +147,34 @@ def detail(repos: BoardRepositories, thread: DiscussionThreadsRow) -> Discussion
     }
 
 
+def unread_for(
+    repos: BoardRepositories, reader: ActorContext | None, threads: Sequence[DiscussionThreadsRow]
+) -> set[str]:
+    """Which of the threads hold something new for the reader, in one read for all of them; a
+    caller without a reader reads nothing as new."""
+    if reader is None or not threads:
+        return set()
+    return repos.reads.unread_ids(reader.actor_id, [thread.id for thread in threads])
+
+
+def opened_by(reader: ActorContext | None, thread: DiscussionThreadsRow) -> bool:
+    """Whether the reader opened the thread; a caller without a reader opened none."""
+    return reader is not None and reader.actor_id == thread.created_by_actor_id
+
+
 def serialize(
-    repos: BoardRepositories, thread: DiscussionThreadsRow, *, with_detail: bool = False
+    repos: BoardRepositories,
+    thread: DiscussionThreadsRow,
+    *,
+    with_detail: bool = False,
+    reader: ActorContext | None = None,
+    unread: bool = False,
 ) -> DiscussionEntry:
+    """A thread as the API answers it; ``unread`` (from ``unread_for``) and ``opened_by_me`` are
+    the reader's."""
     entry: DiscussionEntry = dict(asdict(thread))
+    entry["unread"] = unread
+    entry["opened_by_me"] = opened_by(reader, thread)
     entry["participant_count"] = repos.participants.count(thread.id)
     entry["message_count"] = repos.messages.count(thread.id)
     card = repos.cards.get(thread.card_id) if thread.card_id is not None else None
@@ -344,10 +376,13 @@ class DiscussionService:
         limit: int = 50,
         scope: DiscussionScope | None = None,
         state: ThreadState | None = None,
+        reader: ActorContext | None = None,
     ) -> list[DiscussionEntry]:
         """The board's threads by most recent activity, optionally in one status or on one
         Ticket (its Discussions tab); ``scope`` keeps those on the board itself (``board``) or
-        those on a Ticket (``ticket``), ``state`` the open or the closed ones."""
+        those on a Ticket (``ticket``), ``state`` the open or the closed ones. Each row says
+        whether it holds something new for ``reader`` (``unread``) and whether the reader opened
+        it (``opened_by_me``); without a reader both are false. Reading never moves a marker."""
         self.board_service.require_row(board_id)
         with self.store.reader(board_id) as repos:
             threads = repos.threads.newest(
@@ -357,21 +392,42 @@ class DiscussionService:
                 board_level=None if scope is None else scope == "board",
                 state=state,
             )
-            return [serialize(repos, thread) for thread in threads]
+            unread = unread_for(repos, reader, threads)
+            return [
+                serialize(repos, thread, reader=reader, unread=thread.id in unread)
+                for thread in threads
+            ]
 
-    def get(self, board_id: str, discussion_id: str) -> DiscussionEntry:
+    def get(
+        self, board_id: str, discussion_id: str, *, reader: ActorContext | None = None
+    ) -> DiscussionEntry:
+        """One thread with its detail, ``unread`` and ``opened_by_me`` as ``list`` reads them."""
         self.board_service.require_row(board_id)
         with self.store.reader(board_id) as repos:
-            return serialize(repos, _thread(repos, discussion_id), with_detail=True)
+            thread = _thread(repos, discussion_id)
+            unread = thread.id in unread_for(repos, reader, [thread])
+            return serialize(repos, thread, with_detail=True, reader=reader, unread=unread)
 
     def inbox(self, actor: ActorContext) -> InboxPage:
         """What waits for the person across every board that is not archived: the threads that
-        wait for a decision, the ones the agents are talking in and the decided ones
-        (``discussion_inbox``). It names the boards, so it needs ``boards:read`` beside
-        ``discussions:read``."""
+        wait for a decision, the ones the agents are talking in and the decided ones, each with
+        what is new for the actor (``discussion_inbox``). It names the boards, so it needs
+        ``boards:read`` beside ``discussions:read``."""
         actor.require("boards:read")
         actor.require("discussions:read")
-        return read_inbox(self.registry, self.store)
+        return read_inbox(self.registry, self.store, actor)
+
+    def mark_read(self, actor: ActorContext, board_id: str, discussion_id: str) -> ReadMarker:
+        """The actor has read the thread now: its marker moves to now (made if it is new), so
+        only what someone else writes after it is new for the actor. It is the reader's own
+        bookkeeping, so it needs ``discussions:read`` and is kept on an archived board too."""
+        actor.require("discussions:read")
+        self.board_service.require_row(board_id)
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            _thread(repos, discussion_id)
+            repos.reads.mark(discussion_id, actor.actor_id, now=now)
+        return {"discussion_id": discussion_id, "actor_id": actor.actor_id, "last_read_at": now}
 
     # --- commands ------------------------------------------------------------
 
