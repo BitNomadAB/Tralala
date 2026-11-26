@@ -11,9 +11,11 @@ const TITLE =
   "m-0 mt-2.5 max-w-[40ch] text-balance text-[24px] font-semibold leading-tight tracking-[-0.01em] text-[var(--foreground)]";
 
 /**
- * The discussion's head, the Ticket head's shape: Back to the Ticket, the Ticket's key and
- * "Discussion", Open as page and Close where the host offers them; the question as the view's
- * heading, the line "Asked by … · n agents · round r of max", then the sign and the actions.
+ * The discussion's head, the Ticket head's shape: Back to the Ticket (Back to the board for a
+ * discussion on the board), the Ticket's key and "Discussion", Open as page and Close where the
+ * host offers them; the question as the view's heading, or on the board the title with the
+ * question under it; the line "Asked by … · n agents · round r of max", then the sign and the
+ * actions.
  * The heading takes focus from a script (`headingRef`, tabIndex -1): when the view opens over the
  * Kanban, and when an action took away the control that had focus.
  */
@@ -41,6 +43,7 @@ export function DiscussionHead({
   children: ReactNode;
 }) {
   const Heading = level === 1 ? "h1" : "h2";
+  const onBoard = discussion.card_id === null;
   return (
     <div
       className={cn(
@@ -52,7 +55,7 @@ export function DiscussionHead({
         {onBack ? (
           <button type="button" className={cn(ICON_BUTTON, "-ml-2")} onClick={onBack}>
             <ChevronLeft size={15} aria-hidden="true" />
-            <span>Back to the Ticket</span>
+            <span>{onBoard ? "Back to the board" : "Back to the Ticket"}</span>
           </button>
         ) : null}
         {discussion.ticket_key ? (
@@ -79,9 +82,14 @@ export function DiscussionHead({
       </div>
       {titleWrap(
         <Heading ref={headingRef} tabIndex={-1} className={TITLE}>
-          {discussion.goal}
+          {onBoard ? discussion.title : discussion.goal}
         </Heading>,
       )}
+      {onBoard ? (
+        <p className="m-0 mt-2 max-w-[62ch] text-[16px] leading-normal text-[var(--foreground)]">
+          {discussion.goal}
+        </p>
+      ) : null}
       <p className="m-0 mt-2 text-[13.5px] text-[var(--muted-foreground)]">
         {askedLine(discussion)}
       </p>

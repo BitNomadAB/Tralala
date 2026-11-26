@@ -1,13 +1,10 @@
 import { useEffect, useId, useRef, useState, type ReactElement } from "react";
-import { useNavigate } from "react-router-dom";
 import { SectionHeader } from "@/components/ui/section";
 import { Segmented, SegmentedPanel } from "@/components/ui/segmented";
-import { useToast } from "@/components/ui/useToast";
 import { useAuth } from "@/features/auth/useAuth";
-import { ticketPagePath } from "@/features/cards/ticketRules";
 import { describeError } from "@/lib/describeError";
 import type { Discussion } from "@/lib/types";
-import { clipboard, cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { DiscussionActions } from "./DiscussionActions";
 import { roundLines, stanceRows } from "./discussionData";
 import { DiscussionExpanders } from "./DiscussionExpanders";
@@ -16,7 +13,6 @@ import { DiscussionRail } from "./DiscussionRail";
 import { DiscussionRaw } from "./DiscussionRaw";
 import { DiscussionReply } from "./DiscussionReply";
 import {
-  discussionPagePath,
   isClosed,
   isTalking,
   outcomeLine,
@@ -25,13 +21,13 @@ import {
   roundsText,
   stateOf,
   talkRounds,
-  ticketOnLoopPath,
   type RunAction,
 } from "./discussionRules";
 import { DiscussionSign } from "./DiscussionSign";
 import { ReviewDiscussionDialog } from "./ReviewDiscussionDialog";
 import { StanceRows } from "./StanceRows";
 import { TalkItOutDialog } from "./TalkItOutDialog";
+import { useDiscussionLinks } from "./useDiscussionLinks";
 import { useDiscussionNotices } from "./useDiscussionNotices";
 import { useDiscussionView, type DiscussionViewState } from "./useDiscussionView";
 import { useFocusRescue } from "./useFocusRescue";
@@ -70,7 +66,7 @@ export function DiscussionView({
   /** The Loop the host shows, for a thread whose Ticket the API could not place. */
   loopId?: string | undefined;
   host: DiscussionHost;
-  /** Back to the Ticket in the dialog; elsewhere it navigates to the Ticket. */
+  /** Back to the Ticket in the dialog; elsewhere it navigates to the Ticket or the board. */
   onBack?: ((cardId: string) => void) | undefined;
   onClose?: (() => void) | undefined;
   titleWrap?: ((heading: ReactElement) => ReactElement) | undefined;
@@ -137,8 +133,6 @@ function DiscussionLayout({
   titleWrap: ((heading: ReactElement) => ReactElement) | undefined;
   focusOnOpen: boolean;
 }) {
-  const navigate = useNavigate();
-  const toast = useToast();
   const { actor } = useAuth();
   const idBase = useId();
   const headingId = useId();
@@ -153,33 +147,7 @@ function DiscussionLayout({
   const modal = host === "modal";
   // The sections under the question: h2 under the page's h1, h3 under the dialog's h2.
   const level = host === "page" ? 2 : 3;
-  const cardId = discussion.card_id;
-  const pagePath = loopId ? discussionPagePath(boardId, loopId, cardId, discussion.id) : null;
-
-  const back = onBack
-    ? () => {
-        onBack(cardId);
-      }
-    : loopId
-      ? () =>
-          void navigate(
-            host === "page"
-              ? ticketPagePath(boardId, loopId, cardId)
-              : ticketOnLoopPath(boardId, loopId, cardId),
-          )
-      : undefined;
-
-  function copyLink() {
-    const target = clipboard();
-    if (!target || pagePath === null) {
-      toast.push({ title: "This browser does not allow copying here", variant: "warning" });
-      return;
-    }
-    target.writeText(`${window.location.origin}${pagePath}`).then(
-      () => toast.push({ title: "Link copied", variant: "success" }),
-      () => toast.push({ title: "Could not copy", variant: "error" }),
-    );
-  }
+  const links = useDiscussionLinks({ boardId, loopId, discussion, host, onBack });
 
   const synthesis = discussion.synthesis ?? null;
   const { runs, run } = view;
@@ -207,8 +175,8 @@ function DiscussionLayout({
         headingRef={heading}
         titleWrap={titleWrap}
         page={host === "page"}
-        onBack={back}
-        onOpenPage={host !== "page" && pagePath ? () => void navigate(pagePath) : undefined}
+        onBack={links.back}
+        onOpenPage={host !== "page" ? links.openPage : undefined}
         onClose={modal ? onClose : undefined}
       >
         <DiscussionSign
@@ -222,7 +190,7 @@ function DiscussionLayout({
           onTalk={() => runs.setTalkOpen(true)}
           onControl={control}
           busy={busy}
-          onCopyLink={copyLink}
+          onCopyLink={links.copyLink}
         />
       </DiscussionHead>
       <div
@@ -279,7 +247,7 @@ function DiscussionLayout({
             stoppedBy={stoppedBy}
             onControl={control}
             busy={busy}
-            onCopyLink={copyLink}
+            onCopyLink={links.copyLink}
             level={level}
           />
         </div>

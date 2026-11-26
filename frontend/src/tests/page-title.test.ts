@@ -31,6 +31,9 @@ describe("a page's document title", () => {
     expect(pageTitle({ page: "discussion", question: "Is a day long enough?" })).toBe(
       "Is a day long enough? · Discussion · Tralala",
     );
+    expect(pageTitle({ page: "board-discussion", title: "Export", board: "Payments" })).toBe(
+      "Export · Payments · Tralala",
+    );
   });
 
   it("names the kind of page while its name is loading", () => {
@@ -44,6 +47,9 @@ describe("a page's document title", () => {
       "Unplanned · L · Tralala",
     );
     expect(pageTitle({ page: "discussion", question: undefined })).toBe("Discussion · Tralala");
+    expect(pageTitle({ page: "board-discussion", title: undefined, board: undefined })).toBe(
+      "Discussion · Tralala",
+    );
   });
 
   it("says whether a settings editor makes something new or edits a named thing", () => {

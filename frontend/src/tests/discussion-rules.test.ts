@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { roundLines, stanceRows } from "@/features/discussions/discussionData";
 import {
   askedLine,
+  boardDiscussionPath,
+  boardPagePath,
   confidenceText,
   decisionAllowed,
   decisionBlocked,
+  discussionAddress,
   discussionPagePath,
   holdOutsLine,
   positionLabel,
@@ -166,6 +169,14 @@ describe("the words of the view", () => {
       "/boards/b/loops/l/tickets/c/discussions/d",
     );
     expect(ticketOnLoopPath("b", "l", "c")).toBe("/boards/b/loops/l?card=c");
+  });
+
+  it("builds the page of a discussion on the board, and picks the Ticket's page when there is one", () => {
+    expect(boardPagePath("b 1")).toBe("/boards/b%201");
+    expect(boardDiscussionPath("b", "d 1")).toBe("/boards/b/discussions/d%201");
+    expect(discussionAddress("b", "l", "c", "d")).toBe("/boards/b/loops/l/tickets/c/discussions/d");
+    expect(discussionAddress("b", null, null, "d")).toBe("/boards/b/discussions/d");
+    expect(discussionAddress("b", null, "c", "d")).toBe("/boards/b/discussions/d");
   });
 });
 

@@ -11,6 +11,7 @@ import { replyNeedsRound, reviewedText, type ReviewDecision } from "./discussion
 import { runView } from "./runEvents";
 import { useDiscussionEvents } from "./useDiscussionEvents";
 import { useDiscussionRuns } from "./useDiscussionRuns";
+import { useMarkRead } from "./useMarkRead";
 
 const EVENT_PAGE = 500;
 
@@ -79,6 +80,7 @@ export function useDiscussionView(boardId: string, discussionId: string) {
     refetchInterval: (current) =>
       current.state.data?.run_state === "running" && !live ? 1500 : false,
   });
+  useMarkRead(boardId, discussionId, query.data !== undefined);
   const running = query.data?.run_state === "running";
   const events = useQuery({
     queryKey: keys.discussionEvents(boardId, discussionId),

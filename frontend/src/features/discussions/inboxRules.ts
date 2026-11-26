@@ -5,6 +5,7 @@ import { formatDate } from "@/lib/utils";
 import {
   by,
   countText,
+  discussionAddress,
   discussionPagePath,
   isTalking,
   positionLabel,
@@ -113,12 +114,9 @@ export function inboxMeta(row: DiscussionInboxRow): string {
   return parts.join(" · ");
 }
 
-/** Where an inbox row leads: the discussion as a page of its Ticket, else the board. */
+/** Where an inbox row leads: the discussion as a page of its Ticket, else of its board. */
 export function inboxPath(row: DiscussionInboxRow): string {
-  if (row.loop_id && row.card_id) {
-    return discussionPagePath(row.board_id, row.loop_id, row.card_id, row.discussion_id);
-  }
-  return `/boards/${encodeURIComponent(row.board_id)}`;
+  return discussionAddress(row.board_id, row.loop_id, row.card_id, row.discussion_id);
 }
 
 /** What the dashboard's "Waits for you" says on a discussion row. */

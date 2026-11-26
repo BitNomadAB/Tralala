@@ -166,6 +166,31 @@ export function discussionPagePath(
   return `${ticketPagePath(boardId, loopId, cardId)}/discussions/${encodeURIComponent(discussionId)}`;
 }
 
+/** The board's page, where a discussion on the board goes back to. */
+export function boardPagePath(boardId: string): string {
+  return `/boards/${encodeURIComponent(boardId)}`;
+}
+
+/** A discussion on the board itself, with no Ticket: `/boards/:boardId/discussions/:id`. */
+export function boardDiscussionPath(boardId: string, discussionId: string): string {
+  return `${boardPagePath(boardId)}/discussions/${encodeURIComponent(discussionId)}`;
+}
+
+/**
+ * Where a discussion is a page: of its Ticket when it has one in a Loop, else of the board. This
+ * is the address "Open as page", "Copy link" and a row of a list lead to.
+ */
+export function discussionAddress(
+  boardId: string,
+  loopId: string | null,
+  cardId: string | null,
+  discussionId: string,
+): string {
+  return loopId && cardId
+    ? discussionPagePath(boardId, loopId, cardId, discussionId)
+    : boardDiscussionPath(boardId, discussionId);
+}
+
 /** The Ticket over the Kanban (`?card=`), where the rail's Ticket fact leads. */
 export function ticketOnLoopPath(boardId: string, loopId: string, cardId: string): string {
   return `${loopPagePath(boardId, loopId)}?card=${encodeURIComponent(cardId)}`;
