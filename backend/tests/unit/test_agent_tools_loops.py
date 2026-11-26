@@ -625,6 +625,41 @@ def test_a_roadmap_handed_in_while_the_loop_is_planning_waits_for_a_person_and_l
     }
 
 
+def test_an_empty_analysis_draft_left_by_a_reset_is_asked_for_and_waits_for_no_review(
+    settings: Settings,
+) -> None:
+    """A reset of the analysis leaves an empty draft as the current revision, which keeps the Loop
+    in ``analysis_review`` (``compute_stage``): L-1 has an analysis to review, L-2 only the draft.
+    """
+    state = BoardState()
+    state.documents = [
+        document_row("i1", uid(1), "info"),
+        document_row("a1", uid(1), "analysis_ai", status="ready_for_review", info="i1"),
+        document_row("h1", uid(1), "analysis", status="ready_for_review", analysis_ai="a1"),
+        document_row("i2", uid(2), "info"),
+        document_row("a2", uid(2), "analysis_ai", content="", info="i2"),
+        document_row("h2", uid(2), "analysis", content="", analysis_ai="a2"),
+    ]
+    loops = [loop(uid(1), "analysis_review", 1), loop(uid(2), "analysis_review", 2)]
+    answer = loop_summaries(loop_world(settings, loops, state=state), READER, ask())
+    by_key = {row["key"]: row for row in rows(answer)}
+    assert {
+        key: (row["next"], row["waiting_on"], row["decision_link"]) for key, row in by_key.items()
+    } == {
+        "L-1": (
+            "A person reviews the analysis and approves it or asks for changes.",
+            "person",
+            f"/boards/{BOARD_ID}/loops/{uid(1)}?tab=plan&doc=analysis",
+        ),
+        "L-2": (
+            "The analysis has no text: ask for one (run_analysis) or hand one in, written to a "
+            "board agent's instructions (read_instructions, then write_analysis).",
+            "agent",
+            None,
+        ),
+    }
+
+
 # --- the Tickets the key has not reported on -----------------------------------------------------
 
 THEN = (

@@ -120,7 +120,10 @@ export function loopNextAction(summary: LoopSummary): LoopNextAction {
     case "analysis_review":
       return review(summary, "analysis");
     case "planning":
-      return act("Waits for the RoadMap", "Ask for RoadMap", "plan");
+      // A RoadMap handed in keeps the Loop in planning while a person reviews it.
+      return summary.waiting_on === "person"
+        ? review(summary, "RoadMap")
+        : act("Waits for the RoadMap", "Ask for RoadMap", "plan");
     case "roadmap_review":
       return review(summary, "RoadMap");
     case "replanning":

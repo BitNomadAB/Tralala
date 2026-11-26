@@ -186,6 +186,13 @@ def next_step(
             "agent",
         )
     if stage == "analysis_review":
+        if not any(_written(entry["documents"][kind]) for kind in ("analysis_ai", "analysis")):
+            # The empty draft a reset leaves keeps the Loop in this stage with nothing to review.
+            return (
+                "The analysis has no text: ask for one (run_analysis) or hand one in, written to "
+                "a board agent's instructions (read_instructions, then write_analysis).",
+                "agent",
+            )
         return review_step("analysis", [states["analysis_ai"], states["analysis"]])
     roadmap = [states["roadmap_ai"], states["roadmap"]]
     if stage == "planning":

@@ -60,6 +60,13 @@ describe("a Loop's next action for a person", () => {
       false,
       "plan",
     ]);
+    // A RoadMap handed in keeps the Loop in planning: the server says a person reviews it.
+    expect(shown(summary("a", "A", { stage: "planning", waiting_on: "person" }))).toEqual([
+      "Waits for you to approve the RoadMap",
+      "Approve RoadMap",
+      true,
+      "plan",
+    ]);
     expect(shown(summary("a", "A", { stage: "replanning", waiting_on: "agent" }))[1]).toBe(
       "Ask for RoadMap",
     );
@@ -203,6 +210,16 @@ describe("the dashboard's summaries", () => {
     expect(rows.map((row) => `${row.board.name}/${row.loop.name}`)).toEqual([
       "One/Review",
       "Three/Review",
+    ]);
+  });
+
+  it("lists a Loop in planning whose RoadMap waits for a person's review", () => {
+    const handedIn = summary("p", "Plan", { stage: "planning", waiting_on: "person" });
+    const asked = summary("q", "Asked", { stage: "planning", waiting_on: "agent" });
+    const entries = new Map([["b1", { loops: [asked, handedIn], pending: false, failed: false }]]);
+    const rows = waitingRows([board("b1", "One")], entries);
+    expect(rows.map((row) => [row.loop.name, row.action.label, row.action.tab])).toEqual([
+      ["Plan", "Approve RoadMap", "plan"],
     ]);
   });
 
