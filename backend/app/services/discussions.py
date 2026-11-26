@@ -4,30 +4,33 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
-from typing import Protocol
+from typing import Protocol, TypedDict
 from uuid import uuid4
 
 from ..core.context import ActorContext
 from ..core.dates import utcnow
 from ..core.errors import Conflict, Forbidden, NotFound, ValidationFailure
 from ..db.generated.board import (
+    CardsRow,
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
     DiscussionThreadsRow,
 )
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..repositories.discussions import ThreadState
 from ..repositories.registry import RegistryUnitOfWork
-from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
-from .activity import activity_entry
+from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate, DiscussionScope
+from .activity import discussion_activity
 from .agents import RoleSnapshot
 from .discussion_answers import read_answer
+from .discussion_closing import CLOSED, close_thread, reopen_thread
 from .discussion_inbox import InboxPage, decided_by, read_inbox
 from .discussion_synthesis import latest_answers, positions, read_synthesis
 from .events import HUMAN_REVIEW_COMPLETED, MESSAGE_CREATED, STATUS_CHANGED, Event, EventService
 from .loops import ensure_ticket_writable
 from .mentions import extract_mentions
-from .runs import RunEntry, RunService, recent_runs
+from .runs import CLOSED_THREAD_STATUSES, RunEntry, RunService, recent_runs
 
 REVIEW_DECISIONS = {"approve": "approved", "veto": "vetoed", "rework": "rework_requested"}
 # A human message starts one round in these modes; manual threads wait for an explicit run.
@@ -38,6 +41,14 @@ DiscussionEntry = dict[str, object]
 """A thread as the API answers it: its columns plus counts, its ticket and, in detail, its
 participants, messages (each with its structured ``answer``), the newest round's ``synthesis``,
 each participant's current ``positions``, the votes and the runs."""
+
+
+class ReadMarker(TypedDict):
+    """When an actor last read a thread."""
+
+    discussion_id: str
+    actor_id: str
+    last_read_at: str
 
 
 class BoardChecks(Protocol):
@@ -72,12 +83,39 @@ def _thread(repos: BoardRepositories, discussion_id: str) -> DiscussionThreadsRo
     return thread
 
 
-def message_entry(row: DiscussionMessagesRow) -> dict[str, object]:
-    """A message as the API answers it: its columns, with the stored answer read as ``answer``."""
+def ref_ticket(card: CardsRow | None) -> dict[str, object] | None:
+    """The Ticket a message points at, as the message answers it."""
+    if card is None:
+        return None
+    return {
+        "card_id": card.id,
+        "ticket_key": card.ticket_key,
+        "title": card.title,
+        "loop_id": card.loop_id,
+    }
+
+
+def message_entry(row: DiscussionMessagesRow, ref: CardsRow | None = None) -> dict[str, object]:
+    """A message as the API answers it: its columns, with the stored answer read as ``answer``,
+    ``after_closed`` as a boolean and the Ticket it points at (``ref``) as ``ref_ticket``."""
     entry: dict[str, object] = dict(asdict(row))
     entry.pop("answer_json", None)
+    entry.pop("ref_card_id", None)
     entry["answer"] = read_answer(row.answer_json)
+    entry["after_closed"] = bool(row.after_closed)
+    entry["ref_ticket"] = ref_ticket(ref)
     return entry
+
+
+def resolve_ticket(repos: BoardRepositories, reference: str) -> CardsRow:
+    """The Ticket a message points at, by its id or its key, on this board; unknown is ``422``."""
+    card = repos.cards.get(reference) or repos.cards.by_key(reference)
+    if card is None:
+        raise ValidationFailure(
+            "The message points at a Ticket that is not on this board",
+            details={"field": "ticket", "ticket": reference},
+        )
+    return card
 
 
 def detail(repos: BoardRepositories, thread: DiscussionThreadsRow) -> DiscussionEntry:
@@ -91,9 +129,16 @@ def detail(repos: BoardRepositories, thread: DiscussionThreadsRow) -> Discussion
         stored = read_synthesis(newest.synthesis_json)
         synthesis = None if stored is None else {**stored, "round_id": newest.id}
     runs: list[RunEntry] = recent_runs(repos, thread.id)
+    refs = {
+        card_id: repos.cards.get(card_id)
+        for card_id in {row.ref_card_id for row in messages if row.ref_card_id is not None}
+    }
     return {
         "participants": [asdict(row) for row in participants],
-        "messages": [message_entry(row) for row in messages],
+        "messages": [
+            message_entry(row, refs.get(row.ref_card_id) if row.ref_card_id else None)
+            for row in messages
+        ],
         "positions": positions(participants, latest_answers(messages, participants)),
         "synthesis": synthesis,
         "votes": repos.votes.with_names(thread.id),
@@ -102,10 +147,34 @@ def detail(repos: BoardRepositories, thread: DiscussionThreadsRow) -> Discussion
     }
 
 
+def unread_for(
+    repos: BoardRepositories, reader: ActorContext | None, threads: Sequence[DiscussionThreadsRow]
+) -> set[str]:
+    """Which of the threads hold something new for the reader, in one read for all of them; a
+    caller without a reader reads nothing as new."""
+    if reader is None or not threads:
+        return set()
+    return repos.reads.unread_ids(reader.actor_id, [thread.id for thread in threads])
+
+
+def opened_by(reader: ActorContext | None, thread: DiscussionThreadsRow) -> bool:
+    """Whether the reader opened the thread; a caller without a reader opened none."""
+    return reader is not None and reader.actor_id == thread.created_by_actor_id
+
+
 def serialize(
-    repos: BoardRepositories, thread: DiscussionThreadsRow, *, with_detail: bool = False
+    repos: BoardRepositories,
+    thread: DiscussionThreadsRow,
+    *,
+    with_detail: bool = False,
+    reader: ActorContext | None = None,
+    unread: bool = False,
 ) -> DiscussionEntry:
+    """A thread as the API answers it; ``unread`` (from ``unread_for``) and ``opened_by_me`` are
+    the reader's."""
     entry: DiscussionEntry = dict(asdict(thread))
+    entry["unread"] = unread
+    entry["opened_by_me"] = opened_by(reader, thread)
     entry["participant_count"] = repos.participants.count(thread.id)
     entry["message_count"] = repos.messages.count(thread.id)
     card = repos.cards.get(thread.card_id) if thread.card_id is not None else None
@@ -128,7 +197,8 @@ def serialize(
 
 
 class DiscussionService:
-    """Ticket-bound discussions. Participants keep an immutable role snapshot."""
+    """Discussions on a Ticket or on the board itself. Participants keep an immutable role
+    snapshot."""
 
     def __init__(
         self,
@@ -175,16 +245,16 @@ class DiscussionService:
         repos: BoardRepositories,
         actor: ActorContext,
         action: str,
-        card_id: str | None,
+        thread: DiscussionThreadsRow,
         changes: Mapping[str, object],
         now: str,
     ) -> None:
         repos.activity.add(
-            activity_entry(
+            discussion_activity(
                 actor,
                 action=action,
-                entity_type="card",
-                entity_id=card_id or "",
+                card_id=thread.card_id,
+                discussion_id=thread.id,
                 changes=changes,
                 entry_id=self._new_id(),
                 timestamp=now,
@@ -215,7 +285,7 @@ class DiscussionService:
         now = self._clock()
         with self.store.writer(board_id) as repos:
             thread = _thread(repos, discussion_id)
-            if thread.status in {"approved", "vetoed", "cancelled"}:
+            if thread.status in CLOSED_THREAD_STATUSES:
                 raise Conflict("Discussion is already closed", details={"status": thread.status})
             if repos.runs.active(discussion_id) is not None:
                 raise Conflict("A run is still active; stop it before reviewing")
@@ -245,7 +315,7 @@ class DiscussionService:
                 repos,
                 actor,
                 "discussion.reviewed",
-                thread.card_id,
+                thread,
                 {"discussion_id": discussion_id, "decision": decision},
                 now,
             )
@@ -262,6 +332,39 @@ class DiscussionService:
         self._publish(board_id, review_event, status_event)
         return self.get(board_id, discussion_id)
 
+    def close(self, actor: ActorContext, board_id: str, discussion_id: str) -> DiscussionEntry:
+        """The opener closes the thread (``discussion_closing``)."""
+        actor.require("discussions:write")
+        self.board_service.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            event = close_thread(
+                repos,
+                actor,
+                discussion_id,
+                now=self._clock(),
+                new_id=self._new_id,
+                events=self.events,
+            )
+        self._publish(board_id, event)
+        return self.get(board_id, discussion_id)
+
+    def reopen(self, actor: ActorContext, board_id: str, discussion_id: str) -> DiscussionEntry:
+        """The opener, or a signed-in person, opens a closed thread again
+        (``discussion_closing``)."""
+        actor.require("discussions:write")
+        self.board_service.ensure_active(board_id)
+        with self.store.writer(board_id) as repos:
+            event = reopen_thread(
+                repos,
+                actor,
+                discussion_id,
+                now=self._clock(),
+                new_id=self._new_id,
+                events=self.events,
+            )
+        self._publish(board_id, event)
+        return self.get(board_id, discussion_id)
+
     # --- queries -------------------------------------------------------------
 
     def list(
@@ -271,29 +374,60 @@ class DiscussionService:
         status: str | None = None,
         card_id: str | None = None,
         limit: int = 50,
+        scope: DiscussionScope | None = None,
+        state: ThreadState | None = None,
+        reader: ActorContext | None = None,
     ) -> list[DiscussionEntry]:
         """The board's threads by most recent activity, optionally in one status or on one
-        Ticket (its Discussions tab)."""
+        Ticket (its Discussions tab); ``scope`` keeps those on the board itself (``board``) or
+        those on a Ticket (``ticket``), ``state`` the open or the closed ones. Each row says
+        whether it holds something new for ``reader`` (``unread``) and whether the reader opened
+        it (``opened_by_me``); without a reader both are false. Reading never moves a marker."""
         self.board_service.require_row(board_id)
         with self.store.reader(board_id) as repos:
             threads = repos.threads.newest(
-                status=status or None, card_id=card_id or None, limit=limit
+                status=status or None,
+                card_id=card_id or None,
+                limit=limit,
+                board_level=None if scope is None else scope == "board",
+                state=state,
             )
-            return [serialize(repos, thread) for thread in threads]
+            unread = unread_for(repos, reader, threads)
+            return [
+                serialize(repos, thread, reader=reader, unread=thread.id in unread)
+                for thread in threads
+            ]
 
-    def get(self, board_id: str, discussion_id: str) -> DiscussionEntry:
+    def get(
+        self, board_id: str, discussion_id: str, *, reader: ActorContext | None = None
+    ) -> DiscussionEntry:
+        """One thread with its detail, ``unread`` and ``opened_by_me`` as ``list`` reads them."""
         self.board_service.require_row(board_id)
         with self.store.reader(board_id) as repos:
-            return serialize(repos, _thread(repos, discussion_id), with_detail=True)
+            thread = _thread(repos, discussion_id)
+            unread = thread.id in unread_for(repos, reader, [thread])
+            return serialize(repos, thread, with_detail=True, reader=reader, unread=unread)
 
     def inbox(self, actor: ActorContext) -> InboxPage:
         """What waits for the person across every board that is not archived: the threads that
-        wait for a decision, the ones the agents are talking in and the decided ones
-        (``discussion_inbox``). It names the boards, so it needs ``boards:read`` beside
-        ``discussions:read``."""
+        wait for a decision, the ones the agents are talking in and the decided ones, each with
+        what is new for the actor (``discussion_inbox``). It names the boards, so it needs
+        ``boards:read`` beside ``discussions:read``."""
         actor.require("boards:read")
         actor.require("discussions:read")
-        return read_inbox(self.registry, self.store)
+        return read_inbox(self.registry, self.store, actor)
+
+    def mark_read(self, actor: ActorContext, board_id: str, discussion_id: str) -> ReadMarker:
+        """The actor has read the thread now: its marker moves to now (made if it is new), so
+        only what someone else writes after it is new for the actor. It is the reader's own
+        bookkeeping, so it needs ``discussions:read`` and is kept on an archived board too."""
+        actor.require("discussions:read")
+        self.board_service.require_row(board_id)
+        now = self._clock()
+        with self.store.writer(board_id) as repos:
+            _thread(repos, discussion_id)
+            repos.reads.mark(discussion_id, actor.actor_id, now=now)
+        return {"discussion_id": discussion_id, "actor_id": actor.actor_id, "last_read_at": now}
 
     # --- commands ------------------------------------------------------------
 
@@ -305,40 +439,32 @@ class DiscussionService:
         now = self._clock()
         discussion_id = self._new_id()
         with self.store.writer(board_id) as repos:
-            card = repos.cards.get(payload.card_id)
-            if card is None or card.archived_at is not None:
-                raise ValidationFailure(
-                    "Discussion must reference an existing ticket",
-                    details={"card_id": payload.card_id},
-                )
-            ensure_ticket_writable(repos, payload.card_id)
-            title = (payload.title or f"{card.title} — discussion").strip()
+            title = self._title(repos, payload)
             snapshots = self._snapshots(payload.participant_ids)
-            repos.threads.add(
-                DiscussionThreadsRow(
-                    id=discussion_id,
-                    card_id=payload.card_id,
-                    title=title,
-                    goal=payload.goal,
-                    mode=payload.mode,
-                    status="open",
-                    created_by_actor_id=actor.actor_id,
-                    created_by_type=actor.actor_type,
-                    created_by_name=actor.actor_name,
-                    max_rounds=payload.max_rounds,
-                    origin_comment_id=None,
-                    escalation_depth=0,
-                    created_at=now,
-                    updated_at=now,
-                    last_activity_at=now,
-                    round_count=0,
-                    run_state="idle",
-                    tokens_used=0,
-                    elapsed_ms=0,
-                    closed_at=None,
-                    closed_by_actor_id=None,
-                )
+            thread = DiscussionThreadsRow(
+                id=discussion_id,
+                card_id=payload.card_id,
+                title=title,
+                goal=payload.goal,
+                mode=payload.mode,
+                status="open",
+                created_by_actor_id=actor.actor_id,
+                created_by_type=actor.actor_type,
+                created_by_name=actor.actor_name,
+                max_rounds=payload.max_rounds,
+                origin_comment_id=None,
+                escalation_depth=0,
+                created_at=now,
+                updated_at=now,
+                last_activity_at=now,
+                round_count=0,
+                run_state="idle",
+                tokens_used=0,
+                elapsed_ms=0,
+                closed_at=None,
+                closed_by_actor_id=None,
             )
+            repos.threads.add(thread)
             for snapshot in snapshots:
                 repos.participants.add(
                     DiscussionParticipantsRow(
@@ -382,11 +508,31 @@ class DiscussionService:
                 repos,
                 actor,
                 "discussion.created",
-                payload.card_id,
+                thread,
                 {"discussion_id": discussion_id, "title": title},
                 now,
             )
         return self.get(board_id, discussion_id)
+
+    @staticmethod
+    def _title(repos: BoardRepositories, payload: DiscussionCreate) -> str:
+        """The thread's title. On a Ticket: the one given, or one named after the Ticket, which
+        must exist and whose Loop must take writes. On the board: the one given, which the schema
+        requires."""
+        if payload.card_id is None:
+            if payload.title is None or not payload.title.strip():
+                raise ValidationFailure(
+                    "A discussion on the board needs a title", details={"field": "title"}
+                )
+            return payload.title.strip()
+        card = repos.cards.get(payload.card_id)
+        if card is None or card.archived_at is not None:
+            raise ValidationFailure(
+                "Discussion must reference an existing ticket",
+                details={"card_id": payload.card_id},
+            )
+        ensure_ticket_writable(repos, payload.card_id)
+        return (payload.title or f"{card.title} — discussion").strip()
 
     def _snapshots(self, participant_ids: list[str]) -> list[RoleSnapshot]:
         """Each participant's role as it is now; only an enabled agent may take part."""
@@ -410,6 +556,9 @@ class DiscussionService:
         discussion_id: str,
         payload: DiscussionMessageCreate,
     ) -> DiscussionEntry:
+        """Post a message, which may point at a Ticket (``payload.ticket``). A closed thread takes
+        it as a comment after the close (``after_closed``), stays closed and never starts a round;
+        ``auto_run`` then reads ``thread_closed``."""
         actor.require("discussions:write")
         self.board_service.ensure_active(board_id)
         now = self._clock()
@@ -419,6 +568,8 @@ class DiscussionService:
                 payload.parent_message_id, discussion_id
             ):
                 raise ValidationFailure("Parent message does not belong to this discussion")
+            ref = resolve_ticket(repos, payload.ticket) if payload.ticket else None
+            closed = thread.status == CLOSED
             message_id = self._new_id()
             repos.messages.add(
                 DiscussionMessagesRow(
@@ -437,16 +588,17 @@ class DiscussionService:
                     round_number=0,
                     content_sha256=None,
                     answer_json="{}",
-                    after_closed=0,
-                    ref_card_id=None,
+                    after_closed=int(closed),
+                    ref_card_id=ref.id if ref is not None else None,
                 )
             )
+            # A closed thread keeps its status: only an open one becomes ``discussing``.
             repos.threads.note_message(discussion_id, now=now)
             self._log(
                 repos,
                 actor,
                 "discussion.message_posted",
-                thread.card_id,
+                thread,
                 {"discussion_id": discussion_id, "message_id": message_id},
                 now,
             )
@@ -465,12 +617,18 @@ class DiscussionService:
                     "author_type": actor.actor_type,
                     "author_name": actor.actor_name,
                     "content": payload.content,
+                    "after_closed": closed,
+                    "ref_ticket": ref_ticket(ref),
                 },
                 actor,
             )
         self._publish(board_id, message_event)
-        auto_run = self._auto_run(
-            actor, board_id, discussion_id, thread.mode, payload.content, participants
+        auto_run = (
+            "thread_closed"
+            if closed
+            else self._auto_run(
+                actor, board_id, discussion_id, thread.mode, payload.content, participants
+            )
         )
         detail = self.get(board_id, discussion_id)
         detail["auto_run"] = auto_run
