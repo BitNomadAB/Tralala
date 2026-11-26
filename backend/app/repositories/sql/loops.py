@@ -26,12 +26,13 @@ _ADD = text(
     "INSERT INTO loops (id, name, goal, sequence, key_prefix, key, stage, version,"
     " current_plan_id, analysis_approval_id, roadmap_approval_id, implementation_approval_id,"
     " qa_approval_id, active_qa_cycle_id, history_id, created_by_actor_id, created_by_actor_type,"
-    " created_by_name, created_at, updated_at, archived_at, cancelled_at, completed_at)"
+    " created_by_name, created_at, updated_at, archived_at, cancelled_at, completed_at,"
+    " stops_json)"
     " VALUES (:id, :name, :goal, :sequence, :key_prefix, :key, :stage, :version,"
     " :current_plan_id, :analysis_approval_id, :roadmap_approval_id, :implementation_approval_id,"
     " :qa_approval_id, :active_qa_cycle_id, :history_id, :created_by_actor_id,"
     " :created_by_actor_type, :created_by_name, :created_at, :updated_at, :archived_at,"
-    " :cancelled_at, :completed_at)"
+    " :cancelled_at, :completed_at, :stops_json)"
 )
 _COMPLETE = text(
     "UPDATE loops SET stage = 'completed', completed_at = :now, history_id = :history,"
@@ -45,6 +46,7 @@ _ARCHIVE = text(
     "UPDATE loops SET archived_at = :now, version = version + 1, updated_at = :now WHERE id = :id"
 )
 _SET_STAGE = text("UPDATE loops SET stage = :stage, updated_at = :now WHERE id = :id")
+_SET_STOPS = text("UPDATE loops SET stops_json = :stops, updated_at = :now WHERE id = :id")
 _BUMP_VERSION = text("UPDATE loops SET version = version + 1, updated_at = :now WHERE id = :id")
 _ACCEPT_DELIVERY = text(
     "UPDATE loops SET implementation_approval_id = :implementation, qa_approval_id = :qa,"
@@ -125,6 +127,7 @@ class SqlLoopRepository:
                 "archived_at": row.archived_at,
                 "cancelled_at": row.cancelled_at,
                 "completed_at": row.completed_at,
+                "stops_json": row.stops_json,
             },
         )
 
@@ -198,6 +201,9 @@ class SqlLoopRepository:
     def set_active_qa_cycle(self, loop_id: str, cycle_id: str, *, now: str) -> None:
         parameters = {"cycle": cycle_id, "now": now, "id": loop_id}
         self._connection.execute(_SET_ACTIVE_QA_CYCLE, parameters)
+
+    def set_stops(self, loop_id: str, stops_json: str | None, *, now: str) -> None:
+        self._connection.execute(_SET_STOPS, {"stops": stops_json, "now": now, "id": loop_id})
 
     def bump_version(self, loop_id: str, *, now: str) -> None:
         self._connection.execute(_BUMP_VERSION, {"now": now, "id": loop_id})

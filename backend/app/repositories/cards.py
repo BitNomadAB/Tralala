@@ -29,6 +29,7 @@ CARD_EDITABLE: Final = (
     "waiting_reason",
     "waiting_set_at",
     "waiting_set_by",
+    "waiting_stop",
     "face",
     "version",
     "updated_at",
@@ -64,6 +65,7 @@ class CardChanges(TypedDict, total=False):
     waiting_reason: str
     waiting_set_at: str | None
     waiting_set_by: str | None
+    waiting_stop: str | None
     face: str
     version: int
     updated_at: str

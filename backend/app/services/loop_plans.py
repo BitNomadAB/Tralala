@@ -624,6 +624,7 @@ def _planned_card(
                 ticket.get("steps", []),
             )
         ),
+        waiting_stop=None,
     )
 
 
