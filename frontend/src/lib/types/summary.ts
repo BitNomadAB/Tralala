@@ -1,4 +1,5 @@
 import type { DocumentKind, LoopStage } from "./loop";
+import type { PocCounts } from "./poc";
 
 /** Who a Loop waits for now: a person's decision, an agent's document, anyone, or nobody. */
 export type LoopWaitingOn = "person" | "agent" | "anyone" | "nobody";
@@ -29,10 +30,14 @@ export interface LoopSummary {
     total: number;
     /** Needs input, or ready and a person's task. */
     needs_person: number;
+    /** Done, and awaiting a person's confirmation of a task it depends on. */
+    awaiting_confirmation: number;
     by_column: Record<string, number>;
   };
   /** Each document's state and current revision, e.g. `approved r3` or `empty`. */
   documents: Record<DocumentKind, string>;
+  /** The Loop's POC decisions and what is missing from a person, counted. */
+  poc_decisions: PocCounts;
 }
 
 export interface LoopSummaries {

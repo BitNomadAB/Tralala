@@ -17,6 +17,8 @@ export const keys = {
   readiness: (boardId: string, loopId: string) => ["readiness", boardId, loopId] as const,
   notes: (boardId: string, loopId: string) => ["notes", boardId, loopId] as const,
   qa: (boardId: string, loopId: string) => ["qa", boardId, loopId] as const,
+  pocDecisions: (boardId: string, loopId: string) => ["poc-decisions", boardId, loopId] as const,
+  loopStops: (boardId: string, loopId: string) => ["loop-stops", boardId, loopId] as const,
   generationRuns: (boardId: string, loopId: string) =>
     ["generation-runs", boardId, loopId] as const,
   history: (boardId: string, params: Record<string, unknown>) =>
@@ -193,6 +195,24 @@ export function useQaCycle(boardId: string, loopId: string, enabled = true) {
     queryKey: keys.qa(boardId, loopId),
     queryFn: () => api.getQaCycle(boardId, loopId),
     enabled: Boolean(boardId && loopId) && enabled,
+  });
+}
+
+/** The Loop's POC decisions in the server's review order, read while `enabled`. */
+export function usePocDecisions(boardId: string, loopId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.pocDecisions(boardId, loopId),
+    queryFn: () => api.listPocDecisions(boardId, loopId),
+    enabled: enabled && Boolean(boardId && loopId),
+  });
+}
+
+/** The Loop's stop list, read while `enabled`. */
+export function useLoopStops(boardId: string, loopId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.loopStops(boardId, loopId),
+    queryFn: () => api.getLoopStops(boardId, loopId),
+    enabled: enabled && Boolean(boardId && loopId),
   });
 }
 

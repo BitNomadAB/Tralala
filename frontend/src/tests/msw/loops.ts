@@ -1,6 +1,7 @@
 import { http } from "msw";
 import type { DocumentKind, GenerationRun, Loop, LoopDocument } from "@/lib/types";
 import { apiPath, ok, requestPath } from "./envelope";
+import { DEFAULT_STOP_LIST } from "./stops";
 
 export const BOARD_ID = "board-1";
 export const LOOP_ID = "loop-1";
@@ -117,6 +118,8 @@ export function planningDialogHandlers(runs: GenerationRun[] = []) {
       }),
     ),
     http.get(apiPath(`${LOOP_PATH}/generation-runs`), () => ok(state.runs)),
+    // The stop list under Info.
+    http.get(apiPath(`${LOOP_PATH}/stops`), () => ok(DEFAULT_STOP_LIST)),
   ];
   return { state, handlers };
 }

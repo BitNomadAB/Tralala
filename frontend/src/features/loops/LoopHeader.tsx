@@ -167,6 +167,7 @@ export function LoopHeader({
         isHuman={actor?.type === "user"}
         columnCount={columnCount}
         onChanged={onChanged}
+        openDecisions={summary?.poc_decisions.open ?? 0}
       />
     </header>
   );

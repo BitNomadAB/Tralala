@@ -1,5 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
 import { isFinished, loopNextAction, type LoopNextAction } from "@/features/loops/loopNextAction";
+import { pocAction } from "@/features/loops/pocDecisions";
 import { api } from "@/lib/api";
 import { keys } from "@/lib/queries";
 import type { Board, LoopSummary } from "@/lib/types";
@@ -11,11 +12,15 @@ export interface BoardSummaries {
   failed: boolean;
 }
 
-/** One row of "Waits for you": a Loop whose next step is a person's decision. */
+/**
+ * One row of "Waits for you": a Loop whose next step is a person's decision (`next`), or whose POC
+ * decisions wait for a review or that misses something from a person (`poc`, to its Decisions tab).
+ */
 export interface WaitingRow {
   board: Board;
   loop: LoopSummary;
   action: LoopNextAction;
+  kind: "next" | "poc";
 }
 
 /**
@@ -66,8 +71,9 @@ export function useBoardSummaries(boards: readonly Board[]): Map<string, BoardSu
 
 /**
  * The Loops that wait for a person's decision, across the boards given, in the boards' order and
- * each board's Loops in the server's order. Only an active board decides anything: an archived one
- * is read-only.
+ * each board's Loops in the server's order; after a Loop's own row comes its row for POC decisions
+ * due or something missing from a person, when it has one. Only an active board decides anything:
+ * an archived one is read-only.
  */
 export function waitingRows(
   boards: readonly Board[],
@@ -78,7 +84,9 @@ export function waitingRows(
     if (board.status !== "active") continue;
     for (const loop of summaries.get(board.id)?.loops ?? []) {
       const action = loopNextAction(loop);
-      if (action.decision) rows.push({ board, loop, action });
+      if (action.decision) rows.push({ board, loop, action, kind: "next" });
+      const poc = isFinished(loop.stage) ? null : pocAction(loop);
+      if (poc) rows.push({ board, loop, action: poc, kind: "poc" });
     }
   }
   return rows;

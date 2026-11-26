@@ -1,7 +1,8 @@
 import { http } from "msw";
-import type { CardDetail, TicketState, WaitingFor, Workplace } from "@/lib/types";
+import type { CardDetail, StopList, TicketState, WaitingFor, Workplace } from "@/lib/types";
 import { apiPath, failure, ok } from "./envelope";
 import { BOARD_ID, LOOP_ID, LOOP_PATH, NOW } from "./loops";
+import { DEFAULT_STOP_LIST } from "./stops";
 
 export const CARD_ID = "card-1";
 /** The card's own API path, e.g. `${CARD_PATH}/wait`. */
@@ -60,6 +61,7 @@ export function ticketCard(extra: Partial<CardDetail> = {}): CardDetail {
     waiting_reason: "",
     waiting_set_at: null,
     waiting_set_by: null,
+    waiting_stop: null,
     state: "ready",
     needs_person: false,
     unreported_since: null,
@@ -124,7 +126,7 @@ const WORKPLACES: readonly Workplace[] = ["codebase", "outside", "unknown"];
  * wait without a reason `422`, as the server does. `state.bodies` is every JSON body sent, as
  * "METHOD /path" with the body.
  */
-export function ticketWorkHandlers(initial: CardDetail) {
+export function ticketWorkHandlers(initial: CardDetail, stops: StopList = DEFAULT_STOP_LIST) {
   const state: CardState = { card: initial, bodies: [] };
   const change = (
     request: Request,
@@ -134,6 +136,7 @@ export function ticketWorkHandlers(initial: CardDetail) {
 
   const handlers = [
     http.get(apiPath(CARD_PATH), () => ok(state.card)),
+    http.get(apiPath(`${LOOP_PATH}/stops`), () => ok(stops)),
     http.patch(apiPath(`${CARD_PATH}/workplace`), ({ request }) =>
       change(request, `PATCH ${CARD_PATH}/workplace`, (body) => {
         const workplace = WORKPLACES.find((value) => value === body.workplace);
@@ -147,11 +150,16 @@ export function ticketWorkHandlers(initial: CardDetail) {
         if (!waitingFor || !reason) {
           return failure(422, "validation_error", "A wait needs its kind and a reason");
         }
+        const stop = typeof body.stop === "string" ? body.stop : null;
+        if (stop !== null && !stops.stops.includes(stop)) {
+          return failure(422, "not_a_stop", "That is not on this Loop's stop list.");
+        }
         return {
           waiting_for: waitingFor,
           waiting_reason: reason,
           waiting_set_at: NOW,
           waiting_set_by: PERSON_ID,
+          waiting_stop: stop,
         };
       }),
     ),
@@ -161,6 +169,7 @@ export function ticketWorkHandlers(initial: CardDetail) {
         waiting_reason: "",
         waiting_set_at: null,
         waiting_set_by: null,
+        waiting_stop: null,
       })),
     ),
   ];

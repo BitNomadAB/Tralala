@@ -9,6 +9,7 @@ import { describeError } from "@/lib/describeError";
 import { keys, useReadiness } from "@/lib/queries";
 import type { Loop } from "@/lib/types";
 import { OpenDelivery } from "./OpenDelivery";
+import { PocUnanswered } from "./PocUnanswered";
 
 /** What the completion dialog is given, for a Loop with a plan and for one without. */
 export interface CompletionDialogProps {
@@ -18,6 +19,8 @@ export interface CompletionDialogProps {
   isHuman: boolean;
   onClose: () => void;
   onChanged: () => void;
+  /** The Loop's POC decisions not answered yet; a line says so, holding nothing up. */
+  openDecisions?: number | undefined;
 }
 
 /**
@@ -34,6 +37,7 @@ export function LoopCloseDialog({
   isHuman,
   onClose,
   onChanged,
+  openDecisions = 0,
 }: CompletionDialogProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -84,6 +88,12 @@ export function LoopCloseDialog({
           </p>
         ) : (
           <div className="flex flex-col gap-3">
+            <PocUnanswered
+              boardId={boardId}
+              loopId={loop.id}
+              open={openDecisions}
+              onLeave={onClose}
+            />
             <OpenDelivery
               tickets={unfinished}
               accepted={acceptUnfinished}

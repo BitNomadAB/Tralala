@@ -11,7 +11,8 @@ import type { WaitingRow } from "./boardSummaries";
  * What waits for the person, first: one row per Loop, across their boards, whose next step is a
  * decision only a person makes. Each row names the board and the Loop (marked "Without a plan" when
  * it runs without one), says what it waits for and offers the link that opens the Loop page where
- * the decision is made. After the Loops come the discussions that wait for the person's decision,
+ * the decision is made; a Loop whose POC decisions wait for a review, or that misses something from a
+ * person, has a row of its own leading to its Decisions tab. After the Loops come the discussions that wait for the person's decision,
  * each opening the discussion on its Ticket or on its board. Rows appear as each board answers;
  * `pending` says some have not answered yet.
  */
@@ -40,8 +41,11 @@ export function WaitsForYou({
           aria-label="Waits for you"
           className="card-surface divide-y divide-[var(--border-soft)] overflow-hidden"
         >
-          {rows.map(({ board, loop, action }) => (
-            <li key={loop.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+          {rows.map(({ board, loop, action, kind }) => (
+            <li
+              key={`${loop.id}/${kind}`}
+              className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3"
+            >
               <div className="min-w-0 flex-1">
                 <p className="m-0 text-xs text-[var(--foreground-faint)]">{board.name}</p>
                 <p className="m-0 flex flex-wrap items-baseline gap-x-2 text-[15px]">

@@ -17,6 +17,7 @@ export function LoopDialogs({
   isHuman,
   columnCount,
   onChanged,
+  openDecisions = 0,
 }: {
   open: LoopDialog | null;
   onClose: () => void;
@@ -25,6 +26,8 @@ export function LoopDialogs({
   isHuman: boolean;
   columnCount: number;
   onChanged: () => void;
+  /** The Loop's POC decisions not answered yet, which the completion dialog mentions. */
+  openDecisions?: number | undefined;
 }) {
   switch (open) {
     case null:
@@ -44,6 +47,7 @@ export function LoopDialogs({
           isHuman={isHuman}
           onClose={onClose}
           onChanged={onChanged}
+          openDecisions={openDecisions}
         />
       );
     case "template":

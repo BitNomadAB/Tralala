@@ -5,6 +5,7 @@ import { usePageTitle } from "@/app/usePageTitle";
 import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/useToast";
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
+import { useAuth } from "@/features/auth/useAuth";
 import { TicketModal } from "@/features/cards/TicketModal";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
@@ -19,13 +20,16 @@ import { LoopNotesPanel } from "./LoopNotesPanel";
 import { LoopNotices } from "./LoopNotices";
 import { LoopPlanTab } from "./LoopPlanTab";
 import { LoopToolbar } from "./LoopToolbar";
+import { PocDecisionsPanel } from "./PocDecisionsPanel";
+import { PocNotices } from "./PocNotices";
 import { emptyColumnText, NO_FILTERS, useLoopCards, type TicketFilters } from "./useLoopCards";
 import { parseTab, useLoopView } from "./useLoopView";
 import { useTicketDialog } from "./useTicketDialog";
 
 /**
- * The Loop page: the header with the person's next decision, then the tabs Kanban, Plan and Notes
- * (`?tab=`, the Kanban when absent). `?card=` opens a Ticket over whichever tab is shown, and
+ * The Loop page: the header with the person's next decision, the notices of POC decisions that wait
+ * for a review, then the tabs Kanban, Plan, Notes and Decisions (`?tab=`, the Kanban when absent;
+ * Decisions carries the number of open ones). `?card=` opens a Ticket over whichever tab is shown, and
  * `?discussion=` one of its discussions in the same dialog.
  */
 export function LoopPage() {
@@ -37,6 +41,7 @@ export function LoopPage() {
   usePageTitle({ page: "loop", loop: loopQuery.data?.name, board: boardQuery.data?.name });
   const listsQuery = useLists(boardId, loopId);
   const summaries = useLoopSummaries(boardId);
+  const { actor } = useAuth();
   const view = useLoopView(loopQuery.data?.stage ?? "draft", loopQuery.data?.without_plan);
   // A search result or a discussion deep-links the Ticket it points at.
   const dialog = useTicketDialog();
@@ -68,6 +73,8 @@ export function LoopPage() {
     void queryClient.invalidateQueries({ queryKey: keys.loop(boardId, loopId) });
     void queryClient.invalidateQueries({ queryKey: keys.loopSummaries(boardId) });
     void queryClient.invalidateQueries({ queryKey: keys.board(boardId) });
+    // A Ticket done can make a POC decision due; a feedback answer is a new Ticket.
+    void queryClient.invalidateQueries({ queryKey: keys.pocDecisions(boardId, loopId) });
   }, [queryClient, boardId, loopId]);
 
   const onLoopChanged = useCallback(() => {
@@ -114,6 +121,8 @@ export function LoopPage() {
     loop.stage === "cancelled" ||
     loop.archived_at !== null;
   const kanban = view.tab === "kanban";
+  const summary = summaries.data?.loops.find((entry) => entry.id === loop.id);
+  const openDecisions = summary?.poc_decisions.open ?? 0;
 
   return (
     <section
@@ -129,7 +138,7 @@ export function LoopPage() {
       <LoopHeader
         board={board}
         loop={loop}
-        summary={summaries.data?.loops.find((entry) => entry.id === loop.id)}
+        summary={summary}
         view={view}
         readOnly={readOnly}
         columnCount={lists.length}
@@ -138,6 +147,14 @@ export function LoopPage() {
       />
 
       <LoopNotices board={board} loop={loop} readOnly={readOnly} />
+      {readOnly ? null : (
+        <PocNotices
+          boardId={boardId}
+          loopId={loopId}
+          counts={summary?.poc_decisions}
+          onShow={() => view.show("decisions")}
+        />
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
         <Tabs
@@ -149,6 +166,17 @@ export function LoopPage() {
             <Tab value="kanban">Kanban</Tab>
             <Tab value="plan">Plan</Tab>
             <Tab value="notes">Notes</Tab>
+            <Tab value="decisions">
+              Decisions
+              {openDecisions > 0 ? (
+                <>
+                  {/* The space keeps the accessible name "Decisions 2", not "Decisions2". */}{" "}
+                  <span className="ml-1 rounded-full bg-[var(--surface-raised)] px-1.5 text-xs tabular-nums text-[var(--muted-foreground)]">
+                    {openDecisions}
+                  </span>
+                </>
+              ) : null}
+            </Tab>
           </TabList>
           <TabPanel value="kanban" className="flex min-h-0 flex-1 flex-col gap-3">
             <KanbanFilters filters={filters} onFiltersChange={setFilters} matchCount={matchCount} />
@@ -190,6 +218,16 @@ export function LoopPage() {
           <TabPanel value="notes" className="pt-2">
             {seen.has("notes") ? (
               <LoopNotesPanel boardId={boardId} loop={loop} readOnly={readOnly} />
+            ) : null}
+          </TabPanel>
+          <TabPanel value="decisions" className="pt-2">
+            {seen.has("decisions") ? (
+              <PocDecisionsPanel
+                boardId={boardId}
+                loopId={loopId}
+                canAnswer={!readOnly && actor?.type === "user"}
+                onChanged={invalidateCards}
+              />
             ) : null}
           </TabPanel>
         </Tabs>
