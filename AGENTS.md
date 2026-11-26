@@ -252,7 +252,9 @@ copy) and starts each run from an empty `frontend/e2e/.data` so one run cannot a
   (`src/features/auth/AuthProvider.tsx`): logout, a password change and every 401
   (`tralala:unauthorized`) end there. It sets `me` to null while AuthProvider observes it, so
   `RequireAuth` redirects to the login page, then removes every other query; once `me` is null it does
-  nothing, so a burst of 401s signs out once. ESLint's `no-restricted-syntax` forbids clearing the
+  nothing more, so a burst of 401s signs out once. Logout and a password change pass
+  `forgetAddress`, so the next sign-in opens the dashboard; a 401 keeps the address the person was
+  on, and the sign-in returns there. ESLint's `no-restricted-syntax` forbids clearing the
   query cache anywhere in `src/`: `clear()` drops `me` from under its observer and leaves a dead
   session on screen.
 - Every level of the route tree in `src/app/App.tsx` renders inside `RouteErrorBoundary`
