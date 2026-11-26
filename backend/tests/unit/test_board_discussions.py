@@ -232,7 +232,9 @@ def test_a_closed_or_cancelled_thread_is_not_closed_again_and_a_running_one_wait
     with pytest.raises(Conflict, match="run is still active"):
         w.discussions.close(ADA, BOARD_ID, THREAD)
     del w.state.runs["run-1"]
-    for status in ("closed", "cancelled"):
+    # A thread a person approved or vetoed is finished too: closing and opening it again would
+    # turn that decision into a thread people are talking in.
+    for status in ("closed", "cancelled", "approved", "vetoed"):
         w.state.discussions[THREAD] = w.state.discussions[THREAD].__replace__(status=status)
         with pytest.raises(Conflict) as refused:
             w.discussions.close(ADA, BOARD_ID, THREAD)

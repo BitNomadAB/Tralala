@@ -683,7 +683,8 @@ carries `after_closed`, true for one written while the thread was closed.
 
 **Closing.** `POST .../close` is for the one who opened the thread, a person or a key alike;
 anyone else, a signed-in person included, is refused with `403 not_opener`. A thread already
-closed or cancelled answers `409`, and so does one with a run running or paused. A closed thread
+closed or cancelled answers `409`, and so does one with a run running or paused and one a person
+has approved or vetoed, which is finished by that decision. A closed thread
 has `status: closed` and `closed_at`; it stays readable, still takes messages (each
 `after_closed: true`, the thread stays closed, and `auto_run` reads `thread_closed`), never starts a
 round (`start` and `runs` answer `409`) and takes no review (`409`). `POST .../reopen` is for the

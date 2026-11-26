@@ -502,7 +502,8 @@ A reply may point at a Ticket on the board: name it in **About Ticket**, and the
 ### Closing a discussion
 
 The one who opened a discussion closes it, with **Close discussion**, once they have their answer.
-Nobody else can, not even another signed-in person. A closed discussion shows **Closed** and
+Nobody else can, not even another signed-in person. A discussion a person has approved or vetoed is
+finished by that decision and is not closed. A closed discussion shows **Closed** and
 **Reopen**: the one who opened it, or any signed-in person, opens it again.
 
 A closed discussion stays readable and keeps its reply box: what anyone writes there afterwards is

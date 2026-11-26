@@ -25,6 +25,8 @@ from .loops import ensure_ticket_writable
 CLOSED = "closed"
 # What a closed thread becomes again: a thread people are talking in.
 REOPENED = "discussing"
+# The statuses a person's review ends a thread in; such a thread is never closed.
+DECIDED = frozenset({"approved", "vetoed"})
 
 
 def is_opener(actor: ActorContext, thread: DiscussionThreadsRow) -> bool:
@@ -33,7 +35,8 @@ def is_opener(actor: ActorContext, thread: DiscussionThreadsRow) -> bool:
 
 def ensure_may_close(actor: ActorContext, thread: DiscussionThreadsRow) -> None:
     """Only the opener closes, a person or a key alike (``403 not_opener``); a thread already
-    closed, or cancelled, cannot be closed (``409``)."""
+    closed, or cancelled, cannot be closed (``409``), and neither can one a person has approved
+    or vetoed: it is finished, and opening it again would turn that decision into ``discussing``."""
     if not is_opener(actor, thread):
         raise Forbidden(
             "Only the one who opened the discussion can close it",
@@ -42,6 +45,11 @@ def ensure_may_close(actor: ActorContext, thread: DiscussionThreadsRow) -> None:
         )
     if thread.status in {CLOSED, "cancelled"}:
         raise Conflict("Discussion is already closed", details={"status": thread.status})
+    if thread.status in DECIDED:
+        raise Conflict(
+            "A person has decided this discussion, so it is already finished",
+            details={"status": thread.status},
+        )
 
 
 def ensure_may_reopen(actor: ActorContext, thread: DiscussionThreadsRow) -> None:

@@ -451,7 +451,8 @@ answer's `run` says `running`.
 
 The one who opened a thread closes it (`close_discussion`), a key or a person alike; anyone else is
 refused with `403 not_opener`, a signed-in person included. A thread is not closed while a run is
-under way (`409`). A closed thread stays readable and still takes messages, each marked
+under way, nor once a person has approved or vetoed it (`409`): that decision has finished it. A
+closed thread stays readable and still takes messages, each marked
 `after_closed`, but it never starts a round and takes no decision. The opener or a signed-in person
 opens it again (`reopen_discussion`); another key is refused with `403 not_opener`. Nothing deletes
 a thread or a message. A thread on a Ticket follows its Loop: in a completed, archived or cancelled
