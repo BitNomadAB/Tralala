@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
 
 from ...core import sql
@@ -14,6 +15,7 @@ from ...db.generated.board import (
     DISCUSSION_MESSAGES_COLUMNS,
     DISCUSSION_OUTCOMES_COLUMNS,
     DISCUSSION_PARTICIPANTS_COLUMNS,
+    DISCUSSION_READS_COLUMNS,
     DISCUSSION_ROUNDS_COLUMNS,
     DISCUSSION_RUNS_COLUMNS,
     DISCUSSION_THREADS_COLUMNS,
@@ -23,17 +25,19 @@ from ...db.generated.board import (
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
+    DiscussionReadsRow,
     DiscussionRoundsRow,
     DiscussionRunsRow,
     DiscussionThreadsRow,
     DiscussionVotesRow,
     LoopsRow,
 )
-from ..discussions import InboxThread, NamedVote
+from ..discussions import InboxThread, NamedVote, ThreadState
 
 _THREADS = sql.column_list(DISCUSSION_THREADS_COLUMNS)
 _MESSAGES = sql.column_list(DISCUSSION_MESSAGES_COLUMNS)
 _PARTICIPANTS = sql.column_list(DISCUSSION_PARTICIPANTS_COLUMNS)
+_READS = sql.column_list(DISCUSSION_READS_COLUMNS)
 _VOTES = sql.column_list(DISCUSSION_VOTES_COLUMNS)
 _RUNS = sql.column_list(DISCUSSION_RUNS_COLUMNS)
 _ROUNDS = sql.column_list(DISCUSSION_ROUNDS_COLUMNS)
@@ -50,6 +54,8 @@ _THREAD = text(f"SELECT {_THREADS} FROM discussion_threads WHERE id = :id")  # n
 _NEWEST_THREADS = text(
     f"SELECT {_THREADS} FROM discussion_threads"  # noqa: S608 - generated
     " WHERE (:status IS NULL OR status = :status) AND (:card_id IS NULL OR card_id = :card_id)"
+    " AND (:board_level IS NULL OR (card_id IS NULL) = :board_level)"
+    " AND (:state IS NULL OR (status = 'closed') = (:state = 'closed'))"
     " ORDER BY last_activity_at DESC LIMIT :limit"
 )
 # The inbox reads a board's threads in one statement: each joined row under its own prefix, the
@@ -75,14 +81,23 @@ _ADD_THREAD = text(
     "INSERT INTO discussion_threads (id, card_id, title, goal, mode, status, "
     "created_by_actor_id, created_by_type, created_by_name, max_rounds, origin_comment_id, "
     "escalation_depth, created_at, updated_at, last_activity_at, round_count, run_state, "
-    "tokens_used, elapsed_ms) VALUES (:id, :card_id, :title, :goal, :mode, :status, "
-    ":created_by_actor_id, :created_by_type, :created_by_name, :max_rounds, :origin_comment_id,"
-    " :escalation_depth, :created_at, :updated_at, :last_activity_at, :round_count, :run_state,"
-    " :tokens_used, :elapsed_ms)"
+    "tokens_used, elapsed_ms, closed_at, closed_by_actor_id) VALUES (:id, :card_id, :title, "
+    ":goal, :mode, :status, :created_by_actor_id, :created_by_type, :created_by_name, "
+    ":max_rounds, :origin_comment_id, :escalation_depth, :created_at, :updated_at, "
+    ":last_activity_at, :round_count, :run_state, :tokens_used, :elapsed_ms, :closed_at, "
+    ":closed_by_actor_id)"
 )
 _DECIDE = text(
     "UPDATE discussion_threads SET status = :status, updated_at = :now, last_activity_at = :now"
     " WHERE id = :id"
+)
+_CLOSE = text(
+    "UPDATE discussion_threads SET status = 'closed', closed_at = :now,"
+    " closed_by_actor_id = :actor, updated_at = :now, last_activity_at = :now WHERE id = :id"
+)
+_REOPEN = text(
+    "UPDATE discussion_threads SET status = 'discussing', closed_at = NULL,"
+    " closed_by_actor_id = NULL, updated_at = :now, last_activity_at = :now WHERE id = :id"
 )
 _NOTE_MESSAGE = text(
     "UPDATE discussion_threads SET updated_at = :now, last_activity_at = :now,"
@@ -130,9 +145,21 @@ class SqlDiscussionThreadRepository:
         return None if row is None else DiscussionThreadsRow.from_mapping(row)
 
     def newest(
-        self, *, status: str | None, card_id: str | None, limit: int
+        self,
+        *,
+        status: str | None,
+        card_id: str | None,
+        limit: int,
+        board_level: bool | None = None,
+        state: ThreadState | None = None,
     ) -> list[DiscussionThreadsRow]:
-        parameters = {"status": status or None, "card_id": card_id or None, "limit": limit}
+        parameters = {
+            "status": status or None,
+            "card_id": card_id or None,
+            "limit": limit,
+            "board_level": board_level,
+            "state": state,
+        }
         result = self._connection.execute(_NEWEST_THREADS, parameters)
         return [DiscussionThreadsRow.from_mapping(row) for row in result.mappings()]
 
@@ -145,6 +172,12 @@ class SqlDiscussionThreadRepository:
 
     def decide(self, discussion_id: str, status: str, *, now: str) -> None:
         self._connection.execute(_DECIDE, {"status": status, "now": now, "id": discussion_id})
+
+    def close(self, discussion_id: str, *, actor_id: str, now: str) -> None:
+        self._connection.execute(_CLOSE, {"now": now, "actor": actor_id, "id": discussion_id})
+
+    def reopen(self, discussion_id: str, *, now: str) -> None:
+        self._connection.execute(_REOPEN, {"now": now, "id": discussion_id})
 
     def note_message(self, discussion_id: str, *, now: str) -> None:
         self._connection.execute(_NOTE_MESSAGE, {"now": now, "id": discussion_id})
@@ -196,9 +229,10 @@ _BELONGS = text("SELECT 1 FROM discussion_messages WHERE id = :id AND discussion
 _ADD_MESSAGE = text(
     "INSERT INTO discussion_messages (id, discussion_id, parent_message_id, author_actor_id, "
     "author_type, author_name, author_role, content, status, model, created_at, deleted_at, "
-    "round_number, content_sha256, answer_json) VALUES (:id, :discussion_id, :parent_message_id, "
-    ":author_actor_id, :author_type, :author_name, :author_role, :content, :status, :model, "
-    ":created_at, :deleted_at, :round_number, :content_sha256, :answer_json)"
+    "round_number, content_sha256, answer_json, after_closed, ref_card_id) VALUES (:id, "
+    ":discussion_id, :parent_message_id, :author_actor_id, :author_type, :author_name, "
+    ":author_role, :content, :status, :model, :created_at, :deleted_at, :round_number, "
+    ":content_sha256, :answer_json, :after_closed, :ref_card_id)"
 )
 
 
@@ -232,6 +266,48 @@ class SqlDiscussionMessageRepository:
 
     def add(self, row: DiscussionMessagesRow) -> None:
         self._connection.execute(_ADD_MESSAGE, asdict(row))
+
+
+# --- read markers --------------------------------------------------------------------------------
+
+_READ = text(
+    f"SELECT {_READS} FROM discussion_reads"  # noqa: S608 - generated
+    " WHERE discussion_id = :id AND actor_id = :actor"
+)
+_MARK_READ = text(
+    "INSERT INTO discussion_reads (discussion_id, actor_id, last_read_at)"
+    " VALUES (:id, :actor, :now)"
+    " ON CONFLICT(discussion_id, actor_id) DO UPDATE SET last_read_at = excluded.last_read_at"
+)
+# A thread is unread for the actor when someone else wrote a message in it, not deleted, after the
+# actor's marker, or when the actor has no marker for it at all.
+_UNREAD = text(
+    "SELECT DISTINCT m.discussion_id FROM discussion_messages m"
+    " LEFT JOIN discussion_reads r ON r.discussion_id = m.discussion_id AND r.actor_id = :actor"
+    " WHERE m.discussion_id IN :ids AND m.deleted_at IS NULL AND m.author_actor_id != :actor"
+    " AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)"
+).bindparams(bindparam("ids", expanding=True))
+
+
+class SqlDiscussionReadRepository:
+    def __init__(self, connection: Connection) -> None:
+        self._connection = connection
+
+    def get(self, discussion_id: str, actor_id: str) -> DiscussionReadsRow | None:
+        parameters = {"id": discussion_id, "actor": actor_id}
+        row = self._connection.execute(_READ, parameters).mappings().first()
+        return None if row is None else DiscussionReadsRow.from_mapping(row)
+
+    def mark(self, discussion_id: str, actor_id: str, *, now: str) -> None:
+        parameters = {"id": discussion_id, "actor": actor_id, "now": now}
+        self._connection.execute(_MARK_READ, parameters)
+
+    def unread_ids(self, actor_id: str, discussion_ids: Sequence[str]) -> set[str]:
+        if not discussion_ids:
+            return set()
+        parameters = {"actor": actor_id, "ids": list(discussion_ids)}
+        result = self._connection.execute(_UNREAD, parameters).mappings()
+        return {values.text(row, "discussion_id") for row in result}
 
 
 # --- participants and votes ----------------------------------------------------------------------
