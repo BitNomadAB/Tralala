@@ -119,6 +119,9 @@ export function inboxPath(row: DiscussionInboxRow): string {
   return discussionAddress(row.board_id, row.loop_id, row.card_id, row.discussion_id);
 }
 
+/** The mark on a row with something new for the reader, read as part of the link's name. */
+export const UNREAD = "Unread";
+
 /** What the dashboard's "Waits for you" says on a discussion row. */
 export const WAITS_ON_DISCUSSION = "Waits for your decision on a discussion";
 
