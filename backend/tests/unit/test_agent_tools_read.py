@@ -378,6 +378,7 @@ def test_tools_list_offers_the_listing_tools_to_the_scopes_they_declare() -> Non
         "list_attachments",
         "read_attachment",
         "search_tickets",
+        "list_poc_decisions",
     ]
     catalogue = tool_catalog()
     assert list(catalogue)[:2] == ["whoami", "list_boards"]

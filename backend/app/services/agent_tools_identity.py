@@ -31,6 +31,8 @@ HUMAN_DECISIONS: tuple[str, ...] = (
     "confirming a human-only Ticket",
     "clearing a Ticket's wait",
     "accepting implementation or QA",
+    "answering a POC decision",
+    "writing a Loop's stop list",
     "finalizing a Loop",
 )
 """The decisions AGENTS.md rule 11a keeps for a signed-in person, in the rule's words; the
@@ -45,6 +47,8 @@ _HUMAN_NOTE = (
     "installation allows it and the person gave this key the right, they may approve the "
     "analysis or the RoadMap, clear a wait, confirm their task or accept the implementation in "
     "their editor, as a form ask_person brings them; a reset, QA and closing a Loop never. "
+    "You record POC decisions and what is missing (record_poc_decision, report_missing) and read "
+    "the answers (list_poc_decisions); a person answers them and writes the Loop's stop list. "
     + DECISION_LINK_RULE
 )
 

@@ -78,6 +78,7 @@ CATALOGUE_FILES = tuple(
         "agent_tools_read.py",
         "agent_tools_write.py",
         "agent_tools_plan.py",
+        "agent_tools_poc_decisions.py",
         "agent_tools_tickets.py",
         "agent_tools_work.py",
     )
@@ -102,9 +103,9 @@ class HumanDecision:
 
 
 # AGENTS.md rule 11a: "Approving analysis or a RoadMap, resetting a scope, editing Info,
-# confirming a human-only Ticket, accepting implementation or QA, and finalizing a Loop reject
-# agent tokens (`403 human_action_required`) regardless of scope, and are never registered as
-# WebMCP tools."
+# confirming a human-only Ticket, clearing a Ticket's wait, accepting implementation or QA,
+# answering a POC decision, writing a Loop's stop list, and finalizing a Loop reject agent tokens
+# (`403 human_action_required`) regardless of scope, and are never registered as WebMCP tools."
 HUMAN_DECISIONS: tuple[HumanDecision, ...] = (
     HumanDecision(
         "approving analysis or a RoadMap", ("approv", "review"), ("LoopDocumentService.review",)
@@ -130,6 +131,17 @@ HUMAN_DECISIONS: tuple[HumanDecision, ...] = (
         "accepting implementation or QA",
         ("accept",),
         ("LoopQaService.accept_implementation", "LoopQaService.decide"),
+    ),
+    # A key records a POC decision or something missing (record_poc_decision, report_missing) and
+    # reads the answers (list_poc_decisions); answering one is a signed-in person's.
+    HumanDecision(
+        "answering a POC decision", ("answer_poc", "poc_answer"), ("PocDecisionService.answer",)
+    ),
+    # read_loop reads the stop list; writing it is a person's at every stage of the Loop.
+    HumanDecision(
+        "writing a Loop's stop list",
+        ("stop_list", "write_stop", "set_stop", "edit_stop"),
+        ("LoopStopService.write",),
     ),
     HumanDecision(
         "finalizing a Loop",

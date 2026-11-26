@@ -7,7 +7,10 @@ documents themselves are read with ``read_document``: as numbered lines a page a
 the technical analysis and RoadMap, as an outline whose items (a finding, a Phase, a Ticket) are
 read one at a time. Both take a Loop by its id or by its key. No answer carries a document twice.
 ``read_loop``'s ``decision_link`` is the address of the Loop's next decision when a person takes
-it, the one ``loop_summaries`` gives (``agent_tools_loops.loop_decision_link``), else null.
+it, the one ``loop_summaries`` gives (``agent_tools_loops.loop_decision_link``), else null. It
+also answers the Loop's stop list (``stops``: the only things that stop work, and whether a person
+has written the list or it is still the default) and the counts of its POC decisions and what is
+missing from a person, as ``loop_summaries`` counts them (``agent_tools_loops.poc_summary``).
 
 The handlers are public and typed on the attributes of the composition root they use, so a unit
 test runs them with the real services on the typed fakes. Their catalogue entries are built here
@@ -24,7 +27,7 @@ from ..core.context import ActorContext
 from ..core.errors import NotFound, ValidationFailure
 from ..schemas.loops import DOCUMENT_KINDS
 from .agent_tools_listing import loop_id_of
-from .agent_tools_loops import loop_decision_link
+from .agent_tools_loops import loop_decision_link, poc_summary
 from .agent_tools_read import ToolArguments, ToolResult, _require, _text, _whole_number
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
 
@@ -34,7 +37,9 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from .loop_documents import LoopDocumentService
     from .loop_documents_views import DocumentView
     from .loop_notes import LoopNoteService
+    from .loop_stops import LoopStopService
     from .loops import LoopService
+    from .poc_decisions import PocDecisionService
 
 PAGE_CHARS: Final = 60_000
 """The most text one ``read_document`` answer carries; the rest is read from ``continue_from``."""
@@ -71,6 +76,12 @@ class LoopReading(Protocol):
 
     @property
     def settings(self) -> Settings: ...
+
+    @property
+    def loop_stops(self) -> LoopStopService: ...
+
+    @property
+    def poc_decisions(self) -> PocDecisionService: ...
 
 
 class DocumentReading(Protocol):
@@ -118,6 +129,8 @@ def read_loop(services: LoopReading, actor: ActorContext, args: ToolArguments) -
     columns = services.list.list(board_id, loop_id)
     # The Loop as loop_summaries reads it, so both answer the same decision.
     entry = services.loop.get(board_id, loop_id)
+    stops = services.loop_stops.read(actor, board_id, loop_id)
+    marks = services.poc_decisions.board_marks(actor, board_id).get(loop_id, [])
     return {
         "loop": {
             "id": context["loop_id"],
@@ -160,6 +173,9 @@ def read_loop(services: LoopReading, actor: ActorContext, args: ToolArguments) -
             for note in notes["notes"]
         ],
         "note_count": notes["count"],
+        # The only things that stop work in this Loop; a person writes the list.
+        "stops": {"lines": stops["stops"], "is_default": stops["is_default"]},
+        "poc_decisions": poc_summary(marks, readiness),
         "next_step": (
             "Read a document with read_document (kind info, analysis, analysis_ai, roadmap or "
             "roadmap_ai), list the Tickets with list_tickets and this loop_id, the older notes "
@@ -322,8 +338,10 @@ def document_tools(board_id: ArgumentSchema, loop_id: ArgumentSchema) -> list[Ag
             description=(
                 "Read one Loop as an overview: its goal and stage, whether execution is allowed, "
                 "each document's state and size (not its text), the Phases and the columns with "
-                "their Ticket counts, and the newest notes. Read a document with read_document; "
-                "list the Tickets with list_tickets."
+                "their Ticket counts, the newest notes, the Loop's stop list (stops: the only "
+                "things that stop work, which a person writes) and the counts of its POC "
+                "decisions and what is missing from a person. Read a document with "
+                "read_document; list the Tickets with list_tickets."
             ),
             scopes=("loops:read",),
             input_schema=object_schema(
