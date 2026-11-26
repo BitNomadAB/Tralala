@@ -15,13 +15,14 @@ service runs its real code on the fakes of its own unit tests."""
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
 from app.core.config import Settings
-from app.core.context import ActorContext, EditorDecision
-from app.core.errors import Forbidden
+from app.core.context import DECIDE_SCOPE, ActorContext, EditorDecision
+from app.core.errors import Forbidden, ValidationFailure
 from app.schemas.auth import CredentialCreate
 from app.schemas.cards import TicketWaitClear
 from app.schemas.loops import (
@@ -249,6 +250,32 @@ def test_issuing_or_rotating_a_key_refuses_the_owners_context(
             registry.service.rotate_credential(owner, "t-1")
     refused(error)
     assert list(registry.state.credentials) == ["t-1"]
+
+
+def test_a_key_with_the_right_expires_as_any_key_does_and_an_administrator_may_choose_never(
+    settings: Settings,
+) -> None:
+    """The owner's decision: the right changes nothing about expiry. A key expires by default, a
+    member's always does, and an administrator may still choose 0 for a key that never expires."""
+    registry = accounts.make_registry(settings.model_copy(update={"editor_decisions": True}))
+    policy = registry.service.settings
+
+    def issue(actor: ActorContext, days: int | None) -> str | None:
+        payload = CredentialCreate.model_validate(
+            {"name": "Editor", "scopes": ["cards:read", DECIDE_SCOPE], "expires_in_days": days}
+        )
+        return registry.service.create_credential(actor, payload)["expires_at"]
+
+    def ahead(days: int) -> str:
+        return (accounts.NOW + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    assert issue(accounts.ADMIN, None) == ahead(policy.credential_default_ttl_days)
+    assert issue(accounts.ADMIN, 0) is None
+    assert issue(accounts.MEMBER, None) == ahead(policy.member_token_default_days)
+    assert issue(accounts.MEMBER, 3650) == ahead(policy.member_token_max_days)
+    with pytest.raises(ValidationFailure) as never:
+        issue(accounts.MEMBER, 0)
+    assert never.value.code == "expiry_required"
 
 
 # --- the marks the Loop page shows while the Loop is live -----------------------------------------

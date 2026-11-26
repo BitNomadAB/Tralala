@@ -58,7 +58,9 @@ export function CredentialRow({
             : " · never used"}
           {credential.expires_at
             ? ` · ${state === "expired" ? "expired" : "expires"} ${formatDateTime(credential.expires_at)}`
-            : ""}
+            : revoked
+              ? ""
+              : " · never expires"}
         </p>
       </div>
       {holdsDecide(credential) ? <Badge tone="warning">{DECIDE_LABEL}</Badge> : null}

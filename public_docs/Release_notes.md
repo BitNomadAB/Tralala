@@ -52,6 +52,11 @@ Read this one before upgrading an installation that a coding agent connects to:
 
 Worth knowing when you look at the dashboard:
 
+- **A RoadMap handed in for review is listed under Waits for you.** The dashboard, the board page
+  and the Loop's header said "Waits for the RoadMap" while a RoadMap a worker had handed in waited
+  for a person; they now say "Waits for you to approve the RoadMap" and open it on the Plan tab. An
+  analysis that was reset, which leaves an empty draft, no longer counts as waiting for a review.
+- **The list of keys says "never expires"** beside a key an administrator issued without an expiry.
 - **Board counters are cached**, because they live in each board's own database. A write through the
   app refreshes them immediately; a board file changed behind the app's back can show a number up to
   `TRALALA_BOARD_COUNTS_CACHE_SECONDS` (default 60) old. `GET /boards?with_counts=false` skips the

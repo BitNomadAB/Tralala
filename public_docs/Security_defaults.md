@@ -118,6 +118,10 @@ Deciding in the editor is an opt-in with two switches, and with either one missi
   owner's rotation keeps the right; a rotation by an administrator of somebody else's key issues
   the successor without it. A person's session never holds the scope, and `whoami` tells a coding
   agent whether the installation allows deciding in the editor and whether its key has the right.
+  The right changes nothing about expiry: such a key expires as any key does, a member's always,
+  and an administrator may still choose `0` for one that never expires. That choice is the
+  administrator's own, such a key keeps the right until it is revoked, and the list of keys says
+  "never expires" beside it.
 
 With both switches on, `ask_person` brings five decisions to the person as a form in their
 editor (MCP 2026-07-28, elicitation mode `form`, when the client declares it): approving the
