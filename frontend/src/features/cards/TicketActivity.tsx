@@ -36,9 +36,9 @@ function TicketWork({
     );
   }
   return (
-    <ul aria-label="Work" className="m-0 grid list-none gap-3 p-0 text-sm">
+    <ul aria-label="Work" className="m-0 grid list-none grid-cols-1 gap-3 p-0 text-sm">
       {summary ? (
-        <li className="grid gap-1">
+        <li className="grid grid-cols-1 gap-1">
           <span className="text-xs text-[var(--foreground-faint)]">
             A coding session wrote the summary
           </span>
@@ -65,7 +65,10 @@ function TicketWork({
         </li>
       ) : null}
       {completions.map((comment) => (
-        <li key={comment.id} className="grid gap-1 rounded-lg border border-[var(--border)] p-3">
+        <li
+          key={comment.id}
+          className="grid grid-cols-1 gap-1 rounded-lg border border-[var(--border)] p-3"
+        >
           <span className="text-xs text-[var(--foreground-faint)]">
             {comment.actor_name ?? "Unknown"} · {formatDateTime(comment.created_at)}
           </span>
