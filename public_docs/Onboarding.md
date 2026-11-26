@@ -89,7 +89,7 @@ changes code.
    `comments:write`, `discussions:read`, `discussions:write`; add `loops:write` and
    `loops:generate` if it should open Loops and hand in or ask for analyses and RoadMaps.
 2. Point the agent at `<your URL>/mcp` with `Authorization: Bearer <key>`. The agent must speak MCP
-   revision 2026-07-28: Tralala speaks that one alone and refuses a client of an older revision.
+   revision 2026-07-28 or 2025-06-18: Tralala speaks both on that address.
    For Claude Code it is one command, which **How do I connect my computer?** on the
    **Interaction agent access** card in Settings shows. `<your URL>/llms.txt` tells the agent the rest. Which clients can connect and
    how to check the connection are in [Connect](Agent_usage.md#2-connect); the full walkthrough,

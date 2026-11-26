@@ -11,8 +11,11 @@ export function scopeChoicesFor(isAdmin: boolean, meta: ApiMeta | undefined): st
   return isAdmin ? meta.token_scopes : meta.member_token_scopes;
 }
 
-/** The one MCP revision `/mcp` speaks; a client that does not speak it cannot connect. */
+/** The newer of the two MCP revisions `/mcp` speaks on one address. */
 export const MCP_REVISION = "2026-07-28";
+
+/** The older MCP revision `/mcp` speaks beside it, which opens with `initialize`. */
+export const MCP_LEGACY_REVISION = "2025-06-18";
 
 /** The command that adds this installation to Claude Code, the one the agent guide gives. */
 export function claudeCodeCommand(origin: string, token: string): string {

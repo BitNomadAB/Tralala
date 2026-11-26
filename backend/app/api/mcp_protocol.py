@@ -6,24 +6,28 @@ header pairs, the parsed body and the actor. What comes back is either the whole
 ``tool_failure`` turn into the answer. Nothing here touches the request, the event loop or a
 database, so a unit test calls every rule directly.
 
-The server speaks this one revision and nothing older: there is no ``initialize`` handshake, no
-``ping``, no session and no stream. Every request states its version and its client's
-capabilities in ``params._meta`` and mirrors the version and the method (and a tool call's name)
-into headers. The route authenticates the key first (401 as REST answers it) and refuses an
-untrusted ``Origin`` (403, ``origin_refusal``) before it reads the body; a body that is not JSON is
-400 with -32700 (``parse_error``). ``dispatch`` then checks the rest in this order, and the first
-rule a request breaks answers it:
+The server is dual-era: it also speaks revision 2025-06-18, whose rules live in ``mcp_legacy``,
+and ``mcp_legacy.selects_legacy`` says which of the two answers a request. These rules answer a
+request that names another version than 2025-06-18 in ``params._meta``, or that names none there
+and 2026-07-28 in its ``MCP-Protocol-Version`` header. This revision has no ``initialize``
+handshake, no ``ping``, no session and no stream. Every request states its version and its
+client's capabilities in ``params._meta`` and mirrors the version and the method (and a tool
+call's name) into headers. The route authenticates the key first (401 as REST answers it) and
+refuses an untrusted ``Origin`` (403, ``origin_refusal``) before it reads the body; a body that is
+not JSON is 400 with -32700 (``parse_error``). ``dispatch`` then checks the rest in this order, and
+the first rule a request breaks answers it:
 
 1. a body that is not one JSON-RPC 2.0 request or notification: 400 with -32600;
 2. a notification (no ``id``): 202 and no body, since this revision defines none to act on;
-3. ``initialize``, how a client of an older revision opens: 400 and -32022, naming the version;
-4. ``params._meta`` without the protocol version (a string) and the client's capabilities (an
+3. ``params._meta`` without the protocol version (a string) and the client's capabilities (an
    object): 400 and -32602;
-5. a version this server does not speak: 400 and -32022 with ``supported`` and ``requested``;
-6. ``MCP-Protocol-Version`` or ``Mcp-Method`` missing, repeated, with invalid characters or unlike
+4. a version in ``_meta`` other than 2026-07-28: 400 and -32022 with ``supported`` (both
+   revisions) and ``requested``. The route hands a request whose ``_meta`` names 2025-06-18 to
+   ``mcp_legacy``, so only a version that neither revision speaks gets this answer from it;
+5. ``MCP-Protocol-Version`` or ``Mcp-Method`` missing, repeated, with invalid characters or unlike
    the body: 400 and -32020;
-7. a method this server does not implement, ``ping`` among them: 404 and -32601;
-8. on ``tools/call``, ``Mcp-Name`` likewise against ``params.name``, its Base64 form decoded first:
+6. a method this revision does not have, ``ping`` among them: 404 and -32601;
+7. on ``tools/call``, ``Mcp-Name`` likewise against ``params.name``, its Base64 form decoded first:
    400 and -32020.
 
 Every result carries ``resultType`` and the server's identity in ``_meta``. What a tool call's own
@@ -47,7 +51,9 @@ from ..core.errors import ApiError
 from ..services.agent_tools import AgentTool, missing_scopes, tool_catalog
 
 PROTOCOL_VERSION = "2026-07-28"
-SUPPORTED_VERSIONS: tuple[str, ...] = (PROTOCOL_VERSION,)
+# The older revision, spoken after ``initialize``; its rules live in ``mcp_legacy``.
+LEGACY_VERSION = "2025-06-18"
+SUPPORTED_VERSIONS: tuple[str, ...] = (PROTOCOL_VERSION, LEGACY_VERSION)
 
 # JSON-RPC's codes, and the ones MCP reserves for itself (-32020 to -32099).
 PARSE_ERROR = -32700
@@ -137,6 +143,16 @@ class InputContext:
 
 
 @dataclass(frozen=True, slots=True)
+class Envelope:
+    """A message that is one JSON-RPC 2.0 request or notification: its id (None for a
+    notification), its method and its params as they came."""
+
+    message_id: RequestId | None
+    method: str
+    params: JsonValue
+
+
+@dataclass(frozen=True, slots=True)
 class ToolInvocation:
     """A ``tools/call`` that passed every check: the handler to run and what it is given."""
 
@@ -200,45 +216,30 @@ def parse_error() -> Reply:
 
 
 def method_not_allowed() -> Reply:
-    """The answer to GET and DELETE: this revision has no stream to open and no session to end."""
+    """The answer to GET and DELETE in both revisions: Tralala opens no stream and keeps no
+    session, so there is nothing to GET and nothing to DELETE."""
     return Reply(
         405,
         _error_body(
             None,
             INVALID_REQUEST,
-            "Method not allowed: POST each JSON-RPC request to this endpoint; MCP "
-            f"{PROTOCOL_VERSION} has no stream to GET and no session to DELETE",
+            "Method not allowed: POST each JSON-RPC request to this endpoint; Tralala opens no "
+            "stream to GET and keeps no session to DELETE",
         ),
         {"Allow": "POST"},
     )
 
 
 def unsupported_version(message_id: RequestId, requested: str) -> Reply:
-    """-32022 for a version this server does not speak, with the ones it does."""
+    """-32022 for a version this server does not speak, with the ones it does; the message says
+    how each is spoken, since an older client may show its person nothing else."""
     return _error(
         400,
         message_id,
         UNSUPPORTED_PROTOCOL_VERSION,
-        f"Unsupported protocol version: Tralala speaks only MCP {', '.join(SUPPORTED_VERSIONS)}",
+        f"Unsupported protocol version: Tralala speaks MCP {PROTOCOL_VERSION}, and MCP "
+        f"{LEGACY_VERSION} after initialize",
         {"supported": list(SUPPORTED_VERSIONS), "requested": requested},
-    )
-
-
-def _initialize_refusal(message_id: RequestId, params: JsonValue) -> Reply:
-    """An older client opens with ``initialize`` and can show its person nothing but this error,
-    so it names the version spoken here and the one the client asked for."""
-    requested = params.get("protocolVersion") if isinstance(params, dict) else None
-    spoken = ", ".join(SUPPORTED_VERSIONS)
-    return _error(
-        400,
-        message_id,
-        UNSUPPORTED_PROTOCOL_VERSION,
-        f"Tralala speaks only MCP {spoken}, which has no initialize; connect with a client that "
-        f"speaks MCP {spoken}",
-        {
-            "supported": list(SUPPORTED_VERSIONS),
-            "requested": requested if isinstance(requested, str) else "",
-        },
     )
 
 
@@ -462,17 +463,9 @@ def _tool_call(
     return ToolInvocation(message_id, tool, arguments, context)
 
 
-def dispatch(
-    headers: Iterable[tuple[str, str]],
-    message: JsonValue,
-    actor: ActorContext,
-    server: ServerIdentity,
-) -> Reply | ToolInvocation:
-    """One POSTed message, checked in the module's order: the answer, or the tool to run.
-
-    ``headers`` are the request's header pairs as they arrived, ``message`` its parsed body and
-    ``actor`` the key it authenticated with; nothing in the body or its ``_meta`` says who calls.
-    """
+def envelope(message: JsonValue) -> Envelope | Reply:
+    """The message as one JSON-RPC 2.0 request or notification, or the 400 with -32600 that a
+    body which is neither gets. Both revisions read a message so."""
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return _error(400, None, INVALID_REQUEST, "Invalid Request: not a JSON-RPC 2.0 message")
     has_id = "id" in message
@@ -485,17 +478,32 @@ def dispatch(
             INVALID_REQUEST,
             "Invalid Request: a request needs a method and an id that is a string or an integer",
         )
+    return Envelope(message_id, method, message.get("params"))
+
+
+def dispatch(
+    headers: Iterable[tuple[str, str]],
+    message: JsonValue,
+    actor: ActorContext,
+    server: ServerIdentity,
+) -> Reply | ToolInvocation:
+    """One POSTed message, checked in the module's order: the answer, or the tool to run.
+
+    ``headers`` are the request's header pairs as they arrived, ``message`` its parsed body and
+    ``actor`` the key it authenticated with; nothing in the body or its ``_meta`` says who calls.
+    """
+    read = envelope(message)
+    if isinstance(read, Reply):
+        return read
+    message_id, method, params = read.message_id, read.method, read.params
     if message_id is None:  # a notification: nothing defined to act on, and no answer is sent
         return Reply(202, None)
-    params = message.get("params")
-    if method == "initialize":
-        return _initialize_refusal(message_id, params)
     if not isinstance(params, dict):
         return _error(400, message_id, INVALID_PARAMS, "params must be an object with _meta")
     meta = request_meta(params)
     if isinstance(meta, str):
         return _error(400, message_id, INVALID_PARAMS, meta)
-    if meta.protocol_version not in SUPPORTED_VERSIONS:
+    if meta.protocol_version != PROTOCOL_VERSION:
         return unsupported_version(message_id, meta.protocol_version)
     found = header_values(headers)
     problem = header_problem(found, PROTOCOL_VERSION_HEADER, meta.protocol_version)
@@ -520,21 +528,28 @@ def tool_result(
     invocation: ToolInvocation, server: ServerIdentity, payload: Mapping[str, object]
 ) -> Reply:
     """A handler's answer as a complete ``tools/call`` result: text and structured content."""
-    encoded = json.dumps(payload, ensure_ascii=False)
-    return _complete(
-        invocation.message_id,
-        server,
-        {
-            "content": [{"type": "text", "text": encoded}],
-            "structuredContent": payload,
-            "isError": False,
-        },
-    )
+    return _complete(invocation.message_id, server, tool_content(payload))
 
 
 def tool_failure(invocation: ToolInvocation, server: ServerIdentity, error: ApiError) -> Reply:
-    """A handler's refusal as a complete ``tools/call`` result with ``isError`` true, so the
-    model reads the code, the message and the details and can correct itself."""
+    """A handler's refusal as a complete ``tools/call`` result with ``isError`` true."""
+    return _complete(invocation.message_id, server, failure_content(error))
+
+
+def tool_content(payload: Mapping[str, object]) -> dict[str, object]:
+    """A handler's answer as the ``tools/call`` result of either revision: text and structured
+    content."""
+    encoded = json.dumps(payload, ensure_ascii=False)
+    return {
+        "content": [{"type": "text", "text": encoded}],
+        "structuredContent": payload,
+        "isError": False,
+    }
+
+
+def failure_content(error: ApiError) -> dict[str, object]:
+    """A handler's refusal as the ``tools/call`` result of either revision, with ``isError``
+    true, so the model reads the code, the message and the details and can correct itself."""
     encoded = json.dumps(
         {
             "error": {
@@ -546,18 +561,16 @@ def tool_failure(invocation: ToolInvocation, server: ServerIdentity, error: ApiE
         },
         ensure_ascii=False,
     )
-    return _complete(
-        invocation.message_id,
-        server,
-        {"content": [{"type": "text", "text": encoded}], "isError": True},
-    )
+    return {"content": [{"type": "text", "text": encoded}], "isError": True}
 
 
 __all__ = [
+    "LEGACY_VERSION",
     "METHODS",
     "PROTOCOL_VERSION",
     "SUPPORTED_VERSIONS",
     "ElicitationModes",
+    "Envelope",
     "InputContext",
     "Reply",
     "RequestMeta",
@@ -566,6 +579,8 @@ __all__ = [
     "discover_result",
     "dispatch",
     "elicitation_modes",
+    "envelope",
+    "failure_content",
     "header_problem",
     "header_text",
     "header_values",
@@ -575,6 +590,7 @@ __all__ = [
     "parse_error",
     "request_meta",
     "tool_call",
+    "tool_content",
     "tool_failure",
     "tool_list",
     "tool_result",

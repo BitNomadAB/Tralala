@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { claudeCodeCommand, MCP_REVISION, scopeChoicesFor } from "@/lib/agentAccess";
+import {
+  claudeCodeCommand,
+  MCP_LEGACY_REVISION,
+  MCP_REVISION,
+  scopeChoicesFor,
+} from "@/lib/agentAccess";
 import type { ApiMeta } from "@/lib/types";
 
 const meta: ApiMeta = {
@@ -25,7 +30,8 @@ describe("interaction agent access", () => {
     );
   });
 
-  it("names the one revision the endpoint speaks", () => {
+  it("names the two revisions the endpoint speaks", () => {
     expect(MCP_REVISION).toBe("2026-07-28");
+    expect(MCP_LEGACY_REVISION).toBe("2025-06-18");
   });
 });

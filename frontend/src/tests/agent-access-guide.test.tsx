@@ -49,21 +49,28 @@ describe("the guide for connecting a computer", () => {
     expect(onCopy).toHaveBeenCalledWith(command.textContent);
   });
 
-  it("says which revision a client must speak and no longer points at VS Code", async () => {
+  it("says that both revisions connect, names Codex and no longer points at VS Code", async () => {
     const { guide } = await openGuide();
-    expect(step("Add Tralala to Claude Code.")).toHaveTextContent(
-      "Your agent must speak MCP 2026-07-28: Tralala speaks that revision of the Model Context Protocol and no older one.",
+    const add = step("Add Tralala to Claude Code.");
+    expect(add).toHaveTextContent(
+      "Tralala speaks MCP 2026-07-28 and the older 2025-06-18 of the Model Context Protocol on the same address, so an agent that speaks either connects.",
+    );
+    expect(add).toHaveTextContent(
+      "Codex takes the same address in ~/.codex/config.toml, with the token in an environment variable;",
     );
     expect(guide).toHaveTextContent(
-      "The endpoint is <Your URL>/mcp and speaks MCP 2026-07-28 alone",
+      "The endpoint is <Your URL>/mcp and speaks MCP 2026-07-28 and 2025-06-18;",
     );
-    expect(guide).not.toHaveTextContent(/VS Code|mcp\.json|"servers"/);
+    expect(guide).not.toHaveTextContent(/VS Code|mcp\.json|"servers"|alone|no older|2\.1\.274/);
   });
 
   it("says what 401 and 403 mean, and that a missing scope is an error in the answer", async () => {
     await openGuide();
     const check = step("Check that it works.");
     expect(check).toHaveTextContent("401 means the token is wrong, revoked or expired;");
+    expect(check).toHaveTextContent(
+      "400 with -32022 means the client named an MCP version that Tralala does not speak;",
+    );
     expect(check).toHaveTextContent(
       "403 means the request carried an Origin header that Tralala does not trust.",
     );
