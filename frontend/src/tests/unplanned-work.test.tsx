@@ -98,6 +98,8 @@ function card(extra: Partial<Card>): Card {
     expected_evidence: [],
     ready: true,
     blockers: [],
+    awaiting_confirmation: false,
+    confirmations: [],
     downstream_phase_numbers: [],
     plan_item_id: null,
     workplace: "unknown",

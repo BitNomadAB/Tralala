@@ -19,12 +19,12 @@ from app.core.context import ActorContext
 from app.core.errors import Forbidden, ValidationFailure
 from app.db.generated.board import CardsRow, LoopDocumentsRow, LoopsRow
 from app.services.agent_tools import ToolResult, loop_summaries, tool_catalog
-from app.services.agent_tools_loops import ALL_DONE, ALL_DONE_WITHOUT_PLAN
+from app.services.agent_tools_loops import ALL_DONE, ALL_DONE_WITHOUT_PLAN, ticket_counts
 from app.services.agent_tools_read import REPORT_FIRST
 from app.services.cards import CardService
 from app.services.lists import ListService
 from app.services.loops import LoopService
-from app.services.plan_views import ReadinessItem
+from app.services.plan_views import LoopReadiness, ReadinessItem
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
@@ -38,7 +38,13 @@ from tests.unit.fakes.board import (
     list_row,
     loop_row,
 )
-from tests.unit.fakes.plans import FakePlanViews, plan_views, readiness_item
+from tests.unit.fakes.plans import (
+    BLOCKER,
+    CONFIRMATION,
+    FakePlanViews,
+    plan_views,
+    readiness_item,
+)
 from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState
 
 NOW = datetime(2026, 11, 5, 10, 0, tzinfo=UTC)
@@ -363,6 +369,42 @@ def test_a_loop_without_a_plan_whose_tickets_are_done_waits_for_a_person_to_clos
     tickets = row["tickets"]
     assert isinstance(tickets, Mapping)
     assert (tickets["completed"], tickets["total"]) == (1, 1)
+
+
+def test_work_awaiting_a_person_s_confirmation_is_ready_or_done_and_counted(
+    settings: Settings,
+) -> None:
+    def held(card_id: str) -> ReadinessItem:
+        return readiness_item(
+            card_id, ready=False, blockers=(BLOCKER,), confirmations=(CONFIRMATION,)
+        )
+
+    items = [readiness_item("first", human=True), held("open"), done(held("done"))]
+    readiness: LoopReadiness = {
+        "loop_id": "run",
+        "stage": "in_progress",
+        "execution_allowed": True,
+        "blocked_reason": None,
+        "items": items,
+        "phases": [],
+        "unplanned": [],
+        "open_delivery": [],
+    }
+    counts = ticket_counts(readiness)
+    assert (counts.ready, counts.blocked, counts.completed) == (2, 0, 1)
+    assert (counts.awaiting_confirmation, counts.needs_person) == (1, 1)
+    world = loop_world(settings, [loop("run", "in_progress", 1)], items=items)
+    (row,) = rows(loop_summaries(world, READER, ask()))
+    assert (row["next"], row["waiting_on"]) == ("1 Ticket is ready to start.", "anyone")
+    # Once the open one is done too, the person's task is what is left, and the sentence says the
+    # done work awaits it.
+    items[1] = done(held("open"))
+    world = loop_world(settings, [loop("run", "in_progress", 1)], items=items)
+    (row,) = rows(loop_summaries(world, READER, ask()))
+    assert (row["next"], row["waiting_on"]) == (
+        "1 Ticket is ready and needs a person. 2 Tickets are done and await that confirmation.",
+        "person",
+    )
 
 
 def test_no_ticket_count_or_ticket_sentence_names_an_agent(settings: Settings) -> None:

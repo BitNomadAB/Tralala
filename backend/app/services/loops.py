@@ -94,7 +94,14 @@ from .loops_views import (
     progress_entry,
     qa_summary,
 )
-from .plan_views import LoopReadiness, PlanView, PlanViews, open_delivery, unplanned_tickets
+from .plan_views import (
+    LoopReadiness,
+    PlanView,
+    PlanViews,
+    open_delivery,
+    plan_blocks,
+    unplanned_tickets,
+)
 from .ticket_state import ensure_not_waiting
 
 if TYPE_CHECKING:
@@ -412,7 +419,9 @@ class LoopService:
             ensure_execution_allowed(loop)
             ensure_not_waiting(card)
             item = readiness_item(self.plans.readiness(repos, loop), card_id)
-            if item is not None and not item["ready"]:
+            # Held up only by other unconfirmed human-only Tickets, it may be confirmed as any
+            # Ticket awaiting confirmation may be completed (``plan_blocks``).
+            if item is not None and plan_blocks(item):
                 raise Conflict(
                     "This human action is not available yet",
                     code="ticket_blocked",

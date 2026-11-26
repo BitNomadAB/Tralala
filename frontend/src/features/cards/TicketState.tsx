@@ -7,7 +7,8 @@ import { ReasonButton } from "@/components/ui/reason-button";
 import { useAnnounce } from "@/components/ui/useAnnounce";
 import type { Card, Wait } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
-import { stateReason } from "./ticketRules";
+import { DoneAwaitingLine } from "./AwaitingConfirmation";
+import { doneAwaiting, stateReason } from "./ticketRules";
 import { SAVING, WAIT_HINTS, WAIT_LABELS, WAITING_REASON_MAX, WAITS } from "./ticketWork";
 import { useCardWork } from "./useCardWork";
 import { focusTarget, useFocusAfter } from "./useFocusAfter";
@@ -46,7 +47,10 @@ export function TicketState({
   card: Card;
   readOnly: boolean;
   onChanged: () => void;
-  /** The Tickets that hold this one up, with their buttons (`TicketHoldUps`). */
+  /**
+   * The Tickets that hold this one up, with their buttons (`TicketHoldUps`); for a Ticket done
+   * while awaiting confirmation, the persons' tasks it awaits.
+   */
   holdUps?: ReactNode;
   /** Whether the wait form is open; the head's Mark as waiting opens it too. */
   waitOpen: boolean;
@@ -85,6 +89,8 @@ export function TicketState({
     <div ref={root} className="contents">
       {card.state ? (
         <StateChip state={card.state} reason={stateReason(card)} />
+      ) : doneAwaiting(card) ? (
+        <DoneAwaitingLine card={card} />
       ) : completed ? (
         <span className="inline-flex items-center gap-2 text-sm">
           <CircleCheck size={15} aria-hidden="true" className="text-[var(--success)]" />

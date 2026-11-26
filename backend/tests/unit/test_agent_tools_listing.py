@@ -199,6 +199,7 @@ def test_list_tickets_names_the_tickets_and_where_they_stand_never_what_they_say
         "column": "Todo",
         "phase": 2,
         "state": "ready",
+        "awaiting_confirmation": False,
         "workplace": "codebase",
         "human_action_required": False,
         "assignee": "Grace",

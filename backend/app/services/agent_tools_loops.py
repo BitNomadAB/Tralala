@@ -101,7 +101,9 @@ class LoopSummarising(Protocol):
 class TicketCounts:
     """A Loop's Tickets by state (``ticket_state``): open ones are ready, need input or are
     blocked, and in a closed Loop what was never done is not done; ``needs_person`` counts what
-    waits for a person now (needs input, or ready and a person's task)."""
+    waits for a person now (needs input, or ready and a person's task). ``awaiting_confirmation``
+    counts the completed Tickets that are done, awaiting a person's confirmation of a human-only
+    Ticket before them; they count in ``completed`` too."""
 
     total: int = 0
     completed: int = 0
@@ -110,12 +112,13 @@ class TicketCounts:
     blocked: int = 0
     not_done: int = 0
     needs_person: int = 0
+    awaiting_confirmation: int = 0
 
 
 def ticket_counts(readiness: LoopReadiness) -> TicketCounts:
     """The planned Tickets by state, plus the ones added by hand (outside the plan, or every
     Ticket of a Loop without one; archived ones left out), which only their own wait can hold
-    up."""
+    up. An open Ticket held up only by a person's confirmation is ready (``ticket_state``)."""
     items = readiness["items"]
     unplanned = [ticket for ticket in readiness["unplanned"] if ticket["archived_at"] is None]
     states = [item["state"] for item in items] + [ticket["state"] for ticket in unplanned]
@@ -131,6 +134,9 @@ def ticket_counts(readiness: LoopReadiness) -> TicketCounts:
         blocked=states.count("blocked"),
         not_done=states.count("not_done"),
         needs_person=needs_input + person_tasks,
+        awaiting_confirmation=sum(
+            1 for item in items if item["completed_at"] and item["awaiting_confirmation"]
+        ),
     )
 
 
@@ -222,6 +228,12 @@ def next_step(
         return _tickets(counts.ready - person_tasks, "is", "are") + " ready to start.", "anyone"
     if person_tasks:
         ready = _tickets(person_tasks, "is ready and needs", "are ready and need")
+        if counts.awaiting_confirmation:
+            # Work done after a person's task waits for that task's confirmation, not for an agent.
+            done = _tickets(
+                counts.awaiting_confirmation, "is done and awaits", "are done and await"
+            )
+            return f"{ready} a person. {done} that confirmation.", "person"
         return f"{ready} a person.", "person"
     if counts.blocked:
         blocked = _tickets(counts.blocked, "waits", "wait")

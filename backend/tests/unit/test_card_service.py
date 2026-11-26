@@ -45,7 +45,13 @@ from tests.unit.fakes.board import (
     plan_row,
     qa_cycle_row,
 )
-from tests.unit.fakes.plans import BLOCKER, FakePlanViews, plan_views, readiness_item
+from tests.unit.fakes.plans import (
+    BLOCKER,
+    CONFIRMATION,
+    FakePlanViews,
+    plan_views,
+    readiness_item,
+)
 from tests.unit.fakes.registry import (
     FakeRegistryUnitOfWork,
     RegistryState,
@@ -165,7 +171,7 @@ def test_an_entry_is_the_row_its_labels_counts_and_readiness_in_the_former_key_o
     }
     entry = w.service.get(BOARD_ID, LOOP, "c")
     assert list(entry)[:2] == ["id", "list_id"]
-    assert list(entry)[-20:] == [
+    assert list(entry)[-22:] == [
         "workplace",
         "waiting_for",
         "waiting_reason",
@@ -179,6 +185,8 @@ def test_an_entry_is_the_row_its_labels_counts_and_readiness_in_the_former_key_o
         "human_action_required",
         "ready",
         "blockers",
+        "awaiting_confirmation",
+        "confirmations",
         "downstream_phase_numbers",
         "acceptance_criteria",
         "expected_evidence",
@@ -758,6 +766,50 @@ def test_completion_faces_the_human_the_archive_the_stage_and_readiness_gates(
     w.views.items = [readiness_item("t")]
     w.service.update(AGENT, BOARD_ID, LOOP, "t", complete)
     assert w.card("t").completed_at == STAMP
+
+
+def test_a_ticket_held_up_only_by_a_person_s_confirmation_is_ready_and_may_be_completed(
+    settings: Settings,
+) -> None:
+    w = world(settings, loop_row(LOOP, stage="ready").__replace__(current_plan_id="p"))
+    put(w, card_row("t", "todo", LOOP, plan_item_id="item").__replace__(ticket_key="K-2"))
+    put(w, card_row("u", "todo", LOOP, plan_item_id="item-u").__replace__(ticket_key="K-3"))
+    held = readiness_item("t", ready=False, blockers=(BLOCKER,), confirmations=(CONFIRMATION,))
+    w.views.items = [held, readiness_item("u", ready=False, blockers=(BLOCKER,))]
+    entry = w.service.get(BOARD_ID, LOOP, "t")
+    assert (entry["state"], entry["ready"], entry["blockers"]) == ("ready", False, [BLOCKER])
+    assert (entry["awaiting_confirmation"], entry["confirmations"]) == (True, [CONFIRMATION])
+    # A key completes it, and a person may do the same on another one.
+    done = w.service.update(AGENT, BOARD_ID, LOOP, "t", CardUpdate(version=1, completed=True))
+    assert w.card("t").completed_at == STAMP
+    # Done, awaiting confirmation: the entry keeps the mark and has no state.
+    w.views.items[0] = readiness_item(
+        "t",
+        ready=False,
+        blockers=(BLOCKER,),
+        confirmations=(CONFIRMATION,),
+        completed_at=STAMP,
+    )
+    entry = w.service.get(BOARD_ID, LOOP, "t")
+    assert (entry["state"], entry["awaiting_confirmation"]) == (None, True)
+    assert entry["confirmations"] == [CONFIRMATION]
+    assert done["completed_at"] == STAMP
+    # Real ordering still refuses, and a wait still wins over the mark. (A completion refreshes
+    # the stage, which on this board without approvals leaves delivery; set it back.)
+    w.state.loops[LOOP] = w.state.loops[LOOP].__replace__(stage="ready")
+    with pytest.raises(Conflict) as blocked:
+        w.service.update(HUMAN, BOARD_ID, LOOP, "u", CardUpdate(version=1, completed=True))
+    assert blocked.value.code == "ticket_blocked"
+    w.views.items[1] = readiness_item(
+        "u", ready=False, blockers=(BLOCKER,), confirmations=(CONFIRMATION,)
+    )
+    w.state.cards["u"] = w.card("u").__replace__(waiting_for="decision", waiting_reason="Which?")
+    with pytest.raises(Conflict) as waiting:
+        w.service.update(HUMAN, BOARD_ID, LOOP, "u", CardUpdate(version=1, completed=True))
+    assert waiting.value.code == "ticket_waiting"
+    w.state.cards["u"] = w.card("u").__replace__(waiting_for="nothing", waiting_reason="")
+    w.service.update(HUMAN, BOARD_ID, LOOP, "u", CardUpdate(version=1, completed=True))
+    assert w.card("u").completed_at == STAMP
 
 
 def test_reopening_work_supersedes_open_qa_and_clears_the_delivery_approvals(

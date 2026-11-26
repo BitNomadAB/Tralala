@@ -6,7 +6,14 @@ from dataclasses import dataclass, field
 
 from app.db.generated.board import LoopsRow
 from app.repositories.board import BoardRepositories
-from app.services.plan_views import Blocker, PlanView, PlanViews, Readiness, ReadinessItem
+from app.services.plan_views import (
+    Blocker,
+    Confirmation,
+    PlanView,
+    PlanViews,
+    Readiness,
+    ReadinessItem,
+)
 from app.services.ticket_state import ticket_state
 
 
@@ -18,9 +25,13 @@ def readiness_item(
     human: bool = False,
     phase_number: int = 1,
     waiting_for: str = "nothing",
+    confirmations: tuple[Confirmation, ...] = (),
+    completed_at: str | None = None,
 ) -> ReadinessItem:
     """A planned Ticket's readiness; ``card_id`` is the card that carries it, and its state
-    follows from ``ready`` and ``waiting_for`` as ``ticket_state`` computes it."""
+    follows from ``ready``, ``waiting_for`` and ``confirmations`` (the unconfirmed human-only
+    Tickets that alone hold it up, which make it ``awaiting_confirmation``) as ``ticket_state``
+    computes it."""
     return {
         "id": f"item-{card_id}",
         "key": f"K-{card_id}",
@@ -38,18 +49,27 @@ def readiness_item(
         "prerequisite_ticket_ids": [],
         "prerequisite_phase_ids": [],
         "card_id": card_id,
-        "completed_at": None,
+        "completed_at": completed_at,
         "ready": ready,
         "blockers": list(blockers),
-        "human_action_required": human,
+        "awaiting_confirmation": bool(confirmations),
+        "confirmations": list(confirmations),
+        "human_action_required": human and completed_at is None,
         "downstream_phase_numbers": [2],
         "workplace": "unknown",
         "waiting_for": waiting_for,
         "state": ticket_state(
-            completed=False, waiting_for=waiting_for, blocked=not ready, loop_closed=False
+            completed=completed_at is not None,
+            waiting_for=waiting_for,
+            blocked=not ready and not confirmations,
+            loop_closed=False,
         ),
     }
 
+
+CONFIRMATION: Confirmation = {"id": "item-first", "key": "K-first", "title": "First"}
+"""The human-only Ticket ``BLOCKER`` names, unconfirmed: alone it leaves a Ticket awaiting
+confirmation."""
 
 BLOCKER: Blocker = {
     "type": "ticket",

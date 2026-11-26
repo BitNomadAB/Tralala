@@ -30,6 +30,11 @@ Ticket's page with its confirmation in focus), an unfinished prerequisite (``tic
 the blockers), an open wait (``ticket_waiting``, which a person clears) and a Loop that is not
 executing.
 
+A Ticket held up only by human-only Tickets a person has not confirmed is no refusal: it is
+completed and is then done, awaiting confirmation. The answer says so (``awaiting_confirmation``
+true, the ``confirmations`` and a ``message`` naming them), and the mark goes once a person
+confirms them.
+
 ``complete_ticket`` is typed on ``TicketCompleting``, the attributes of the composition root it
 uses, so a unit test runs it with the real services on the typed fakes.
 """
@@ -123,16 +128,33 @@ def _answer(
     comment: CommentEntry | None,
 ) -> ToolResult:
     loop = services.loop.get(board_id, card["loop_id"])
-    return {
+    answer: ToolResult = {
         "ticket": {
             "id": card["id"],
             "key": card["ticket_key"],
             "completed_at": card["completed_at"],
             "version": card["version"],
+            "awaiting_confirmation": card["awaiting_confirmation"],
+            "confirmations": card["confirmations"],
         },
         "comment_id": comment["id"] if comment is not None else None,
         "loop": {"stage": loop["stage"], "progress": loop["progress"]},
     }
+    if card["completed_at"] and card["awaiting_confirmation"]:
+        answer["message"] = awaiting_message(card)
+    return answer
+
+
+def awaiting_message(card: CardEntry) -> str:
+    """What a completion of a Ticket awaiting confirmation says: it is done, and which human-only
+    Tickets a person has still to confirm."""
+    keys = [entry["key"] for entry in card["confirmations"]]
+    whom = "it" if len(keys) == 1 else "them"
+    return (
+        f"{card['ticket_key'] or 'This Ticket'} is done. A person's confirmation of "
+        f"{', '.join(keys)} is still missing, so it shows as done, awaiting confirmation, until a "
+        f"person confirms {whom}."
+    )
 
 
 def _recent(
@@ -374,6 +396,7 @@ __all__ = [
     "TicketCommenting",
     "TicketCompleting",
     "TicketCreating",
+    "awaiting_message",
     "comment_ticket",
     "complete_ticket",
     "completion_comment",

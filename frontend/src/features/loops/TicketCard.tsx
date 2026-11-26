@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Chip, StateChip } from "@/components/ui/chip";
 import { Menu, type MenuItem } from "@/components/ui/menu";
+import { AwaitingConfirmationChip } from "@/features/cards/AwaitingConfirmation";
 import { NoReportChip } from "@/features/cards/NoReport";
 import { NOT_DONE_REASON } from "@/features/cards/ticketWork";
 import type { Card } from "@/lib/types";
@@ -64,8 +65,9 @@ const GRIP =
  * A Ticket on the Kanban, the first line of its face: the title, the plain summary, and a bottom
  * row with the key, the state unless it is Ready (Needs input, Blocked, or Not done once its Loop
  * was closed without it), "No report" while a key that took it has not reported on it, the
- * priority and due date when set, "done" once completed, "Needs a person" for a person's task that
- * can still be done, and the owner.
+ * priority and due date when set, "done" once completed (with "Awaiting confirmation" while a
+ * person's task before it is not confirmed yet), "Needs a person" for a person's task that can
+ * still be done, and the owner.
  * The title is the button that opens the Ticket (Enter or a click); it covers the whole card, so a
  * pointer drags the card from anywhere on it. The grip beside the title ("Move <title>") is the
  * keyboard's drag handle: Space or Enter picks the card up, the arrow keys move it. `actions`, the
@@ -226,6 +228,7 @@ export function TicketCard({
             done
           </span>
         ) : null}
+        <AwaitingConfirmationChip card={card} />
         {card.assignee_name ? (
           <Avatar
             name={card.assignee_name}

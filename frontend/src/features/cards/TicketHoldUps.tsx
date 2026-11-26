@@ -18,9 +18,9 @@ function rowButton(list: Element | null, cardId: string): HTMLElement | null {
 }
 
 /**
- * "Held up by", under the state of a Ticket the plan blocks: every open Ticket that has to be done
- * first, with a link that opens it and the one button for what it needs now (Confirm for a
- * person's task, Complete, Clear wait, Restore). A Ticket that waits for earlier work itself keeps
+ * "Held up by", under the state of a Ticket the plan blocks or one done while awaiting a person's
+ * confirmation: every open Ticket that has to be done first, with a link that opens it and the one
+ * button for what it needs now (Confirm for a person's task, Complete, Clear wait, Restore). A Ticket that waits for earlier work itself keeps
  * its button held with the reason, below the ones that can be pressed, so the list is worked from
  * the top and the blocked Ticket is freed without leaving it.
  *
@@ -46,7 +46,11 @@ export function TicketHoldUps({
   afterLast: () => HTMLElement | null;
   onChanged: () => void;
 }) {
-  const blocked = card.completed_at === null && !card.ready && card.blockers.length > 0;
+  // A Ticket done while awaiting confirmation keeps the rows: the persons' tasks it awaits.
+  const blocked =
+    (card.completed_at === null || card.awaiting_confirmation) &&
+    !card.ready &&
+    card.blockers.length > 0;
   const open = useOpenCards(boardId, loopId, blocked);
   const unblock = useUnblock({ boardId, loopId, onChanged });
   const focusAfter = useFocusAfter();

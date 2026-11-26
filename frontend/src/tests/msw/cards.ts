@@ -51,6 +51,8 @@ export function ticketCard(extra: Partial<CardDetail> = {}): CardDetail {
     expected_evidence: [],
     ready: true,
     blockers: [],
+    awaiting_confirmation: false,
+    confirmations: [],
     downstream_phase_numbers: [],
     plan_item_id: "item-1",
     workplace: "unknown",
