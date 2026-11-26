@@ -417,7 +417,8 @@ from `services/agent_tools.py`, which is the one description of what a worker to
 key's identity (`whoami`); reading boards, Loops, documents, Tickets and their attached files;
 working a Ticket (summaries, a wait, assigning, moving, commenting, completing) and adding a
 follow-up outside the plan; planning a Loop (creating it, writing Info, handing in or asking for the
-analysis, the RoadMap and their briefs); the Loop's notes; and the three discussion tools. No tool
+analysis, the RoadMap and their briefs); the Loop's notes; and discussions on a Ticket or on the
+board, with the `notices` every answer carries while one waits for the key. No tool
 takes a planning decision. The local role agents are not part of that surface: a run invokes them, they never
 authenticate, and they never change a Ticket. [Agent_usage.md](Agent_usage.md) lists what each
 tool may do.
