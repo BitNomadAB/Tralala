@@ -82,6 +82,14 @@ export interface LoopBlocker {
   phase_number?: number | null;
 }
 
+/** A person's task not confirmed yet, which a Ticket awaiting confirmation is held up by. */
+export interface Confirmation {
+  /** The planned Ticket's id, as a blocker names it. */
+  id: string;
+  key: string;
+  title: string;
+}
+
 export interface PlanTicketView {
   id: string;
   key: string;
@@ -102,6 +110,12 @@ export interface PlanTicketView {
   completed_at: string | null;
   ready: boolean;
   blockers: LoopBlocker[];
+  /**
+   * Its blockers lead only to persons' tasks not confirmed yet (`confirmations`): it may be worked
+   * and completed, and is then done, awaiting their confirmation. `ready` stays false.
+   */
+  awaiting_confirmation: boolean;
+  confirmations: Confirmation[];
   human_action_required: boolean;
   downstream_phase_numbers: number[];
   workplace: Workplace;

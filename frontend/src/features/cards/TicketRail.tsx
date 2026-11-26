@@ -98,7 +98,7 @@ export function TicketRail({
           readOnly={readOnly}
           onChanged={refresh}
           holdUps={
-            readOnly || card.completed_at !== null ? null : (
+            readOnly || (card.completed_at !== null && !card.awaiting_confirmation) ? null : (
               <TicketHoldUps
                 boardId={boardId}
                 loopId={loopId}
