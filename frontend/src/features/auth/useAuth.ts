@@ -14,6 +14,10 @@ export interface AuthContextValue {
   actor: Actor | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<Actor>;
+  /**
+   * Asks the server to end the session and signs out in this tab whatever it answers. It never
+   * rejects: a session that had already ended, a server error or a lost network still sign out.
+   */
   logout: () => Promise<void>;
   refresh: () => Promise<Actor | null>;
   /**

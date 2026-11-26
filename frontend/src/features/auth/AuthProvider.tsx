@@ -94,7 +94,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (username: string, password: string) => loginMutation.mutateAsync({ username, password }),
     [loginMutation],
   );
-  const logout = useCallback(() => logoutMutation.mutateAsync(), [logoutMutation]);
+  /**
+   * Never rejects: whatever the server answers, `onSettled` has signed the person out in this tab
+   * before the mutation settles. A 401 (the session had already ended), a 500 or a network failure
+   * leaves nothing for a caller to show or retry, so no caller has to catch it.
+   */
+  const logout = useCallback(async () => {
+    try {
+      await logoutMutation.mutateAsync();
+    } catch {
+      // Signed out in this tab all the same, which is what the person asked for.
+    }
+  }, [logoutMutation]);
   /** Re-read the session, for flows that sign in outside the login form (an invitation link). */
   const refresh = useCallback(async () => {
     const actor = await fetchActor();
