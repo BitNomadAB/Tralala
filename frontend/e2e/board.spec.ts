@@ -78,8 +78,11 @@ test.describe("boards and cards", () => {
     await page.getByLabel("Filter tickets").fill("login");
     await expect(cardTile(page, "Todo", "Fix login bug")).toBeVisible();
     await expect(cardTile(page, "Todo", "Write documentation")).toHaveCount(0);
-    // The count is on screen and in the announcer; an empty column says why it is empty.
-    await expect(page.getByText("1 Ticket matches", { exact: true })).toBeVisible();
+    // The count is on screen and in the announcer; an empty column says why it is empty. The
+    // announcer says the same words a moment later, so the count on screen is read in the Kanban.
+    await expect(
+      page.getByLabel("Kanban", { exact: true }).getByText("1 Ticket matches", { exact: true }),
+    ).toBeVisible();
     await expect(page.locator('[data-announcer="polite"]')).toContainText("1 Ticket matches");
     await expect(listRegion(page, "Review")).toContainText("No Tickets match the filter");
 

@@ -157,7 +157,7 @@ describe("signOutLocally", () => {
         <button type="button" onClick={() => void login("ada", MEMBER_PASSWORD)}>
           Sign in
         </button>
-        <button type="button" onClick={() => void logout().catch(() => undefined)}>
+        <button type="button" onClick={() => void logout()}>
           Sign out
         </button>
       </>
