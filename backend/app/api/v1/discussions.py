@@ -16,6 +16,8 @@ from ...schemas.discussions import (
     DiscussionRunListOut,
     DiscussionRunOut,
     DiscussionRunStart,
+    DiscussionScope,
+    DiscussionState,
 )
 from ...schemas.envelope import Envelope, OpenObject
 from ..deps import RequestContext, get_context, ok
@@ -40,9 +42,13 @@ def list_discussions(
     status: Annotated[str | None, Query(max_length=40)] = None,
     card_id: Annotated[str | None, Query(max_length=64)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    scope: Annotated[DiscussionScope | None, Query()] = None,
+    state: Annotated[DiscussionState | None, Query()] = None,
 ) -> dict[str, object]:
     ctx.actor.require("discussions:read")
-    items = ctx.services.discussion.list(board_id, status=status, card_id=card_id, limit=limit)
+    items = ctx.services.discussion.list(
+        board_id, status=status, card_id=card_id, limit=limit, scope=scope, state=state
+    )
     return ok(request, {"items": items, "total": len(items)})
 
 

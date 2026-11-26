@@ -17,9 +17,10 @@ from ..db.generated.board import (
     DiscussionThreadsRow,
 )
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
+from ..repositories.discussions import ThreadState
 from ..repositories.registry import RegistryUnitOfWork
-from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate
-from .activity import activity_entry
+from ..schemas.discussions import DiscussionCreate, DiscussionMessageCreate, DiscussionScope
+from .activity import discussion_activity
 from .agents import RoleSnapshot
 from .discussion_answers import read_answer
 from .discussion_inbox import InboxPage, decided_by, read_inbox
@@ -128,7 +129,8 @@ def serialize(
 
 
 class DiscussionService:
-    """Ticket-bound discussions. Participants keep an immutable role snapshot."""
+    """Discussions on a Ticket or on the board itself. Participants keep an immutable role
+    snapshot."""
 
     def __init__(
         self,
@@ -175,16 +177,16 @@ class DiscussionService:
         repos: BoardRepositories,
         actor: ActorContext,
         action: str,
-        card_id: str | None,
+        thread: DiscussionThreadsRow,
         changes: Mapping[str, object],
         now: str,
     ) -> None:
         repos.activity.add(
-            activity_entry(
+            discussion_activity(
                 actor,
                 action=action,
-                entity_type="card",
-                entity_id=card_id or "",
+                card_id=thread.card_id,
+                discussion_id=thread.id,
                 changes=changes,
                 entry_id=self._new_id(),
                 timestamp=now,
@@ -245,7 +247,7 @@ class DiscussionService:
                 repos,
                 actor,
                 "discussion.reviewed",
-                thread.card_id,
+                thread,
                 {"discussion_id": discussion_id, "decision": decision},
                 now,
             )
@@ -271,13 +273,20 @@ class DiscussionService:
         status: str | None = None,
         card_id: str | None = None,
         limit: int = 50,
+        scope: DiscussionScope | None = None,
+        state: ThreadState | None = None,
     ) -> list[DiscussionEntry]:
         """The board's threads by most recent activity, optionally in one status or on one
-        Ticket (its Discussions tab)."""
+        Ticket (its Discussions tab); ``scope`` keeps those on the board itself (``board``) or
+        those on a Ticket (``ticket``), ``state`` the open or the closed ones."""
         self.board_service.require_row(board_id)
         with self.store.reader(board_id) as repos:
             threads = repos.threads.newest(
-                status=status or None, card_id=card_id or None, limit=limit
+                status=status or None,
+                card_id=card_id or None,
+                limit=limit,
+                board_level=None if scope is None else scope == "board",
+                state=state,
             )
             return [serialize(repos, thread) for thread in threads]
 
@@ -305,40 +314,32 @@ class DiscussionService:
         now = self._clock()
         discussion_id = self._new_id()
         with self.store.writer(board_id) as repos:
-            card = repos.cards.get(payload.card_id)
-            if card is None or card.archived_at is not None:
-                raise ValidationFailure(
-                    "Discussion must reference an existing ticket",
-                    details={"card_id": payload.card_id},
-                )
-            ensure_ticket_writable(repos, payload.card_id)
-            title = (payload.title or f"{card.title} — discussion").strip()
+            title = self._title(repos, payload)
             snapshots = self._snapshots(payload.participant_ids)
-            repos.threads.add(
-                DiscussionThreadsRow(
-                    id=discussion_id,
-                    card_id=payload.card_id,
-                    title=title,
-                    goal=payload.goal,
-                    mode=payload.mode,
-                    status="open",
-                    created_by_actor_id=actor.actor_id,
-                    created_by_type=actor.actor_type,
-                    created_by_name=actor.actor_name,
-                    max_rounds=payload.max_rounds,
-                    origin_comment_id=None,
-                    escalation_depth=0,
-                    created_at=now,
-                    updated_at=now,
-                    last_activity_at=now,
-                    round_count=0,
-                    run_state="idle",
-                    tokens_used=0,
-                    elapsed_ms=0,
-                    closed_at=None,
-                    closed_by_actor_id=None,
-                )
+            thread = DiscussionThreadsRow(
+                id=discussion_id,
+                card_id=payload.card_id,
+                title=title,
+                goal=payload.goal,
+                mode=payload.mode,
+                status="open",
+                created_by_actor_id=actor.actor_id,
+                created_by_type=actor.actor_type,
+                created_by_name=actor.actor_name,
+                max_rounds=payload.max_rounds,
+                origin_comment_id=None,
+                escalation_depth=0,
+                created_at=now,
+                updated_at=now,
+                last_activity_at=now,
+                round_count=0,
+                run_state="idle",
+                tokens_used=0,
+                elapsed_ms=0,
+                closed_at=None,
+                closed_by_actor_id=None,
             )
+            repos.threads.add(thread)
             for snapshot in snapshots:
                 repos.participants.add(
                     DiscussionParticipantsRow(
@@ -382,11 +383,31 @@ class DiscussionService:
                 repos,
                 actor,
                 "discussion.created",
-                payload.card_id,
+                thread,
                 {"discussion_id": discussion_id, "title": title},
                 now,
             )
         return self.get(board_id, discussion_id)
+
+    @staticmethod
+    def _title(repos: BoardRepositories, payload: DiscussionCreate) -> str:
+        """The thread's title. On a Ticket: the one given, or one named after the Ticket, which
+        must exist and whose Loop must take writes. On the board: the one given, which the schema
+        requires."""
+        if payload.card_id is None:
+            if payload.title is None or not payload.title.strip():
+                raise ValidationFailure(
+                    "A discussion on the board needs a title", details={"field": "title"}
+                )
+            return payload.title.strip()
+        card = repos.cards.get(payload.card_id)
+        if card is None or card.archived_at is not None:
+            raise ValidationFailure(
+                "Discussion must reference an existing ticket",
+                details={"card_id": payload.card_id},
+            )
+        ensure_ticket_writable(repos, payload.card_id)
+        return (payload.title or f"{card.title} — discussion").strip()
 
     def _snapshots(self, participant_ids: list[str]) -> list[RoleSnapshot]:
         """Each participant's role as it is now; only an enabled agent may take part."""
@@ -446,7 +467,7 @@ class DiscussionService:
                 repos,
                 actor,
                 "discussion.message_posted",
-                thread.card_id,
+                thread,
                 {"discussion_id": discussion_id, "message_id": message_id},
                 now,
             )

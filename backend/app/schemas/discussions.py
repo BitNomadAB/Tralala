@@ -1,21 +1,39 @@
 from __future__ import annotations
 
-from pydantic import Field
+from typing import Literal
+
+from pydantic import Field, ValidationInfo, field_validator
 
 from .common import Id, LongText, Name, OutModel, StrictModel
 
 DiscussionStatus = str
+# Which threads a board's list keeps: those on the board itself (no Ticket) or those on a Ticket.
+DiscussionScope = Literal["board", "ticket"]
+# Which threads by state: ``closed`` (their opener closed them) or ``open`` (every other status).
+DiscussionState = Literal["open", "closed"]
 
 
 class DiscussionCreate(StrictModel):
-    card_id: Id
-    title: Name | None = None
+    """A thread on a Ticket (``card_id``) or, without one, on the board itself; a thread on the
+    board has no Ticket to be named after, so it needs its ``title``."""
+
+    card_id: Id | None = None
+    # Checked even when left out, so a thread on the board without a title is refused by name.
+    title: Name | None = Field(default=None, validate_default=True)
     goal: LongText = Field(min_length=1)
     mode: str = Field(default="manual", pattern="^(manual|roundtable|autonomous)$")
     participant_ids: list[Id] = Field(default_factory=list, max_length=12)
     # Four rounds is where a discussion still adds something: with sequential answers and a review
     # round before consensus, a thread either converges by two or repeats itself.
     max_rounds: int = Field(default=3, ge=1, le=4)
+
+    @field_validator("title")
+    @classmethod
+    def _title_on_the_board(cls, value: str | None, info: ValidationInfo) -> str | None:
+        # ``card_id`` is declared first, so it is in ``data`` unless it failed on its own.
+        if value is None and "card_id" in info.data and info.data["card_id"] is None:
+            raise ValueError("title is required for a discussion on the board, without a Ticket")
+        return value
 
 
 class DiscussionRunStart(StrictModel):
@@ -201,7 +219,8 @@ class DiscussionEventListOut(OutModel):
 
 class DiscussionOut(OutModel):
     id: str
-    card_id: str
+    # Null for a thread on the board itself.
+    card_id: str | None = None
     card_title: str | None = None
     ticket_key: str | None = None
     loop_id: str | None = None
