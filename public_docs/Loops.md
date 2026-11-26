@@ -373,6 +373,11 @@ the focus on the button, and the person reads and presses it. Opening a link dec
   on the address they opened, with everything after the `?` and the `#`. Only an address inside
   Tralala, a path that starts with a single `/`, is followed after the sign-in; anything else
   (`//host`, another site, a full `https://` address) opens the dashboard instead.
+- **Signing out forgets the address.** A session that ends by itself (it expired, or was signed out
+  from another device) returns the person to the page they were on once they sign in again.
+  **Sign out** and a password change forget it: the next sign-in in that tab opens the dashboard,
+  so whoever signs in next does not land on the page the last person left. A link opened after
+  that, from the address bar or in a new tab, leads to its address as before.
 - **`?dialog=completion`** opens the dialog only where **Loop actions** offers it: not in a draft,
   which has nothing to finalize yet, and not in a completed, cancelled or archived Loop or on an
   archived board, which are read-only. There the Loop page opens without it. Closing the dialog

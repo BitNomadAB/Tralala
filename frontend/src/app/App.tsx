@@ -84,10 +84,13 @@ function RouteFocus() {
  * page navigates to as well, so whichever of the two runs first, the person lands on it.
  */
 function LoginRoute() {
-  const { actor, loading } = useAuth();
+  const { actor, loading, addressForgotten } = useAuth();
   const location = useLocation();
   if (loading) return null;
   if (actor) return <Navigate to={returnPath(location.state)} replace />;
+  // After a sign-out the person asked for, the address RequireAuth kept leaves the login page's
+  // state, so the next sign-in opens the dashboard, also after a reload of the login page.
+  if (addressForgotten && location.state !== null) return <Navigate to="/login" replace />;
   return <LoginPage />;
 }
 

@@ -71,6 +71,7 @@ function renderLayout(path: string, loaded: Promise<void> = Promise.resolve()) {
     login: () => Promise.resolve(MEMBER),
     logout: () => Promise.resolve(),
     refresh: () => Promise.resolve(MEMBER),
+    addressForgotten: false,
     signOutLocally: () => undefined,
   };
   render(

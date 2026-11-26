@@ -132,6 +132,7 @@ describe("the Plan tab when the documents change elsewhere", () => {
       login: () => Promise.resolve(MEMBER),
       logout: () => Promise.resolve(),
       refresh: () => Promise.resolve(MEMBER),
+      addressForgotten: false,
       signOutLocally: () => undefined,
     };
     // What the Loop page's `onChanged` does to these two.
