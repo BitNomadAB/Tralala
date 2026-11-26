@@ -330,7 +330,7 @@ class DiscussionService:
                 repos, discussion_id, STATUS_CHANGED, {"status": target, "run_state": "idle"}, actor
             )
         self._publish(board_id, review_event, status_event)
-        return self.get(board_id, discussion_id)
+        return self.get(board_id, discussion_id, reader=actor)
 
     def close(self, actor: ActorContext, board_id: str, discussion_id: str) -> DiscussionEntry:
         """The opener closes the thread (``discussion_closing``)."""
@@ -346,7 +346,7 @@ class DiscussionService:
                 events=self.events,
             )
         self._publish(board_id, event)
-        return self.get(board_id, discussion_id)
+        return self.get(board_id, discussion_id, reader=actor)
 
     def reopen(self, actor: ActorContext, board_id: str, discussion_id: str) -> DiscussionEntry:
         """The opener, or a signed-in person, opens a closed thread again
@@ -363,7 +363,7 @@ class DiscussionService:
                 events=self.events,
             )
         self._publish(board_id, event)
-        return self.get(board_id, discussion_id)
+        return self.get(board_id, discussion_id, reader=actor)
 
     # --- queries -------------------------------------------------------------
 
@@ -512,7 +512,7 @@ class DiscussionService:
                 {"discussion_id": discussion_id, "title": title},
                 now,
             )
-        return self.get(board_id, discussion_id)
+        return self.get(board_id, discussion_id, reader=actor)
 
     @staticmethod
     def _title(repos: BoardRepositories, payload: DiscussionCreate) -> str:
@@ -630,7 +630,7 @@ class DiscussionService:
                 actor, board_id, discussion_id, thread.mode, payload.content, participants
             )
         )
-        detail = self.get(board_id, discussion_id)
+        detail = self.get(board_id, discussion_id, reader=actor)
         detail["auto_run"] = auto_run
         return detail
 

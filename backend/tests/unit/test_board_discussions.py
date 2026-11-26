@@ -202,6 +202,18 @@ def test_only_the_opener_closes_a_thread_not_even_another_person() -> None:
     assert (answered["status"], answered["closed_at"]) == ("closed", NOW)
 
 
+def test_every_answer_to_a_command_carries_the_callers_view_of_the_thread() -> None:
+    w = world()
+    assert w.discussions.create(ADA, BOARD_ID, on_the_board())["opened_by_me"] is True
+    message = DiscussionMessageCreate(content="x")
+    assert w.discussions.add_message(ADA, BOARD_ID, THREAD, message)["opened_by_me"] is True
+    assert w.discussions.add_message(GRACE, BOARD_ID, THREAD, message)["opened_by_me"] is False
+    assert w.discussions.close(ADA, BOARD_ID, THREAD)["opened_by_me"] is True
+    assert w.discussions.reopen(ADA, BOARD_ID, THREAD)["opened_by_me"] is True
+    reviewed = w.discussions.review(ADA, BOARD_ID, THREAD, decision="approve")
+    assert (reviewed["status"], reviewed["opened_by_me"]) == ("approved", True)
+
+
 def test_a_key_that_opened_a_thread_closes_it_and_closing_needs_the_write_scope() -> None:
     w = world()
     w.state.discussions[THREAD] = w.state.discussions[THREAD].__replace__(
