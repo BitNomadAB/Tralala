@@ -17,7 +17,7 @@ from app.api.mcp import render_bootstrap, tool_list
 from app.core.config import Settings
 from app.core.context import ActorContext
 from app.core.errors import Forbidden, ValidationFailure
-from app.db.generated.board import CardsRow, LoopsRow
+from app.db.generated.board import CardsRow, LoopDocumentsRow, LoopsRow
 from app.services.agent_tools import ToolResult, loop_summaries, tool_catalog
 from app.services.agent_tools_loops import ALL_DONE, ALL_DONE_WITHOUT_PLAN
 from app.services.agent_tools_read import REPORT_FIRST
@@ -536,6 +536,92 @@ def test_with_a_public_url_every_link_is_absolute(settings: Settings) -> None:
     answer = loop_summaries(decisions_world(settings, public_url=PUBLIC), READER, ask())
     assert links(answer) == {
         key: None if path is None else f"{PUBLIC}{path}" for key, path in decision_paths().items()
+    }
+
+
+ASK_FOR_ROADMAP = (
+    "Ask for the RoadMap (run_roadmap) or hand one in, written to a board agent's instructions "
+    "(read_instructions, then write_roadmap)."
+)
+
+
+def planning_world(settings: Settings, *, public_url: str | None = None) -> LoopWorld:
+    """Five Loops in ``planning``, each with an approved analysis: a Loop stays in that stage once
+    a RoadMap is handed in (``compute_stage``).
+
+    L-1 has no RoadMap, L-2 one ready for review, L-3 one a person asked to change, L-4 one out of
+    date with its Info, and L-5 the empty draft a reset of the RoadMap leaves.
+    """
+    state = BoardState()
+
+    def roadmap(
+        n: int, status: str, *, content: str = "text", info: str = ""
+    ) -> list[LoopDocumentsRow]:
+        loop_id = uid(n)
+        return [
+            document_row(
+                f"r{n}",
+                loop_id,
+                "roadmap_ai",
+                status=status,
+                content=content,
+                info=info or f"i{n}",
+                analysis_ai=f"a{n}",
+                analysis=f"h{n}",
+            ),
+            document_row(
+                f"m{n}", loop_id, "roadmap", status=status, content=content, roadmap_ai=f"r{n}"
+            ),
+        ]
+
+    for n in range(1, 6):
+        state.documents += [
+            document_row(f"i{n}", uid(n), "info"),
+            document_row(f"a{n}", uid(n), "analysis_ai", status="approved", info=f"i{n}"),
+            document_row(f"h{n}", uid(n), "analysis", status="approved", analysis_ai=f"a{n}"),
+        ]
+    state.documents += [
+        *roadmap(2, "ready_for_review"),
+        *roadmap(3, "changes_requested"),
+        *roadmap(4, "ready_for_review", info="i4-old"),
+        *roadmap(5, "draft", content=""),
+    ]
+    loops = [loop(uid(n), "planning", n) for n in range(1, 6)]
+    return loop_world(settings, loops, state=state, public_url=public_url)
+
+
+def test_a_roadmap_handed_in_while_the_loop_is_planning_waits_for_a_person_and_links_it(
+    settings: Settings,
+) -> None:
+    answer = loop_summaries(planning_world(settings), READER, ask())
+    by_key = {row["key"]: row for row in rows(answer)}
+    review = f"/boards/{BOARD_ID}/loops/{uid(2)}?tab=plan&doc=roadmap"
+    reviews = "A person reviews the RoadMap and approves it or asks for changes."
+    assert {
+        key: (row["next"], row["waiting_on"], row["decision_link"]) for key, row in by_key.items()
+    } == {
+        # Nothing handed in yet: the RoadMap is asked for, as before.
+        "L-1": (ASK_FOR_ROADMAP, "agent", None),
+        # Handed in: a person reviews it in the Plan tab.
+        "L-2": (reviews, "person", review),
+        # Sent back, or out of date with its inputs: an agent hands in a new one, no link.
+        "L-3": ("A person asked for changes to the RoadMap: hand in a new one.", "agent", None),
+        "L-4": ("The RoadMap is out of date with its inputs: hand in a new one.", "agent", None),
+        # A reset left an empty draft: nothing to review, the RoadMap is asked for again.
+        "L-5": (ASK_FOR_ROADMAP, "agent", None),
+    }
+    assert {key: row["stage"] for key, row in by_key.items()} == dict.fromkeys(by_key, "planning")
+    documents = by_key["L-2"]["documents"]
+    assert isinstance(documents, Mapping)
+    assert (documents["roadmap_ai"], documents["roadmap"]) == ("ready_for_review r1",) * 2
+    # With the installation's public address the same link is absolute; the others stay null.
+    public = loop_summaries(planning_world(settings, public_url=PUBLIC), READER, ask())
+    assert links(public) == {
+        "L-1": None,
+        "L-2": f"{PUBLIC}{review}",
+        "L-3": None,
+        "L-4": None,
+        "L-5": None,
     }
 
 

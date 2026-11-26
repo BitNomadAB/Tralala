@@ -76,11 +76,14 @@ describe("the inbox's words", () => {
     expect(inboxMeta(bare)).toBe("Platform · 1 agent · no round yet");
   });
 
-  it("leads to the discussion as a page of its Ticket, or to the board without one", () => {
+  it("leads to the discussion as a page of its Ticket, or as a page of the board without one", () => {
     expect(inboxPath(inboxRow("d 1"))).toBe(
       "/boards/board-1/loops/loop-1/tickets/card-1/discussions/d%201",
     );
-    expect(inboxPath(inboxRow("d", { loop_id: null }))).toBe("/boards/board-1");
+    const onBoard = { loop_id: null, loop_key: null, loop_name: null, card_id: null };
+    expect(inboxPath(inboxRow("d 1", onBoard))).toBe("/boards/board-1/discussions/d%201");
+    // A Ticket the API could not place in a Loop opens at the board's address, which shows it.
+    expect(inboxPath(inboxRow("d", { loop_id: null }))).toBe("/boards/board-1/discussions/d");
   });
 });
 

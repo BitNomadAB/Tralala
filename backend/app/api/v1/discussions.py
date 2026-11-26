@@ -12,10 +12,13 @@ from ...schemas.discussions import (
     DiscussionListOut,
     DiscussionMessageCreate,
     DiscussionOut,
+    DiscussionReadOut,
     DiscussionReview,
     DiscussionRunListOut,
     DiscussionRunOut,
     DiscussionRunStart,
+    DiscussionScope,
+    DiscussionState,
 )
 from ...schemas.envelope import Envelope, OpenObject
 from ..deps import RequestContext, get_context, ok
@@ -40,9 +43,19 @@ def list_discussions(
     status: Annotated[str | None, Query(max_length=40)] = None,
     card_id: Annotated[str | None, Query(max_length=64)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    scope: Annotated[DiscussionScope | None, Query()] = None,
+    state: Annotated[DiscussionState | None, Query()] = None,
 ) -> dict[str, object]:
     ctx.actor.require("discussions:read")
-    items = ctx.services.discussion.list(board_id, status=status, card_id=card_id, limit=limit)
+    items = ctx.services.discussion.list(
+        board_id,
+        status=status,
+        card_id=card_id,
+        limit=limit,
+        scope=scope,
+        state=state,
+        reader=ctx.actor,
+    )
     return ok(request, {"items": items, "total": len(items)})
 
 
@@ -69,7 +82,20 @@ def get_discussion(
     request: Request,
 ) -> dict[str, object]:
     ctx.actor.require("discussions:read")
-    return ok(request, ctx.services.discussion.get(board_id, discussion_id))
+    return ok(request, ctx.services.discussion.get(board_id, discussion_id, reader=ctx.actor))
+
+
+@router.post(
+    "/boards/{board_id}/discussions/{discussion_id}/read",
+    response_model=Envelope[DiscussionReadOut],
+)
+def mark_discussion_read(
+    board_id: str,
+    discussion_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    return ok(request, ctx.services.discussion.mark_read(ctx.actor, board_id, discussion_id))
 
 
 @router.post(
@@ -222,6 +248,32 @@ def review_discussion(
             reason=payload.reason,
         ),
     )
+
+
+@router.post(
+    "/boards/{board_id}/discussions/{discussion_id}/close",
+    response_model=Envelope[DiscussionOut],
+)
+def close_discussion(
+    board_id: str,
+    discussion_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    return ok(request, ctx.services.discussion.close(ctx.actor, board_id, discussion_id))
+
+
+@router.post(
+    "/boards/{board_id}/discussions/{discussion_id}/reopen",
+    response_model=Envelope[DiscussionOut],
+)
+def reopen_discussion(
+    board_id: str,
+    discussion_id: str,
+    ctx: Annotated[RequestContext, Depends(get_context)],
+    request: Request,
+) -> dict[str, object]:
+    return ok(request, ctx.services.discussion.reopen(ctx.actor, board_id, discussion_id))
 
 
 @router.post(

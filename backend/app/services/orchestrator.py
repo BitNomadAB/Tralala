@@ -24,6 +24,7 @@ from ..db.generated.board import (
     DiscussionThreadsRow,
     DiscussionVotesRow,
 )
+from ..db.generated.registry import BoardsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.registry import RegistryUnitOfWork
 from . import runtime
@@ -102,6 +103,18 @@ def ticket_briefing(repos: BoardRepositories, card_id: str | None) -> str:
         f"Ticket id: {card.id} (key: {card.ticket_key or 'not keyed yet'})\n"
         f"Priority: {card.priority}\n"
         f"Description:\n{(card.description or '(empty)')[:4000]}"
+    )
+
+
+def board_briefing(board: BoardsRow | None, title: str) -> str:
+    """What a thread on the board itself is about, as the prompt names it in place of a Ticket:
+    the board's name and description (cut as a Ticket's is) and the thread's title."""
+    name = board.name if board is not None and board.name else "(unknown)"
+    description = board.description if board is not None else ""
+    return (
+        f"Board: {name}\n"
+        f"Board description:\n{(description or '(empty)')[:4000]}\n"
+        f"Discussion on the board, not on a Ticket: {title}"
     )
 
 
@@ -225,11 +238,16 @@ class Orchestrator:
             if thread is None:
                 raise NotFound("Discussion not found")
             participants = repos.participants.for_thread(discussion_id)
-            ticket = ticket_briefing(repos, thread.card_id)
+            ticket = (
+                ticket_briefing(repos, thread.card_id) if thread.card_id is not None else None
+            )
             history = transcript(repos, thread.id)
             # Counted before the round runs: a roundtable may only conclude once some earlier round
             # produced answers, otherwise a unanimous first round means everyone guessed alike.
             prior_answers = repos.messages.agent_answers(discussion_id)
+        if ticket is None:
+            with self.registry.reader() as registry:
+                ticket = board_briefing(registry.boards.get(board_id), thread.title)
 
         _, tokens_before = self._run_state(board_id, run_id)
         answers = 0
@@ -317,6 +335,8 @@ class Orchestrator:
                             round_number=round_number,
                             content_sha256=digest,
                             answer_json=json.dumps(structured),
+                            after_closed=0,
+                            ref_card_id=None,
                         )
                     )
                     message_event = self._record(

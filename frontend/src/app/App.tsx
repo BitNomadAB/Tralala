@@ -129,6 +129,10 @@ export function App() {
                         path="/boards/:boardId/loops/:loopId/tickets/:cardId/discussions/:discussionId"
                         element={<DiscussionPage />}
                       />
+                      <Route
+                        path="/boards/:boardId/discussions/:discussionId"
+                        element={<DiscussionPage />}
+                      />
                       <Route path="/boards/:boardId/history" element={<HistoryPage />} />
                       <Route path="/discussions" element={<DiscussionsPage />} />
                       <Route path="/settings" element={<SettingsPage />} />

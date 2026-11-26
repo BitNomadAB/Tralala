@@ -3,6 +3,7 @@ services change. List order stands in for SQLite's rowid order."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from app.db.generated.board import (
@@ -10,18 +11,21 @@ from app.db.generated.board import (
     DiscussionMessagesRow,
     DiscussionOutcomesRow,
     DiscussionParticipantsRow,
+    DiscussionReadsRow,
     DiscussionRoundsRow,
     DiscussionRunsRow,
     DiscussionThreadsRow,
     DiscussionVotesRow,
 )
-from app.repositories.discussions import InboxThread, NamedVote
+from app.repositories.discussions import InboxThread, NamedVote, NoticeThread, ThreadState
 from tests.unit.fakes.registry import ConstraintError
 
 if TYPE_CHECKING:
     from tests.unit.fakes.board import BoardState
 
 ACTIVE = ("running", "paused")
+# A thread on the board in one of these is no open question any more.
+OPEN_QUESTION_ENDS = frozenset({"closed", "cancelled", "approved", "vetoed"})
 
 
 class FakeDiscussionThreadRepository:
@@ -32,12 +36,21 @@ class FakeDiscussionThreadRepository:
         return self._state.discussions.get(discussion_id)
 
     def newest(
-        self, *, status: str | None, card_id: str | None, limit: int
+        self,
+        *,
+        status: str | None,
+        card_id: str | None,
+        limit: int,
+        board_level: bool | None = None,
+        state: ThreadState | None = None,
     ) -> list[DiscussionThreadsRow]:
         rows = [
             row
             for row in self._state.discussions.values()
-            if (not status or row.status == status) and (not card_id or row.card_id == card_id)
+            if (not status or row.status == status)
+            and (not card_id or row.card_id == card_id)
+            and (board_level is None or (row.card_id is None) == board_level)
+            and (state is None or (row.status == "closed") == (state == "closed"))
         ]
         return sorted(rows, key=lambda row: row.last_activity_at, reverse=True)[:limit]
 
@@ -83,6 +96,28 @@ class FakeDiscussionThreadRepository:
         if row is not None:
             self._state.discussions[discussion_id] = row.__replace__(
                 status=status, updated_at=now, last_activity_at=now
+            )
+
+    def close(self, discussion_id: str, *, actor_id: str, now: str) -> None:
+        row = self._state.discussions.get(discussion_id)
+        if row is not None:
+            self._state.discussions[discussion_id] = row.__replace__(
+                status="closed",
+                closed_at=now,
+                closed_by_actor_id=actor_id,
+                updated_at=now,
+                last_activity_at=now,
+            )
+
+    def reopen(self, discussion_id: str, *, now: str) -> None:
+        row = self._state.discussions.get(discussion_id)
+        if row is not None:
+            self._state.discussions[discussion_id] = row.__replace__(
+                status="discussing",
+                closed_at=None,
+                closed_by_actor_id=None,
+                updated_at=now,
+                last_activity_at=now,
             )
 
     def note_message(self, discussion_id: str, *, now: str) -> None:
@@ -167,7 +202,83 @@ class FakeDiscussionMessageRepository:
     def add(self, row: DiscussionMessagesRow) -> None:
         if row.discussion_id not in self._state.discussions:
             raise ConstraintError("FOREIGN KEY constraint failed")
+        if row.ref_card_id is not None and row.ref_card_id not in self._state.cards:
+            raise ConstraintError("FOREIGN KEY constraint failed")
         self._state.discussion_messages.append(row)
+
+
+class FakeDiscussionReadRepository:
+    def __init__(self, state: BoardState) -> None:
+        self._state = state
+
+    def get(self, discussion_id: str, actor_id: str) -> DiscussionReadsRow | None:
+        return self._state.discussion_reads.get((discussion_id, actor_id))
+
+    def mark(self, discussion_id: str, actor_id: str, *, now: str) -> None:
+        if discussion_id not in self._state.discussions:
+            raise ConstraintError("FOREIGN KEY constraint failed")
+        self._state.discussion_reads[(discussion_id, actor_id)] = DiscussionReadsRow(
+            discussion_id=discussion_id, actor_id=actor_id, last_read_at=now
+        )
+
+    def unread_ids(self, actor_id: str, discussion_ids: Sequence[str]) -> set[str]:
+        wanted = set(discussion_ids)
+        unread: set[str] = set()
+        for row in self._state.discussion_messages:
+            if (
+                row.discussion_id not in wanted
+                or row.deleted_at is not None
+                or row.author_actor_id == actor_id
+            ):
+                continue
+            marker = self._state.discussion_reads.get((row.discussion_id, actor_id))
+            if marker is None or row.created_at > marker.last_read_at:
+                unread.add(row.discussion_id)
+        return unread
+
+    def notices(self, actor_id: str, *, limit: int) -> list[NoticeThread]:
+        found: list[NoticeThread] = []
+        for thread in self._state.discussions.values():
+            marker = self._state.discussion_reads.get((thread.id, actor_id))
+            read_at = None if marker is None else marker.last_read_at
+            messages = [m for m in self._state.discussion_messages if m.discussion_id == thread.id]
+            involved = thread.created_by_actor_id == actor_id or any(
+                m.author_actor_id == actor_id for m in messages
+            )
+            news = [
+                (m.created_at, position, m)
+                for position, m in enumerate(messages)
+                if m.deleted_at is None
+                and m.author_actor_id != actor_id
+                and (read_at is None or m.created_at > read_at)
+            ]
+            run_failed = any(
+                run.discussion_id == thread.id
+                and run.started_by_actor_id == actor_id
+                and run.status == "failed"
+                and (read_at is None or (run.finished_at or run.created_at) > read_at)
+                for run in self._state.runs.values()
+            )
+            open_question = (
+                thread.card_id is None
+                and thread.status not in OPEN_QUESTION_ENDS
+                and not involved
+                and marker is None
+            )
+            if (involved and news) or run_failed or open_question:
+                found.append(
+                    NoticeThread(
+                        thread=thread,
+                        involved=involved,
+                        marked=marker is not None,
+                        news=bool(news),
+                        news_after_closed=bool(news) and bool(max(news)[2].after_closed),
+                        run_failed=run_failed,
+                    )
+                )
+        found.sort(key=lambda entry: entry.thread.id)
+        found.sort(key=lambda entry: entry.thread.last_activity_at, reverse=True)
+        return found[:limit]
 
 
 class FakeDiscussionParticipantRepository:

@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 
 from app.services import runtime
-from app.services.orchestrator import content_hash, usage_tokens
+from app.services.orchestrator import board_briefing, content_hash, usage_tokens
+from tests.unit.fakes.registry import board_row
 
 
 def test_extract_position_parses_the_trailing_verdict() -> None:
@@ -82,3 +83,18 @@ def test_a_message_hash_ignores_surrounding_whitespace() -> None:
     assert content_hash("  Same answer.\n") == content_hash("Same answer.")
     assert content_hash("Same answer.") != content_hash("Other answer.")
     assert len(content_hash("Same answer.")) == 64
+
+
+def test_a_thread_on_the_board_is_briefed_with_the_board_and_its_title() -> None:
+    board = board_row("b-1", name="Homepage").__replace__(description="Our web site.")
+    assert board_briefing(board, "Pick a licence") == (
+        "Board: Homepage\nBoard description:\nOur web site.\n"
+        "Discussion on the board, not on a Ticket: Pick a licence"
+    )
+
+
+def test_a_board_briefing_cuts_the_description_as_a_tickets_and_survives_no_board() -> None:
+    long = board_row("b-1", name="Homepage").__replace__(description="x" * 5000)
+    assert "x" * 4000 + "\n" in board_briefing(long, "T")
+    assert "x" * 4001 not in board_briefing(long, "T")
+    assert board_briefing(None, "T").startswith("Board: (unknown)\nBoard description:\n(empty)\n")

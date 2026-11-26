@@ -79,6 +79,40 @@ export interface DiscussionMessage {
   created_at: string;
   /** A participant's structured answer; null for a person's message and an older answer. */
   answer?: DiscussionAnswer | null;
+  /** Written while the thread was closed: a comment after the close, which no agent answers. */
+  after_closed: boolean;
+  /** The Ticket on the board the message points at, or null. */
+  ref_ticket: DiscussionTicketRef | null;
+}
+
+/** A Ticket a message points at: its id, key, title and the Loop that holds it. */
+export interface DiscussionTicketRef {
+  card_id: string;
+  ticket_key: string | null;
+  title: string;
+  loop_id: string;
+}
+
+/** What marking a thread read answers: when the reader last read it. */
+export interface DiscussionReadMarker {
+  discussion_id: string;
+  actor_id: string;
+  last_read_at: string;
+}
+
+/** Which threads a board's list holds: on the board itself, or on its Tickets. */
+export type DiscussionScope = "board" | "ticket";
+
+/** `open` is every status but closed; `closed` only the closed threads. */
+export type DiscussionOpenState = "open" | "closed";
+
+/** The filters of a board's list of discussions; each one left out filters nothing. */
+export interface DiscussionFilters {
+  scope?: DiscussionScope | undefined;
+  state?: DiscussionOpenState | undefined;
+  status?: string | undefined;
+  card_id?: string | undefined;
+  limit?: number | undefined;
 }
 
 export interface DiscussionRound {
@@ -183,6 +217,10 @@ export interface DiscussionInboxRow {
   last_activity_at: string;
   decided_by_name: string | null;
   waits_for: DiscussionWaitsFor;
+  /** Something in the thread is new for the reader since they last opened it. */
+  unread: boolean;
+  /** The reader opened the thread. */
+  opened_by_me: boolean;
 }
 
 /** At most 200 rows, decision first, then talking, then decided; `total` counts them all. */
@@ -193,7 +231,8 @@ export interface DiscussionInbox {
 
 export interface Discussion {
   id: string;
-  card_id: string;
+  /** The Ticket the thread is about; null for a discussion on the board itself. */
+  card_id: string | null;
   card_title: string | null;
   ticket_key: string | null;
   loop_id: string | null;
@@ -214,6 +253,12 @@ export interface Discussion {
   last_activity_at: string;
   participant_count: number;
   message_count: number;
+  /** When the opener closed the thread; null while it is open. */
+  closed_at: string | null;
+  /** Something in the thread is new for the signed-in reader. */
+  unread: boolean;
+  /** The signed-in reader opened the thread, so only they may close it. */
+  opened_by_me: boolean;
   /** Who recorded the newest decision (approve, veto, rework); null before any. */
   decided_by_name?: string | null;
   participants: DiscussionParticipant[];

@@ -12,8 +12,8 @@ import type { WaitingRow } from "./boardSummaries";
  * decision only a person makes. Each row names the board and the Loop (marked "Without a plan" when
  * it runs without one), says what it waits for and offers the link that opens the Loop page where
  * the decision is made. After the Loops come the discussions that wait for the person's decision,
- * each opening the discussion on its Ticket. Rows appear as each board answers; `pending` says some
- * have not answered yet.
+ * each opening the discussion on its Ticket or on its board. Rows appear as each board answers;
+ * `pending` says some have not answered yet.
  */
 export function WaitsForYou({
   rows,

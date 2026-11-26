@@ -26,6 +26,8 @@ export function inboxRow(id: string, extra: Partial<DiscussionInboxRow> = {}): D
     last_activity_at: "2026-11-08T10:00:00Z",
     decided_by_name: null,
     waits_for: "your_decision",
+    unread: false,
+    opened_by_me: false,
     ...extra,
   };
 }

@@ -1,4 +1,5 @@
 import type { Discussion, DiscussionRun } from "@/lib/types";
+import { CLOSED_NOTICE, isThreadClosed, REOPENED_NOTICE } from "./closingRules";
 import {
   countText,
   failedLine,
@@ -13,7 +14,8 @@ import type { RunView } from "./runEvents";
  * What a screen reader is told while a person has a discussion open (WCAG 4.1.3). The view
  * changes by itself as the agents answer, from server events or a refetch; only a change worth
  * hearing is said, never a refetch that changed nothing: a round that starts, another agent that
- * answered, an agent that could not be reached, and how a run ended. The sign itself is not a
+ * answered, an agent that could not be reached, how a run ended, and the thread closed or opened
+ * again, by the person or by someone else. The sign itself is not a
  * live region, so a person is not read the whole sign on every change.
  */
 
@@ -43,6 +45,8 @@ export interface LiveState {
   failures: ReadonlyMap<string, string>;
   /** How the newest run ended, said once it has. */
   ended: string;
+  /** Closed by its opener. */
+  closed: boolean;
 }
 
 /**
@@ -83,6 +87,7 @@ export function liveState(discussion: Discussion, view: RunView | null): LiveSta
     agents: discussion.participants.length,
     failures,
     ended: endedNotice(discussion, run, view?.stoppedBy ?? null),
+    closed: isThreadClosed(discussion),
   };
 }
 
@@ -110,5 +115,6 @@ export function discussionNotices(before: LiveState | null, after: LiveState): s
   // A run that ended between two looks, and one too short to be seen running, both tell the end.
   const ended = !after.talking && (before.talking || (newRun && after.runId !== null));
   if (ended) notices.push(after.ended);
+  if (after.closed !== before.closed) notices.push(after.closed ? CLOSED_NOTICE : REOPENED_NOTICE);
   return notices;
 }

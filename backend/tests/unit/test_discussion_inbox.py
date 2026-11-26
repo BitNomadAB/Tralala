@@ -1,19 +1,25 @@
 """The Discussions inbox on the in-memory fakes: who a thread waits for, the counts, the verdict,
-who decided, the order across boards, and the two additions the Ticket's tab reads (the
-``card_id`` filter and ``decided_by_name``)."""
+who decided, the order across boards, the two additions the Ticket's tab reads (the ``card_id``
+filter and ``decided_by_name``), and what is new for whom (the read markers)."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 
 import pytest
 
 from app.core.context import ActorContext
 from app.core.errors import Forbidden, NotFound
-from app.db.generated.board import DiscussionOutcomesRow, DiscussionRoundsRow
+from app.db.generated.board import (
+    DiscussionMessagesRow,
+    DiscussionOutcomesRow,
+    DiscussionReadsRow,
+    DiscussionRoundsRow,
+)
 from app.repositories.board import BoardRepositories
+from app.schemas.discussions import DiscussionMessageCreate
 from app.services.discussion_inbox import (
     InboxCounts,
     InboxRow,
@@ -35,6 +41,7 @@ from tests.unit.fakes.board import (
     list_row,
     loop_row,
 )
+from tests.unit.fakes.discussions import FakeDiscussionReadRepository
 from tests.unit.fakes.registry import RegistryState, board_row, registry_unit_of_work
 from tests.unit.test_discussion_services import ADA, Ids, Snapshots, participant
 
@@ -171,7 +178,7 @@ class Boards:
     ],
 )
 def test_who_a_thread_waits_for(status: str, run_state: str, expected: str) -> None:
-    assert waits_for(status, run_state) == expected
+    assert waits_for(status, run_state, 2) == expected
 
 
 def test_the_verdict_and_counts_come_from_the_newest_synthesis() -> None:
@@ -206,7 +213,7 @@ def test_who_decided_reads_the_name_from_the_payload_or_cuts_it_from_the_summary
     assert decided_by(broken) is None
 
 
-def row(discussion_id: str, waits: str, at: str) -> InboxRow:
+def row(discussion_id: str, waits: str, at: str, *, unread: bool = False) -> InboxRow:
     return {
         "discussion_id": discussion_id,
         "board_id": BOARD_ID,
@@ -229,6 +236,8 @@ def row(discussion_id: str, waits: str, at: str) -> InboxRow:
         "last_activity_at": at,
         "decided_by_name": None,
         "waits_for": waits,
+        "unread": unread,
+        "opened_by_me": False,
     }
 
 
@@ -275,6 +284,7 @@ def test_the_inbox_reads_every_board_it_can_open_and_leaves_out_cancelled_thread
     )
     second = board_state()
     thread(second, "talk", status="discussing", run_state="running", at="2026-11-01T00:00:00Z")
+    second.participants.append(participant("alpha").__replace__(discussion_id="talk"))
     registry = RegistryState()
     registry.boards[BOARD_ID] = board_row(BOARD_ID, name="Homepage")
     registry.boards["b-2"] = board_row("b-2", name="Memorial")
@@ -286,7 +296,7 @@ def test_the_inbox_reads_every_board_it_can_open_and_leaves_out_cancelled_thread
             "b-3": FakeBoardUnitOfWork(BoardState(), databases=("b-3",), unavailable=("b-3",)),
         }
     )
-    page = read_inbox(registry_unit_of_work(registry), boards)
+    page = read_inbox(registry_unit_of_work(registry), boards, READER)
     assert [(r["discussion_id"], r["waits_for"]) for r in page["items"]] == [
         ("wait", "your_decision"),
         ("talk", "agents"),
@@ -339,7 +349,7 @@ def test_an_archived_board_is_left_out_because_nothing_can_be_decided_there() ->
             "b-2": FakeBoardUnitOfWork(old, databases=("b-2",)),
         }
     )
-    page = read_inbox(registry_unit_of_work(registry), boards)
+    page = read_inbox(registry_unit_of_work(registry), boards, READER)
     assert [(r["discussion_id"], r["board_name"]) for r in page["items"]] == [("live", "Homepage")]
     assert page["total"] == 1
 
@@ -350,7 +360,7 @@ def test_a_thread_whose_ticket_has_gone_reads_without_ticket_or_loop() -> None:
     del state.cards["card-1"]
     registry = RegistryState()
     registry.boards[BOARD_ID] = board_row(BOARD_ID, name="Board")
-    page = read_inbox(registry_unit_of_work(registry), FakeBoardUnitOfWork(state))
+    page = read_inbox(registry_unit_of_work(registry), FakeBoardUnitOfWork(state), READER)
     (orphan,) = page["items"]
     assert (orphan["loop_id"], orphan["ticket_key"], orphan["card_title"]) == (None, None, None)
     assert orphan["card_id"] == "card-1"
@@ -404,3 +414,173 @@ def test_a_decision_carries_the_deciders_name_on_the_thread() -> None:
     assert decided["decided_by_name"] == "Ada"
     assert json.loads(state.outcomes[-1].payload_json)["actor_name"] == "Ada"
     assert discussions.list(BOARD_ID, card_id="card-1")[0]["decided_by_name"] == "Ada"
+
+
+# --- what is new for whom ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("status", "run_state", "participants"),
+    [
+        ("closed", "idle", 2),
+        ("closed", "running", 2),
+        ("consensus_proposed", "idle", 0),
+        ("discussing", "idle", 0),
+        ("open", "idle", 0),
+    ],
+)
+def test_a_closed_thread_or_one_without_local_agents_waits_for_nobody(
+    status: str, run_state: str, participants: int
+) -> None:
+    assert waits_for(status, run_state, participants) == "nobody"
+
+
+def test_inside_each_group_the_unread_rows_come_first_then_the_newest() -> None:
+    rows = [
+        row("read-new", "your_decision", "2026-11-09"),
+        row("unread-old", "your_decision", "2026-11-01", unread=True),
+        row("unread-new", "your_decision", "2026-11-05", unread=True),
+        row("done-unread", "nobody", "2026-11-02", unread=True),
+        row("done-read", "nobody", "2026-11-08"),
+    ]
+    assert [entry["discussion_id"] for entry in ordered(rows)["items"]] == [
+        "unread-new",
+        "unread-old",
+        "read-new",
+        "done-unread",
+        "done-read",
+    ]
+
+
+def message(discussion_id: str, author: str, at: str) -> DiscussionMessagesRow:
+    return DiscussionMessagesRow(
+        id=f"m-{discussion_id}-{author}-{at}",
+        discussion_id=discussion_id,
+        parent_message_id=None,
+        author_actor_id=author,
+        author_type="agent",
+        author_name=author,
+        author_role=None,
+        content="Said.",
+        status="posted",
+        model=None,
+        created_at=at,
+        deleted_at=None,
+        round_number=0,
+        content_sha256=None,
+        answer_json="{}",
+        after_closed=0,
+        ref_card_id=None,
+    )
+
+
+def read_state() -> BoardState:
+    """Three threads: ``mine`` (opened by the reader, answered by someone else after the reader's
+    marker), ``theirs`` (someone else's, read since its last message) and ``quiet`` (only the
+    reader wrote in it, and there is no marker)."""
+    state = board_state()
+    thread(state, "mine", at="2026-11-03T00:00:00Z")
+    thread(state, "theirs", at="2026-11-02T00:00:00Z")
+    thread(state, "quiet", at="2026-11-01T00:00:00Z")
+    state.discussions["theirs"] = state.discussions["theirs"].__replace__(
+        created_by_actor_id="actor-2"
+    )
+    state.discussion_messages += [
+        message("mine", "alpha", "2026-11-03T00:00:00Z"),
+        message("theirs", "alpha", "2026-11-02T00:00:00Z"),
+        message("quiet", READER.actor_id, "2026-11-01T00:00:00Z"),
+    ]
+    state.discussion_reads[("mine", READER.actor_id)] = DiscussionReadsRow(
+        discussion_id="mine", actor_id=READER.actor_id, last_read_at="2026-11-02T12:00:00Z"
+    )
+    state.discussion_reads[("theirs", READER.actor_id)] = DiscussionReadsRow(
+        discussion_id="theirs", actor_id=READER.actor_id, last_read_at="2026-11-02T00:00:00Z"
+    )
+    return state
+
+
+def test_the_inbox_rows_say_what_is_new_for_the_reader_and_what_the_reader_opened() -> None:
+    registry = RegistryState()
+    registry.boards[BOARD_ID] = board_row(BOARD_ID, name="Board")
+    page = read_inbox(registry_unit_of_work(registry), FakeBoardUnitOfWork(read_state()), READER)
+    assert [(r["discussion_id"], r["unread"], r["opened_by_me"]) for r in page["items"]] == [
+        ("mine", True, True),
+        ("theirs", False, False),
+        ("quiet", False, True),
+    ]
+    # Another reader without markers finds new words in every thread someone else wrote in.
+    grace = READER.__replace__(actor_id="actor-2")
+    other = read_inbox(registry_unit_of_work(registry), FakeBoardUnitOfWork(read_state()), grace)
+    assert [(r["discussion_id"], r["unread"], r["opened_by_me"]) for r in other["items"]] == [
+        ("mine", True, False),
+        ("theirs", True, True),
+        ("quiet", True, False),
+    ]
+
+
+def test_the_list_and_the_detail_carry_unread_and_opened_by_me_for_the_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = read_state()
+    discussions = service(state)
+    calls: list[list[str]] = []
+    unread_ids = FakeDiscussionReadRepository.unread_ids
+
+    def counted(
+        self: FakeDiscussionReadRepository, actor_id: str, discussion_ids: Sequence[str]
+    ) -> set[str]:
+        calls.append(list(discussion_ids))
+        return unread_ids(self, actor_id, discussion_ids)
+
+    monkeypatch.setattr(FakeDiscussionReadRepository, "unread_ids", counted)
+    listed = discussions.list(BOARD_ID, reader=READER)
+    assert [(e["id"], e["unread"], e["opened_by_me"]) for e in listed] == [
+        ("mine", True, True),
+        ("theirs", False, False),
+        ("quiet", False, True),
+    ]
+    # One read for the page, never one per row.
+    assert calls == [["mine", "theirs", "quiet"]]
+    detail = discussions.get(BOARD_ID, "mine", reader=READER)
+    assert (detail["unread"], detail["opened_by_me"]) == (True, True)
+    # An internal caller without a reader reads both as false.
+    assert {(e["unread"], e["opened_by_me"]) for e in discussions.list(BOARD_ID)} == {
+        (False, False)
+    }
+    assert (discussions.get(BOARD_ID, "mine")["unread"], len(calls)) == (False, 2)
+
+
+def test_marking_a_thread_read_moves_the_marker_and_reading_never_does() -> None:
+    state = read_state()
+    discussions = service(state)
+    before = dict(state.discussion_reads)
+    discussions.list(BOARD_ID, reader=READER)
+    discussions.get(BOARD_ID, "mine", reader=READER)
+    discussions.inbox(READER)
+    assert state.discussion_reads == before
+    marker = discussions.mark_read(READER, BOARD_ID, "mine")
+    assert marker == {"discussion_id": "mine", "actor_id": READER.actor_id, "last_read_at": NOW}
+    assert state.discussion_reads[("mine", READER.actor_id)].last_read_at == NOW
+    assert discussions.get(BOARD_ID, "mine", reader=READER)["unread"] is False
+    # A thread without a marker gets one.
+    discussions.mark_read(READER, BOARD_ID, "quiet")
+    assert state.discussion_reads[("quiet", READER.actor_id)].last_read_at == NOW
+
+
+def test_marking_read_needs_the_read_scope_and_a_thread_on_the_board() -> None:
+    discussions = service(read_state())
+    with pytest.raises(Forbidden):
+        discussions.mark_read(READER.__replace__(scopes=frozenset()), BOARD_ID, "mine")
+    with pytest.raises(NotFound):
+        discussions.mark_read(READER, BOARD_ID, "missing")
+
+
+def test_the_readers_own_message_never_makes_a_thread_new_for_them() -> None:
+    state = read_state()
+    discussions = service(state)
+    writer = ADA.__replace__(scopes=ADA.scopes | {"discussions:read"})
+    discussions.mark_read(writer, BOARD_ID, "theirs")
+    discussions.add_message(writer, BOARD_ID, "theirs", DiscussionMessageCreate(content="Mine."))
+    assert discussions.get(BOARD_ID, "theirs", reader=writer)["unread"] is False
+    other = READER.__replace__(actor_id="actor-2")
+    assert discussions.get(BOARD_ID, "theirs", reader=other)["unread"] is True

@@ -9,6 +9,7 @@ import { Expander } from "@/components/ui/expander";
 import { Section } from "@/components/ui/section";
 import { DeleteBoardDialog } from "@/features/boards/DeleteBoardDialog";
 import { useBoardLifecycle } from "@/features/boards/useBoardLifecycle";
+import { BoardDiscussions } from "@/features/discussions/BoardDiscussions";
 import { api } from "@/lib/api";
 import { describeError } from "@/lib/describeError";
 import { useAgents, useBoard, useLoopSummaries, useLoops } from "@/lib/queries";
@@ -24,8 +25,8 @@ import { useBoardEditing } from "./useBoardEditing";
 
 /**
  * A board's Loops: what each waits for and the person's next action first, as rows; completed and
- * cancelled Loops folded away under "Completed (N)"; the board's agents and repositories under
- * their own expander.
+ * cancelled Loops folded away under "Completed (N)"; the board's own discussions, the ones on no
+ * Ticket, after the Loops; the board's agents and repositories under their own expander.
  */
 export function BoardLoopsPage() {
   const { boardId = "" } = useParams();
@@ -133,6 +134,8 @@ export function BoardLoopsPage() {
           />
         </Expander>
       ) : null}
+
+      <BoardDiscussions boardId={boardId} readOnly={readOnly} />
 
       <Expander title="Agents and repositories">
         <BoardContext

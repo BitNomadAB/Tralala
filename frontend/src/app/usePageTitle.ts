@@ -25,6 +25,7 @@ export type TitledPage =
   | { page: "loop"; loop: Name; board: Name }
   | { page: "ticket"; ticketKey: Name; ticket: Name; loop: Name }
   | { page: "discussion"; question: Name }
+  | { page: "board-discussion"; title: Name; board: Name }
   | { page: "discussions" }
   | { page: "settings" }
   | { page: "repositories" }
@@ -69,6 +70,8 @@ function parts(page: TitledPage): string[] {
     }
     case "discussion":
       return [named(page.question, "Discussion"), clean(page.question) ? "Discussion" : ""];
+    case "board-discussion":
+      return [named(page.title, "Discussion"), clean(page.board)];
     case "discussions":
       return ["Discussions"];
     case "settings":
