@@ -396,6 +396,18 @@ class CardService:
                 self._remember(repos, actor, idempotency_key, fingerprint, entry)
         return entry, False
 
+    def add_in_writer(
+        self, repos: BoardRepositories, actor: ActorContext, loop_id: str, payload: CardCreate
+    ) -> CardsRow:
+        """A new Ticket inside the caller's writer, through the checks and writes ``create`` makes
+        (a Loop that takes new work in its stage, the column, the key, the activity entry, the
+        stage of a Loop without a plan), so a caller that stores something with the Ticket keeps
+        both or neither. The caller checks ``cards:write`` and that the board takes writes."""
+        loop = self._loop_taking_new_work(repos, loop_id)
+        row = self._insert_card(repos, actor, loop, payload)
+        self._refresh_without_plan(repos, loop)
+        return row
+
     def bulk_create(
         self,
         actor: ActorContext,

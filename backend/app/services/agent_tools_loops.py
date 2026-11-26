@@ -9,7 +9,8 @@ asking Tralala's agent for an analysis is decision support), ``anyone`` or ``nob
 is finished). Delivery never waits on an agent: a person owns every Ticket, and a ready one is
 ``anyone``'s to take. The Tickets count by state: ready, needs input, blocked, completed, and
 ``needs_person``. The documents, the Tickets and the notes themselves are read with ``read_loop``,
-``list_tickets`` and ``read_document``.
+``list_tickets`` and ``read_document``. ``poc_decisions`` counts the Loop's POC decisions and what
+is missing from a person (``poc_decision_rules.poc_counts``), read for the whole board at once.
 
 Beside the rows, ``unreported`` names the Tickets on the board the calling key took and has not
 reported on since (``CardService.unreported``), whatever the stage asked for, and ``next_step`` then
@@ -32,11 +33,13 @@ runs it with the real services on the typed fakes. Its catalogue entry is built 
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from ..core.context import ActorContext
 from ..core.errors import ValidationFailure
+from ..repositories.poc_decisions import PocDecisionMark
 from ..schemas.loops import DOCUMENT_KINDS, LOOP_STAGES
 from .agent_tools_read import (
     ToolArguments,
@@ -48,6 +51,7 @@ from .agent_tools_read import (
     unreported_rows,
 )
 from .agent_tools_schema import AgentTool, ArgumentSchema, object_schema, string_argument
+from .poc_decision_rules import loop_progress, poc_counts
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from ..core.config import Settings
@@ -57,6 +61,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from .loops import LoopEntry, LoopService
     from .loops_stage import DocumentState
     from .plan_views import LoopReadiness
+    from .poc_decisions import PocDecisionService
 
 type WaitingOn = Literal["person", "agent", "anyone", "nobody"]
 
@@ -95,6 +100,9 @@ class LoopSummarising(Protocol):
 
     @property
     def settings(self) -> Settings: ...
+
+    @property
+    def poc_decisions(self) -> PocDecisionService: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,10 +295,13 @@ def loop_row(
     columns: list[ListEntry],
     *,
     public_url: str | None,
+    poc_marks: Sequence[PocDecisionMark] = (),
 ) -> ToolResult:
-    """One Loop as ``loop_summaries`` shows it."""
+    """One Loop as ``loop_summaries`` shows it; ``poc_marks`` are the Loop's POC decisions and
+    what is missing from a person, counted against the Loop's progress."""
     counts = ticket_counts(readiness)
     sentence, waiting_on = next_step(entry, readiness, counts)
+    poc = poc_counts(poc_marks, loop_progress(readiness, readiness["unplanned"]))
     return {
         "id": entry["id"],
         "key": entry["key"],
@@ -313,6 +324,13 @@ def loop_row(
             "by_column": {column["name"]: column["card_count"] for column in columns},
         },
         "documents": {kind: _document(entry, kind) for kind in DOCUMENT_KINDS},
+        "poc_decisions": {
+            "open": poc["open"],
+            "built_on_open": poc["built_on_open"],
+            "missing_open": poc["missing_open"],
+            "due": poc["due"],
+            "answered": poc["answered"],
+        },
     }
 
 
@@ -330,12 +348,14 @@ def loop_summaries(
     include_completed = args.get("include_completed") is True or stage in _FINISHED
     loops = services.loop.list(board_id, include_completed=include_completed, stage=stage)
     public_url = services.settings.public_url
+    marks = services.poc_decisions.board_marks(actor, board_id)
     rows = [
         loop_row(
             entry,
             services.loop.readiness(board_id, entry["id"]),
             services.list.list(board_id, entry["id"]),
             public_url=public_url,
+            poc_marks=marks.get(entry["id"], ()),
         )
         for entry in loops
     ]

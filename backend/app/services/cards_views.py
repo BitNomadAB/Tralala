@@ -61,6 +61,8 @@ class CardRecord(TypedDict):
     waiting_reason: str
     waiting_set_at: str | None
     waiting_set_by: str | None
+    waiting_stop: str | None
+    """The stop-list line the wait names; ``None`` for a wait without one and for no wait."""
 
 
 class CardEntry(CardRecord):
@@ -167,6 +169,7 @@ def card_record(row: CardsRow) -> CardRecord:
         "waiting_reason": row.waiting_reason,
         "waiting_set_at": row.waiting_set_at,
         "waiting_set_by": row.waiting_set_by,
+        "waiting_stop": row.waiting_stop,
     }
 
 

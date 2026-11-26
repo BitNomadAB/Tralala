@@ -256,6 +256,7 @@ def test_a_hit_carries_its_card_its_loop_its_labels_and_its_counts() -> None:
         "waiting_reason",
         "waiting_set_at",
         "waiting_set_by",
+        "waiting_stop",
         "board_id",
         "labels",
         "checklist_total",
