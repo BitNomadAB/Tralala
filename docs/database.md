@@ -55,9 +55,10 @@ Indexes: `boards(status)`, `api_credentials(actor_id)`.
 | `comment_mention_jobs` | id, card_id → cards, comment_id → comments, agent_id, agent_name, status (`queued`, `running`, `completed`, `failed`), attempts, error, response_comment_id → comments, role_snapshot_json, tokens_used, requested_by_*, created_at, started_at, finished_at |
 | `card_events` | seq (autoincrement), id, card_id → cards, type, payload_json, actor_*, created_at |
 | `activity_log` | id, actor_id, actor_type, action, entity_type, entity_id, request_id, timestamp, changes_json |
-| `discussion_threads` | id, card_id → cards, title, goal, mode, status, run_state, round_count, tokens_used, elapsed_ms, created_by_*, max_rounds, origin_comment_id, escalation_depth, created_at, updated_at, last_activity_at |
+| `discussion_threads` | id, card_id → cards, title, goal, mode, status, run_state, round_count, tokens_used, elapsed_ms, created_by_*, max_rounds, origin_comment_id, escalation_depth, created_at, updated_at, last_activity_at, closed_at, closed_by_actor_id (status `closed`: who closed it and when) |
 | `discussion_participants` | id, discussion_id → discussion_threads, participant_id, participant_type, display_name, role_template_*, role_source, system_prompt, system_prompt_sha256, snapshot_at, joined_at |
-| `discussion_messages` | id, discussion_id → discussion_threads, parent_message_id, author_*, content, status, model, round_number, content_sha256, answer_json (the structured answer, `{}` for none), created_at, deleted_at |
+| `discussion_messages` | id, discussion_id → discussion_threads, parent_message_id, author_*, content, status, model, round_number, content_sha256, answer_json (the structured answer, `{}` for none), created_at, deleted_at, after_closed (0/1: written after the thread was closed), ref_card_id → cards (SET NULL: the Ticket the message points at) |
+| `discussion_reads` (STRICT) | discussion_id → discussion_threads, actor_id, last_read_at (PK discussion_id, actor_id: when the actor last read the thread) |
 | `discussion_votes` | id, discussion_id → discussion_threads, participant_id, position, justification, round_number, created_at |
 | `discussion_outcomes` | id, discussion_id → discussion_threads, summary, payload_json, created_at |
 | `discussion_runs` | id, discussion_id → discussion_threads, status, autonomy, rounds_requested, rounds_completed, token_budget, tokens_used, time_budget_seconds, elapsed_ms, stop_reason, error, started_by_*, created_at, started_at, finished_at |
@@ -72,6 +73,7 @@ Indexes: `lists(position,id)`, `cards(list_id,position,id)`, `cards(updated_at)`
 `activity_log(timestamp)`, `activity_log(entity_type,entity_id)`,
 `discussion_threads(card_id)`, `discussion_threads(status)`,
 `discussion_participants(discussion_id)`, `discussion_messages(discussion_id,created_at)`,
+`discussion_messages(ref_card_id)`, `discussion_reads(actor_id)`,
 `discussion_votes(discussion_id)`, `discussion_runs(discussion_id,created_at)`,
 `discussion_runs(status)`, `discussion_rounds(run_id,round_number)` (unique),
 `discussion_events(discussion_id,seq)`, `comment_mention_jobs(card_id,created_at)`,

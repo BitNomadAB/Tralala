@@ -341,9 +341,12 @@ one publish path covers both streams.
 
 ## Discussion navigation
 
-A thread belongs to one Ticket and therefore to one Loop, so every thread records `loop_id`,
-`loop_key`, `loop_name` and `ticket_key`, and a discussion is only ever reached through its Ticket.
-Nothing infers a default Loop from a board.
+A thread belongs to one Ticket, and through it to one Loop, or to the board itself. A thread on a
+Ticket records `loop_id`, `loop_key`, `loop_name` and `ticket_key` and is reached through its
+Ticket. A thread on the board has none of them: it is reached at
+`/boards/:boardId/discussions/:discussionId`, from the board page's Discussions
+(`features/discussions/BoardDiscussions.tsx`, where **New discussion** starts one) and from the
+inbox. Nothing infers a default Loop from a board.
 
 - **The Ticket's Discussions tab** (`features/cards/TicketDiscussions.tsx`) reads
   `GET /boards/{board_id}/discussions?card_id=` as the Ticket opens, so its count is right at once.
@@ -417,7 +420,8 @@ from `services/agent_tools.py`, which is the one description of what a worker to
 key's identity (`whoami`); reading boards, Loops, documents, Tickets and their attached files;
 working a Ticket (summaries, a wait, assigning, moving, commenting, completing) and adding a
 follow-up outside the plan; planning a Loop (creating it, writing Info, handing in or asking for the
-analysis, the RoadMap and their briefs); the Loop's notes; and the three discussion tools. No tool
+analysis, the RoadMap and their briefs); the Loop's notes; and discussions on a Ticket or on the
+board, with the `notices` every answer carries while one waits for the key. No tool
 takes a planning decision. The local role agents are not part of that surface: a run invokes them, they never
 authenticate, and they never change a Ticket. [Agent_usage.md](Agent_usage.md) lists what each
 tool may do.

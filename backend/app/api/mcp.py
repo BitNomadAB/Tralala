@@ -26,8 +26,10 @@ from ..core.errors import ApiError
 from ..schemas.loops import CRITERION_MAX_CHARS
 from ..services.agent_tools import (
     DECISION_LINK_RULE,
+    NOTICES_RULE,
     REPORT_RULE,
     missing_scopes,
+    run_tool,
     tool_catalog,
 )
 from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
@@ -63,7 +65,8 @@ INSTRUCTIONS = (
     "clearing a wait and accepting QA are human decisions that no token can perform. "
     + DECISION_LINK_RULE
     + " The Loop "
-    "is the plan: what you plan or log goes into the Loop, never into a file of a repository."
+    "is the plan: what you plan or log goes into the Loop, never into a file of a repository. "
+    + NOTICES_RULE
 )
 
 
@@ -177,8 +180,8 @@ async def mcp_endpoint(request: Request) -> Response:
             )
         try:
             # Handlers touch SQLite and may poll a generation run, so they never run on the event
-            # loop.
-            payload = await run_in_threadpool(tool.handler, ctx.services, ctx.actor, arguments)
+            # loop. The call goes through run_tool, which adds the notices that wait for the key.
+            payload = await run_in_threadpool(run_tool, ctx.services, ctx.actor, name, arguments)
         except ApiError as error:
             return JSONResponse(_result(message_id, _tool_failure(error)))
         return JSONResponse(_result(message_id, _tool_result(payload)))
@@ -339,9 +342,12 @@ def render_bootstrap(settings: Settings) -> str:
         "  is one more of the Loop's own Tickets.",
         "- What belongs to the Loop and to no single Ticket is a note: `write_note`, and",
         "  `read_notes` for the log.",
-        "- A question for the board's agents is a discussion on the Ticket: `ask_agents`, then",
-        "  `read_discussion` and `reply_discussion`. Their answers and Tralala's synthesis are",
-        "  decision support (section 7); a person decides.",
+        "- A question for the board's agents is a discussion on a Ticket, or on the board itself",
+        "  under a title: `ask_agents`, then `read_discussion` and `reply_discussion`. Their",
+        "  answers and Tralala's synthesis are decision support (section 7); a person decides.",
+        "- A question for people and other keys is `open_discussion` on the board, with no agent",
+        "  and no round; `list_discussions` finds the board's threads, and `close_discussion`",
+        "  closes one you opened. A closed thread still takes messages; nothing is deleted.",
         "",
         "## 4. Rules that never change",
         "",
@@ -441,10 +447,11 @@ def render_bootstrap(settings: Settings) -> str:
         "## 7. Asking the agents",
         "",
         "The agents registered here read and advise; they never change a Ticket and never touch",
-        "code. Ask them through a discussion on the Ticket: create the thread with the question as",
-        "`goal`, then start one round. `ask_agents` does both in a single call; `reply_discussion`",
-        "continues the same thread and `read_discussion` re-reads it, so a question can become a",
-        "conversation instead of a new thread per question.",
+        "code. Ask them through a discussion on a Ticket, or on the board itself under a title:",
+        "create the thread with the question as `goal`, then start one round. `ask_agents` does",
+        "both in a single call, and with `background` answers at once while the round runs;",
+        "`reply_discussion` continues the same thread and `read_discussion` re-reads it, so a",
+        "question can become a conversation instead of a new thread per question.",
         "",
         "Each agent answers in one standard shape: `position` (`yes`,",
         "`yes_with_conditions`, `no`, `unclear`), a one-sentence `recommendation`, `pros`,",

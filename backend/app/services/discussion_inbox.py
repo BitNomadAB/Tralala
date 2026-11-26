@@ -9,15 +9,16 @@ reads the answer.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import TypedDict, TypeIs
 
 from pydantic import JsonValue
 
+from ..core.context import ActorContext
 from ..core.errors import NotFound, ServiceUnavailable
 from ..db.generated.board import DiscussionOutcomesRow
 from ..db.generated.registry import BoardsRow
-from ..repositories.board import BoardUnitOfWork
+from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..repositories.discussions import InboxThread
 from ..repositories.registry import RegistryUnitOfWork
 from .discussion_synthesis import read_synthesis
@@ -26,6 +27,8 @@ from .discussion_synthesis import read_synthesis
 WAITS_FOR = ("your_decision", "agents", "nobody")
 DECIDED = frozenset({"approved", "vetoed", "rework_requested"})
 TALKING = frozenset({"running", "paused"})
+# The status of a thread its opener closed (``discussion_closing``).
+CLOSED = "closed"
 INBOX_LIMIT = 200
 # What one board may contribute before the rows are grouped; a guard, not a page size.
 BOARD_LIMIT = 1000
@@ -62,6 +65,9 @@ class InboxRow(TypedDict):
     last_activity_at: str
     decided_by_name: str | None
     waits_for: str
+    # Something someone else wrote is newer than the reader's marker (or the reader has none).
+    unread: bool
+    opened_by_me: bool
 
 
 class InboxPage(TypedDict):
@@ -69,10 +75,14 @@ class InboxPage(TypedDict):
     total: int
 
 
-def waits_for(status: str, run_state: str) -> str:
-    """Who the thread waits for: ``agents`` while a run is running or paused, ``nobody`` once a
-    person approved, vetoed or asked for rework, otherwise ``your_decision``. A thread with no
-    round yet waits for the person too: nobody else will move it."""
+def waits_for(status: str, run_state: str, participant_count: int) -> str:
+    """Who the thread waits for: ``nobody`` once its opener closed it, and in a thread without
+    the board's agents (people and keys talk there, and no round asks anyone to decide);
+    ``agents`` while a run is running or paused, ``nobody`` once a person approved, vetoed or
+    asked for rework, otherwise ``your_decision``. A thread with no round yet waits for the
+    person too: nobody else will move it."""
+    if status == CLOSED or participant_count == 0:
+        return "nobody"
     if run_state in TALKING:
         return "agents"
     if status in DECIDED:
@@ -142,9 +152,11 @@ def decided_by(outcome: DiscussionOutcomesRow | None) -> str | None:
     return cut.strip() or None
 
 
-def inbox_row(board: BoardsRow, entry: InboxThread) -> InboxRow:
-    """One thread as an inbox row. The Ticket and its Loop count only together, as the thread's
-    own view reads them."""
+def inbox_row(
+    board: BoardsRow, entry: InboxThread, *, unread: bool = False, opened_by_me: bool = False
+) -> InboxRow:
+    """One thread as an inbox row, with what is new for the reader and whether the reader opened
+    it. The Ticket and its Loop count only together, as the thread's own view reads them."""
     thread = entry.thread
     card, loop = entry.card, entry.loop
     joined = card is not None and loop is not None
@@ -172,34 +184,66 @@ def inbox_row(board: BoardsRow, entry: InboxThread) -> InboxRow:
         "asked_by_name": thread.created_by_name,
         "last_activity_at": thread.last_activity_at,
         "decided_by_name": decided_by(entry.outcome),
-        "waits_for": waits_for(thread.status, run_state),
+        "waits_for": waits_for(thread.status, run_state, entry.participant_count),
+        "unread": unread,
+        "opened_by_me": opened_by_me,
     }
 
 
 def ordered(rows: Iterable[InboxRow], *, limit: int = INBOX_LIMIT) -> InboxPage:
-    """The rows by group (``WAITS_FOR``), each group newest activity first; at most ``limit``
-    rows, with ``total`` counting all of them."""
+    """The rows by group (``WAITS_FOR``), inside each group the unread ones first, then newest
+    activity first; at most ``limit`` rows, with ``total`` counting all of them."""
     items = sorted(rows, key=lambda row: row["discussion_id"])
     items.sort(key=lambda row: row["last_activity_at"], reverse=True)
+    items.sort(key=lambda row: not row["unread"])
     items.sort(key=lambda row: WAITS_FOR.index(row["waits_for"]))
     return {"items": items[:limit], "total": len(items)}
 
 
-def read_inbox(registry: RegistryUnitOfWork, store: BoardUnitOfWork) -> InboxPage:
-    """Every thread that is not cancelled, on every board that is not archived, as the inbox
-    orders them. An archived board is read-only: a decision there is refused (``board_archived``),
-    so none of its threads waits for anyone, and they are read on its Tickets. A board whose
-    database cannot be read now (missing, or its schema under repair) is left out."""
+def each_board[Read](
+    registry: RegistryUnitOfWork,
+    store: BoardUnitOfWork,
+    read: Callable[[BoardRepositories], Read],
+) -> list[tuple[BoardsRow, Read]]:
+    """``read`` on every board that is not archived, each in a reader of its own, with the board
+    it read. An archived board is read-only: a decision there is refused (``board_archived``), so
+    none of its threads waits for anyone. A board whose database cannot be read now (missing, or
+    its schema under repair) is left out."""
     with registry.reader() as repos:
         boards = repos.boards.all()
-    rows: list[InboxRow] = []
+    found: list[tuple[BoardsRow, Read]] = []
     for board in boards:
         if board.status == "archived":
             continue
         try:
             with store.reader(board.id) as repos:
-                threads = repos.threads.inbox(limit=BOARD_LIMIT)
+                found.append((board, read(repos)))
         except (NotFound, ServiceUnavailable):
             continue
-        rows.extend(inbox_row(board, entry) for entry in threads)
+    return found
+
+
+def read_inbox(
+    registry: RegistryUnitOfWork, store: BoardUnitOfWork, reader: ActorContext
+) -> InboxPage:
+    """Every thread that is not cancelled, on every board that is not archived (``each_board``),
+    as the inbox orders them for ``reader``: what is new for the reader is read once per board.
+    The threads of an archived board are read on its Tickets."""
+
+    def board_threads(repos: BoardRepositories) -> tuple[list[InboxThread], set[str]]:
+        threads = repos.threads.inbox(limit=BOARD_LIMIT)
+        ids = [entry.thread.id for entry in threads]
+        return threads, repos.reads.unread_ids(reader.actor_id, ids) if ids else set[str]()
+
+    rows: list[InboxRow] = []
+    for board, (threads, unread) in each_board(registry, store, board_threads):
+        rows.extend(
+            inbox_row(
+                board,
+                entry,
+                unread=entry.thread.id in unread,
+                opened_by_me=entry.thread.created_by_actor_id == reader.actor_id,
+            )
+            for entry in threads
+        )
     return ordered(rows)

@@ -28,6 +28,22 @@ Worth knowing when you look at the dashboard:
 - **The web tier is Caddy**, not nginx: TLS, HTTP/2 and the body limit come from
   `frontend/Caddyfile`, and `TRALALA_SITE_ADDRESS` decides whether Caddy serves plain HTTP on `:80`
   or gets a certificate.
+- **A discussion can be about the board, not only a Ticket.** The board's page has its own
+  **Discussions**, with **New discussion** for a title and a question, and the board's agents are
+  told the board's name and description instead of a Ticket. People and connected keys can ask each
+  other things there without any agent. The one who opened a discussion closes it; the opener or a
+  signed-in person reopens it. A closed discussion still takes replies, marked **After closing**,
+  and never starts a round. Nothing deletes a discussion or a message. Each discussion is marked
+  when someone else has written since you last read it, and the inbox puts those first; a closed
+  discussion, and one without the board's agents, waits for nobody. A reply may point at a Ticket.
+- **A connected key hears about the discussions that wait for it.** Four new tools open, list, close
+  and reopen discussions on the board (`open_discussion`, `list_discussions`, `close_discussion`,
+  `reopen_discussion`), `ask_agents` works without a Ticket and in the background, and
+  `reply_discussion` asks the agents by default only on a Ticket, saying `run_skipped` when a round
+  could not start. Every tool answer carries `notices` while a discussion waits for the key: an
+  answer, a comment after the close, a failed run or an open question on the board. The new REST
+  calls are `POST .../discussions/{id}/close`, `.../reopen` and `.../read`; a key needs
+  `discussions:read` for the notices and `discussions:write` for the new tools that write.
 - **A Loop can be closed without the Tickets that are not done.** Accepting the implementation
   was refused while a delivery Ticket was open, with no way past it. The dialog now names those
   Tickets and a person may choose **Accept without them**; in the completed Loop each one reads

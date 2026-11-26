@@ -3,14 +3,16 @@ import { useCallback, useState } from "react";
 import { useAnnounce } from "@/components/ui/useAnnounce";
 import { useToast } from "@/components/ui/useToast";
 import { api } from "@/lib/api";
-import { describeError } from "@/lib/describeError";
+import { describeError, fieldErrors } from "@/lib/describeError";
 import { keys } from "@/lib/queries";
 import type { Discussion, DiscussionEvent } from "@/lib/types";
 import { REPLY_SENT } from "./discussionNotices";
 import { replyNeedsRound, reviewedText, type ReviewDecision } from "./discussionRules";
 import { runView } from "./runEvents";
+import { useDiscussionClosing } from "./useDiscussionClosing";
 import { useDiscussionEvents } from "./useDiscussionEvents";
 import { useDiscussionRuns } from "./useDiscussionRuns";
+import { useMarkRead } from "./useMarkRead";
 
 const EVENT_PAGE = 500;
 
@@ -27,6 +29,8 @@ async function allEvents(boardId: string, discussionId: string): Promise<Discuss
 
 /** What a saved reply did when it did not start a round, in the words of the toast. */
 function replyNotice(discussion: Discussion) {
+  // A comment in a thread closed by its opener: the reply's hint already said no agent answers.
+  if (discussion.status === "closed") return null;
   switch (discussion.auto_run) {
     case "already_running":
       return {
@@ -54,8 +58,8 @@ function replyNotice(discussion: Discussion) {
 /**
  * One discussion for the view: the thread and its stored events (refetched while the agents answer
  * and the event stream is down), its server-sent events, the person's decision with the review
- * dialog, the reply that asks again (starting the round itself where the server does not) and the
- * runs.
+ * dialog, the reply that asks again (starting the round itself where the server does not), with
+ * the Ticket it is about, closing and opening again, and the runs.
  */
 export function useDiscussionView(boardId: string, discussionId: string) {
   const queryClient = useQueryClient();
@@ -63,6 +67,8 @@ export function useDiscussionView(boardId: string, discussionId: string) {
   const announce = useAnnounce();
   const [reviewing, setReviewing] = useState<ReviewDecision | null>(null);
   const [reply, setReply] = useState("");
+  // The Ticket the reply is about, by its key; empty for none.
+  const [ticket, setTicket] = useState("");
 
   const invalidate = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: keys.discussion(boardId, discussionId) });
@@ -79,6 +85,7 @@ export function useDiscussionView(boardId: string, discussionId: string) {
     refetchInterval: (current) =>
       current.state.data?.run_state === "running" && !live ? 1500 : false,
   });
+  useMarkRead(boardId, discussionId, query.data !== undefined);
   const running = query.data?.run_state === "running";
   const events = useQuery({
     queryKey: keys.discussionEvents(boardId, discussionId),
@@ -87,6 +94,7 @@ export function useDiscussionView(boardId: string, discussionId: string) {
     refetchInterval: running && !live ? 1500 : false,
   });
   const runs = useDiscussionRuns(boardId, discussionId, invalidate);
+  const closing = useDiscussionClosing(boardId, discussionId, invalidate);
 
   const reviewMutation = useMutation({
     mutationFn: (input: { decision: ReviewDecision; reason: string }) =>
@@ -106,9 +114,14 @@ export function useDiscussionView(boardId: string, discussionId: string) {
   });
 
   const replyMutation = useMutation({
-    mutationFn: (content: string) => api.postDiscussionMessage(boardId, discussionId, { content }),
+    mutationFn: (content: string) =>
+      api.postDiscussionMessage(boardId, discussionId, {
+        content,
+        ...(ticket.trim() ? { ticket: ticket.trim() } : {}),
+      }),
     onSuccess: (discussion) => {
       setReply("");
+      setTicket("");
       invalidate();
       announce(REPLY_SENT);
       if (replyNeedsRound(discussion)) runs.askRound();
@@ -116,6 +129,8 @@ export function useDiscussionView(boardId: string, discussionId: string) {
       if (notice) toast.push(notice);
     },
     onError: (error) => {
+      // An unknown Ticket is said under About Ticket, where it was typed.
+      if (fieldErrors(error).some((entry) => entry.field === "ticket")) return;
       toast.push({
         title: "Could not send the reply",
         description: describeError(error, undefined),
@@ -140,6 +155,11 @@ export function useDiscussionView(boardId: string, discussionId: string) {
     reviewPending: reviewMutation.isPending,
     reply,
     setReply,
+    ticket,
+    setTicket,
+    /** Why the server refused the last reply, for the field it names. */
+    replyRefusal: replyMutation.error,
+    closing,
     sendReply: () => {
       const content = reply.trim();
       if (content) replyMutation.mutate(content);

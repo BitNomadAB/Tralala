@@ -24,14 +24,18 @@ export const LOOP_URL = `/boards/${BOARD_ID}/loops/${LOOP_ID}`;
 export const MODAL_URL = `${LOOP_URL}?card=card-1&discussion=${DISCUSSION_ID}`;
 export const TICKET_PAGE_URL = `${LOOP_URL}/tickets/card-1`;
 export const PAGE_URL = `${TICKET_PAGE_URL}/discussions/${DISCUSSION_ID}`;
+export const BOARD_URL = `/boards/${BOARD_ID}`;
+export const BOARD_PAGE_URL = `${BOARD_URL}/discussions/${DISCUSSION_ID}`;
 
 /**
  * The discussion as the app shows it, over `thread` answered by `discussionHandlers`: on the Loop
- * page inside the Ticket's dialog (`MODAL_URL`), or as a page of its Ticket (`PAGE_URL`), signed in
+ * page inside the Ticket's dialog (`MODAL_URL`), as a page of its Ticket (`PAGE_URL`) or of the board
+ * (`BOARD_PAGE_URL`, where the board's own page is a stand-in heading "Board page"), signed in
  * as the member with the CSRF cookie set. The Ticket, its page and the Loop page are answered too,
  * so Back to the Ticket and Close can be followed; `events` is what the event history replays.
  * `ticket.agents` are the agents the board may ask; creating a discussion answers `thread` too.
- * Resolves once the question (or `ticket.heading`, when the URL opens the Ticket) is on screen.
+ * Resolves once the question (the title on the board, or `ticket.heading` when the URL opens the
+ * Ticket) is on screen.
  */
 export async function renderDiscussion(
   thread: Discussion = discussion(),
@@ -83,6 +87,11 @@ export async function renderDiscussion(
                 path="/boards/:boardId/loops/:loopId/tickets/:cardId/discussions/:discussionId"
                 element={<DiscussionPage />}
               />
+              <Route
+                path="/boards/:boardId/discussions/:discussionId"
+                element={<DiscussionPage />}
+              />
+              <Route path="/boards/:boardId" element={<h1>Board page</h1>} />
             </Routes>
             <LocationProbe />
           </MemoryRouter>
@@ -90,6 +99,7 @@ export async function renderDiscussion(
       </AuthContext.Provider>
     </QueryClientProvider>,
   );
-  await screen.findByRole("heading", { name: ticket.heading ?? (thread.goal || QUESTION) });
+  const named = thread.card_id === null ? thread.title : thread.goal || QUESTION;
+  await screen.findByRole("heading", { name: ticket.heading ?? named });
   return { api, user };
 }

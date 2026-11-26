@@ -1,21 +1,39 @@
 from __future__ import annotations
 
-from pydantic import Field
+from typing import Literal
+
+from pydantic import Field, ValidationInfo, field_validator
 
 from .common import Id, LongText, Name, OutModel, StrictModel
 
 DiscussionStatus = str
+# Which threads a board's list keeps: those on the board itself (no Ticket) or those on a Ticket.
+DiscussionScope = Literal["board", "ticket"]
+# Which threads by state: ``closed`` (their opener closed them) or ``open`` (every other status).
+DiscussionState = Literal["open", "closed"]
 
 
 class DiscussionCreate(StrictModel):
-    card_id: Id
-    title: Name | None = None
+    """A thread on a Ticket (``card_id``) or, without one, on the board itself; a thread on the
+    board has no Ticket to be named after, so it needs its ``title``."""
+
+    card_id: Id | None = None
+    # Checked even when left out, so a thread on the board without a title is refused by name.
+    title: Name | None = Field(default=None, validate_default=True)
     goal: LongText = Field(min_length=1)
     mode: str = Field(default="manual", pattern="^(manual|roundtable|autonomous)$")
     participant_ids: list[Id] = Field(default_factory=list, max_length=12)
     # Four rounds is where a discussion still adds something: with sequential answers and a review
     # round before consensus, a thread either converges by two or repeats itself.
     max_rounds: int = Field(default=3, ge=1, le=4)
+
+    @field_validator("title")
+    @classmethod
+    def _title_on_the_board(cls, value: str | None, info: ValidationInfo) -> str | None:
+        # ``card_id`` is declared first, so it is in ``data`` unless it failed on its own.
+        if value is None and "card_id" in info.data and info.data["card_id"] is None:
+            raise ValueError("title is required for a discussion on the board, without a Ticket")
+        return value
 
 
 class DiscussionRunStart(StrictModel):
@@ -36,6 +54,8 @@ class DiscussionRunStart(StrictModel):
 class DiscussionMessageCreate(StrictModel):
     content: LongText = Field(min_length=1)
     parent_message_id: Id | None = None
+    # The Ticket the message is about, by its id or its key, on the same board.
+    ticket: Id | None = None
 
 
 class DiscussionReview(StrictModel):
@@ -126,6 +146,15 @@ class DiscussionVoteOut(OutModel):
     created_at: str
 
 
+class DiscussionRefTicketOut(OutModel):
+    """The Ticket a message points at."""
+
+    card_id: str
+    ticket_key: str | None = None
+    title: str
+    loop_id: str
+
+
 class DiscussionMessageOut(OutModel):
     id: str
     parent_message_id: str | None = None
@@ -140,6 +169,10 @@ class DiscussionMessageOut(OutModel):
     created_at: str
     # A participant's structured answer; null for a person's message and an answer before it.
     answer: DiscussionAnswerOut | None = None
+    # Written while the thread was closed: a comment after its opener closed it.
+    after_closed: bool = False
+    # The Ticket the message points at; null when it points at none (or that Ticket is gone).
+    ref_ticket: DiscussionRefTicketOut | None = None
 
 
 class DiscussionRoundOut(OutModel):
@@ -201,7 +234,8 @@ class DiscussionEventListOut(OutModel):
 
 class DiscussionOut(OutModel):
     id: str
-    card_id: str
+    # Null for a thread on the board itself.
+    card_id: str | None = None
     card_title: str | None = None
     ticket_key: str | None = None
     loop_id: str | None = None
@@ -221,6 +255,12 @@ class DiscussionOut(OutModel):
     created_at: str
     updated_at: str
     last_activity_at: str
+    # When the opener closed the thread; null while it is not closed.
+    closed_at: str | None = None
+    # For the one who asks: someone else wrote something after their read marker (or they have
+    # none), and whether they opened the thread. Both false where no reader is known.
+    unread: bool = False
+    opened_by_me: bool = False
     participant_count: int = 0
     message_count: int = 0
     # Who recorded the newest outcome (approve, veto or rework); null before any decision.
@@ -245,6 +285,14 @@ class DiscussionListOut(OutModel):
     total: int
 
 
+class DiscussionReadOut(OutModel):
+    """The reader's marker on a thread: everything written until ``last_read_at`` is read."""
+
+    discussion_id: str
+    actor_id: str
+    last_read_at: str
+
+
 class DiscussionInboxCountsOut(OutModel):
     """How the newest round's answers stand; before a round every participant is missing."""
 
@@ -257,9 +305,11 @@ class DiscussionInboxCountsOut(OutModel):
 class DiscussionInboxRowOut(OutModel):
     """One thread in the Discussions inbox, on any board the person may read.
 
-    ``waits_for``: ``your_decision`` (no run active and not decided), ``agents`` (a run is running
-    or paused) or ``nobody`` (approved, vetoed or rework requested). ``verdict`` is the newest
-    round's suggested verdict, null before a round.
+    ``waits_for``: ``nobody`` (closed by its opener, or no local agent takes part, or approved,
+    vetoed or rework requested), ``agents`` (a run is running or paused) or ``your_decision``
+    (otherwise). ``verdict`` is the newest round's suggested verdict, null before a round.
+    ``unread``: someone else wrote after the reader's marker, or the reader has none;
+    ``opened_by_me``: the reader opened the thread.
     """
 
     discussion_id: str
@@ -283,11 +333,14 @@ class DiscussionInboxRowOut(OutModel):
     last_activity_at: str
     decided_by_name: str | None = None
     waits_for: str
+    unread: bool = False
+    opened_by_me: bool = False
 
 
 class DiscussionInboxOut(OutModel):
     """At most 200 rows: those that wait for a decision, then those the agents are talking in,
-    then the decided ones, each newest activity first; ``total`` counts every row."""
+    then those that wait for nobody, each group unread first, then newest activity first;
+    ``total`` counts every row."""
 
     items: list[DiscussionInboxRowOut]
     total: int

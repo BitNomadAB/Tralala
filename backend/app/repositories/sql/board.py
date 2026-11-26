@@ -23,6 +23,7 @@ from ..discussions import (
     DiscussionMessageRepository,
     DiscussionOutcomeRepository,
     DiscussionParticipantRepository,
+    DiscussionReadRepository,
     DiscussionRoundRepository,
     DiscussionRunRepository,
     DiscussionThreadRepository,
@@ -59,6 +60,7 @@ from .discussions import (
     SqlDiscussionMessageRepository,
     SqlDiscussionOutcomeRepository,
     SqlDiscussionParticipantRepository,
+    SqlDiscussionReadRepository,
     SqlDiscussionRoundRepository,
     SqlDiscussionRunRepository,
     SqlDiscussionThreadRepository,
@@ -119,6 +121,7 @@ class SqlBoardRepositories:
         self.events: EventRepository = SqlEventRepository(connection)
         self.threads: DiscussionThreadRepository = SqlDiscussionThreadRepository(connection)
         self.messages: DiscussionMessageRepository = SqlDiscussionMessageRepository(connection)
+        self.reads: DiscussionReadRepository = SqlDiscussionReadRepository(connection)
         self.participants: DiscussionParticipantRepository = (
             SqlDiscussionParticipantRepository(connection)
         )

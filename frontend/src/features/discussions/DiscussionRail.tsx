@@ -7,9 +7,11 @@ import { Expander } from "@/components/ui/expander";
 import { Fact, Facts } from "@/components/ui/facts";
 import { ReasonButton } from "@/components/ui/reason-button";
 import { SectionHeader } from "@/components/ui/section";
+import { useBoard } from "@/lib/queries";
 import type { Discussion } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 import {
+  boardPagePath,
   NOT_YET,
   roundsText,
   runControlBlocked,
@@ -26,12 +28,15 @@ const MORE_ITEM =
 
 const DANGER = "hover:text-[var(--destructive)]";
 
+const LINK = "text-[13px] text-[var(--primary)] hover:underline";
+
 /**
  * The rail beside the discussion, the Ticket rail's shape: where it stands in words, the facts
- * (the Ticket as a link that opens it over the Kanban, who asked, the agents, the rounds, the
- * tokens, when it started), and More (Pause or Resume and Stop the run while the agents answer,
- * Copy link, Cancel discussion). Status and Facts are named groups, not landmarks: the rail is the
- * one landmark. Their headings sit at `level`, under the view's heading.
+ * (the Ticket as a link that opens it over the Kanban, or the board for a discussion on the board,
+ * who asked, the agents, the rounds, the tokens, when it started and when it was closed), and More
+ * (Pause or Resume and Stop the run while the agents answer, Copy link, Cancel discussion). Status
+ * and Facts are named groups, not landmarks: the rail is the one landmark. Their headings sit at
+ * `level`, under the view's heading.
  */
 export function DiscussionRail({
   boardId,
@@ -53,6 +58,8 @@ export function DiscussionRail({
 }) {
   const statusId = useId();
   const factsId = useId();
+  // Already read by the page; only a discussion on the board names it.
+  const board = useBoard(discussion.card_id === null ? boardId : "");
   const control = runControlBlocked(discussion, busy);
   const state = stateOf(discussion, { decidedBy: discussion.decided_by_name, stoppedBy });
   const ticket = discussion.ticket_key ?? discussion.card_title ?? "Ticket";
@@ -66,18 +73,26 @@ export function DiscussionRail({
       <div role="group" aria-labelledby={factsId}>
         <SectionHeader id={factsId} title="Facts" level={level} />
         <Facts>
-          <Fact label="Ticket">
-            {discussion.loop_id ? (
-              <Link
-                to={ticketOnLoopPath(boardId, discussion.loop_id, discussion.card_id)}
-                className="font-mono text-[13px] text-[var(--primary)] hover:underline"
-              >
-                {ticket}
+          {discussion.card_id === null ? (
+            <Fact label="Board">
+              <Link to={boardPagePath(boardId)} className={LINK}>
+                {board.data?.name ?? "Board"}
               </Link>
-            ) : (
-              <span className="font-mono text-[13px]">{ticket}</span>
-            )}
-          </Fact>
+            </Fact>
+          ) : (
+            <Fact label="Ticket">
+              {discussion.loop_id ? (
+                <Link
+                  to={ticketOnLoopPath(boardId, discussion.loop_id, discussion.card_id)}
+                  className={cn(LINK, "font-mono")}
+                >
+                  {ticket}
+                </Link>
+              ) : (
+                <span className="font-mono text-[13px]">{ticket}</span>
+              )}
+            </Fact>
+          )}
           <Fact label="Asked by">
             <Avatar name={discussion.created_by_name} size="sm" />
             {discussion.created_by_name}
@@ -92,6 +107,9 @@ export function DiscussionRail({
             <span className="tabular-nums">{tokensText(discussion.tokens_used)}</span>
           </Fact>
           <Fact label="Started">{formatDate(discussion.created_at)}</Fact>
+          {discussion.closed_at ? (
+            <Fact label="Closed">{formatDate(discussion.closed_at)}</Fact>
+          ) : null}
         </Facts>
       </div>
 

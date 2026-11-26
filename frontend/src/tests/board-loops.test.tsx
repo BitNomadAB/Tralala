@@ -26,6 +26,7 @@ function renderBoard(shown: Board, loops: Loop[], summaries: LoopSummary[]) {
     http.get(apiPath("/boards/board-1/loop-summaries"), () =>
       ok({ board_id: "board-1", loops: summaries, count: summaries.length }),
     ),
+    http.get(apiPath("/boards/board-1/discussions"), () => ok({ items: [], total: 0 })),
     http.get(apiPath("/agents"), () => ok([])),
     http.get(apiPath("/repositories"), () => ok([])),
   );

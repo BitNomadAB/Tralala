@@ -395,8 +395,9 @@ the focus on the button, and the person reads and presses it. Opening a link dec
 
 ## Ask the agents
 
-A discussion is a question to the board's agents about one Ticket. It belongs to that Ticket and
-opens inside it. The agents advise; a person decides, and nothing a discussion says changes the
+A discussion is a question to the board's agents about one Ticket, or a thread on the board itself
+([Discussions on the board](#discussions-on-the-board)). One about a Ticket belongs to that Ticket
+and opens inside it. The agents advise; a person decides, and nothing a discussion says changes the
 Ticket.
 
 ### Asking
@@ -484,7 +485,39 @@ no round is left and once the discussion is decided.
 decide on, and while the agents answer Stop takes their place. Request rework and Veto ask for an
 explanation. A decision
 is recorded on the discussion only and never changes the Ticket: what follows from it is yours to
-do. After Request rework, Ask again starts the next round; Approve and Veto close the discussion.
+do. After Request rework, Ask again starts the next round; after Approve or Veto no round starts.
+
+### Discussions on the board
+
+Not every question is about one Ticket. The board's page has a part **Discussions** for the threads
+on the board itself, with the filter **Open** / **Closed** and a mark on each discussion with
+something new for you. **New discussion** asks for a **Title** and a **Question** and, if you like,
+the board's agents to ask. Such a discussion has no Ticket and its own page; when the agents answer,
+they are told the board's name, its description and the title instead of a Ticket. People and
+connected coding agents use these threads to ask each other things too, such as who is working on
+what, with none of the board's agents taking part.
+
+A reply may point at a Ticket on the board: name it in **About Ticket**, and the message links it.
+
+### Closing a discussion
+
+The one who opened a discussion closes it, with **Close discussion**, once they have their answer.
+Nobody else can, not even another signed-in person. A discussion a person has approved or vetoed is
+finished by that decision and is not closed. A closed discussion shows **Closed** and
+**Reopen**: the one who opened it, or any signed-in person, opens it again.
+
+A closed discussion stays readable and keeps its reply box: what anyone writes there afterwards is
+kept and marked **After closing**, so a late answer is not lost. A closed discussion never asks the
+agents for another round and takes no decision. Nothing deletes a discussion or a message, whether
+it is open or closed. A discussion on a Ticket follows its Loop: once the Loop is completed,
+cancelled or archived it can be neither closed nor reopened.
+
+### What is new for you
+
+Tralala remembers, for each person and each connected key, when they last read each discussion. A
+discussion is marked as new for you when someone else has written in it since you last opened it,
+or has written in it at all when you have never opened it; what you write yourself never counts.
+Opening the discussion takes the mark away; a list only shows it.
 
 ### The inbox
 
@@ -493,8 +526,11 @@ archived board is read-only, so its discussions are read on its Tickets): **Wait
 decision**, **Agents are talking** and **Decided**, each with its count and newest first. A row
 shows the verdict (or the round while the agents talk), the question, when it last moved (or the
 decision with who took it) and a line such as "SES-1-PH01-001 · Session expiry · Platform · 3 agents
-· 2 for · 1 against · round 2 of 4". A row opens the discussion as a page of its Ticket. A cancelled
-discussion is not listed, and a discussion starts from a Ticket, never from the inbox. The
+· 2 for · 1 against · round 2 of 4". In each group the discussions with something new for you come
+first. A discussion its opener closed, and one without any of the board's agents, waits for nobody
+and is listed with the decided ones. A row opens the discussion as a page of its Ticket, or as its
+own page when it is on the board. A cancelled discussion is not listed, and a discussion starts from
+a Ticket or from the board's Discussions, never from the inbox. The
 dashboard's **Waits for you** lists the discussions that wait for your decision after the Loops,
 each with **Open discussion**.
 

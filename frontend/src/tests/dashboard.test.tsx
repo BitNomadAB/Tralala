@@ -150,6 +150,23 @@ describe("the dashboard", () => {
     );
   });
 
+  it("opens a discussion on the board, which has no Ticket, at the board's address", async () => {
+    const onBoard = inboxRow("board-1-d", {
+      question: "Where should the export live?",
+      loop_id: null,
+      loop_key: null,
+      loop_name: null,
+      card_id: null,
+      ticket_key: null,
+      card_title: null,
+    });
+    renderDashboard([PLATFORM], { "board-1": [] }, [], [onBoard]);
+    const link = await screen.findByRole("link", {
+      name: "Open discussion: Where should the export live?",
+    });
+    expect(link).toHaveAttribute("href", "/boards/board-1/discussions/board-1-d");
+  });
+
   it("lists a Loop without a plan whose Tickets are done as waiting to be closed, marked", async () => {
     const closing = summary("loop-3", "Small fixes", {
       stage: "in_progress",

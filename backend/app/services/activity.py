@@ -65,6 +65,30 @@ def activity_entry(
     )
 
 
+def discussion_activity(
+    actor: ActorContext,
+    *,
+    action: str,
+    card_id: str | None,
+    discussion_id: str,
+    changes: Mapping[str, object],
+    entry_id: str,
+    timestamp: str,
+) -> ActivityLogRow:
+    """The entry a discussion write adds. A thread on a Ticket is logged on the Ticket, so the
+    Ticket's history shows it; a thread on the board has no Ticket, so the entry is about the thread
+    itself (``discussion``, as a run logs it)."""
+    return activity_entry(
+        actor,
+        action=action,
+        entity_type="card" if card_id is not None else "discussion",
+        entity_id=card_id if card_id is not None else discussion_id,
+        changes=changes,
+        entry_id=entry_id,
+        timestamp=timestamp,
+    )
+
+
 def _changes(raw: str) -> JsonValue:
     """The stored changes; text that is not JSON reads as no changes."""
     try:
