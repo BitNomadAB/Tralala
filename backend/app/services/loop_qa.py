@@ -31,6 +31,7 @@ from ..schemas.loops import (
     QaResultSubmission,
     QaScenario,
 )
+from .decision_requests import AskedThrough, open_questions, with_asked_through
 from .idempotency import remember, request_fingerprint, stored_answer
 from .lists import BoardChecks
 from .loop_history import LoopHistoryService
@@ -149,8 +150,12 @@ class LoopQaService:
             ensure_writable(loop)
             _check_version(loop, payload.version)
             ensure_execution_allowed(loop)
+            # A coding session's open question about the implementation is answered here.
+            through = open_questions(
+                repos, loop_id=loop_id, decision="implementation", card_id=None, now=self._now()
+            )
             if without_plan(loop):
-                return self._close_without_plan(repos, loop, actor, board_id, payload)
+                return self._close_without_plan(repos, loop, actor, board_id, payload, through)
             unfinished = open_delivery(repos, loop)
             if unfinished and not payload.accept_unfinished:
                 raise Conflict(
@@ -172,6 +177,7 @@ class LoopQaService:
             if unfinished_keys:
                 # The decision names what it left unfinished, so the history snapshot holds it.
                 extra["unfinished"] = unfinished_keys
+            extra = with_asked_through(extra, through)
             approval_id = self._record_decision(
                 repos,
                 loop,
@@ -228,7 +234,9 @@ class LoopQaService:
                 actor,
                 "loop.implementation_accepted",
                 loop_id,
-                {"qa_status": payload.qa_status, "cycle": cycle.cycle_number},
+                with_asked_through(
+                    {"qa_status": payload.qa_status, "cycle": cycle.cycle_number}, through
+                ),
                 now,
             )
             refresh_stage(repos, loop_id, now=now)
@@ -249,6 +257,7 @@ class LoopQaService:
         actor: ActorContext,
         board_id: str,
         payload: ImplementationAcceptance,
+        through: list[AskedThrough],
     ) -> Entry:
         """A person closes a Loop without a plan in one decision, inside the caller's writer: no
         QA cycle, no QA Task and no QA decision. Its Tickets that are neither completed nor
@@ -267,6 +276,7 @@ class LoopQaService:
         extra: dict[str, object] = {"without_plan": True}
         if unfinished_keys:
             extra["unfinished"] = unfinished_keys
+        extra = with_asked_through(extra, through)
         approval_id = self._record_decision(
             repos,
             loop,
@@ -514,11 +524,14 @@ class LoopQaService:
             if cycle.status == "accepted":
                 return self.history.existing(board_id, loop_id)
             now = self._now()
+            # A coding session's open question about QA is answered by this decision, either way.
+            through = open_questions(repos, loop_id=loop_id, decision="qa", card_id=None, now=now)
             if payload.decision == "rejected":
                 repos.qa.decide(
                     cycle.id, status="rejected", actor_id=actor.actor_id, note=payload.note, now=now
                 )
-                self._log(repos, actor, "loop.qa_rejected", loop_id, {"cycle_id": cycle.id}, now)
+                rejected_changes = with_asked_through({"cycle_id": cycle.id}, through)
+                self._log(repos, actor, "loop.qa_rejected", loop_id, rejected_changes, now)
                 refresh_stage(repos, loop_id, now=now)
                 rejected = self._latest_entry(repos, loop_id)
                 self._remember(repos, actor, idempotency_key, fingerprint, rejected)
@@ -541,7 +554,10 @@ class LoopQaService:
                 scope="qa",
                 decision="approved",
                 feedback=payload.note,
-                extra={"cycle_id": cycle.id, "not_applicable": payload.not_applicable_approvals},
+                extra=with_asked_through(
+                    {"cycle_id": cycle.id, "not_applicable": payload.not_applicable_approvals},
+                    through,
+                ),
             )
             repos.qa.decide(
                 cycle.id, status="accepted", actor_id=actor.actor_id, note=payload.note, now=now
@@ -552,7 +568,7 @@ class LoopQaService:
                 actor,
                 "loop.qa_accepted",
                 loop_id,
-                {"cycle_id": cycle.id, "approval_id": approval_id},
+                with_asked_through({"cycle_id": cycle.id, "approval_id": approval_id}, through),
                 now,
             )
             finalized = self.history.finalize(

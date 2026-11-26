@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TypeIs
 
 import pytest
@@ -33,6 +33,7 @@ from app.services.agent_tools_decisions import CALL_AGAIN, STILL_OPEN, ask_messa
 from app.services.cards import CardService
 from app.services.decision_links import decision_link
 from app.services.decision_outcomes import AskedDecision, DecisionOutcomeService
+from app.services.decision_requests import CLOSED, OPEN_FOR, REQUESTED, DecisionRequestService
 from app.services.loops import LoopService
 from app.services.request_state import (
     REQUEST_STATE_TTL,
@@ -54,7 +55,12 @@ from tests.unit.fakes.board import (
     qa_cycle_row,
 )
 from tests.unit.fakes.plans import FakePlanViews, plan_views
-from tests.unit.fakes.registry import FakeRegistryUnitOfWork, RegistryState, actor_row
+from tests.unit.fakes.registry import (
+    FakeRegistryUnitOfWork,
+    RegistryState,
+    actor_row,
+    credential_row,
+)
 
 NOW = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
 EARLIER = "2026-11-26T11:00:00Z"
@@ -83,6 +89,14 @@ KEY = ActorContext(
 SECOND_KEY = KEY.__replace__(actor_name="Codex", credential_id="cred-2")
 OTHER_KEY = KEY.__replace__(actor_id="key-actor-2", credential_id="cred-3")
 
+OTHER_PERSON = "55555555-5555-4555-8555-555555555555"
+# Each key: its credential, the actor it acts as, the person who issued it and its name.
+KEYS = (
+    ("cred-1", KEY.actor_id, PERSON, "Laptop"),
+    ("cred-2", KEY.actor_id, PERSON, "Desktop"),
+    ("cred-3", OTHER_KEY.actor_id, OTHER_PERSON, "Bo's laptop"),
+)
+
 URL = ToolInput(url=True)
 FORM = ToolInput(form=True)
 BOTH = ToolInput(form=True, url=True)
@@ -105,6 +119,7 @@ class World:
     loop: LoopService
     card: CardService
     decision_outcome: DecisionOutcomeService
+    decision_request: DecisionRequestService
     request_state: RequestStateService
     settings: Settings
     state: BoardState
@@ -117,6 +132,13 @@ def _world(settings: Settings, loop: LoopsRow, public_url: str | None) -> World:
     board.lists["todo"] = list_row("todo", loop.id, 512, name="Todo")
     registry = RegistryState()
     registry.actors[PERSON] = actor_row(PERSON, name=PERSON_NAME)
+    registry.actors[OTHER_PERSON] = actor_row(OTHER_PERSON, name="Bo")
+    for actor_id in (KEY.actor_id, OTHER_KEY.actor_id):
+        registry.actors[actor_id] = actor_row(actor_id, type_="agent", name="session")
+    for credential_id, actor_id, owner, name in KEYS:
+        registry.credentials[credential_id] = credential_row(
+            credential_id, actor_id, owner_actor_id=owner
+        ).__replace__(name=name)
     views = plan_views(FakePlanViews())
     checks = FakeBoardChecks()
     store = FakeBoardUnitOfWork(board)
@@ -127,6 +149,7 @@ def _world(settings: Settings, loop: LoopsRow, public_url: str | None) -> World:
         loop=LoopService(settings, checks, store, plans=views, tickets=cards, clock=lambda: NOW),
         card=cards,
         decision_outcome=DecisionOutcomeService(store, accounts),
+        decision_request=DecisionRequestService(checks, store, accounts, clock=clock),
         request_state=RequestStateService(SECRET, clock=clock),
         settings=settings.model_copy(update={"public_url": public_url}),
         state=board,
@@ -751,3 +774,93 @@ def test_a_wait_a_person_replaced_counts_as_cleared_but_a_keys_does_not(settings
     )
     answer = complete(call(w, "wait", retry(state)))
     assert (answer["outcome"], answer["decided_by"]) == ("cleared", PERSON_NAME)
+
+
+# --- the question in the board's history -------------------------------------------------------
+
+
+def requests(w: World, action: str = REQUESTED) -> list[dict[str, object]]:
+    rows = [row for row in w.state.activity if row.action == action]
+    found: list[dict[str, object]] = []
+    for row in rows:
+        changes: JsonValue = json.loads(row.changes_json)
+        assert isinstance(changes, dict)
+        found.append({"entity": (row.entity_type, row.entity_id), "by": row.actor_id, **changes})
+    return found
+
+
+@pytest.mark.parametrize("decision", DECISIONS)
+def test_the_first_question_writes_one_row_on_its_target(
+    settings: Settings, decision: AskedDecision
+) -> None:
+    w = world_for(settings, decision)
+    state = asked(call(w, decision)).request_state
+    target = ("card", CARD) if card_id_of(decision) else ("loop", LOOP)
+    assert requests(w) == [
+        {
+            "entity": target,
+            "by": KEY.actor_id,
+            "decision": decision,
+            "credential_id": "cred-1",
+            "key_name": "Laptop",
+            "owner_name": PERSON_NAME,
+            "via": "link",
+        }
+    ]
+    # Asking again while the question is open, with the state or without, writes no row.
+    asked(call(w, decision, retry(state)))
+    complete(call(w, decision, NO_INPUT))
+    assert len(requests(w)) == 1
+
+
+def test_each_key_writes_its_own_row_and_the_owner_is_the_person_who_issued_it(
+    settings: Settings,
+) -> None:
+    w = world_for(settings, "wait")
+    for actor in (KEY, SECOND_KEY, OTHER_KEY, KEY):
+        call(w, "wait", actor=actor)
+    assert [(row["key_name"], row["owner_name"]) for row in requests(w)] == [
+        ("Laptop", PERSON_NAME),
+        ("Desktop", PERSON_NAME),
+        ("Bo's laptop", "Bo"),
+    ]
+
+
+def test_a_question_that_lapsed_is_asked_again_with_a_new_row(settings: Settings) -> None:
+    w = world_for(settings, "analysis")
+    call(w, "analysis")
+    w.clock.moment = NOW + OPEN_FOR - timedelta(seconds=1)
+    call(w, "analysis")
+    assert len(requests(w)) == 1
+    w.clock.moment = NOW + OPEN_FOR
+    call(w, "analysis")
+    assert len(requests(w)) == 2
+
+
+def test_a_declined_question_is_closed_and_the_next_one_is_new(settings: Settings) -> None:
+    w = world_for(settings, "qa")
+    state = asked(call(w, "qa")).request_state
+    complete(call(w, "qa", retry(state, "decline")))
+    assert [row["reason"] for row in requests(w, CLOSED)] == ["declined"]
+    assert requests(w, CLOSED)[0]["credential_id"] == "cred-1"
+    call(w, "qa")
+    assert len(requests(w)) == 2
+
+
+def test_nothing_is_written_when_nothing_waits(settings: Settings) -> None:
+    w = world_for(settings, "analysis")
+    complete(call(w, "roadmap"))
+    assert requests(w) == []
+
+
+def test_a_question_answered_by_a_decision_is_no_longer_open(settings: Settings) -> None:
+    w = world_for(settings, "wait")
+    call(w, "wait")
+    decide(w, "wait", "cleared")
+    w.state.cards[CARD] = w.state.cards[CARD].__replace__(
+        waiting_for="decision", waiting_set_at=DECIDED
+    )
+    w.clock.moment = NOW + timedelta(minutes=10)
+    call(w, "wait")
+    assert len(requests(w)) == 2
+

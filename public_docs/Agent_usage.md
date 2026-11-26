@@ -662,6 +662,11 @@ When you repeat the call with the state:
 Each key asks for itself. A person may hold any number of keys, and two keys asking about one
 decision each get a state of their own; `decided_by` is the person, whichever key asks.
 
+Your question shows in the history of the Ticket or the Loop, once per key while it is open, and
+the decision that answers it names your key there; a decision on a Ticket also gets one comment by
+the person who decided. [Loops](Loops.md#a-decision-a-coding-session-asked-for) describes what a
+person sees.
+
 ## 5. What a worker cannot do, by design
 
 - Take a planning decision: approve or reset an analysis or a RoadMap, edit the Info once planning

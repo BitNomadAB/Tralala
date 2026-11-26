@@ -75,6 +75,7 @@ if TYPE_CHECKING:  # the composition root imports this module lazily, so keep th
     from ..core.config import Settings
     from .cards import CardEntry, CardService
     from .decision_outcomes import DecisionOutcomeService
+    from .decision_requests import DecisionRequestService
     from .loops import LoopEntry, LoopService
     from .request_state import RequestStateService
 
@@ -126,6 +127,9 @@ class DecisionAsking(Protocol):
 
     @property
     def decision_outcome(self) -> DecisionOutcomeService: ...
+
+    @property
+    def decision_request(self) -> DecisionRequestService: ...
 
     @property
     def request_state(self) -> RequestStateService: ...
@@ -321,6 +325,11 @@ def _ask(
     is absolute, else answer with the address as text."""
     link = _link(services, request, situation)
     message = ask_message(request.decision, situation.loop_key, situation.ticket_key)
+    # The board records the question once while it is open (decision_requests), so the decision
+    # that answers it names this key.
+    services.decision_request.asked(
+        actor, request.board_id, situation.loop_id, request.decision, situation.card_id
+    )
     if given.url and services.settings.public_url:
         state = services.request_state.seal(actor, _call(request, situation), situation.subject)
         return InputRequired(
@@ -375,6 +384,10 @@ def _retry(
     action = _action(given.responses)
     if action in ("decline", "cancel"):
         status = "declined" if action == "decline" else "cancelled"
+        # The person turned the question down: a later decision does not answer it.
+        services.decision_request.withdrawn(
+            actor, request.board_id, situation.loop_id, request.decision, situation.card_id, status
+        )
         return {
             "status": status,
             **_about(request, situation),

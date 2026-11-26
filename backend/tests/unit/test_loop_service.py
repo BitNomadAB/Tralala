@@ -24,6 +24,7 @@ from app.db.generated.board import (
 )
 from app.schemas.loops import HumanConfirmation, LoopCancel, LoopCreate, LoopUpdate
 from app.services.cards import CardService
+from app.services.decision_requests import open_questions
 from app.services.loops import (
     DocumentSlots,
     LoopService,
@@ -43,6 +44,13 @@ from app.services.loops import (
     without_plan,
 )
 from app.services.plan_views import unplanned_tickets
+from tests.unit.decision_questions import (
+    DESKTOP,
+    LAPTOP,
+    changes,
+    question_row,
+    through,
+)
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
@@ -1209,3 +1217,48 @@ def test_a_stored_answer_that_is_not_an_object_counts_as_none(
     assert replayed is False
     assert len(w.state.loops) == 2
     assert w.state.idempotency[("actor-1", "k")].response_json.startswith("{")
+
+
+# --- a confirmation a coding session asked for ---------------------------------------------------
+
+
+def test_a_confirmation_that_answers_a_question_names_the_keys_and_comments_once(
+    settings: Settings,
+) -> None:
+    w = _human_ticket(settings)
+    w.views.items = [readiness_item("h", human=True)]
+    w.state.activity += [
+        question_row("q-1", "confirmation", ("card", "h"), at="2026-11-03T09:50:00Z"),
+        question_row("q-2", "confirmation", ("card", "h"), key=DESKTOP, at=STAMP),
+    ]
+    w.service.confirm_human_ticket(HUMAN, BOARD_ID, LOOP, "h", HumanConfirmation(version=1))
+    row = w.state.activity[-1]
+    assert (row.action, row.actor_id) == ("card.human_confirmed", "actor-1")
+    assert changes(row) == {
+        "note": "",
+        "ticket_key": None,
+        "asked_through": through(LAPTOP, DESKTOP),
+    }
+    (comment,) = w.state.comments.values()
+    assert (comment.card_id, comment.actor_id, comment.created_at) == ("h", "actor-1", STAMP)
+    assert comment.content == (
+        "Ada confirmed that the person's task on this Ticket is done. The question came from a "
+        "coding session through the keys Laptop and Desktop."
+    )
+    assert w.state.mention_jobs == {}
+    # Answered: the questions no longer count as open.
+    with FakeBoardUnitOfWork(w.state).reader(BOARD_ID) as repos:
+        assert open_questions(
+            repos, loop_id=LOOP, decision="confirmation", card_id="h", now=STAMP
+        ) == []
+
+
+def test_a_confirmation_nobody_asked_for_writes_no_comment(settings: Settings) -> None:
+    w = _human_ticket(settings)
+    w.views.items = [readiness_item("h", human=True)]
+    # A question about the Ticket's wait is no question about its confirmation.
+    w.state.activity.append(question_row("q-1", "wait", ("card", "h"), at=STAMP))
+    w.service.confirm_human_ticket(HUMAN, BOARD_ID, LOOP, "h", HumanConfirmation(version=1))
+    assert changes(w.state.activity[-1]) == {"note": "", "ticket_key": None}
+    assert w.state.comments == {}
+

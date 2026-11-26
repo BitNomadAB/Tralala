@@ -19,6 +19,8 @@ from ..db.generated.board import LoopApprovalsRow, LoopDocumentsRow, LoopsRow
 from ..repositories.board import BoardRepositories
 from ..repositories.loops import ApprovalColumn
 from ..schemas.loops import ApprovalRequest, ScopeResetRequest
+from .decision_outcomes import AskedDecision
+from .decision_requests import open_questions, with_asked_through
 from .loop_documents_revisions import (
     current_id,
     invalidate_downstream,
@@ -136,6 +138,10 @@ def record_review(
                     code="document_stale",
                     details={"kind": kind, "expected": expected[kind]},
                 )
+    # A question a coding session asked about this review is answered by it: the history row says
+    # so (``asked_through``); the approval and its revisions_json stay exactly as they were.
+    asked: AskedDecision = "analysis" if scope == "analysis" else "roadmap"
+    through = open_questions(repos, loop_id=loop_id, decision=asked, card_id=None, now=clock())
     approval_id = record_approval(
         repos,
         clock=clock,
@@ -169,7 +175,7 @@ def record_review(
         actor,
         f"loop.{scope}_reviewed",
         loop_id,
-        {"decision": payload.decision, "approval_id": approval_id},
+        with_asked_through({"decision": payload.decision, "approval_id": approval_id}, through),
         clock=clock,
         new_id=new_id,
     )

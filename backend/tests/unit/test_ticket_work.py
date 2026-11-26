@@ -47,6 +47,14 @@ from app.services.plan_views import ReadinessItem
 from app.services.subresources import CommentService
 from app.services.ticket_state import loop_closed, needs_person, ticket_state
 from app.services.ticket_work import TicketWorkService
+from tests.unit.decision_questions import (
+    DESKTOP,
+    LAPTOP,
+    changes,
+    closed_row,
+    question_row,
+    through,
+)
 from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
     BOARD_ID,
@@ -628,3 +636,78 @@ def test_set_ticket_wait_is_offered_to_cards_write_and_no_tool_clears_a_wait(
     assert "'ready'" not in listing
     created = str(catalogue["create_ticket"].input_schema)
     assert all(word in created for word in ("workplace", "waiting_reason", "labels"))
+
+
+# --- a wait a coding session asked a person to clear ----------------------------------------------
+
+EARLIER = "2026-11-07T08:50:00Z"
+LAPSED = "2026-11-07T08:29:59Z"
+
+
+def waiting(w: World) -> None:
+    """Ticket ``t`` waits for a decision a key set."""
+    w.ticket_work.set_wait(WORKER, BOARD_ID, LOOP, "t", wait())
+
+
+def test_a_cleared_wait_that_answers_a_question_names_the_key_and_comments_once(
+    settings: Settings,
+) -> None:
+    w = world(settings)
+    waiting(w)
+    w.state.activity.append(question_row("q-1", "wait", ("card", "t"), at=EARLIER))
+    w.ticket_work.clear_wait(PERSON, BOARD_ID, LOOP, "t", TicketWaitClear(version=2))
+    row = w.state.activity[-1]
+    assert (row.action, row.actor_id) == ("card.wait_cleared", "person-1")
+    assert changes(row)["asked_through"] == through(LAPTOP)
+    (comment,) = w.state.comments.values()
+    assert (comment.card_id, comment.actor_id) == ("t", "person-1")
+    assert comment.content == (
+        "Grace cleared the wait on this Ticket. The question came from a coding session through "
+        "the key Laptop."
+    )
+    assert "@" not in comment.content
+    assert w.state.mention_jobs == {}
+    # The question is answered: the next wait, cleared, is a decision nobody asked for.
+    w.ticket_work.set_wait(WORKER, BOARD_ID, LOOP, "t", wait(version=3))
+    w.ticket_work.clear_wait(PERSON, BOARD_ID, LOOP, "t", TicketWaitClear(version=4))
+    assert "asked_through" not in changes(w.state.activity[-1])
+    assert len(w.state.comments) == 1
+
+
+def test_a_cleared_wait_nobody_asked_about_is_recorded_as_before(settings: Settings) -> None:
+    w = world(settings)
+    waiting(w)
+    w.ticket_work.clear_wait(PERSON, BOARD_ID, LOOP, "t", TicketWaitClear(version=2))
+    assert changes(w.state.activity[-1]) == {
+        "before": {"workplace": "unknown", "waiting_for": "decision"}
+    }
+    assert w.state.comments == {}
+
+
+def test_every_key_with_an_open_question_is_named_in_the_one_comment(settings: Settings) -> None:
+    w = world(settings)
+    waiting(w)
+    w.state.activity += [
+        question_row("q-1", "wait", ("card", "t"), at=EARLIER),
+        question_row("q-2", "wait", ("card", "t"), key=DESKTOP, at=STAMP),
+        # Another Ticket's question, and another decision on this one, answer nothing here.
+        question_row("q-3", "wait", ("card", "m"), at=EARLIER),
+        question_row("q-4", "confirmation", ("card", "t"), at=EARLIER),
+    ]
+    w.ticket_work.clear_wait(PERSON, BOARD_ID, LOOP, "t", TicketWaitClear(version=2))
+    assert changes(w.state.activity[-1])["asked_through"] == through(LAPTOP, DESKTOP)
+    (comment,) = w.state.comments.values()
+    assert comment.content.endswith("through the keys Laptop and Desktop.")
+
+
+def test_a_lapsed_or_declined_question_is_answered_by_nothing(settings: Settings) -> None:
+    w = world(settings)
+    waiting(w)
+    w.state.activity += [
+        question_row("q-1", "wait", ("card", "t"), at=LAPSED),
+        question_row("q-2", "wait", ("card", "t"), key=DESKTOP, at=EARLIER),
+        closed_row("c-2", "wait", ("card", "t"), key=DESKTOP, at=EARLIER),
+    ]
+    w.ticket_work.clear_wait(PERSON, BOARD_ID, LOOP, "t", TicketWaitClear(version=2))
+    assert "asked_through" not in changes(w.state.activity[-1])
+    assert w.state.comments == {}

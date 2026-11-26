@@ -42,6 +42,7 @@ from ..schemas.loops import (
 )
 from . import idempotency
 from .activity import activity_entry
+from .decision_requests import add_answer_comment, open_questions, with_asked_through
 from .lists import BoardChecks
 from .loop_identifiers import format_loop_key, loop_prefix
 from .loops_rules import (
@@ -416,14 +417,23 @@ class LoopService:
                     code="ticket_blocked",
                     details={"blockers": item["blockers"]},
                 )
-            repos.cards.confirm_human(card_id, actor.actor_id, now=self._now())
+            # A coding session's open question about this confirmation is answered by it: the
+            # history row names the keys and the Ticket gets one comment by the person.
+            now = self._now()
+            through = open_questions(
+                repos, loop_id=loop_id, decision="confirmation", card_id=card_id, now=now
+            )
+            repos.cards.confirm_human(card_id, actor.actor_id, now=now)
             self._log(
                 repos,
                 actor,
                 "card.human_confirmed",
                 "card",
                 card_id,
-                {"note": payload.note, "ticket_key": card.ticket_key},
+                with_asked_through({"note": payload.note, "ticket_key": card.ticket_key}, through),
+            )
+            add_answer_comment(
+                repos, actor, card_id, "confirmation", through, new_id=self._new_id, now=now
             )
             refresh_stage(repos, loop_id, now=self._now())
         return self.tickets.get(board_id, loop_id, card_id)

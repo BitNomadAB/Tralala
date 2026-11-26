@@ -393,6 +393,31 @@ the focus on the button, and the person reads and presses it. Opening a link dec
   (`TRALALA_PUBLIC_URL`, see [Installation](Installation.md)); to open a path, put the address you
   open Tralala at in front of it.
 
+### A decision a coding session asked for
+
+A coding session can also ask its person for one of these decisions with `ask_person`. The question
+then shows in the history of the Ticket or the Loop, as a row by the key: "asked a person to decide,
+from a coding session", with the key's name and the person who issued the key. Each key that asks
+gets one row; asking again while its question is open adds none.
+
+When the person takes the decision while a question about it is open, the decision answers every
+open question:
+
+- Its row in the history says so: "asked from a coding session through the key Laptop", or
+  "through the keys Laptop and Desktop" when several keys asked. On a completed Loop, the record in
+  **Board history** lists those decisions under **Decisions asked from a coding session**.
+- A decision on a Ticket (clearing a wait, confirming a person's task) also gets one comment on
+  that Ticket, written in the name of the person who decided: who decided, what they decided, and
+  that the question came from a coding session through which keys. A decision on the Loop (the
+  analysis, the RoadMap, the implementation, QA) has no Ticket, so it shows in the history only.
+
+A question stops being open when a decision answers it, when the person declines or cancels it in
+the coding session's editor, or 30 minutes after its row; a key that is still asking then gets a
+new row, so a session that went away stops counting while one that keeps asking does not. A
+decision taken directly in Tralala, without an open question, shows as before: a row in the
+history, with no key named and no comment. That a question came from a coding session is read only
+from Tralala's own history, never from what the person's browser sends.
+
 ## Ask the agents
 
 A discussion is a question to the board's agents about one Ticket, or a thread on the board itself

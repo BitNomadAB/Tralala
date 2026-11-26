@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "playwright/test";
-import { mcpAsk, mcpAskError } from "./mcp";
+import { mcpAsk, mcpAskError, mcpCall, rowsOf } from "./mcp";
 import {
   analysisUnderReview,
   approvedAnalysis,
@@ -164,6 +164,72 @@ test.describe("a link to a decision", () => {
       const reused = await mcpAskError(page, token, "ask_person", args, options);
       expect(reused.code).toBe(-32602);
       expect(reused.data).toEqual({ reason: "reused" });
+    });
+  });
+
+  test("a wait a key asked about is cleared, and the Ticket says through which key", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await login(page);
+    const { candidates, headers } = await approvedAnalysis(page, "Asked wait");
+    const published = await page.request.post(candidates, { headers, data: roadmap([TICKET]) });
+    expect(published.status()).toBe(201);
+    await approveRoadmap(page, TICKET);
+    const boardId = boardIdFromUrl(page);
+    const loopId = loopIdFromUrl(page);
+    const token = await issueToken(page, plan.WORKER_SCOPES);
+    const listed = await mcpCall(page, token, "list_tickets", {
+      board_id: boardId,
+      loop_id: loopId,
+    });
+    const ticket = rowsOf<{ id: string; title: string }>(listed, "tickets").find(
+      (row) => row.title === TICKET,
+    );
+    const cardId = ticket?.id ?? "";
+    let link = "";
+
+    await test.step("the key sets a wait and asks its person to clear it", async () => {
+      await mcpCall(page, token, "set_ticket_wait", {
+        board_id: boardId,
+        card_id: cardId,
+        waiting_for: "decision",
+        reason: "Which mail service do we use?",
+      });
+      const args = { board_id: boardId, loop_id: loopId, decision: "wait", card_id: cardId };
+      const asked = await mcpAsk(page, token, "ask_person", args);
+      expect(asked.structuredContent?.status).toBe("waiting_for_person");
+      link = String(asked.structuredContent?.decision_link);
+      expect(link).toMatch(/\/tickets\/[0-9a-f-]{36}\?focus=clear-wait$/);
+    });
+
+    await test.step("the person clears it in Tralala", async () => {
+      await page.goto(link);
+      const clear = page.getByRole("button", { name: "Clear the wait", exact: true });
+      await expect(clear).toBeFocused();
+      await clear.click();
+      await expect(
+        page.getByRole("button", { name: "Mark as waiting…", exact: true }),
+      ).toBeVisible();
+    });
+
+    await test.step("the Ticket shows one comment and the history names the key", async () => {
+      await page.reload();
+      const comments = page.getByRole("tabpanel", { name: "Comments" });
+      const answer = comments.getByText(
+        /cleared the wait on this Ticket\. The question came from a coding session through the key worker-key/,
+      );
+      await expect(answer).toHaveCount(1);
+      await page.getByRole("tab", { name: "History" }).click();
+      const history = page.getByRole("list", { name: "History" });
+      await expect(
+        history.getByText(
+          /cleared the wait, asked from a coding session through the key worker-key/,
+        ),
+      ).toBeVisible();
+      await expect(
+        history.getByText(/asked a person to decide, from a coding session/),
+      ).toBeVisible();
     });
   });
 });

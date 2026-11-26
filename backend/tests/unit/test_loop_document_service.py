@@ -37,6 +37,14 @@ from app.services.loop_documents import (
 )
 from app.services.loop_documents_views import HumanViewStart
 from app.services.loop_plans import LoopPlanService
+from tests.unit.decision_questions import (
+    DESKTOP,
+    LAPTOP,
+    changes,
+    closed_row,
+    question_row,
+    through,
+)
 from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
     BOARD_ID,
@@ -1368,3 +1376,62 @@ def test_the_analysis_renders_its_sections_and_traceability() -> None:
     empty = render_analysis(AnalysisPayload(outcome=""))
     assert "Not described." in empty
     assert "No findings were recorded." in empty
+
+
+# --- a review a coding session asked for ---------------------------------------------------------
+
+ASKED = "2026-11-03T09:50:00Z"
+
+
+@pytest.mark.parametrize("decision", ["approved", "changes_requested"])
+def test_a_review_that_answers_a_question_names_the_keys_and_keeps_its_revisions(
+    decision: str,
+) -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    w.state.activity += [
+        question_row("q-1", "analysis", ("loop", LOOP), at=ASKED),
+        question_row("q-2", "analysis", ("loop", LOOP), key=DESKTOP, at=ASKED),
+        # A question about the RoadMap is no question about the analysis.
+        question_row("q-3", "roadmap", ("loop", LOOP), at=ASKED),
+    ]
+    review(w, "analysis", decision=decision)
+    approval = w.state.approvals[-1]
+    expected = {kind: current(w, kind) for kind in ("info", "analysis_ai", "analysis")}
+    assert json.loads(approval.revisions_json) == expected
+    entry = w.state.activity[-1]
+    assert (entry.action, changes(entry)) == (
+        "loop.analysis_reviewed",
+        {
+            "decision": decision,
+            "approval_id": approval.id,
+            "asked_through": through(LAPTOP, DESKTOP),
+        },
+    )
+    # A decision on the Loop has no Ticket: the history row says it, and nothing comments.
+    assert w.state.comments == {}
+
+
+def test_a_review_nobody_asked_for_is_recorded_as_before() -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    w.state.activity += [
+        question_row("q-1", "analysis", ("loop", LOOP), at=ASKED),
+        closed_row("c-1", "analysis", ("loop", LOOP), at=ASKED),
+    ]
+    review(w, "analysis")
+    approval = w.state.approvals[-1]
+    assert changes(w.state.activity[-1]) == {"decision": "approved", "approval_id": approval.id}
+
+
+def test_a_second_review_after_the_answer_names_no_key() -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    w.state.activity.append(question_row("q-1", "analysis", ("loop", LOOP), at=ASKED))
+    review(w, "analysis", decision="changes_requested")
+    analysis(w)
+    review(w, "analysis")
+    assert "asked_through" not in changes(w.state.activity[-1])

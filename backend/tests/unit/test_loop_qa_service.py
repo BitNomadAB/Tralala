@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import JsonValue
 
 from app.core.context import ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, VersionConflict
@@ -24,6 +25,7 @@ from app.services.loop_history import LoopHistoryService
 from app.services.loop_links import LoopWorkflowLinks
 from app.services.loop_qa import LoopQaService, render_qa_task
 from app.services.plan_views import open_delivery, unplanned_tickets
+from tests.unit.decision_questions import LAPTOP, changes, question_row, through
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -696,3 +698,65 @@ def test_open_delivery_of_a_loop_without_a_plan_is_its_open_tickets(tmp_path: Pa
         # With a plan, the same Loop's open delivery is the plan's Tickets, as before.
         planned = state.loops[LOOP].__replace__(current_plan_id="plan-1")
         assert [ticket["id"] for ticket in open_delivery(repos, planned)] == ["t-9"]
+
+
+# --- the implementation and QA a coding session asked for ----------------------------------------
+
+ASKED = "2026-11-03T09:50:00Z"
+
+
+def _logged(state: BoardState, action: str) -> dict[str, JsonValue]:
+    (row,) = [entry for entry in state.activity if entry.action == action]
+    return changes(row)
+
+
+def test_an_acceptance_that_answers_a_question_names_the_key_in_the_decision(
+    tmp_path: Path,
+) -> None:
+    service, state, _ = make(tmp_path)
+    state.activity.append(question_row("q-1", "implementation", ("loop", LOOP), at=ASKED))
+    accept(service)
+    (implementation,) = [row for row in state.approvals if row.scope == "implementation"]
+    extra = json.loads(implementation.revisions_json)
+    assert extra["asked_through"] == through(LAPTOP)
+    assert _logged(state, "loop.implementation_accepted")["asked_through"] == through(LAPTOP)
+    assert state.comments == {}
+
+
+def test_an_acceptance_nobody_asked_for_is_recorded_as_before(tmp_path: Path) -> None:
+    service, state, _ = make(tmp_path)
+    state.activity.append(question_row("q-1", "qa", ("loop", LOOP), at=ASKED))
+    accept(service)
+    (implementation,) = [row for row in state.approvals if row.scope == "implementation"]
+    assert "asked_through" not in json.loads(implementation.revisions_json)
+    assert "asked_through" not in _logged(state, "loop.implementation_accepted")
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "rejected"])
+def test_a_qa_decision_that_answers_a_question_names_the_key(tmp_path: Path, outcome: str) -> None:
+    service, state, cycle_id = _ready(
+        tmp_path,
+        [
+            {"scenario_id": "S1", "status": "passed"},
+            {"scenario_id": "S2", "status": "passed"},
+        ],
+    )
+    state.activity.append(question_row("q-1", "qa", ("loop", LOOP), at=NOW))
+    service.decide(ADA, BOARD_ID, LOOP, decision(cycle_id, outcome))
+    assert _logged(state, f"loop.qa_{outcome}")["asked_through"] == through(LAPTOP)
+    if outcome == "accepted":
+        qa = state.approvals[-1]
+        assert json.loads(qa.revisions_json)["asked_through"] == through(LAPTOP)
+    assert state.comments == {}
+
+
+def test_a_qa_decision_nobody_asked_for_is_recorded_as_before(tmp_path: Path) -> None:
+    service, state, cycle_id = _ready(
+        tmp_path,
+        [
+            {"scenario_id": "S1", "status": "passed"},
+            {"scenario_id": "S2", "status": "passed"},
+        ],
+    )
+    service.decide(ADA, BOARD_ID, LOOP, decision(cycle_id, "rejected"))
+    assert _logged(state, "loop.qa_rejected") == {"cycle_id": cycle_id}
