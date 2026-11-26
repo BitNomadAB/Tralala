@@ -128,8 +128,9 @@ class TicketWorkService:
         card_id: str,
         payload: TicketWaitClear,
     ) -> CardEntry:
-        """The wait is answered: a person's act, whatever the Ticket waited for."""
-        actor.require_human("Clearing a Ticket's wait")
+        """The wait is answered: a person's act, whatever the Ticket waited for, in Tralala or
+        in the editor through a key with the right (AGENTS.md rule 11a)."""
+        actor.require_person_or_editor_decision("Clearing a Ticket's wait")
         actor.require("cards:write")
 
         def change(card: CardsRow) -> CardChanges:
@@ -190,7 +191,9 @@ class TicketWorkService:
                     if answers is not None
                     else []
                 )
-                marked = with_asked_through(logged, through)
+                marked = with_asked_through(
+                    logged, through, actor if answers is not None else None
+                )
                 self._apply(repos, actor, card, changes, action, marked)
                 if answers is not None:
                     add_answer_comment(

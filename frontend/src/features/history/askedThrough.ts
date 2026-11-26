@@ -35,6 +35,28 @@ export function askedThroughText(changes: Record<string, unknown>): string | nul
 }
 
 /**
+ * "decided in a coding session through the key Laptop" for a decision the person took in their
+ * editor (`taken_through`, the one key that brought the answer), or null for one taken in Tralala.
+ */
+export function takenThroughText(changes: Record<string, unknown>): string | null {
+  const taken = changes.taken_through;
+  if (typeof taken !== "object" || taken === null) return null;
+  const name = "key_name" in taken ? taken.key_name : null;
+  return `decided in a coding session through the key ${typeof name === "string" && name !== "" ? name : "(unnamed)"}`;
+}
+
+/**
+ * What a decision's history adds after what was done: where it was decided and who asked, or
+ * null for a decision taken in Tralala that nobody asked for.
+ */
+export function decisionTrail(changes: Record<string, unknown>): string | null {
+  const parts = [takenThroughText(changes), askedThroughText(changes)].filter(
+    (part): part is string => part !== null,
+  );
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+/**
  * The decisions of a completed Loop that answered a question a coding session asked its person,
  * read from the record's snapshot: the history rows of the reviews, the Ticket decisions and a
  * rejected QA, and the decision rows of the implementation and an accepted QA, which carry the
@@ -88,13 +110,13 @@ export function askedDecisions(envelope: Record<string, unknown>): string[] {
   for (const entry of entries(envelope.activity)) {
     const changes = fields(entry.changes);
     const what = decisionText(String(entry.action), changes.decision);
-    const asked = askedThroughText(changes);
+    const asked = decisionTrail(changes);
     if (what && asked) lines.push(`${what}, ${asked}`);
   }
   for (const approval of entries(envelope.approvals)) {
     if (approval.decision !== "approved") continue;
     const what = decisionText(`approval.${String(approval.scope)}`, approval.decision);
-    const asked = askedThroughText(fields(approval.revisions));
+    const asked = decisionTrail(fields(approval.revisions));
     if (what && asked) lines.push(`${what}, ${asked}`);
   }
   return lines;

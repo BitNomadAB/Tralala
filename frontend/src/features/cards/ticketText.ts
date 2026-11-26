@@ -1,4 +1,4 @@
-import { askedThroughText } from "@/features/history/askedThrough";
+import { decisionTrail } from "@/features/history/askedThrough";
 import type {
   ActivityEntry,
   Comment,
@@ -152,7 +152,8 @@ function updated(changes: Record<string, unknown>): string {
 
 /**
  * One entry as a sentence: who, then what they did ("Ada Member changed the title"), and for a
- * decision that answered a coding session's question, through which key it was asked.
+ * decision that answered a coding session's question, where it was decided and through which key
+ * it was asked.
  */
 export function historyLine(entry: ActivityEntry, name: string | null): string {
   const who = name ?? WHO[entry.actor_type];
@@ -160,8 +161,8 @@ export function historyLine(entry: ActivityEntry, name: string | null): string {
     entry.action === "card.updated"
       ? updated(entry.changes)
       : (ACTIONS[entry.action] ?? entry.action);
-  const asked = askedThroughText(entry.changes);
-  return asked ? `${who} ${what}, ${asked}` : `${who} ${what}`;
+  const trail = decisionTrail(entry.changes);
+  return trail ? `${who} ${what}, ${trail}` : `${who} ${what}`;
 }
 
 /** Whoever did something, when the board does not know their name. */

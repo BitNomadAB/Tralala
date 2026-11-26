@@ -17,8 +17,13 @@ How the tool answers depends on what the client can be asked:
   sealed ``requestState`` (``RequestStateService``);
 - it waits and the client cannot be asked so (no ``url`` mode, a client of 2025-06-18, or no public
   address, since a path is no URL for that mode): ``complete`` with ``status``
-  ``waiting_for_person``, ``decision_link`` and the advice to call again later. The mode ``form`` is
-  never used, whatever the client declared.
+  ``waiting_for_person``, ``decision_link`` and the advice to call again later;
+- it waits, the client declared the mode ``form``, the installation's setting ``editor_decisions``
+  is on, the key holds the right ``loops:decide`` and the decision is one of the five the person
+  may take in the editor (``agent_tools_decide.offers_form``): ``input_required`` with the form
+  instead, whatever else the client declared. The person's answer is taken as their decision on
+  the repeated call (``_take_in_form``): as the owner of the key, through the same service methods
+  as REST, marked ``taken_through`` the key. QA and every other decision never get a form.
 
 The client repeats the call with ``inputResponses`` and the state. The state is opened first, for
 the same key and the same call, once; a state the service refuses ends the call there (the
@@ -26,6 +31,7 @@ transport answers JSON-RPC -32602 and nothing about the decision). Then:
 
 - ``decline`` or ``cancel``: ``complete`` with ``status`` ``declined`` or ``cancelled``; the
   decision stays open in Tralala;
+- for a question asked as a form, ``_form_retry`` (below);
 - ``accept`` (in mode ``url`` it only means the person agreed to open the address), or no answer:
   when the person took the decision the question was about, ``complete`` with ``status``
   ``decided``, the ``outcome``, who decided and when (``DecisionOutcomeService``); while it still
@@ -56,6 +62,19 @@ from ..core.context import ActorContext
 from ..core.dates import iso_utc
 from ..core.errors import ValidationFailure
 from ..core.identifiers import canonical_board_id
+from ..schemas.cards import TicketWaitClear
+from ..schemas.loops import ApprovalRequest, HumanConfirmation, ImplementationAcceptance
+from .agent_tools_decide import (
+    FORM_RULE,
+    FormDecision,
+    answered_content,
+    form_decision,
+    form_request,
+    no_decision,
+    offers_form,
+    read_answer,
+    revision_ids,
+)
 from .agent_tools_loops import next_decision, next_step, ticket_counts
 from .agent_tools_read import ToolArguments, ToolResult, _require, _text, tool_decision_link
 from .agent_tools_schema import (
@@ -68,16 +87,21 @@ from .agent_tools_schema import (
     string_argument,
 )
 from .decision_outcomes import ASKED_DECISIONS, TICKET_DECISIONS, AskedDecision, DecisionTaken
+from .decision_requests import VIA_FORM, VIA_LINK
 from .loop_documents_review import ANALYSIS_SCOPE_KINDS, ROADMAP_SCOPE_KINDS
 from .request_state import OpenedState, PendingCall, RequestStateRefused
 
 if TYPE_CHECKING:  # the composition root imports this module lazily, so keep the cycle out
     from ..core.config import Settings
+    from .auth import AuthService
     from .cards import CardEntry, CardService
     from .decision_outcomes import DecisionOutcomeService
     from .decision_requests import DecisionRequestService
+    from .loop_documents import LoopDocumentService
+    from .loop_qa import LoopQaService
     from .loops import LoopEntry, LoopService
     from .request_state import RequestStateService
+    from .ticket_work import TicketWorkService
 
 ASK_PERSON: Final = "ask_person"
 # The key of the one input request the tool sends, and of the answer it reads back.
@@ -104,8 +128,10 @@ _MESSAGES: Final[dict[AskedDecision, str]] = {
 # The tool in one sentence: the MCP instructions give it in these words.
 ASK_PERSON_RULE: Final = (
     "ask_person asks your person for such a decision and later says what they decided; the "
-    "person takes it in Tralala, never the tool."
+    "decision is always the person's, in Tralala or in their editor, never yours. " + FORM_RULE
 )
+# What a subject sealed for a form holds besides what the question was about.
+_FORM_MARKS: Final = ("mode", "version")
 CALL_AGAIN: Final = (
     "A person takes this decision in Tralala at decision_link; call ask_person again later to "
     "learn what they decided."
@@ -137,6 +163,18 @@ class DecisionAsking(Protocol):
     @property
     def settings(self) -> Settings: ...
 
+    @property
+    def auth(self) -> AuthService: ...
+
+    @property
+    def loop_document(self) -> LoopDocumentService: ...
+
+    @property
+    def ticket_work(self) -> TicketWorkService: ...
+
+    @property
+    def loop_qa(self) -> LoopQaService: ...
+
 
 @dataclass(frozen=True, slots=True)
 class _Request:
@@ -151,7 +189,10 @@ class _Request:
 @dataclass(frozen=True, slots=True)
 class _Situation:
     """Where the decision stands now: the Loop's and the Ticket's ids and keys, whether it waits
-    for a person, why not, and what it is about (its ``subject``) while it waits."""
+    for a person, why not, and what it is about (its ``subject``) while it waits. ``version`` is
+    the Ticket's version for a decision on a Ticket and the Loop's otherwise, ``revision`` the
+    revision number of the document a review approves, and ``without_plan`` whether the Loop has
+    no plan (accepting its implementation closes it)."""
 
     loop_id: str
     loop_key: str
@@ -160,6 +201,9 @@ class _Situation:
     pending: bool
     why: str = ""
     subject: dict[str, JsonValue] = field(default_factory=dict[str, JsonValue])
+    version: int = 0
+    revision: int | None = None
+    without_plan: bool = False
 
 
 def _decision(args: ToolArguments) -> AskedDecision:
@@ -222,13 +266,32 @@ def _loop_situation(services: DecisionAsking, request: _Request, entry: LoopEntr
         why = f"The {name} of {key} does not wait for a person now. {sentence}"
         return _Situation(entry["id"], key, None, None, False, why)
     subject: dict[str, JsonValue] = {}
+    revision: int | None = None
     if request.decision == "analysis":
         subject = {"revisions": _revisions(entry, ANALYSIS_SCOPE_KINDS)}
+        revision = _revision_number(entry, "analysis")
     elif request.decision == "roadmap":
         subject = {"revisions": _revisions(entry, ROADMAP_SCOPE_KINDS)}
+        revision = _revision_number(entry, "roadmap")
     elif request.decision == "qa":
         subject = {"cycle_id": entry["active_qa_cycle_id"]}
-    return _Situation(entry["id"], key, None, None, True, subject=subject)
+    return _Situation(
+        entry["id"],
+        key,
+        None,
+        None,
+        True,
+        subject=subject,
+        version=entry["version"],
+        revision=revision,
+        without_plan=entry["without_plan"],
+    )
+
+
+def _revision_number(entry: LoopEntry, kind: str) -> int | None:
+    """The revision number of the document a person reads and approves."""
+    current = entry["documents"][kind]["current"]
+    return None if current is None else current["revision_number"]
 
 
 def _ticket_why(decision: AskedDecision, card: CardEntry, label: str) -> str | None:
@@ -260,7 +323,16 @@ def _ticket_situation(
     subject: dict[str, JsonValue] = {}
     if request.decision == "wait":
         subject = {"waiting_for": card["waiting_for"], "waiting_set_at": card["waiting_set_at"]}
-    return _Situation(entry["id"], entry["key"], card["id"], ticket_key, True, subject=subject)
+    return _Situation(
+        entry["id"],
+        entry["key"],
+        card["id"],
+        ticket_key,
+        True,
+        subject=subject,
+        version=card["version"],
+        without_plan=entry["without_plan"],
+    )
 
 
 def _situation(services: DecisionAsking, request: _Request) -> _Situation:
@@ -321,14 +393,29 @@ def _ask(
     situation: _Situation,
     given: ToolInput,
 ) -> ToolResult | InputRequired:
-    """The decision waits: ask in mode ``url`` when the client can be asked so and the address
-    is absolute, else answer with the address as text."""
+    """The decision waits: ask in mode ``form`` when the person may decide in the editor, in mode
+    ``url`` when the client can be asked so and the address is absolute, else answer with the
+    address as text."""
+    allowed = form_decision(request.decision)
+    if allowed is not None and offers_form(
+        services.settings,
+        actor,
+        request.decision,
+        declared=given.form,
+        without_plan=situation.without_plan,
+    ):
+        return _ask_in_form(services, actor, request, situation, allowed)
     link = _link(services, request, situation)
     message = ask_message(request.decision, situation.loop_key, situation.ticket_key)
     # The board records the question once while it is open (decision_requests), so the decision
     # that answers it names this key.
     services.decision_request.asked(
-        actor, request.board_id, situation.loop_id, request.decision, situation.card_id
+        actor,
+        request.board_id,
+        situation.loop_id,
+        request.decision,
+        situation.card_id,
+        via=VIA_LINK,
     )
     if given.url and services.settings.public_url:
         state = services.request_state.seal(actor, _call(request, situation), situation.subject)
@@ -383,17 +470,9 @@ def _retry(
     """The call repeated with a state that opened: the person's answer, then the decision."""
     action = _action(given.responses)
     if action in ("decline", "cancel"):
-        status = "declined" if action == "decline" else "cancelled"
-        # The person turned the question down: a later decision does not answer it.
-        services.decision_request.withdrawn(
-            actor, request.board_id, situation.loop_id, request.decision, situation.card_id, status
-        )
-        return {
-            "status": status,
-            **_about(request, situation),
-            "decision_link": _link(services, request, situation),
-            "next_step": STILL_OPEN,
-        }
+        return _withdrawn(services, actor, request, situation, action)
+    if opened.subject.get("mode") == VIA_FORM:
+        return _form_retry(services, actor, request, situation, opened, given)
     taken = services.decision_outcome.taken(
         request.board_id,
         situation.loop_id,
@@ -410,6 +489,164 @@ def _retry(
         # The question was about a revision or a wait that is no longer the one that waits.
         raise RequestStateRefused("wrong_call")
     return _not_pending(request, situation)
+
+
+def _withdrawn(
+    services: DecisionAsking,
+    actor: ActorContext,
+    request: _Request,
+    situation: _Situation,
+    action: str,
+) -> ToolResult:
+    """The person declined or cancelled the question: no decision, and a later one does not
+    answer it."""
+    if action in ("decline", "cancel"):
+        status = "declined" if action == "decline" else "cancelled"
+        # The person turned the question down: a later decision does not answer it.
+        services.decision_request.withdrawn(
+            actor, request.board_id, situation.loop_id, request.decision, situation.card_id, status
+        )
+        return {
+            "status": status,
+            **_about(request, situation),
+            "decision_link": _link(services, request, situation),
+            "next_step": STILL_OPEN,
+        }
+    raise ValueError(f"not a withdrawal: {action}")  # pragma: no cover - callers check
+
+
+# --- the mode form ------------------------------------------------------------------------------
+
+
+def _ask_in_form(
+    services: DecisionAsking,
+    actor: ActorContext,
+    request: _Request,
+    situation: _Situation,
+    decision: FormDecision,
+) -> InputRequired:
+    """Ask the person in the editor: the form, and a state sealed with what the question is about
+    and, for a Ticket or the implementation, the version it binds to."""
+    services.decision_request.asked(
+        actor,
+        request.board_id,
+        situation.loop_id,
+        request.decision,
+        situation.card_id,
+        via=VIA_FORM,
+    )
+    subject: dict[str, JsonValue] = {**situation.subject, "mode": VIA_FORM}
+    if decision in ("wait", "confirmation", "implementation"):
+        subject["version"] = situation.version
+    state = services.request_state.seal(actor, _call(request, situation), subject)
+    question = form_request(decision, situation.loop_key, situation.ticket_key, situation.revision)
+    return InputRequired({REQUEST_KEY: question}, state)
+
+
+def _still_in_force(situation: _Situation, opened: OpenedState) -> bool:
+    """Whether what the form asked about is what waits now: the same revisions or wait, and the
+    same version of the Ticket or the Loop when the question bound one."""
+    about = {key: value for key, value in opened.subject.items() if key not in _FORM_MARKS}
+    if situation.subject != about:
+        return False
+    version = opened.subject.get("version")
+    return version is None or version == situation.version
+
+
+def _form_retry(
+    services: DecisionAsking,
+    actor: ActorContext,
+    request: _Request,
+    situation: _Situation,
+    opened: OpenedState,
+    given: ToolInput,
+) -> ToolResult | InputRequired:
+    """The answer to a form. The setting, the right on the key and its owner are checked again
+    first (``403 human_action_required`` otherwise); a decision someone already took is reported;
+    a question about something no longer in force, or an answer that is not the form's, is asked
+    again with what holds now; then the decision is taken as the owner."""
+    person = services.auth.editor_decision_actor(actor)
+    taken = services.decision_outcome.taken(
+        request.board_id,
+        situation.loop_id,
+        request.decision,
+        card_id=situation.card_id,
+        subject=opened.subject,
+        since=iso_utc(opened.issued_at),
+    )
+    if taken is not None:
+        return _decided(request, situation, taken)
+    if not situation.pending:
+        return _not_pending(request, situation)
+    decision = form_decision(request.decision)
+    answer = (
+        None
+        if decision is None or _action(given.responses) != "accept"
+        else read_answer(decision, answered_content(given.responses, REQUEST_KEY))
+    )
+    if decision is None or answer is None or not _still_in_force(situation, opened):
+        return _ask(services, actor, request, situation, given)
+    chosen, feedback = answer
+    if no_decision(decision, chosen):
+        services.decision_request.withdrawn(
+            actor, request.board_id, situation.loop_id, request.decision, situation.card_id, "kept"
+        )
+        return {
+            "status": "not_decided",
+            **_about(request, situation),
+            "feedback": feedback,
+            "decision_link": _link(services, request, situation),
+            "next_step": STILL_OPEN,
+        }
+    _take_in_form(services, person, request, situation, opened, (chosen, feedback))
+    found = services.decision_outcome.taken(
+        request.board_id,
+        situation.loop_id,
+        request.decision,
+        card_id=situation.card_id,
+        subject=opened.subject,
+        since=iso_utc(opened.issued_at),
+    )
+    if found is None:  # pragma: no cover - the decision was written above
+        raise RuntimeError("the decision just taken is missing")
+    granted = person.editor_decision
+    return {
+        **_decided(request, situation, found),
+        "taken_through": None if granted is None else granted.key_name,
+    }
+
+
+def _take_in_form(
+    services: DecisionAsking,
+    person: ActorContext,
+    request: _Request,
+    situation: _Situation,
+    opened: OpenedState,
+    answer: tuple[bool, str],
+) -> None:
+    """Take the person's decision as the owner of the key, through the service method REST calls
+    for it. Only these four methods, for the five decisions, are reached; each lets the owner's
+    context through ``ActorContext.require_person_or_editor_decision`` and nothing else does."""
+    chosen, feedback = answer
+    board_id, loop_id, card_id = request.board_id, situation.loop_id, situation.card_id
+    decision = request.decision
+    if decision in ("analysis", "roadmap"):
+        review = ApprovalRequest(
+            decision="approved" if chosen else "changes_requested",
+            version=situation.version,
+            revisions=revision_ids(opened.subject),
+            feedback=feedback,
+        )
+        services.loop_document.review(person, board_id, loop_id, decision, review)
+    elif decision == "wait" and card_id is not None:
+        clear = TicketWaitClear(version=situation.version)
+        services.ticket_work.clear_wait(person, board_id, loop_id, card_id, clear)
+    elif decision == "confirmation" and card_id is not None:
+        confirm = HumanConfirmation(version=situation.version, note=feedback)
+        services.loop.confirm_human_ticket(person, board_id, loop_id, card_id, confirm)
+    elif decision == "implementation":
+        accept = ImplementationAcceptance(version=situation.version, note=feedback)
+        services.loop_qa.accept_implementation(person, board_id, loop_id, accept)
 
 
 def ask_person_with_input(
@@ -445,12 +682,15 @@ def decision_tools(board_id: ArgumentSchema) -> list[AgentTool]:
             description=(
                 "Ask your person for a decision only a person takes, and later learn what they "
                 "decided: the analysis or RoadMap under review, a Ticket's wait to clear, a "
-                "person's task to confirm, the implementation to accept, or QA. The tool never "
-                "takes the decision; the person takes it in Tralala, signed in. A client that "
-                "declared the elicitation mode url gets the question as input_required with the "
-                "decision's address; any other gets status waiting_for_person with "
-                "decision_link. Call again (with the requestState and inputResponses when you "
-                "were asked) to get status decided with the outcome, who decided and when."
+                "person's task to confirm, the implementation to accept, or QA. The person "
+                "takes it in Tralala, signed in. A client that declared the elicitation mode url "
+                "gets the question as input_required with the decision's address; any other gets "
+                "status waiting_for_person with decision_link. With the installation's setting "
+                "editor_decisions on, the right loops:decide on your key and the mode form "
+                "declared, the five decisions other than QA come as a form instead, which your "
+                "person answers in their editor; you never fill it in. Call again (with the "
+                "requestState and inputResponses when you were asked) to get status decided "
+                "with the outcome, who decided and when."
             ),
             scopes=("loops:read", "cards:read"),
             input_schema=object_schema(

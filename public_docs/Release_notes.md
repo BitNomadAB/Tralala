@@ -39,8 +39,16 @@ Read this one before upgrading an installation that a coding agent connects to:
   accept. A client of MCP 2026-07-28 that declared the elicitation mode `url` shows its person the
   question with the decision's address, once the installation sets `TRALALA_PUBLIC_URL`; any other
   client gets the address as text. The person decides in Tralala, signed in, as before, and the
-  agent's next call says what they decided, who decided and when. The tool never takes the
-  decision.
+  agent's next call says what they decided, who decided and when.
+- **A person may decide in their editor, as an opt-in.** It is off by default:
+  `TRALALA_EDITOR_DECISIONS=true` turns it on for the installation, and a person then gives a key
+  of their own the right **Decide in the editor** when they create it under Settings, with a
+  warning. Only with both does `ask_person` bring the analysis, the RoadMap, a wait, a person's
+  task and the implementation of a Loop with a plan as a form the person answers in their editor.
+  The decision is recorded in their name and marked "decided in a coding session through the key
+  …". Resets, QA and closing a Loop stay in Tralala. Tralala cannot see whether a person or a
+  program answered the form; read [Deciding in the editor](Security_defaults.md#deciding-in-the-editor)
+  before you turn it on.
 
 Worth knowing when you look at the dashboard:
 

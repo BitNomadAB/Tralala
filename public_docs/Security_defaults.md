@@ -119,10 +119,22 @@ Deciding in the editor is an opt-in with two switches, and with either one missi
   the successor without it. A person's session never holds the scope, and `whoami` tells a coding
   agent whether the installation allows deciding in the editor and whether its key has the right.
 
-The risk is the reason it is off: anyone who holds a key with the right can then decide in its
-owner's name, a leaked key included, and an editor can be set up to answer on its own, which
-Tralala cannot tell from a person's answer. In this release the right opens no tool and changes no
-answer: every decision below still refuses a key with `403 human_action_required`.
+With both switches on, `ask_person` brings five decisions to the person as a form in their
+editor (MCP 2026-07-28, elicitation mode `form`, when the client declares it): approving the
+analysis or the RoadMap, clearing a wait, confirming a person's task and accepting the
+implementation of a Loop with a plan. Resetting, QA, closing or cancelling a Loop, replacing a wait
+and editing the Info are never offered; they stay in Tralala. The answer is taken as the key's
+owner, through the same checks as in Tralala, and only after the setting, the right on the key and
+the owner's account are checked again on the call that brings it; a revision or a Ticket that
+changed in between is asked again. The history row of such a decision names the key it came
+through (`taken_through`), the board shows "decided in a coding session through the key …", and a
+decision on a Ticket gets one comment saying so.
+
+The risk is the reason it is off. Anyone who holds a key with the right can decide in its owner's
+name, a leaked key included. The answer comes from the editor, and an editor can be set up to
+answer on its own: Tralala cannot see whether a person or a program answered the form. The form
+asks for no secret and carries no address. Give the right only to a key on a machine you control,
+and revoke the key, or switch the setting off, as soon as you doubt it.
 
 ## What a worker key can do
 
@@ -139,10 +151,13 @@ described by `/llms.txt`), within the scopes it was given and never beyond them:
 - write notes on a Loop and ask the board's agents for advice in a discussion;
 - ask its person for a decision only a person takes (`ask_person`) and learn what they decided:
   the tool hands over the decision's address, in MCP 2026-07-28 as an elicitation in mode `url`
-  when the client declared it, and never takes the decision. The address carries only ids and
-  signs nobody in; the person decides in Tralala, signed in. The state the client repeats the call
-  with is sealed with the installation's secret, bound to the key and the call that asked, valid
-  for 15 minutes and used once; a state the server refuses answers nothing about the decision.
+  when the client declared it. The address carries only ids and signs nobody in; the person
+  decides in Tralala, signed in. Only where the installation allows it and the person gave the key
+  the right does the tool bring five decisions as a form instead, which the person answers in
+  their editor ([Deciding in the editor](#deciding-in-the-editor)); the agent never fills it in.
+  The state the client repeats the call with is sealed with the installation's secret, bound to
+  the key and the call that asked, valid for 15 minutes and used once; a state the server refuses
+  answers nothing about the decision.
 
 Every one of these runs through the same services and checks as the REST API, so a key can do
 nothing over `/mcp` that the same key could not do over REST. The text it reads (Tickets, comments,
@@ -154,7 +169,9 @@ Approving or resetting an analysis or a RoadMap, editing the Info once planning 
 confirming a human-only Ticket, clearing or replacing a Ticket's wait, accepting the implementation
 or QA, finalizing or cancelling a Loop, and issuing or rotating a key are human decisions. They
 reject tokens with `403 human_action_required` regardless of scope, and they are not registered as
-worker tools. Approvals bind to exact document revision ids, so a changed input invalidates them. A
+worker tools. The one exception is the person's own answer to the form of
+[Deciding in the editor](#deciding-in-the-editor), for five of them and only with both switches on;
+a reset, QA, finalizing or cancelling a Loop and issuing a key refuse even that. Approvals bind to exact document revision ids, so a changed input invalidates them. A
 token never replaces a current approval either: over an approved analysis or RoadMap a person
 requests changes or resets it first.
 

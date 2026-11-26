@@ -503,6 +503,10 @@ class AuthService:
         """Whether this installation allows deciding in the editor and the key holds the right."""
         return auth_tokens.editor_decisions(self.settings, actor)
 
+    def editor_decision_actor(self, key: ActorContext) -> ActorContext:
+        """The owner's context a decision in the editor is taken in, checked again now."""
+        return auth_tokens.editor_decision_actor(self.store, self.settings, key)
+
     def grant_vocabulary(self) -> auth_tokens.GrantVocabulary:
         """The scope lists and the editor-decisions setting, as ``/meta`` publishes them."""
         return auth_tokens.grant_vocabulary(self.settings)

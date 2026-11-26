@@ -27,7 +27,13 @@ and of the service methods it calls, and holds each entry to five rules:
    a person, and no handler reaches (itself or through a catalogue-module helper) a service method
    that takes one: the methods listed per decision, and every service method that opens with
    ``require_human``. ``GATED`` lists the methods a tool may reach because the method refuses a
-   token for the human part itself; the guard checks that the refusal is still there.
+   token for the human part itself; the guard checks that the refusal is still there. One named
+   exception, ``EDITOR_DECISIONS``, is the opt-in of deciding in the editor: only ``ask_person`` may
+   reach exactly the four methods that take the five decisions a person may take there, and only
+   while each opens with ``require_person_or_editor_decision``, the explicit check that lets the
+   owner's context of a key with the right through (and refuses as ``require_human`` otherwise).
+   A reset, QA's decision, finalizing a Loop and every other rule-11a method stay refused, also
+   to ``ask_person``.
 5. **Tested.** A unit test other than this guard names the tool (its name as a string literal) or
    its handler (imported from, or read as an attribute of, the catalogue module). ``UNTESTED_TOOLS``
    lists the exceptions with their reason; an exception that is no longer needed fails.
@@ -81,7 +87,8 @@ AGENTS_MD = BACKEND_ROOT.parent / "AGENTS.md"
 CATALOGUE_MODULE = agent_tools.__name__
 
 Function = ast.FunctionDef | ast.AsyncFunctionDef
-CHECKS = frozenset({"require", "require_human"})
+EDITOR_CHECK = "require_person_or_editor_decision"
+CHECKS = frozenset({"require", "require_human", EDITOR_CHECK})
 HUMAN_CODE = "human_action_required"
 
 
@@ -145,6 +152,22 @@ GATED: Mapping[str, str] = MappingProxyType(
         "CardService.update": "confirming a human-only Ticket",
         # A token never hands in an analysis or a RoadMap over one a person approved.
         "LoopDocumentService.submit_candidate": "approving analysis or a RoadMap",
+    }
+)
+
+# The named exception to rule 4 (AGENTS.md rules 11a and 13): deciding in the editor. The tool that
+# may reach a rule-11a method, and exactly the methods it may reach, each of which must open with
+# EDITOR_CHECK. Approving the analysis or the RoadMap is one method, so five decisions are four.
+EDITOR_DECISIONS: Mapping[str, frozenset[str]] = MappingProxyType(
+    {
+        "ask_person": frozenset(
+            {
+                "LoopDocumentService.review",
+                "TicketWorkService.clear_wait",
+                "LoopService.confirm_human_ticket",
+                "LoopQaService.accept_implementation",
+            }
+        )
     }
 )
 
@@ -570,19 +593,25 @@ def _opens_with_require_human(function: Function) -> bool:
     return any(check == "require_human" for _, check, _ in opening_checks(function))
 
 
+def _opens_with_editor_check(function: Function) -> bool:
+    return any(check == EDITOR_CHECK for _, check, _ in opening_checks(function))
+
+
 def human_problems(
     catalogue: Sequence[Entry],
     code: Code,
     decisions: Sequence[HumanDecision] = HUMAN_DECISIONS,
     gated: Mapping[str, str] = GATED,
+    editor: Mapping[str, frozenset[str]] = EDITOR_DECISIONS,
 ) -> list[str]:
     reserved: dict[str, str] = {}
     for decision in decisions:
         for method in decision.methods:
             reserved.setdefault(method, decision.action)
+    excepted = [method for methods in editor.values() for method in sorted(methods)]
     problems = [
         f"the rule-11a list names {method}, which the services no longer define"
-        for method in [*reserved, *gated]
+        for method in [*reserved, *gated, *excepted]
         if method not in code.methods
     ]
     for entry in catalogue:
@@ -594,8 +623,15 @@ def human_problems(
         ]
         if not _readable(entry, code):
             continue
+        allowed = editor.get(entry.name, frozenset[str]())
         for method in sorted(reach(code, entry.handler).methods):
-            if method in gated:
+            if method in allowed:
+                if not _opens_with_editor_check(code.methods[method]):
+                    problems.append(
+                        f"{entry.name} reaches {method}, which no longer opens with "
+                        f"{EDITOR_CHECK} (the exception for deciding in the editor)"
+                    )
+            elif method in gated:
                 if not refuses_a_token(code, method):
                     problems.append(
                         f"{entry.name} reaches {method}, which no longer refuses a token for "
@@ -742,6 +778,7 @@ FIXTURE_ROOT = """
 from .cards import CardService
 from .documents import LoopDocumentService
 from .loops import LoopService
+from .qa import LoopHistoryService, LoopQaService
 
 
 class Services:
@@ -750,6 +787,8 @@ class Services:
         self.card = CardService(settings)
         self.loop_document: LoopDocumentService = LoopDocumentService(settings)
         self.loop = LoopService(settings)
+        self.loop_qa = LoopQaService(settings)
+        self.loop_history = LoopHistoryService(settings)
 """
 FIXTURE_CARDS = """
 class CardService:
@@ -783,6 +822,21 @@ class LoopDocumentService:
 
     def _refuse_over_approval(self, loop_id):
         raise Forbidden("Approved by a person", code="human_action_required")
+"""
+FIXTURE_QA = """
+class LoopQaService:
+    def accept_implementation(self, actor, board_id, loop_id):
+        actor.require_person_or_editor_decision("Accepting implementation as complete")
+        actor.require("loops:review")
+
+    def decide(self, actor, board_id, loop_id):
+        actor.require_human("Accepting QA")
+        actor.require("loops:review")
+
+
+class LoopHistoryService:
+    def finalize(self, repos, loop_id, actor):
+        actor.require_human("Finalizing a Loop")
 """
 FIXTURE_LOOPS = """
 class LoopService:
@@ -849,14 +903,54 @@ def _cancel(services, actor, args):
 
 def _two(services, actor):
     actor.require("cards:read")
+
+
+def _ask_person(services, actor, args):
+    actor.require("loops:read")
+    person = services.auth.editor_decision_actor(actor)
+    return _take(services, person, args)
+
+
+def _take(services, person, args):
+    if args["decision"] == "analysis":
+        return services.loop_document.review(person, args["board_id"], args["loop_id"])
+    return services.loop_qa.accept_implementation(person, args["board_id"], args["loop_id"])
+
+
+def _ask_too_much(services, actor, args):
+    actor.require("loops:read")
+    person = services.auth.editor_decision_actor(actor)
+    services.loop.cancel(person, args["board_id"], args["loop_id"])
+    services.loop_qa.decide(person, args["board_id"], args["loop_id"])
+    return services.loop_history.finalize(None, args["loop_id"], person)
 '''
 FIXTURE_DECISIONS = (
     HumanDecision("approving analysis or a RoadMap", ("approv",), ("LoopDocumentService.review",)),
+    HumanDecision(
+        "accepting implementation or QA",
+        ("accept",),
+        ("LoopQaService.accept_implementation", "LoopQaService.decide"),
+    ),
+    HumanDecision("finalizing a Loop", ("finaliz",), ("LoopHistoryService.finalize",)),
+)
+FIXTURE_EDITOR = {
+    "ask_person": frozenset(
+        {"LoopDocumentService.review", "LoopQaService.accept_implementation"}
+    )
+}
+EDITOR_REVIEW = FIXTURE_DOCUMENTS.replace(
+    'actor.require_human("Approving an analysis")',
+    'actor.require_person_or_editor_decision("Approving an analysis")',
 )
 
 
 def _fixture_code(documents: str = FIXTURE_DOCUMENTS) -> Code:
-    modules = {"cards": FIXTURE_CARDS, "documents": documents, "loops": FIXTURE_LOOPS}
+    modules = {
+        "cards": FIXTURE_CARDS,
+        "documents": documents,
+        "loops": FIXTURE_LOOPS,
+        "qa": FIXTURE_QA,
+    }
     return build_code([FIXTURE_HANDLERS], FIXTURE_ROOT, modules.__getitem__)
 
 
@@ -865,7 +959,9 @@ def _entry(name: str, handler: str, *scopes: str) -> Entry:
 
 
 def _human(*catalogue: Entry, code: Code | None = None) -> list[str]:
-    return human_problems(catalogue, code or _fixture_code(), FIXTURE_DECISIONS, GATED)
+    return human_problems(
+        catalogue, code or _fixture_code(), FIXTURE_DECISIONS, GATED, FIXTURE_EDITOR
+    )
 
 
 def test_the_composition_root_is_read_from_its_assignments() -> None:
@@ -874,6 +970,8 @@ def test_the_composition_root_is_read_from_its_assignments() -> None:
         "card": "CardService",
         "loop_document": "LoopDocumentService",
         "loop": "LoopService",
+        "loop_qa": "LoopQaService",
+        "loop_history": "LoopHistoryService",
     }
     assert "CardService._complete" in code.methods
 
@@ -1036,9 +1134,13 @@ def test_a_gated_method_is_allowed_only_while_it_refuses_a_token() -> None:
 
 def test_a_stale_rule_11a_list_fails() -> None:
     renamed = (HumanDecision("resetting a scope", ("reset",), ("LoopDocumentService.clear",)),)
-    assert human_problems([], _fixture_code(), renamed, {"CardService.finish": "x"}) == [
+    editor = {"ask_person": frozenset({"LoopQaService.close"})}
+    assert human_problems(
+        [], _fixture_code(), renamed, {"CardService.finish": "x"}, editor
+    ) == [
         "the rule-11a list names LoopDocumentService.clear, which the services no longer define",
         "the rule-11a list names CardService.finish, which the services no longer define",
+        "the rule-11a list names LoopQaService.close, which the services no longer define",
     ]
 
 
@@ -1070,3 +1172,59 @@ def test_an_untested_tool_and_a_stale_exception_fail() -> None:
         "no unit test names tidy_card or its handler",
         "UNTESTED_TOOLS lists gone_card, which the catalogue lacks",
     ]
+
+
+# --- the exception for deciding in the editor ---------------------------------------------------
+
+
+def test_ask_person_may_reach_the_editor_decisions_through_the_explicit_check() -> None:
+    code = _fixture_code(documents=EDITOR_REVIEW)
+    assert _human(_entry("ask_person", "_ask_person", "loops:read"), code=code) == []
+    assert reach(code, "_ask_person").methods == {
+        "LoopDocumentService.review",
+        "LoopQaService.accept_implementation",
+    }
+
+
+def test_the_exception_holds_only_while_each_method_opens_with_the_explicit_check() -> None:
+    # The fixture's review still opens with require_human: the exception no longer matches it.
+    assert _human(_entry("ask_person", "_ask_person", "loops:read")) == [
+        "ask_person reaches LoopDocumentService.review, which no longer opens with "
+        "require_person_or_editor_decision (the exception for deciding in the editor)"
+    ]
+
+
+def test_the_exception_is_ask_persons_alone() -> None:
+    code = _fixture_code(documents=EDITOR_REVIEW)
+    assert _human(_entry("ask_agents", "_ask_person", "loops:read"), code=code) == [
+        "ask_agents reaches LoopDocumentService.review: approving analysis or a RoadMap is a "
+        "person's decision (AGENTS.md rule 11a)",
+        "ask_agents reaches LoopQaService.accept_implementation: accepting implementation or QA "
+        "is a person's decision (AGENTS.md rule 11a)",
+    ]
+
+
+def test_a_cancel_qas_decision_and_finalizing_stay_refused_also_to_ask_person() -> None:
+    code = _fixture_code(documents=EDITOR_REVIEW)
+    assert _human(_entry("ask_person", "_ask_too_much", "loops:read"), code=code) == [
+        "ask_person reaches LoopHistoryService.finalize: finalizing a Loop is a person's "
+        "decision (AGENTS.md rule 11a)",
+        "ask_person reaches LoopQaService.decide: accepting implementation or QA is a person's "
+        "decision (AGENTS.md rule 11a)",
+        "ask_person reaches LoopService.cancel, which opens with require_human",
+    ]
+
+
+def test_the_exception_lists_exactly_the_four_methods_of_the_five_decisions(code: Code) -> None:
+    assert dict(EDITOR_DECISIONS) == {
+        "ask_person": {
+            "LoopDocumentService.review",
+            "TicketWorkService.clear_wait",
+            "LoopService.confirm_human_ticket",
+            "LoopQaService.accept_implementation",
+        }
+    }
+    assert reach(code, "ask_person").methods >= EDITOR_DECISIONS["ask_person"]
+    for method in ("LoopDocumentService.reset", "LoopQaService.decide", "LoopService.cancel"):
+        assert _opens_with_require_human(code.methods[method])
+    assert not _opens_with_editor_check(code.methods["LoopDocumentService.reset"])

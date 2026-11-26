@@ -20,7 +20,14 @@ from uuid import uuid4
 
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
-from ..core.errors import ApiError, Conflict, NotFound, ValidationFailure, VersionConflict
+from ..core.errors import (
+    ApiError,
+    Conflict,
+    Forbidden,
+    NotFound,
+    ValidationFailure,
+    VersionConflict,
+)
 from ..db.generated.board import LoopApprovalsRow, LoopQaCyclesRow, LoopQaResultsRow, LoopsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..schemas.loops import (
@@ -139,8 +146,12 @@ class LoopQaService:
         and once the Loop is completed each one reads ``not_done`` (``ticket_state``).
 
         A Loop without a plan (``without_plan``) closes in this one decision
-        (``_close_without_plan``); a Loop with a plan goes on to its QA."""
-        actor.require_human("Accepting implementation as complete")
+        (``_close_without_plan``); a Loop with a plan goes on to its QA.
+
+        A person may also accept it in the editor through a key with the right (AGENTS.md rule
+        11a), but only the plain acceptance that hands the Loop to its QA: closing a Loop, passing
+        QA with it or leaving Tickets unfinished stays a decision in Tralala."""
+        actor.require_person_or_editor_decision("Accepting implementation as complete")
         actor.require("loops:review")
         if not payload.accepted:
             raise ValidationFailure("Implementation was not accepted by the reviewer")
@@ -150,6 +161,15 @@ class LoopQaService:
             ensure_writable(loop)
             _check_version(loop, payload.version)
             ensure_execution_allowed(loop)
+            if actor.credential_id is not None and (
+                without_plan(loop) or payload.qa_status == "passed" or payload.accept_unfinished
+            ):
+                raise Forbidden(
+                    "Closing a Loop, passing its QA or leaving Tickets unfinished is decided in "
+                    "Tralala",
+                    code="human_action_required",
+                    details={"action": "Finalizing a Loop", "actor_type": actor.actor_type},
+                )
             # A coding session's open question about the implementation is answered here.
             through = open_questions(
                 repos, loop_id=loop_id, decision="implementation", card_id=None, now=self._now()
@@ -177,7 +197,7 @@ class LoopQaService:
             if unfinished_keys:
                 # The decision names what it left unfinished, so the history snapshot holds it.
                 extra["unfinished"] = unfinished_keys
-            extra = with_asked_through(extra, through)
+            extra = with_asked_through(extra, through, actor)
             approval_id = self._record_decision(
                 repos,
                 loop,
@@ -235,7 +255,7 @@ class LoopQaService:
                 "loop.implementation_accepted",
                 loop_id,
                 with_asked_through(
-                    {"qa_status": payload.qa_status, "cycle": cycle.cycle_number}, through
+                    {"qa_status": payload.qa_status, "cycle": cycle.cycle_number}, through, actor
                 ),
                 now,
             )

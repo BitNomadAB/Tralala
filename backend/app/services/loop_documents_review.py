@@ -175,7 +175,9 @@ def record_review(
         actor,
         f"loop.{scope}_reviewed",
         loop_id,
-        with_asked_through({"decision": payload.decision, "approval_id": approval_id}, through),
+        with_asked_through(
+            {"decision": payload.decision, "approval_id": approval_id}, through, actor
+        ),
         clock=clock,
         new_id=new_id,
     )

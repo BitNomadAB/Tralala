@@ -385,8 +385,9 @@ class LoopService:
         card_id: str,
         payload: HumanConfirmation,
     ) -> CardEntry:
-        """A human confirms that a human-only Ticket was performed."""
-        actor.require_human("Confirming a human-only Ticket")
+        """A human confirms that a human-only Ticket was performed, in Tralala or in the editor
+        through a key with the right (AGENTS.md rule 11a)."""
+        actor.require_person_or_editor_decision("Confirming a human-only Ticket")
         actor.require("cards:write")
         self.boards.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
@@ -430,7 +431,9 @@ class LoopService:
                 "card.human_confirmed",
                 "card",
                 card_id,
-                with_asked_through({"note": payload.note, "ticket_key": card.ticket_key}, through),
+                with_asked_through(
+                    {"note": payload.note, "ticket_key": card.ticket_key}, through, actor
+                ),
             )
             add_answer_comment(
                 repos, actor, card_id, "confirmation", through, new_id=self._new_id, now=now

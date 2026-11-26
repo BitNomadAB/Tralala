@@ -16,14 +16,21 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import datetime
-from typing import Protocol, TypedDict, TypeIs, get_args
+from typing import Literal, Protocol, TypedDict, TypeIs, get_args
 
 from ..core.config import Settings
-from ..core.context import DECIDE_SCOPE, MEMBER_TOKEN_SCOPES, SCOPES, ActorContext
+from ..core.context import (
+    DECIDE_SCOPE,
+    MEMBER_TOKEN_SCOPES,
+    SCOPES,
+    ActorContext,
+    EditorDecision,
+    scopes_for_role,
+)
 from ..core.errors import Conflict, Forbidden, NotFound, Unauthorized, ValidationFailure
 from ..core.security import generate_token, hash_token
 from ..db.generated.registry import ActorsRow, ApiCredentialsRow
-from ..repositories.accounts import IssuedToken
+from ..repositories.accounts import IssuedToken, User
 from ..repositories.registry import RegistryRepositories, RegistryUnitOfWork
 from ..schemas.auth import CredentialCreate, Scope
 
@@ -169,6 +176,61 @@ def editor_decisions(settings: Settings, actor: ActorContext) -> EditorDecisions
         "key_has_right": actor.credential_id is not None and actor.has_scope(DECIDE_SCOPE),
         "scope": DECIDE_SCOPE,
     }
+
+
+EditorDecisionRefusal = Literal["editor_decisions_off", "no_right", "owner_disabled"]
+
+
+def editor_decision_actor(
+    store: RegistryUnitOfWork, settings: Settings, key: ActorContext
+) -> ActorContext:
+    """The context a person's answer in the editor is decided in: the owner of the key that
+    carried it, as a person with their role's scopes, ``credential_id`` set to that key and
+    ``editor_decision`` naming it. Nothing is taken from the call's content.
+
+    Everything is checked again on this call: the installation's setting, the right on the key as
+    the registry holds it now, the key not revoked and its owner's account enabled. Any of them
+    missing refuses with ``403 human_action_required``, the refusal every key gets for a person's
+    decision, with ``reason`` saying which."""
+    reason = _editor_decision_refusal(store, settings, key)
+    if isinstance(reason, str):
+        raise Forbidden(
+            "Deciding in the editor is not open to this key now; the person decides in Tralala",
+            code="human_action_required",
+            details={"action": "Deciding in the editor", "reason": reason},
+        )
+    owner, key_name = reason
+    return ActorContext(
+        actor_id=owner.actor.id,
+        actor_type="user",
+        actor_name=owner.actor.name,
+        scopes=scopes_for_role(owner.credentials.role),
+        request_id=key.request_id,
+        role=owner.credentials.role,
+        credential_id=key.credential_id,
+        editor_decision=EditorDecision(credential_id=key.credential_id or "", key_name=key_name),
+    )
+
+
+def _editor_decision_refusal(
+    store: RegistryUnitOfWork, settings: Settings, key: ActorContext
+) -> EditorDecisionRefusal | tuple[User, str]:
+    """Why a decision in the editor is refused to ``key`` now, or its owner and the key's name."""
+    if not settings.editor_decisions:
+        return "editor_decisions_off"
+    if key.credential_id is None or not key.has_scope(DECIDE_SCOPE):
+        return "no_right"
+    with store.reader() as repos:
+        found = repos.credentials.get(key.credential_id)
+        if found is None or found.credential.revoked_at is not None:
+            return "no_right"
+        if DECIDE_SCOPE not in stored_scopes(found.credential.scopes):
+            return "no_right"
+        owner_id = found.credential.owner_actor_id
+        owner = None if owner_id is None else repos.users.get(owner_id)
+    if owner is None or owner.actor.disabled_at is not None:
+        return "owner_disabled"
+    return owner, found.credential.name
 
 
 def token_scopes() -> frozenset[str]:

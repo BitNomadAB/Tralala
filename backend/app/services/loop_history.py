@@ -125,7 +125,11 @@ class LoopHistoryService:
 
         A Loop with a plan needs an accepted QA (``409 qa_incomplete``). A Loop without a plan
         (``without_plan``) has no QA: a person's acceptance of its work closes it
-        (``409 approval_required`` without one), and its record says ``qa_status`` ``not_run``."""
+        (``409 approval_required`` without one), and its record says ``qa_status`` ``not_run``.
+
+        Finalizing is a signed-in person's, never a key's: also a decision in the editor through a
+        key with the right is refused here (AGENTS.md rule 11a)."""
+        actor.require_human("Finalizing a Loop")
         loop = repos.loops.get(loop_id)
         if loop is None:
             raise NotFound("Loop not found", code="loop_not_found")

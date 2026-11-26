@@ -84,6 +84,8 @@ Change it under **Settings → Your password**. More in
   approved, and approvals bind to exact revisions.
 - **Version-bound human gates**: agents may generate, plan and execute eligible Tickets, but only a
   signed-in person approves plans, confirms human-only actions, accepts QA and finalizes a Loop.
+  An installation may let a person answer five of these decisions in their own editor, through a
+  key they gave that right; it is off by default.
 - **QA handover** with one QA Task carrying an agent view and a human view of the same scenarios,
   scenario-level results, and a human acceptance decision.
 - **Discussions** per Ticket or on the board, closed by the one who opened them and never deleted,

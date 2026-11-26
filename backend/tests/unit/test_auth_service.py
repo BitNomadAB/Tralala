@@ -18,7 +18,13 @@ import pytest
 
 from app.core import security
 from app.core.config import Settings
-from app.core.context import DECIDE_SCOPE, MEMBER_TOKEN_SCOPES, ActorContext, scopes_for_role
+from app.core.context import (
+    DECIDE_SCOPE,
+    MEMBER_TOKEN_SCOPES,
+    ActorContext,
+    EditorDecision,
+    scopes_for_role,
+)
 from app.core.errors import Conflict, Forbidden, NotFound, Unauthorized, ValidationFailure
 from app.core.security import (
     BOOTSTRAP_PASSWORD_FILE_NAME,
@@ -1418,3 +1424,81 @@ def test_a_session_or_a_key_without_the_right_has_none(deciding: Registry) -> No
     # A context that claims the scope without a key behind it has no right either.
     claimed = MEMBER.__replace__(scopes=MEMBER.scopes | {DECIDE_SCOPE})
     assert deciding.service.editor_decisions(claimed)["key_has_right"] is False
+
+
+# --- the owner's context of a decision in the editor ---------------------------------------------
+
+
+def _deciding_key(registry: Registry, *, scopes: frozenset[str] | None = None) -> ActorContext:
+    """Bob's key ``t-1`` with the right, as the request that carries the answer authenticated."""
+    held = frozenset({"cards:read", DECIDE_SCOPE}) if scopes is None else scopes
+    add_token(registry, "t-1", scopes=json.dumps(sorted(held)))
+    registry.state.credentials["t-1"] = registry.state.credentials["t-1"].__replace__(
+        name="Laptop"
+    )
+    return ActorContext(
+        actor_id="agent-t-1",
+        actor_type="agent",
+        actor_name="Agent t-1",
+        scopes=held,
+        request_id="req-9",
+        credential_id="t-1",
+    )
+
+
+def test_a_decision_in_the_editor_runs_as_the_owner_of_the_key(deciding: Registry) -> None:
+    owner = deciding.service.editor_decision_actor(_deciding_key(deciding))
+    assert (owner.actor_id, owner.actor_type, owner.actor_name, owner.role) == (
+        MEMBER_ID,
+        "user",
+        "Bob",
+        "member",
+    )
+    assert owner.scopes == scopes_for_role("member")
+    assert (owner.credential_id, owner.request_id) == ("t-1", "req-9")
+    assert owner.editor_decision == EditorDecision(credential_id="t-1", key_name="Laptop")
+    owner.require_person_or_editor_decision("Approving an analysis")
+    with pytest.raises(Forbidden):
+        owner.require_human("Resetting the analysis")
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["setting-off", "no-scope", "stored-right-gone", "revoked", "owner-disabled", "no-owner"],
+)
+def test_a_decision_in_the_editor_is_refused_when_a_switch_is_off(
+    settings: Settings, change: str
+) -> None:
+    registry = make_registry(
+        settings.model_copy(update={"editor_decisions": change != "setting-off"})
+    )
+    key = _deciding_key(registry)
+    row = registry.state.credentials["t-1"]
+    if change == "no-scope":
+        key = key.__replace__(scopes=frozenset({"cards:read"}))
+    elif change == "stored-right-gone":
+        registry.state.credentials["t-1"] = row.__replace__(scopes='["cards:read"]')
+    elif change == "revoked":
+        registry.state.credentials["t-1"] = row.__replace__(revoked_at=EARLIER)
+    elif change == "owner-disabled":
+        bob = registry.state.actors[MEMBER_ID]
+        registry.state.actors[MEMBER_ID] = bob.__replace__(disabled_at=EARLIER)
+    elif change == "no-owner":
+        registry.state.credentials["t-1"] = row.__replace__(owner_actor_id=None)
+    with pytest.raises(Forbidden) as refused:
+        registry.service.editor_decision_actor(key)
+    assert refused.value.code == "human_action_required"
+    reason = {
+        "setting-off": "editor_decisions_off",
+        "no-scope": "no_right",
+        "stored-right-gone": "no_right",
+        "revoked": "no_right",
+        "owner-disabled": "owner_disabled",
+        "no-owner": "owner_disabled",
+    }[change]
+    assert refused.value.details == {"action": "Deciding in the editor", "reason": reason}
+
+
+def test_a_session_has_no_key_to_decide_through(deciding: Registry) -> None:
+    with pytest.raises(Forbidden):
+        deciding.service.editor_decision_actor(MEMBER)

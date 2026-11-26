@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { completionComments, historyLine } from "@/features/cards/ticketText";
+import { askedDecisions } from "@/features/history/askedThrough";
 import type { ActivityEntry, Comment } from "@/lib/types";
 import { CARD_ID, CARD_PATH, ticketCard } from "./msw/cards";
 import { NOW } from "./msw/loops";
@@ -163,5 +164,35 @@ describe("the history's words", () => {
     );
     // A decision nobody asked for reads as before.
     expect(historyLine(entry("8", "card.wait_cleared"), "Ada")).toBe("Ada cleared the wait");
+  });
+
+  it("says a decision taken in the editor came through which one key", () => {
+    const laptop = { credential_id: "cred-1", key_name: "Laptop", via: "form" };
+    const desktop = { credential_id: "cred-2", key_name: "Desktop", via: "link" };
+    const cleared = entry("9", "card.wait_cleared", {
+      changes: { taken_through: laptop, asked_through: [desktop, laptop] },
+    });
+    expect(historyLine(cleared, "Ada")).toBe(
+      "Ada cleared the wait, decided in a coding session through the key Laptop, asked from a coding session through the keys Desktop and Laptop",
+    );
+    const envelope = {
+      activity: [
+        {
+          action: "loop.analysis_reviewed",
+          changes: { decision: "approved", taken_through: laptop, asked_through: [laptop] },
+        },
+      ],
+      approvals: [
+        {
+          scope: "implementation",
+          decision: "approved",
+          revisions: { taken_through: laptop, asked_through: [laptop] },
+        },
+      ],
+    };
+    expect(askedDecisions(envelope)).toEqual([
+      "Approved the analysis, decided in a coding session through the key Laptop, asked from a coding session through the key Laptop",
+      "Accepted the implementation, decided in a coding session through the key Laptop, asked from a coding session through the key Laptop",
+    ]);
   });
 });

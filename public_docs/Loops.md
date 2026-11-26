@@ -411,6 +411,11 @@ open question:
   that the question came from a coding session through which keys. A decision on the Loop (the
   analysis, the RoadMap, the implementation, QA) has no Ticket, so it shows in the history only.
 
+When the person answered a form in their editor (deciding in the editor, see
+[Approval boundaries](#approval-boundaries)), the row also says "decided in a coding session through
+the key Laptop", naming the one key that brought the answer, and the comment on a Ticket says the
+same. Every other key that asked is still named as having asked.
+
 A question stops being open when a decision answers it, when the person declines or cancels it in
 the coding session's editor, or 30 minutes after its row; a key that is still asking then gets a
 new row, so a session that went away stops counting while one that keeps asking does not. A
@@ -571,6 +576,14 @@ each with **Open discussion**.
 | Clear (or replace) a Ticket's wait | Signed-in person | `POST …/cards/{card_id}/wait/clear` |
 | Accept implementation (in a Loop without a plan, this closes it) | Signed-in person | `POST …/completion` |
 | Accept QA and finalize | Signed-in person | `POST …/qa/decision` |
+
+Where the installation's setting `TRALALA_EDITOR_DECISIONS` is on and the person gave a key the
+right **Decide in the editor**, five of these may also be taken in the person's editor, as a form a
+coding session's `ask_person` brings them: approving or rejecting the analysis or the RoadMap,
+confirming a human-only Ticket, clearing a wait and accepting the implementation of a Loop with a
+plan. The decision is the person's, recorded in their name and marked "decided in a coding session
+through the key …". A reset, replacing a wait, QA, finalizing or cancelling a Loop and closing a
+Loop without a plan stay in Tralala.
 
 Info is the intent a person and their worker agree on, so the worker that agreed it may write it —
 but only while the Loop is still speculative (`draft` or `analysis_review`). Once planning has

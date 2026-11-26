@@ -633,7 +633,8 @@ When your work waits for a decision only a person takes, `ask_person` asks them 
 board, the Loop and the `decision`: `analysis`, `roadmap`, `implementation` or `qa` on the Loop,
 `wait` or `confirmation` on a Ticket (with `card_id`). The tool points at the decision and reports
 it; the person takes it in Tralala, signed in, on the page its address opens, as they would without
-you. The tool never approves, clears, confirms or accepts anything.
+you. Only where the installation allows deciding in the editor and your person gave your key that
+right is the question a form your person answers in their editor (below); you never fill it in.
 
 - When the decision does not wait for a person, the answer is `status: not_pending` with `why`.
 - When it waits, your client declared the elicitation mode `url` in MCP 2026-07-28 and the
@@ -646,8 +647,16 @@ you. The tool never approves, clears, confirms or accepts anything.
 - Any other client gets the address as text: `status: waiting_for_person` with `decision_link` and
   `next_step`, which says to call again later. That is every client of MCP 2025-06-18, a client
   that declared no `url` mode, and any client while the installation has no public address, since
-  a path inside Tralala is no URL for that mode. The mode `form` is never used, even when your
-  client declared it.
+  a path inside Tralala is no URL for that mode.
+- When the installation's setting `editor_decisions` is on, your key holds `loops:decide`
+  (`whoami` says both under `editor_decisions`) and your client declared the mode `form`, the
+  analysis, the RoadMap, a wait, a person's task and the implementation of a Loop with a plan come
+  as `elicitation/create` in mode `form` instead: a message naming the Loop's and the Ticket's keys
+  and the revision, and a `requestedSchema` with the choice `decision` (`approve` or
+  `request_changes`, `clear` or `keep`, `confirm` or `not_yet`, `accept` or `reject`) and an
+  optional `feedback` of at most 500 characters. Your client shows it to your person; their answer
+  is their decision. Never answer it yourself. QA, a reset and closing a Loop always keep the
+  link.
 
 When you repeat the call with the state:
 
@@ -657,6 +666,12 @@ When you repeat the call with the state:
   `changes_requested` for an analysis or a RoadMap, `cleared` for a wait, `confirmed` for a
   person's task, `accepted` for the implementation, `accepted` or `rejected` for QA), `decided_by`,
   `decided_by_id` and `decided_at`; while it still waits, `input_required` again with a new state.
+- For a form, `accept` with the content takes the decision as your person, the key's owner:
+  `status: decided` with `taken_through`, your key's name. `keep`, `not_yet` and `reject` take
+  nothing and answer `status: not_decided` with the `feedback`; asking for changes to a review is
+  a decision. Content that is not the form's, or a revision or a Ticket that changed since the
+  question, is asked again with what holds now. A setting turned off, a right taken away or a
+  disabled owner answers `403 human_action_required`, and the person decides in Tralala.
 - A state that was changed, has expired after 15 minutes, belongs to another key, is for another
   call or was used before answers JSON-RPC `-32602` and nothing about the decision. So does a state
   whose question is out of date, because another revision is under review or the wait was replaced.
@@ -675,7 +690,8 @@ person sees.
 - Take a planning decision: approve or reset an analysis or a RoadMap, edit the Info once planning
   has started, confirm a human-only Ticket, clear or replace a Ticket's wait, accept the
   implementation or QA, finalize a Loop. These answer `403 human_action_required` even with every
-  scope, and no tool offers them. Closing a Loop without a plan is accepting its implementation, so
+  scope, and no tool offers them. The one exception is your person's own answer to `ask_person`'s
+  form, where the installation and your person allow it; you never give that answer. Closing a Loop without a plan is accepting its implementation, so
   a key adds Tickets to such a Loop but never closes it, and its Info is a person's from its first
   Ticket on.
 - Replace an approved analysis or RoadMap, or write a brief over one: the person requests changes
@@ -703,8 +719,9 @@ person sees.
   (`403 not_opener`), or delete a thread or a message: nothing deletes them.
 - Attach a file through the tools, issue or rotate a key, or see or change users, credentials or
   agent configuration.
-- Take the decision it asks for: `ask_person` asks your person and reports what they decided,
-  and the person decides in Tralala, signed in. Its address never signs anyone in.
+- Take the decision it asks for: `ask_person` asks your person and reports what they decided.
+  The person decides in Tralala, signed in, or in their editor when they answer its form. Its
+  address never signs anyone in.
 
 What you can do is show your person where to decide. An answer or a refusal that waits for a
 person carries `decision_link`, the address in Tralala of the tab, dialog or button where that

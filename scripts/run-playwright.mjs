@@ -162,6 +162,9 @@ const env = {
   ...process.env,
   NODE_PATH: [nodeModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter),
   TRALALA_PUBLIC_URL: `http://127.0.0.1:${frontendPort}`,
+  // Deciding in the editor is on in the isolated stack, so the journeys can give a key the right
+  // and answer ask_person's form; a key without the right still sees everything as before.
+  TRALALA_EDITOR_DECISIONS: "true",
 };
 
 const child = spawn(process.execPath, [cli, ...process.argv.slice(2)], {

@@ -449,7 +449,9 @@ class LoopDocumentService:
         scope: str,
         payload: ApprovalRequest,
     ) -> Review:
-        actor.require_human(
+        # One of the five decisions a person may also take in the editor through a key with the
+        # right (AGENTS.md rule 11a); a reset never.
+        actor.require_person_or_editor_decision(
             "Approving an analysis" if scope == "analysis" else "Approving a RoadMap"
         )
         actor.require("loops:review")

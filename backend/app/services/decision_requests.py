@@ -29,8 +29,13 @@ inside the decision's own unit of work, before they write the decision, and the 
 through the board repositories in that same unit of work, as plain text without ``@`` so no mention
 job is ever queued.
 
-``via`` is ``link`` for every question here. A decision taken another way later (in the editor,
-through the key) is told apart by another ``via``, in the same rows.
+``via`` says how the person was asked: ``link`` (they decide in Tralala at the decision's address)
+or ``form`` (``ask_person`` offered the decision as a form in the editor, which needs the
+installation's setting ``editor_decisions`` and the right ``loops:decide`` on the key). A decision
+taken through such a form is the person's, run as the owner of the key that carried the answer
+(``ActorContext.editor_decision``): its history row also carries ``taken_through``, that one key
+``{credential_id, key_name, via: "form"}``, beside ``asked_through`` for every key that asked, and
+the one comment on a Ticket says it was decided in a coding session through that key.
 """
 
 from __future__ import annotations
@@ -59,6 +64,7 @@ CLOSED: Final = "decision.request_closed"
 # again with a state issued before the row lapsed still finds it open; one that went away does not.
 OPEN_FOR: Final = 2 * REQUEST_STATE_TTL
 VIA_LINK: Final = "link"
+VIA_FORM: Final = "form"
 # The newest rows of one kind on one Loop or Ticket that are read; far more than one decision's
 # questions in a window of thirty minutes.
 _PAGE: Final = 200
@@ -70,6 +76,22 @@ class AskedThrough(TypedDict):
     credential_id: str
     key_name: str | None
     via: str
+
+
+class TakenThrough(TypedDict):
+    """The key a decision taken in the editor came through: its id, its name and ``form``."""
+
+    credential_id: str
+    key_name: str
+    via: str
+
+
+def taken_through(actor: ActorContext) -> TakenThrough | None:
+    """The key ``actor`` decided through in the editor, or None for a person in Tralala."""
+    granted = actor.editor_decision
+    if granted is None:
+        return None
+    return {"credential_id": granted.credential_id, "key_name": granted.key_name, "via": VIA_FORM}
 
 
 def target_of(decision: AskedDecision, loop_id: str, card_id: str | None) -> tuple[str, str]:
@@ -185,12 +207,19 @@ def open_questions(
 
 
 def with_asked_through(
-    changes: Mapping[str, object], through: Sequence[AskedThrough]
+    changes: Mapping[str, object],
+    through: Sequence[AskedThrough],
+    actor: ActorContext | None = None,
 ) -> dict[str, object]:
-    """A decision's changes, with ``asked_through`` only when a question was open."""
-    if not through:
-        return dict(changes)
-    return {**changes, "asked_through": [dict(entry) for entry in through]}
+    """A decision's changes, with ``asked_through`` only when a question was open and
+    ``taken_through`` only when ``actor`` decided in the editor through a key."""
+    marked = dict(changes)
+    if through:
+        marked["asked_through"] = [dict(entry) for entry in through]
+    taken = None if actor is None else taken_through(actor)
+    if taken is not None:
+        marked["taken_through"] = dict(taken)
+    return marked
 
 
 def _plain(name: str | None) -> str:
@@ -213,14 +242,25 @@ _ANSWERS: Final[dict[AskedDecision, str]] = {
 }
 
 
-def answer_comment(person: str, decision: AskedDecision, through: Sequence[AskedThrough]) -> str:
+def answer_comment(
+    person: str,
+    decision: AskedDecision,
+    through: Sequence[AskedThrough],
+    taken: TakenThrough | None = None,
+) -> str:
     """What a decision on a Ticket that answers a question says on the Ticket: who decided, what,
-    and that a coding session asked through which keys. Plain text, without ``@``."""
+    where when it was in the editor, and that a coding session asked through which keys. Plain
+    text, without ``@``."""
     what = _ANSWERS.get(decision, "decided")
-    return (
-        f"{_plain(person)} {what}. The question came from a coding session through "
-        f"{keys_text(through)}."
+    where = (
+        ""
+        if taken is None
+        else f" in a coding session through the key {_plain(taken['key_name'])}"
     )
+    sentence = f"{_plain(person)} {what}{where}."
+    if not through:
+        return sentence
+    return f"{sentence} The question came from a coding session through {keys_text(through)}."
 
 
 def add_answer_comment(
@@ -234,15 +274,17 @@ def add_answer_comment(
     now: str,
 ) -> None:
     """The one comment a decision on a Ticket that answers a question writes, by the person who
-    decided, inside the decision's unit of work; nothing when no question was open."""
-    if not through:
+    decided, inside the decision's unit of work; nothing when no question was open and the
+    decision was not taken in the editor (which always answers one)."""
+    taken = taken_through(actor)
+    if not through and taken is None:
         return
     repos.comments.add(
         CommentsRow(
             id=new_id(),
             card_id=card_id,
             actor_id=actor.actor_id,
-            content=answer_comment(actor.actor_name, decision, through),
+            content=answer_comment(actor.actor_name, decision, through, taken),
             created_at=now,
             updated_at=now,
         )
@@ -335,15 +377,17 @@ class DecisionRequestService:
         loop_id: str,
         decision: AskedDecision,
         card_id: str | None,
+        *,
+        via: str = VIA_LINK,
     ) -> bool:
-        """Record the key's question unless it already has one open; True when a row was
-        written."""
+        """Record the key's question unless it already has one open, with how the person is
+        asked (``via``); True when a row was written."""
         return self._write(
             actor,
             board_id,
             (loop_id, decision, card_id),
             action=REQUESTED,
-            extra={"via": VIA_LINK},
+            extra={"via": via},
             when_open=False,
         )
 
@@ -372,14 +416,17 @@ __all__ = [
     "CLOSED",
     "OPEN_FOR",
     "REQUESTED",
+    "VIA_FORM",
     "VIA_LINK",
     "AskedThrough",
     "DecisionRequestService",
+    "TakenThrough",
     "add_answer_comment",
     "answer_comment",
     "keys_text",
     "last_decided",
     "open_questions",
+    "taken_through",
     "target_of",
     "with_asked_through",
 ]

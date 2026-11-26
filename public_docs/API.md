@@ -1164,7 +1164,7 @@ the handler runs.
 | `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
 | `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Every Ticket carries its face, or the RoadMap answers `422 face_invalid` naming each Ticket, field and rule. The answer's `decision_link` is the RoadMap in the Plan tab, where a person reviews it. Both take an optional `brief`, stored as the human view instead of asking a board agent; an analysis brief that breaks the sign answers `422 brief_invalid`. Over an approved RoadMap `403 human_action_required` with `decision_link`, the RoadMap in the Plan tab |
 | `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval (`403 human_action_required` with `decision_link`, that document in the Plan tab); an analysis brief keeps the sign (`422 brief_invalid`) |
-| `ask_person` | `loops:read`, `cards:read` | Ask the key's person for one decision (`decision`: `analysis`, `roadmap`, `implementation` or `qa` on the Loop, `wait` or `confirmation` on a Ticket with `card_id`) and report it; it never takes the decision. Answers `not_pending` with `why` when nothing waits; in MCP 2026-07-28 with the elicitation mode `url` declared and `TRALALA_PUBLIC_URL` set, `resultType: input_required` (below); otherwise `waiting_for_person` with `decision_link`. The repeated call with `requestState` answers `decided` (`outcome`, `decided_by`, `decided_by_id`, `decided_at`), `declined`, `cancelled` or `input_required` again |
+| `ask_person` | `loops:read`, `cards:read` | Ask the key's person for one decision (`decision`: `analysis`, `roadmap`, `implementation` or `qa` on the Loop, `wait` or `confirmation` on a Ticket with `card_id`) and report it. Answers `not_pending` with `why` when nothing waits; in MCP 2026-07-28 with the elicitation mode `url` declared and `TRALALA_PUBLIC_URL` set, `resultType: input_required` (below); otherwise `waiting_for_person` with `decision_link`. With `editor_decisions` on, `loops:decide` on the key and the mode `form` declared, the analysis, the RoadMap, a wait, a confirmation and the implementation of a Loop with a plan come as a form the person answers in their editor, never the agent (below). The repeated call with `requestState` answers `decided` (`outcome`, `decided_by`, `decided_by_id`, `decided_at`, and `taken_through` for a form), `declined`, `cancelled`, `not_decided` or `input_required` again |
 | `ask_agents` | `discussions:write` | Create a `roundtable` discussion with the board's askable agents (or `agent_ids`; at most 12) on the Ticket (`card_id`) or, without one, on the board under a `title`, and run one round; returns the synthesis, the positions and the structured answers, which the person sees as the sign; with `background` it answers at once with the `discussion_id` and `next_step`; without an askable agent `422 no_agents_available` |
 | `read_discussion` | `discussions:read` | Read a thread: its `title`, `state` (`open` or `closed`) and `closed_at`, the newest round's synthesis, each agent's position and the messages with their structured answers, `after_closed` and `ref_ticket` (the reasoning, which the person reads as raw text, with `include_prose`); sets the caller's read marker |
 | `reply_discussion` | `discussions:write` | Post a message, in a closed thread too (`after_closed`), optionally pointing at a `ticket` (id or key); a round runs by default in a thread on a Ticket and only with `run: true` on the board, and never in a thread without agents or one that is closed, cancelled, approved or vetoed, where `run_skipped` (`no_participants`, `thread_closed`, `thread_decided`) says why; `background` as for `ask_agents` |
@@ -1224,7 +1224,7 @@ completed, cancelled or archived. A refusal keeps its code, `403 human_action_re
 }
 ```
 
-`ask_person` asks for a decision and never takes it. In MCP 2026-07-28, when the request declares
+`ask_person` asks for a decision. In MCP 2026-07-28, when the request declares
 the elicitation mode `url` (`clientCapabilities.elicitation.url`) and the installation sets
 `TRALALA_PUBLIC_URL`, a decision that waits answers `input_required`, with the full address of the
 decision, which carries only ids:
@@ -1255,11 +1255,62 @@ The client repeats the call with `inputResponses` (`{"decision": {"action": "acc
 `decline`, or `cancel`) and the same `requestState`. Only `tools/call` of this tool answers
 `input_required`, and only in 2026-07-28; a call of 2025-06-18, a client without the `url` mode or
 an installation without its public address gets `status: waiting_for_person` and `decision_link`
-instead, and the mode `form` is never used. The state is sealed with the installation's secret and
+instead. The state is sealed with the installation's secret and
 bound to the key, the call and what the question was about; it is valid for 15 minutes and opens
 once. A state that is changed, expired, another key's, for another call, used before or out of
 date answers JSON-RPC `-32602` with HTTP 200 and `data.reason`, and nothing about the decision:
 call again without `requestState`.
+
+Deciding in the editor is the opt-in mode `form`. It is used only when the request declares
+`clientCapabilities.elicitation.form` (or an empty `elicitation`, which the revision reads as
+form), the installation's setting `TRALALA_EDITOR_DECISIONS` is on and the key holds
+`loops:decide`; and only for `analysis`, `roadmap`, `wait`, `confirmation` and the
+`implementation` of a Loop with a plan. QA, a reset and closing a Loop keep the link. The request
+is a flat form with no address in it, and the person answers it in their editor, never the agent:
+
+```json
+{
+  "method": "elicitation/create",
+  "params": {
+    "mode": "form",
+    "message": "Approve revision 3 of the analysis of BE007, or ask for changes. Only you answer this; the agent never fills it in. Your answer is your decision in Tralala, recorded as taken in a coding session through this key.",
+    "requestedSchema": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "string",
+          "title": "Your decision",
+          "oneOf": [
+            {"const": "approve", "title": "Approve"},
+            {"const": "request_changes", "title": "Ask for changes"}
+          ]
+        },
+        "feedback": {
+          "type": "string",
+          "title": "Feedback",
+          "description": "Optional: what you want changed or want the agent to know.",
+          "maxLength": 500
+        }
+      },
+      "required": ["decision"]
+    }
+  }
+}
+```
+
+The choices are `approve` and `request_changes` for a review, `clear` and `keep` for a wait,
+`confirm` and `not_yet` for a person's task, `accept` and `reject` for the implementation. The
+repeated call with `{"decision": {"action": "accept", "content": {"decision": "approve"}}}` and
+the state takes the decision as the key's owner, through the same service method as the route:
+the setting, the right on the key and the owner's account are checked again on that call
+(`403 human_action_required` with `details.reason` `editor_decisions_off`, `no_right` or
+`owner_disabled` otherwise), the revisions, the Ticket's version or the Loop's version the
+question was about must still be in force, and content that is not the form's is asked again
+(`input_required` with what holds now). The answer is `status: decided` with `taken_through`, the
+key's name; `keep`, `not_yet` and `reject` take nothing (`status: not_decided`). The decision's
+history row carries `taken_through` (`{credential_id, key_name, via: "form"}`) beside
+`asked_through`, and so does the implementation's approval row; a decision on a Ticket gets one
+comment saying it was decided in a coding session through that key.
 
 The flow a person and their worker use to plan is `create_loop` → `write_info` → `write_analysis`
 (or `run_analysis`) → the person approves the analysis → `write_roadmap` (or `run_roadmap`) → the

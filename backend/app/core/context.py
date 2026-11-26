@@ -76,6 +76,18 @@ MEMBER_TOKEN_SCOPES: tuple[str, ...] = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class EditorDecision:
+    """The key a person's decision in the editor came through: its id and its name.
+
+    Only ``AuthService.editor_decision_actor`` builds one, on the call that carries the person's
+    answer, and only while the installation's setting ``editor_decisions`` is on, the key holds
+    ``DECIDE_SCOPE`` and its owner's account is enabled."""
+
+    credential_id: str
+    key_name: str
+
+
 @dataclass(slots=True)
 class ActorContext:
     actor_id: str
@@ -86,6 +98,8 @@ class ActorContext:
     role: str | None = None
     # The API token the request authenticated with; None for a session cookie or an internal actor.
     credential_id: str | None = None
+    # Set only on the owner's context built for a decision in the editor (``EditorDecision``).
+    editor_decision: EditorDecision | None = None
 
     @property
     def is_user(self) -> bool:
@@ -103,10 +117,21 @@ class ActorContext:
             raise Forbidden(f"Missing required scope: {scope}", details={"required_scope": scope})
 
     def require_human(self, action: str) -> None:
-        """Human-only workflow decisions can never be satisfied by an agent credential."""
-        if not self.is_user:
+        """Human-only workflow decisions can never be satisfied by an agent credential, nor by a
+        context that came through a key (``credential_id`` set), whatever identity it carries."""
+        if not self.is_user or self.credential_id is not None:
             raise Forbidden(
                 f"{action} is a human decision",
                 code="human_action_required",
                 details={"action": action, "actor_type": self.actor_type},
             )
+
+    def require_person_or_editor_decision(self, action: str) -> None:
+        """The five decisions a person may take in the editor (approving the analysis or the
+        RoadMap, clearing a wait, confirming a person's task, accepting the implementation): a
+        signed-in person, or the owner's context ``AuthService.editor_decision_actor`` built for
+        the key that carried the person's answer. Everything else refuses as ``require_human``."""
+        granted = self.editor_decision
+        if granted is not None and self.is_user and granted.credential_id == self.credential_id:
+            return
+        self.require_human(action)

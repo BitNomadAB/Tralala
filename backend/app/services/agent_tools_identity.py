@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from ..core.context import DECIDE_SCOPE, MEMBER_TOKEN_SCOPES, ActorContext
+from .agent_tools_decide import FORM_RULE
 from .agent_tools_read import DECISION_LINK_RULE, ToolArguments, ToolResult
 from .agent_tools_schema import AgentTool, missing_scopes, object_schema
 
@@ -40,15 +41,19 @@ _HUMAN_NOTE = (
     "whatever its scopes. Info stays yours to write while the Loop is draft or under analysis "
     "review; once planning has started, editing it is a person's. "
     "A Loop without a plan leaves draft with its first Ticket, so its Info is a person's from "
-    "then on, and accepting its implementation is what closes it. " + DECISION_LINK_RULE
+    "then on, and accepting its implementation is what closes it. The one exception: where the "
+    "installation allows it and the person gave this key the right, they may approve the "
+    "analysis or the RoadMap, clear a wait, confirm their task or accept the implementation in "
+    "their editor, as a form ask_person brings them; a reset, QA and closing a Loop never. "
+    + DECISION_LINK_RULE
 )
 
 
 _EDITOR_DECISIONS_NOTE = (
     "Deciding in the editor needs both switches: the installation's setting, which its operator "
     "turns on, and the right on this key, which only the signed-in person who owns the key can "
-    "give, and only to a new key. With either one missing, every decision in human_only is "
-    "refused with human_action_required."
+    "give, and only to a new key. " + FORM_RULE + " With either one missing, every decision in "
+    "human_only is refused with human_action_required."
 )
 
 

@@ -1,7 +1,8 @@
 """``ask_person`` on the fakes: the real Loop, Ticket, outcome and request-state services on an
 in-memory board, handed to the tool as the attributes ``DecisionAsking`` declares, with a clock the
 test moves. The question in mode ``url`` when the client declared it, the address as text when it
-did not or the installation has no public address, never the mode ``form``; ``not_pending``; the
+did not or the installation has no public address, never the mode ``form`` without the setting and
+the right (``test_agent_tools_editor_decisions.py`` has the form); ``not_pending``; the
 repeated call before and after the decision for every decision; ``decline`` and ``cancel``; every
 state that is refused; two keys of one person; and the scopes."""
 
@@ -11,6 +12,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TypeIs
 
 import pytest
@@ -30,10 +32,16 @@ from app.services.agent_tools import (
     tool_catalog,
 )
 from app.services.agent_tools_decisions import CALL_AGAIN, STILL_OPEN, ask_message
+from app.services.auth import AuthService
 from app.services.cards import CardService
 from app.services.decision_links import decision_link
 from app.services.decision_outcomes import AskedDecision, DecisionOutcomeService
 from app.services.decision_requests import CLOSED, OPEN_FOR, REQUESTED, DecisionRequestService
+from app.services.loop_documents import LoopDocumentService
+from app.services.loop_history import LoopHistoryService
+from app.services.loop_links import LoopWorkflowLinks
+from app.services.loop_plans import LoopPlanService
+from app.services.loop_qa import LoopQaService
 from app.services.loops import LoopService
 from app.services.request_state import (
     REQUEST_STATE_TTL,
@@ -41,6 +49,7 @@ from app.services.request_state import (
     RequestStateRefused,
     RequestStateService,
 )
+from app.services.ticket_work import TicketWorkService
 from tests.unit.fakes.board import (
     BOARD_ID,
     BoardState,
@@ -54,13 +63,16 @@ from tests.unit.fakes.board import (
     loop_row,
     qa_cycle_row,
 )
+from tests.unit.fakes.data_files import FakeBootstrapPasswordFile
 from tests.unit.fakes.plans import FakePlanViews, plan_views
 from tests.unit.fakes.registry import (
     FakeRegistryUnitOfWork,
     RegistryState,
     actor_row,
     credential_row,
+    sign_in_row,
 )
+from tests.unit.test_loop_history_service import Files, Ids, Index
 
 NOW = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
 EARLIER = "2026-11-26T11:00:00Z"
@@ -122,7 +134,12 @@ class World:
     decision_request: DecisionRequestService
     request_state: RequestStateService
     settings: Settings
+    auth: AuthService
+    loop_document: LoopDocumentService
+    ticket_work: TicketWorkService
+    loop_qa: LoopQaService
     state: BoardState
+    registry: RegistryState
     clock: Clock
 
 
@@ -133,6 +150,8 @@ def _world(settings: Settings, loop: LoopsRow, public_url: str | None) -> World:
     registry = RegistryState()
     registry.actors[PERSON] = actor_row(PERSON, name=PERSON_NAME)
     registry.actors[OTHER_PERSON] = actor_row(OTHER_PERSON, name="Bo")
+    registry.sign_ins[PERSON] = sign_in_row(PERSON)
+    registry.sign_ins[OTHER_PERSON] = sign_in_row(OTHER_PERSON)
     for actor_id in (KEY.actor_id, OTHER_KEY.actor_id):
         registry.actors[actor_id] = actor_row(actor_id, type_="agent", name="session")
     for credential_id, actor_id, owner, name in KEYS:
@@ -144,15 +163,39 @@ def _world(settings: Settings, loop: LoopsRow, public_url: str | None) -> World:
     store = FakeBoardUnitOfWork(board)
     accounts = FakeRegistryUnitOfWork(registry)
     clock = Clock(NOW)
-    cards = CardService(settings, checks, store, accounts, plans=views, clock=lambda: NOW)
+    used = settings.model_copy(update={"public_url": public_url})
+    ids = Ids()
+    cards = CardService(used, checks, store, accounts, plans=views, clock=clock)
+    history = LoopHistoryService(
+        checks, store, Files(Path("unused")), Index(), clock=lambda: DECIDED, new_id=ids
+    )
     return World(
-        loop=LoopService(settings, checks, store, plans=views, tickets=cards, clock=lambda: NOW),
+        loop=LoopService(
+            used, checks, store, plans=views, tickets=cards, clock=clock, new_id=ids
+        ),
         card=cards,
         decision_outcome=DecisionOutcomeService(store, accounts),
         decision_request=DecisionRequestService(checks, store, accounts, clock=clock),
         request_state=RequestStateService(SECRET, clock=clock),
-        settings=settings.model_copy(update={"public_url": public_url}),
+        settings=used,
+        auth=AuthService(
+            used, accounts, bootstrap_password_file=FakeBootstrapPasswordFile(), clock=clock
+        ),
+        loop_document=LoopDocumentService(
+            checks, store, LoopPlanService(clock=lambda: NOW, new_id=ids), clock=clock, new_id=ids
+        ),
+        ticket_work=TicketWorkService(checks, store, cards, clock=clock, new_id=ids),
+        loop_qa=LoopQaService(
+            checks,
+            store,
+            history,
+            LoopWorkflowLinks(),
+            idempotency_ttl_seconds=3600,
+            clock=clock,
+            new_id=ids,
+        ),
         state=board,
+        registry=registry,
         clock=clock,
     )
 
@@ -461,8 +504,11 @@ def test_without_a_public_address_even_a_url_client_gets_the_path_as_text(
     assert answer["decision_link"] == f"/boards/{BOARD_ID}/loops/{LOOP}?tab=plan&doc=analysis"
 
 
-def test_the_form_mode_is_never_used(settings: Settings) -> None:
+def test_without_the_setting_and_the_right_the_form_mode_is_never_used(
+    settings: Settings,
+) -> None:
     w = world_for(settings, "analysis")
+    assert w.settings.editor_decisions is False
     assert params(asked(call(w, "analysis", BOTH)))["mode"] == "url"
     assert complete(call(w, "analysis", FORM))["status"] == "waiting_for_person"
 
@@ -750,7 +796,7 @@ def test_the_catalogue_entry_reads_and_asks() -> None:
     assert tool.asks is ask_person_with_input
     assert tool.input_schema["required"] == ["board_id", "loop_id", "decision"]
     assert set(tool.input_schema["properties"]) == {"board_id", "loop_id", "decision", "card_id"}
-    assert "never takes the decision" in tool.description
+    assert "you never fill it in" in tool.description
     others = [entry.name for entry in tool_catalog().values() if entry.asks is not None]
     assert others == ["ask_person"]
 
