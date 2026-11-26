@@ -432,6 +432,17 @@ class DiscussionService:
         only what someone else writes after it is new for the actor. It is the reader's own
         bookkeeping, so it needs ``discussions:read`` and is kept on an archived board too."""
         actor.require("discussions:read")
+        return self._mark(actor, board_id, discussion_id)
+
+    def handed_over(self, actor: ActorContext, board_id: str, discussion_id: str) -> None:
+        """The actor was just handed the thread in an answer (a worker tool that answers the
+        whole thread), so what it holds now is read for them. The marker is kept only for an
+        actor who may read discussions, and its absence is never a refusal: the answer the
+        actor asked for has already been given."""
+        if actor.has_scope("discussions:read"):
+            self._mark(actor, board_id, discussion_id)
+
+    def _mark(self, actor: ActorContext, board_id: str, discussion_id: str) -> ReadMarker:
         self.board_service.require_row(board_id)
         now = self._clock()
         with self.store.writer(board_id) as repos:

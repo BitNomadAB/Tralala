@@ -29,6 +29,7 @@ from ..services.agent_tools import (
     NOTICES_RULE,
     REPORT_RULE,
     missing_scopes,
+    run_tool,
     tool_catalog,
 )
 from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
@@ -179,8 +180,8 @@ async def mcp_endpoint(request: Request) -> Response:
             )
         try:
             # Handlers touch SQLite and may poll a generation run, so they never run on the event
-            # loop.
-            payload = await run_in_threadpool(tool.handler, ctx.services, ctx.actor, arguments)
+            # loop. The call goes through run_tool, which adds the notices that wait for the key.
+            payload = await run_in_threadpool(run_tool, ctx.services, ctx.actor, name, arguments)
         except ApiError as error:
             return JSONResponse(_result(message_id, _tool_failure(error)))
         return JSONResponse(_result(message_id, _tool_result(payload)))

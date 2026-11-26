@@ -172,11 +172,7 @@ test.describe("a discussion on the board", () => {
     });
   });
 
-  // FIXME product defect: `/mcp` tools/call runs the tool's handler directly
-  // (backend/app/api/mcp.py), so `with_notices` (reached only through `run_tool`, which nothing
-  // calls) never adds `notices` to an answer. The step "the key's next tool call carries the
-  // thread in notices" fails with no notices at all, although the thread waits for the key.
-  test.fixme("a key that opened a discussion finds the person's answer in notices until it reads it", async ({
+  test("a key that opened a discussion finds the person's answer in notices until it reads it", async ({
     page,
   }) => {
     await login(page);

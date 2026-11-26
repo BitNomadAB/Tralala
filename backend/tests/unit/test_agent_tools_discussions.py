@@ -397,3 +397,29 @@ def test_read_discussion_marks_the_thread_read_and_answers_its_state_and_message
     assert field(message, "ref_ticket")["card_id"] == CARD
     assert (THREAD, WORKER.actor_id) in w.state.discussion_reads
     assert w.discussions.list(BOARD_ID, reader=WORKER)[0]["unread"] is False
+
+
+def test_a_tool_that_hands_the_thread_to_the_caller_marks_it_read(settings: Settings) -> None:
+    """What came with the tool's own answer is not news in the next answer's notices."""
+    w = world()
+    on_the_board(w)
+    ada = ActorContext(
+        actor_id="actor-1", actor_type="user", actor_name="Ada", scopes=WORKER.scopes
+    )
+    w.discussions.add_message(ada, BOARD_ID, THREAD, DiscussionMessageCreate(content="Any news?"))
+    assert w.discussions.list(BOARD_ID, reader=WORKER)[0]["unread"] is True
+    reply_discussion(
+        tools(w, settings),
+        WORKER,
+        {"board_id": BOARD_ID, "discussion_id": THREAD, "content": "Done since noon."},
+    )
+    assert (THREAD, WORKER.actor_id) in w.state.discussion_reads
+    assert w.discussions.list(BOARD_ID, reader=WORKER)[0]["unread"] is False
+    # A key that cannot read keeps no marker, and its reply still goes in.
+    writer = WORKER.__replace__(actor_id="worker-2", scopes=frozenset({"discussions:write"}))
+    reply_discussion(
+        tools(w, settings),
+        writer,
+        {"board_id": BOARD_ID, "discussion_id": THREAD, "content": "Mine too."},
+    )
+    assert (THREAD, writer.actor_id) not in w.state.discussion_reads

@@ -210,6 +210,15 @@ def blocked_round(detail: Mapping[str, object]) -> str | None:
     return None
 
 
+def seen(
+    services: DiscussionReading, actor: ActorContext, board_id: str, discussion_id: str
+) -> None:
+    """The caller was just handed the thread, so what it holds now is no longer new for them: an
+    answer that came with the tool's own answer never comes back in ``notices``. A key without
+    ``discussions:read`` keeps no marker (``DiscussionService.handed_over``)."""
+    services.discussion.handed_over(actor, board_id, discussion_id)
+
+
 def read_discussion(
     services: DiscussionReading, actor: ActorContext, args: ToolArguments
 ) -> ToolResult:
@@ -257,6 +266,7 @@ def reply_discussion(
             # A run already active is not a failure: the message is posted and the caller can poll.
             run = {"status": "running", "stop_reason": error.code}
     thread = services.discussion.get(board_id, discussion_id, reader=actor)
+    seen(services, actor, board_id, discussion_id)
     view = thread_view(thread, include_prose=include_prose)
     view["run"] = run_view(run)
     if wanted and blocked is not None:
@@ -313,6 +323,7 @@ def ask_agents(services: DiscussionAsking, actor: ActorContext, args: ToolArgume
     for existing in recent:
         if _same_thread(existing, actor, card_id=card_id, title=title, question=question):
             thread = services.discussion.get(board_id, str(existing["id"]), reader=actor)
+            seen(services, actor, board_id, str(existing["id"]))
             view = thread_view(thread, include_prose=include_prose)
             view["deduplicated"] = True
             return view
@@ -334,6 +345,9 @@ def ask_agents(services: DiscussionAsking, actor: ActorContext, args: ToolArgume
         actor, board_id, discussion_id, rounds=1, autonomous=False, background=background
     )
     thread = services.discussion.get(board_id, discussion_id, reader=actor)
+    # The answers of an inline round come with this answer; those of a round in the background
+    # come later and are news then.
+    seen(services, actor, board_id, discussion_id)
     view = thread_view(thread, include_prose=include_prose)
     view["run"] = run_view(run)
     if background:

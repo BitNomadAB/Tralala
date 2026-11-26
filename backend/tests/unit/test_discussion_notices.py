@@ -5,6 +5,7 @@ tool."""
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from typing import TypeIs
 import pytest
 from pydantic import JsonValue
 
+from app.api import mcp
 from app.api.mcp import INSTRUCTIONS, render_bootstrap
 from app.core.config import Settings
 from app.core.context import ActorContext
@@ -309,3 +311,10 @@ def test_the_service_reads_every_board_without_a_board_id() -> None:
     found = w.discussions.notices(CODEX, None)
     assert found is not None
     assert {entry["board_id"] for entry in found["threads"]} == {BOARD_ID}
+
+
+def test_the_mcp_route_calls_a_tool_through_run_tool_so_its_answer_carries_notices() -> None:
+    """The route once called the handler itself, and no key ever saw ``notices``."""
+    source = inspect.getsource(mcp)
+    assert "run_in_threadpool(run_tool, ctx.services, ctx.actor, name, arguments)" in source
+    assert "tool.handler" not in source
