@@ -81,13 +81,14 @@ const DECIDED: Record<string, string> = {
 
 /**
  * The text at the right of an inbox row: when the thread last moved, "Answering now" while the
- * agents answer, and the decision with who took it ("Vetoed by Mike · Nov 7, 2026").
+ * agents answer, and the decision with who took it ("Vetoed by Mike · Nov 7, 2026"), or Closed.
  */
 export function inboxAside(row: DiscussionInboxRow): string {
   const when = formatDate(row.last_activity_at);
   if (row.waits_for === "agents") {
     return row.run_state === "paused" ? `Paused · ${when}` : "Answering now";
   }
+  if (row.status === "closed") return `Closed · ${when}`;
   if (row.waits_for === "nobody") {
     return `${by(DECIDED[row.status] ?? "Decided", row.decided_by_name)} · ${when}`;
   }
@@ -127,11 +128,15 @@ export const WAITS_ON_DISCUSSION = "Waits for your decision on a discussion";
 
 /**
  * Who a Ticket's discussion waits for, as the inbox groups it: the agents while a run is running
- * or paused, nobody once it is decided or cancelled, otherwise the person (also before a round).
+ * or paused, nobody once it is decided, cancelled or closed, otherwise the person (also before a
+ * round).
  */
 export function discussionWaitsFor(discussion: Discussion): DiscussionWaitsFor {
   if (isTalking(discussion)) return "agents";
-  if (DECIDED[discussion.status] !== undefined || discussion.status === "cancelled") {
+  if (
+    DECIDED[discussion.status] !== undefined ||
+    ["cancelled", "closed"].includes(discussion.status)
+  ) {
     return "nobody";
   }
   return "your_decision";
@@ -152,11 +157,12 @@ export function ticketDiscussionsInOrder(discussions: readonly Discussion[]): Di
 }
 
 /**
- * The mark in front of a row of a Ticket's Discussions tab: the state while the agents answer
- * ("Agents are answering", "Paused"), the suggested verdict once there is one, "No answer yet"
- * before it.
+ * The mark in front of a row of a Ticket's Discussions tab: Closed, the state while the agents
+ * answer ("Agents are answering", "Paused"), the suggested verdict once there is one, "No answer
+ * yet" before it.
  */
 export function ticketDiscussionMark(discussion: Discussion): { word: string; tone: MarkTone } {
+  if (discussion.status === "closed") return { word: "Closed", tone: "neutral" };
   if (isTalking(discussion)) {
     const state = stateOf(discussion);
     return { word: state.word, tone: state.tone };
@@ -172,6 +178,7 @@ export function ticketDiscussionMark(discussion: Discussion): { word: string; to
  */
 export function ticketDiscussionAside(discussion: Discussion): string {
   if (discussion.status === "cancelled") return "Cancelled";
+  if (discussion.status === "closed") return "Closed";
   const waits = discussionWaitsFor(discussion);
   if (waits === "agents") {
     return discussion.run_state === "paused" ? "Waits for you to resume" : "Waits for the agents";

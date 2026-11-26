@@ -298,8 +298,10 @@ export function discussionHandlers(initial: Discussion = discussion()) {
       const body: unknown = await request.json();
       state.bodies.push({ route: "messages", body, csrf: request.headers.get("X-CSRF-Token") });
       const thread = after(state, "messages");
-      // The server answers every reply on a roundtable thread; a manual one leaves it to the UI.
-      return ok({ ...thread, auto_run: thread.mode === "manual" ? null : "started" });
+      // The server answers every reply on a roundtable thread; a manual one leaves it to the UI,
+      // and a closed one keeps the reply as a comment that starts nothing.
+      const auto = thread.status === "closed" ? "thread_closed" : "started";
+      return ok({ ...thread, auto_run: thread.mode === "manual" ? null : auto });
     }),
     ...threadHandlers(state, DISCUSSION_PATH),
   ];

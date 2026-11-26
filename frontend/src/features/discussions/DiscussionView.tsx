@@ -1,31 +1,26 @@
 import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { SectionHeader } from "@/components/ui/section";
 import { Segmented, SegmentedPanel } from "@/components/ui/segmented";
-import { useAuth } from "@/features/auth/useAuth";
+import { ConfirmDialog } from "@/features/settings/ConfirmDialog";
 import { describeError } from "@/lib/describeError";
 import type { Discussion } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { CLOSE_QUESTION } from "./closingRules";
 import { DiscussionActions } from "./DiscussionActions";
-import { roundLines, stanceRows } from "./discussionData";
-import { DiscussionExpanders } from "./DiscussionExpanders";
+import { DiscussionForYou } from "./DiscussionForYou";
 import { DiscussionHead } from "./DiscussionHead";
 import { DiscussionRail } from "./DiscussionRail";
 import { DiscussionRaw } from "./DiscussionRaw";
-import { DiscussionReply } from "./DiscussionReply";
 import {
-  isClosed,
   isTalking,
   outcomeLine,
   progressLine,
-  replyHint,
-  roundsText,
   stateOf,
   talkRounds,
   type RunAction,
 } from "./discussionRules";
 import { DiscussionSign } from "./DiscussionSign";
 import { ReviewDiscussionDialog } from "./ReviewDiscussionDialog";
-import { StanceRows } from "./StanceRows";
 import { TalkItOutDialog } from "./TalkItOutDialog";
 import { useDiscussionLinks } from "./useDiscussionLinks";
 import { useDiscussionNotices } from "./useDiscussionNotices";
@@ -133,7 +128,6 @@ function DiscussionLayout({
   titleWrap: ((heading: ReactElement) => ReactElement) | undefined;
   focusOnOpen: boolean;
 }) {
-  const { actor } = useAuth();
   const idBase = useId();
   const headingId = useId();
   const [tab, setTab] = useState<View>("you");
@@ -191,6 +185,7 @@ function DiscussionLayout({
           onControl={control}
           busy={busy}
           onCopyLink={links.copyLink}
+          closing={view.closing}
         />
       </DiscussionHead>
       <div
@@ -214,28 +209,12 @@ function DiscussionLayout({
               }
             />
             <SegmentedPanel idBase={idBase} value="you" active={tab} className="grid gap-6">
-              <StanceRows
-                rows={stanceRows(discussion)}
-                failed={run?.failed ?? new Map()}
+              <DiscussionForYou
+                boardId={boardId}
+                discussion={discussion}
+                view={view}
                 level={level === 2 ? 3 : 4}
               />
-              <DiscussionExpanders
-                conditions={synthesis?.conditions ?? []}
-                openQuestions={synthesis?.open_questions ?? []}
-                rounds={roundLines(discussion, actor?.id ?? null)}
-                roundsHint={roundsText(discussion)}
-              />
-              {isClosed(discussion) ? null : (
-                <DiscussionReply
-                  author={actor?.name ?? "You"}
-                  value={view.reply}
-                  onChange={view.setReply}
-                  hint={replyHint(discussion)}
-                  disabled={talking}
-                  sending={view.sending}
-                  onSend={view.sendReply}
-                />
-              )}
             </SegmentedPanel>
             <SegmentedPanel idBase={idBase} value="raw" active={tab}>
               <DiscussionRaw discussion={discussion} failures={run?.failures ?? new Map()} />
@@ -266,6 +245,11 @@ function DiscussionLayout({
         pending={view.reviewPending}
         onClose={() => view.setReviewing(null)}
         onConfirm={view.review}
+      />
+      <ConfirmDialog
+        question={view.closing.asking ? CLOSE_QUESTION : null}
+        onConfirm={view.closing.confirm}
+        onCancel={view.closing.cancel}
       />
     </div>
   );

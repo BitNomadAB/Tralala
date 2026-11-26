@@ -32,10 +32,11 @@ const LINK = "text-[13px] text-[var(--primary)] hover:underline";
 
 /**
  * The rail beside the discussion, the Ticket rail's shape: where it stands in words, the facts
- * (the Ticket as a link that opens it over the Kanban, or the board for a discussion on the board, who asked, the agents, the rounds, the
- * tokens, when it started), and More (Pause or Resume and Stop the run while the agents answer,
- * Copy link, Cancel discussion). Status and Facts are named groups, not landmarks: the rail is the
- * one landmark. Their headings sit at `level`, under the view's heading.
+ * (the Ticket as a link that opens it over the Kanban, or the board for a discussion on the board,
+ * who asked, the agents, the rounds, the tokens, when it started and when it was closed), and More
+ * (Pause or Resume and Stop the run while the agents answer, Copy link, Cancel discussion). Status
+ * and Facts are named groups, not landmarks: the rail is the one landmark. Their headings sit at
+ * `level`, under the view's heading.
  */
 export function DiscussionRail({
   boardId,
@@ -106,6 +107,9 @@ export function DiscussionRail({
             <span className="tabular-nums">{tokensText(discussion.tokens_used)}</span>
           </Fact>
           <Fact label="Started">{formatDate(discussion.created_at)}</Fact>
+          {discussion.closed_at ? (
+            <Fact label="Closed">{formatDate(discussion.closed_at)}</Fact>
+          ) : null}
         </Facts>
       </div>
 

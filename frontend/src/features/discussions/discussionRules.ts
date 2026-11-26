@@ -85,6 +85,7 @@ const REVIEWABLE = ["discussing", "consensus_proposed", "human_review"];
 /** Why the decision buttons cannot be pressed now, or null when they can (the server's rule). */
 export function decisionBlocked(discussion: Discussion): string | null {
   if (discussion.status === "cancelled") return "The discussion was cancelled";
+  if (discussion.status === "closed") return "The discussion is closed";
   if (isClosed(discussion)) return "The discussion is decided";
   if (discussion.run_state === "running") return "The agents are still answering";
   if (discussion.run_state === "paused" || discussion.active_run) {
@@ -119,11 +120,12 @@ export function by(word: string, name: string | null | undefined): string {
 }
 
 /**
- * Where a discussion stands, in the words of the rail's Status and the sign: decided, the agents
- * answering, paused or stopped, waiting for the person's decision, or no answer yet.
+ * Where a discussion stands, in the words of the rail's Status and the sign: closed, decided, the
+ * agents answering, paused or stopped, waiting for the person's decision, or no answer yet.
  */
 export function stateOf(discussion: Discussion, names: StateNames = {}): DiscussionState {
   const { status, run_state: run } = discussion;
+  if (status === "closed") return { word: "Closed", reason: null, tone: "neutral" };
   if (status === "cancelled") return { word: "Cancelled", reason: null, tone: "neutral" };
   if (status === "approved") {
     return { word: by("Approved", names.decidedBy), reason: null, tone: "success" };
@@ -228,10 +230,16 @@ export const EMPTY_REPLY = "Write your reply first.";
 /**
  * Whether the UI starts the round a reply asks for: the server starts it itself on a thread that
  * answers every reply (`auto_run` is then set, also when it could not start one), and leaves it
- * to the caller on a thread that answers only when asked.
+ * to the caller on a thread that answers only when asked. A closed thread, and one without agents,
+ * has no round to start.
  */
 export function replyNeedsRound(saved: Discussion): boolean {
-  return (saved.auto_run ?? null) === null && !isClosed(saved);
+  return (
+    (saved.auto_run ?? null) === null &&
+    !isClosed(saved) &&
+    saved.status !== "closed" &&
+    saved.participants.length > 0
+  );
 }
 
 /** The most rounds one run may ask for (the server's cap). */
@@ -250,6 +258,7 @@ export function talkRounds(discussion: Discussion): number {
 /** Why "Let them talk it out" cannot be pressed now, or null when it can. */
 export function talkBlocked(discussion: Discussion): string | null {
   if (discussion.status === "cancelled") return "The discussion was cancelled";
+  if (discussion.status === "closed") return "The discussion is closed";
   if (isClosed(discussion)) return "The discussion is decided";
   if (isTalking(discussion)) return "The agents are already answering";
   if (roundsLeft(discussion) === 0) {

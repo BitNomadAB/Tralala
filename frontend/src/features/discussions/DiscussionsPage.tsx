@@ -33,9 +33,10 @@ function item(row: DiscussionInboxRow): InboxItem {
 /**
  * The Discussions page is an inbox across every board the person may read: what waits for their
  * decision, where the agents are talking, and what was decided. A row opens the discussion as a
- * page of its Ticket or of its board, and says Unread when something in it is new for the person. The inbox refetches every 30 s while visible and when a discussion's events
- * arrive; while focus is in the lists a row keeps its section (`useHeldSections`). A discussion
- * starts from a Ticket or a board, never from here.
+ * page of its Ticket or of its board, and says Unread when something in it is new for the person.
+ * The inbox refetches every 30 s while visible and when a discussion's events arrive; while focus
+ * is in the lists a row keeps its section (`useHeldSections`). A discussion starts from a Ticket
+ * or a board, never from here.
  */
 export function DiscussionsPage() {
   const inbox = useDiscussionInbox();
