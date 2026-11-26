@@ -96,8 +96,11 @@ export function TicketBody({
   const face = card.face;
   const names = new Map(people.map((person) => [person.id, person.name]));
 
+  // One column that keeps the width it is given, and text that breaks inside a word when the word
+  // is longer than the column: a long path or test name in a comment would otherwise widen every
+  // section until the column slid under the rail beside it.
   return (
-    <div className="grid min-w-0 content-start gap-[30px]">
+    <div className="grid min-w-0 grid-cols-1 content-start gap-[30px] [overflow-wrap:anywhere]">
       <section aria-labelledby={headingId}>
         <SectionHeader
           id={headingId}

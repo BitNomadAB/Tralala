@@ -2,6 +2,7 @@ import { RefreshCw, Trash2 } from "lucide-react";
 import { useId } from "react";
 import { Badge } from "@/components/ui/badge";
 import { HeldButton } from "@/components/ui/held-button";
+import { DECIDE_LABEL, holdsDecide } from "@/lib/agentAccess";
 import type { Credential } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { CREDENTIAL_TONES, credentialState } from "./credentialState";
@@ -57,9 +58,12 @@ export function CredentialRow({
             : " · never used"}
           {credential.expires_at
             ? ` · ${state === "expired" ? "expired" : "expires"} ${formatDateTime(credential.expires_at)}`
-            : ""}
+            : revoked
+              ? ""
+              : " · never expires"}
         </p>
       </div>
+      {holdsDecide(credential) ? <Badge tone="warning">{DECIDE_LABEL}</Badge> : null}
       <Badge id={stateId} tone={CREDENTIAL_TONES[state]}>
         {state}
       </Badge>

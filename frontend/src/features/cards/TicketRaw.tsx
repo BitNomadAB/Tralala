@@ -65,7 +65,7 @@ export function TicketRaw({
   }
 
   return (
-    <div className="grid max-w-[78ch] gap-[18px]">
+    <div className="grid max-w-[78ch] grid-cols-1 gap-[18px]">
       <p className="m-0 text-[13px] text-[var(--foreground-faint)]">
         Written by the agent that planned the Loop. Read over /mcp by your coding session. Shown as
         it is, for when you want to dig.

@@ -27,6 +27,8 @@ from .board_stats import BoardStatsCache
 from .boards import BoardSchema, BoardService
 from .card_notes import CardNoteService
 from .cards import CardService
+from .decision_outcomes import DecisionOutcomeService
+from .decision_requests import DecisionRequestService
 from .discussions import DiscussionService
 from .events import EventService
 from .lists import ListService
@@ -47,6 +49,7 @@ from .repo_mirror_files import DiskMirrorFiles
 from .repo_mirror_git import SubprocessGit
 from .repo_snapshot import RepositorySnapshotService
 from .repositories import RepositoryService
+from .request_state import RequestStateService, system_clock
 from .runs import RunService
 from .search import SearchService
 from .subresources import ChecklistService, CommentService, LabelService
@@ -192,6 +195,16 @@ class Services:
             bootstrap_password_file=BootstrapPasswordFileOnDisk(
                 settings.data_dir, profile=settings.file_profile
             ),
+        )
+        # The sealed state of a question a key asks its person: the installation secret and the
+        # system clock.
+        self.request_state = RequestStateService(self.auth.secret_key, clock=system_clock)
+        # What a person decided after a key asked them (ask_person); it reads and decides nothing.
+        self.decision_outcome = DecisionOutcomeService(self.board_store, self.registry_store)
+        # The questions a key asked its person (ask_person): the rows a decision that answers
+        # them reads.
+        self.decision_request = DecisionRequestService(
+            self.board, self.board_store, self.registry_store
         )
         self.discussion = DiscussionService(
             self.board, self.agent, self.board_store, self.registry_store

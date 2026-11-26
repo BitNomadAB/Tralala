@@ -488,6 +488,12 @@ body {
  * between blocks, heading sizes, list markers and underlined links.
  */
 
+/* A word longer than the line (a path, an address, a test name) breaks inside the word, so the
+   text never widens what holds it. A code block keeps its lines and scrolls. */
+.prose-card {
+  overflow-wrap: anywhere;
+}
+
 /* Sized by the number of hashes, not by the tag: the tag follows the page's outline. */
 .prose-card .md-heading {
   font-weight: 600;

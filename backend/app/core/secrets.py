@@ -3,6 +3,10 @@
 Keys are sealed with Fernet (AES-128-CBC + HMAC) using a key derived from the installation secret
 through HKDF, so a copied `registry.sqlite` alone does not expose provider keys. Raw keys are never
 returned by the API after submission; only a short hint is kept for display.
+
+The same sealing, under a key derived for one named purpose, protects a value that leaves the
+installation and must come back unchanged (``seal_for_purpose``): the state of a question a key asks
+its person (``services/request_state.py``).
 """
 
 from __future__ import annotations
@@ -73,6 +77,41 @@ def open_secret_state(settings: Settings, token: str) -> tuple[str, bool]:
 
 def open_secret(settings: Settings, token: str) -> str:
     return open_secret_state(settings, token)[0]
+
+
+class SealedValueError(Exception):
+    """Raised when a value sealed for a purpose cannot be opened: changed, malformed, sealed with
+    another secret or for another purpose."""
+
+
+# The salt of every purpose key. The purpose itself is the HKDF info, so each purpose gets a key of
+# its own, and none of them is the provider-credential key above (another salt and info).
+_PURPOSE_SALT = b"tralala-sealed-value"
+
+
+@lru_cache(maxsize=8)
+def _purpose_fernet(secret: str, purpose: str) -> Fernet:
+    derived = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=_PURPOSE_SALT,
+        info=purpose.encode("utf-8"),
+    ).derive(secret.encode("utf-8"))
+    return Fernet(base64.urlsafe_b64encode(derived))
+
+
+def seal_for_purpose(secret: str, purpose: str, value: bytes) -> str:
+    """Seal ``value`` (encrypted and authenticated) under a key derived from the installation
+    secret for ``purpose`` alone; only :func:`open_for_purpose` with both again opens it."""
+    return _purpose_fernet(secret, purpose).encrypt(value).decode("ascii")
+
+
+def open_for_purpose(secret: str, purpose: str, token: str) -> bytes:
+    """The value :func:`seal_for_purpose` sealed, or :class:`SealedValueError`."""
+    try:
+        return _purpose_fernet(secret, purpose).decrypt(token.encode("ascii"))
+    except (InvalidToken, ValueError) as exc:  # UnicodeEncodeError is a ValueError
+        raise SealedValueError("Sealed value cannot be opened") from exc
 
 
 def secret_hint(value: str | None) -> str | None:

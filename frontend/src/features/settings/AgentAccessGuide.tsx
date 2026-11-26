@@ -1,8 +1,9 @@
 import { ChevronRight, Copy, Laptop } from "lucide-react";
-import { mcpConfigSnippet } from "@/lib/agentAccess";
+import { claudeCodeCommand, MCP_LEGACY_REVISION, MCP_REVISION } from "@/lib/agentAccess";
 
 /** The placeholder is the installation's own address, so the guide carries no host of its own. */
 const PLACEHOLDER_ORIGIN = "https://<Your URL>";
+const PLACEHOLDER_TOKEN = "<your-token>";
 
 /** A block to paste; a long line scrolls sideways, so it takes focus for a keyboard to scroll it. */
 function Code({ children }: { children: string }) {
@@ -18,20 +19,27 @@ function Code({ children }: { children: string }) {
   );
 }
 
+function Mono({ children }: { children: string }) {
+  return <span className="font-mono">{children}</span>;
+}
+
 /**
  * The five steps between "I have a key" and "my agent is working".
  *
  * Deliberately short and self-contained: the person reading it is at their own machine, not in the
- * Tralala UI, so it names the exact block to paste and what a failure looks like.
+ * Tralala UI, so it names the exact command to run and what a failure looks like. `/mcp` speaks
+ * two MCP revisions on one address, so the agent needs no setting for either; the command is
+ * Claude Code's, Codex is named with where its configuration lives, and the copy button copies the
+ * command exactly as it is shown.
  */
 export function AgentAccessGuide({
   token,
   onCopy,
 }: {
   token?: string | undefined;
-  onCopy?: (snippet: string) => void;
+  onCopy?: (command: string) => void;
 }) {
-  const snippet = mcpConfigSnippet(PLACEHOLDER_ORIGIN, token ?? "<your-token>");
+  const command = claudeCodeCommand(PLACEHOLDER_ORIGIN, token ?? PLACEHOLDER_TOKEN);
   return (
     <details className="group rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs">
       {/* A flex summary loses the browser's own triangle, so it draws one that turns when open. */}
@@ -49,14 +57,10 @@ export function AgentAccessGuide({
           <li>
             <strong className="text-[var(--foreground)]">Create the key for this machine.</strong>{" "}
             Press <em>New access key</em> above and name it after the machine — &quot;laptop
-            work&quot;, &quot;desktop copilot&quot;. Tick the scopes the agent needs:{" "}
-            <span className="font-mono">boards:read</span>,{" "}
-            <span className="font-mono">cards:read</span>,{" "}
-            <span className="font-mono">loops:read</span> to look around; add{" "}
-            <span className="font-mono">cards:write</span>,{" "}
-            <span className="font-mono">comments:write</span> to track Tickets, and{" "}
-            <span className="font-mono">loops:write</span>,{" "}
-            <span className="font-mono">loops:generate</span> to start Loops and analyses.
+            work&quot;, &quot;home desktop&quot;. Tick the scopes the agent needs:{" "}
+            <Mono>boards:read</Mono>, <Mono>cards:read</Mono>, <Mono>loops:read</Mono> to look
+            around; add <Mono>cards:write</Mono>, <Mono>comments:write</Mono> to track Tickets, and{" "}
+            <Mono>loops:write</Mono>, <Mono>loops:generate</Mono> to start Loops and analyses.
           </li>
           <li>
             <strong className="text-[var(--foreground)]">Copy the token.</strong> It is shown once;
@@ -64,35 +68,45 @@ export function AgentAccessGuide({
             repository.
           </li>
           <li>
-            <strong className="text-[var(--foreground)]">
-              Paste it into your agent&apos;s MCP configuration
-            </strong>{" "}
-            — in VS Code that is the <em>mcp.json</em> file. The block below is complete apart from
-            the address and the token: replace <span className="font-mono">{"<Your URL>"}</span>{" "}
-            with the address you use to open Tralala, which is normally{" "}
-            <span className="font-mono">https://…</span> over a tailnet or behind a proxy.
-            <Code>{snippet}</Code>
-            <p className="mt-2 text-xs">
-              <span className="font-mono">type</span> names the transport (Streamable HTTP), not the
-              scheme — keep <span className="font-mono">http</span> even when the address is{" "}
-              <span className="font-mono">https://</span>. The scheme lives in{" "}
-              <span className="font-mono">url</span>.
-            </p>
+            <strong className="text-[var(--foreground)]">Add Tralala to Claude Code.</strong>{" "}
+            Tralala speaks MCP {MCP_REVISION} and the older {MCP_LEGACY_REVISION} of the Model
+            Context Protocol on the same address, so an agent that speaks either connects. In the
+            folder of the project you will work on, run this command with{" "}
+            <Mono>{PLACEHOLDER_ORIGIN}</Mono> replaced by the address you use to open Tralala
+            {token ? null : (
+              <>
+                {" "}
+                and <Mono>{PLACEHOLDER_TOKEN}</Mono> by the token
+              </>
+            )}
+            :<Code>{command}</Code>
             {onCopy ? (
               <button
                 type="button"
-                onClick={() => onCopy(snippet)}
+                onClick={() => onCopy(command)}
                 className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--surface)]"
               >
-                <Copy size={12} /> Copy this block
+                <Copy size={12} /> Copy this command
               </button>
             ) : null}
+            <p className="mt-2 text-xs">
+              Claude Code keeps the server for that folder; start a new session there. Codex takes
+              the same address in <Mono>~/.codex/config.toml</Mono>, with the token in an
+              environment variable; another client takes the same address and the same{" "}
+              <Mono>Authorization</Mono> header in its own configuration.
+            </p>
           </li>
           <li>
-            <strong className="text-[var(--foreground)]">Ask the agent to read a board.</strong> If
-            it answers with your boards, the connection works. When it does not:{" "}
-            <span className="font-mono">401</span> means the token is wrong, revoked or expired, and{" "}
-            <span className="font-mono">403</span> means the key is missing a scope.
+            <strong className="text-[var(--foreground)]">Check that it works.</strong>{" "}
+            <Mono>claude mcp list</Mono> shows <Mono>tralala</Mono> as connected, and when you ask
+            Claude to call Tralala&apos;s <Mono>whoami</Mono>, it answers with your key&apos;s name.
+            When it does not connect: <Mono>401</Mono> means the token is wrong, revoked or expired;{" "}
+            <Mono>400</Mono> with <Mono>-32022</Mono> means the client named an MCP version that
+            Tralala does not speak; <Mono>403</Mono> means the request carried an{" "}
+            <Mono>Origin</Mono> header that Tralala does not trust. A missing scope stops no
+            connection: the agent does not see the tools that scope opens, and a call to one comes
+            back with the error <Mono>Missing required scope: …</Mono> in its answer, not with a{" "}
+            <Mono>403</Mono>.
           </li>
           <li>
             <strong className="text-[var(--foreground)]">Watch &quot;last used&quot; here.</strong>{" "}
@@ -101,8 +115,10 @@ export function AgentAccessGuide({
           </li>
         </ol>
         <p className="text-xs italic">
-          The endpoint is <span className="font-mono">{"<Your URL>"}/mcp</span>; its tool list is
-          described in plain text at <span className="font-mono">{"<Your URL>"}/llms.txt</span>.
+          The endpoint is <Mono>{"<Your URL>/mcp"}</Mono> and speaks MCP {MCP_REVISION} and{" "}
+          {MCP_LEGACY_REVISION}; its tool list is described in plain text at{" "}
+          <Mono>{"<Your URL>/llms.txt"}</Mono>. Agent usage, in Tralala&apos;s documentation, says
+          how to connect Claude Code and Codex and what to try when one does not connect.
         </p>
       </div>
     </details>

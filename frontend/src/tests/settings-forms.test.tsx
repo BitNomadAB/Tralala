@@ -31,6 +31,7 @@ const renderNewAccess = () =>
       onOpenChange={() => undefined}
       isAdmin={false}
       scopeChoices={["boards:read", "cards:read"]}
+      offerDecide={false}
       defaultExpiry="30"
       expiryHint="Expires after 30 days."
       onIssued={() => undefined}

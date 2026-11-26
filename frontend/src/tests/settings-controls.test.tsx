@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { delay, http } from "msw";
 import { useState, type ReactNode } from "react";
@@ -108,6 +108,14 @@ describe("an agent access key", () => {
     renderRow({ ...KEY, expires_at: "2020-01-01T00:00:00Z" });
     expect(screen.getByText("expired", { exact: true })).toBeInTheDocument();
     expect(screen.queryByText("active", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("says that a key without an expiry never expires, unless it is revoked", () => {
+    renderRow({ ...KEY, expires_at: null });
+    expect(screen.getByText(/· never expires$/)).toBeInTheDocument();
+    cleanup();
+    renderRow({ ...KEY, expires_at: null, revoked_at: "2026-11-02T00:00:00Z" });
+    expect(screen.queryByText(/never expires/)).not.toBeInTheDocument();
   });
 
   it("keeps a revoked key's buttons focusable, unavailable and described as revoked", () => {

@@ -27,7 +27,7 @@ from uuid import uuid4
 from ..core.context import ActorContext
 from ..core.dates import iso_utc
 from ..core.errors import Forbidden, ValidationFailure, VersionConflict
-from ..db.generated.board import LoopDocumentsRow, LoopsRow
+from ..db.generated.board import LoopApprovalsRow, LoopDocumentsRow, LoopsRow
 from ..repositories.board import BoardRepositories, BoardUnitOfWork
 from ..schemas.briefs import BriefWrite, HumanBrief, HumanBriefWriter, RoadmapBrief
 from ..schemas.loops import (
@@ -39,6 +39,7 @@ from ..schemas.loops import (
     QaInstructions,
     ScopeResetRequest,
 )
+from .decision_requests import approval_marks
 from .lists import BoardChecks
 from .loop_documents_generated import (
     check_expected_sources,
@@ -63,6 +64,7 @@ from .loop_documents_revisions import (
     write_revision,
 )
 from .loop_documents_views import (
+    ApprovalEntry,
     ContextDocument,
     DocumentsView,
     GeneratedAnalysis,
@@ -106,6 +108,17 @@ def _now() -> datetime:
 
 def _new_id() -> str:
     return str(uuid4())
+
+
+def _marked(repos: BoardRepositories, approval: LoopApprovalsRow) -> ApprovalEntry:
+    """The decision as the documents route shows it, with how it was asked for and taken."""
+    entry = approval_entry(approval)
+    marks = approval_marks(repos, approval)
+    if "asked_through" in marks:
+        entry["asked_through"] = marks["asked_through"]
+    if "taken_through" in marks:
+        entry["taken_through"] = marks["taken_through"]
+    return entry
 
 
 class LoopDocumentService:
@@ -153,7 +166,7 @@ class LoopDocumentService:
                     for kind in DOCUMENT_KINDS
                 },
                 "approvals": {
-                    scope: approval_entry(approval) for scope, approval in approvals.items()
+                    scope: _marked(repos, approval) for scope, approval in approvals.items()
                 },
             }
 
@@ -449,7 +462,9 @@ class LoopDocumentService:
         scope: str,
         payload: ApprovalRequest,
     ) -> Review:
-        actor.require_human(
+        # One of the five decisions a person may also take in the editor through a key with the
+        # right (AGENTS.md rule 11a); a reset never.
+        actor.require_person_or_editor_decision(
             "Approving an analysis" if scope == "analysis" else "Approving a RoadMap"
         )
         actor.require("loops:review")

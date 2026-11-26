@@ -87,7 +87,14 @@ function RawPlan({ technical }: { technical: LoopDocument }) {
  * one Section per Phase with a row per Ticket that expands to its face; Raw text is the technical
  * RoadMap (AI) with the plan as JSON. The approval under it binds to the revisions shown here.
  */
-export function RoadmapReview({ documents }: { documents: LoopDocuments["documents"] }) {
+export function RoadmapReview({
+  documents,
+  decision,
+}: {
+  documents: LoopDocuments["documents"];
+  /** The RoadMap's current decision: who took it and how. */
+  decision?: Record<string, unknown> | null | undefined;
+}) {
   const [view, setView] = useState<View>("you");
   const idBase = useId();
   const roadmap = documents.roadmap;
@@ -108,6 +115,7 @@ export function RoadmapReview({ documents }: { documents: LoopDocuments["documen
           kind="roadmap"
           document={roadmap}
           technical={technical.current_payload}
+          decision={decision}
           body={
             <div className="grid gap-7">
               <Section title="In short">

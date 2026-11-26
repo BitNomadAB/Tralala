@@ -93,16 +93,68 @@ decides for itself whether to believe the `X-Forwarded-For` header it receives:
   issued. An administrator may issue a wider token (`TRALALA_CREDENTIAL_DEFAULT_TTL_DAYS`, default
   90; `0` for none).
 - Scopes are enforced server-side on every request. A tool that needs more than the token holds is
-  refused, and `/mcp` hides it from `tools/list` rather than advertising a call that would fail.
+  refused, and `/mcp` hides it from `tools/list` rather than advertising a call that would fail. A
+  call to it anyway is answered with HTTP `200` and the JSON-RPC error `-32602`
+  (`Missing required scope: …`), not with `403`.
 - A key is identity: it is not bound to a device and there is no per-token rate limit. The intended
   deployment is a local machine or an internal network with approved models, not the open internet.
   Cost is bounded per discussion instead: at most four rounds, with a default token and time budget
   per run, and every key belongs to the account that issued it.
 
+### Deciding in the editor
+
+Deciding in the editor is an opt-in with two switches, and with either one missing nothing changes:
+
+- **The installation's setting**, `TRALALA_EDITOR_DECISIONS`, is `false` by default. Only the
+  operator turns it on ([Installation](Installation.md#deciding-in-the-editor)); `/meta` reports it
+  as `editor_decisions`.
+- **The right on a key**, the scope `loops:decide`, shown as **Decide in the editor** with the
+  warning "Anyone who holds this key can then approve, clear a wait or confirm in your name." A
+  person may give it only while the setting is on, only when they create a key of their own, and
+  only beside another scope; asking for it while the setting is off is
+  `422 editor_decisions_off`. A person may hold any number of keys, and each of them has the right
+  or not; the list of keys shows which. No key can give itself or another key the right: issuing
+  and rotating refuse every request that came through a key (`403 human_action_required`). The
+  owner's rotation keeps the right; a rotation by an administrator of somebody else's key issues
+  the successor without it. A person's session never holds the scope, and `whoami` tells a coding
+  agent whether the installation allows deciding in the editor and whether its key has the right.
+  The right changes nothing about expiry: such a key expires as any key does, a member's always,
+  and an administrator may still choose `0` for one that never expires. That choice is the
+  administrator's own, such a key keeps the right until it is revoked, and the list of keys says
+  "never expires" beside it.
+
+With both switches on, `ask_person` brings five decisions to the person as a form in their
+editor (MCP 2026-07-28, elicitation mode `form`, when the client declares it): approving the
+analysis or the RoadMap, clearing a wait, confirming a person's task and accepting the
+implementation of a Loop with a plan. Resetting, QA, closing or cancelling a Loop, replacing a wait
+and editing the Info are never offered; they stay in Tralala. The answer is taken as the key's
+owner, through the same checks as in Tralala, and only after the setting, the right on the key and
+the owner's account are checked again on the call that brings it; a revision or a Ticket that
+changed in between is asked again. The history row of such a decision names the key it came
+through (`taken_through`), the board shows "decided in a coding session through the key …", and a
+decision on a Ticket gets one comment saying so.
+
+The risk is the reason it is off. Anyone who holds a key with the right can decide in its owner's
+name, a leaked key included. The answer comes from the editor, and an editor can be set up to
+answer on its own. More than that: any program that can read the key can send the answer itself,
+and that includes the coding agent in the very session that asks, which can read the key from
+the editor's configuration. Tralala cannot tell a person's answer from such a program's. The form
+tells the person to answer it themselves and the tools tell the agent never to answer it, but
+that is a rule, not a guarantee: the server enforces only the two switches. The only trace is the
+mark in history, "decided in a coding session through the key …", on the decision's row, on the
+Loop page and in the board's activity.
+
+What follows for the person: give the right only to a key used in sessions you watch, on a
+machine you control, and revoke the key, or ask the operator to switch the setting off, as soon as
+you doubt it. A decision taken through a key can be undone the usual way, by resetting the scope
+or answering the wait again, and resetting, QA, closing a Loop and issuing keys still need a
+signed-in person. The form asks for no secret and carries no address.
+
 ## What a worker key can do
 
 A key a person issues for their coding agent works the boards through the tools of the worker
-catalogue (`/mcp`, described by `/llms.txt`), within the scopes it was given and never beyond them:
+catalogue (`/mcp`, which speaks MCP revisions 2026-07-28 and 2025-06-18 with the same scope checks,
+described by `/llms.txt`), within the scopes it was given and never beyond them:
 
 - read boards, Loops, documents, Tickets, their attached files and notes, and search them;
 - open a Loop and write its Info while the Loop is still `draft` or `analysis_review`;
@@ -110,7 +162,17 @@ catalogue (`/mcp`, described by `/llms.txt`), within the scopes it was given and
   for a person's approval like any other;
 - assign, move and comment on Tickets, write their summaries, say what a Ticket waits for, complete
   a Ticket that is ready and not a person's, and add a follow-up outside the plan;
-- write notes on a Loop and ask the board's agents for advice in a discussion.
+- write notes on a Loop and ask the board's agents for advice in a discussion;
+- ask its person for a decision only a person takes (`ask_person`) and learn what they decided:
+  the tool hands over the decision's address, in MCP 2026-07-28 as an elicitation in mode `url`
+  when the client declared it. The address carries only ids and signs nobody in; the person
+  decides in Tralala, signed in. Only where the installation allows it and the person gave the key
+  the right does the tool bring five decisions as a form instead, which the person answers in
+  their editor ([Deciding in the editor](#deciding-in-the-editor)). The agent must never answer
+  it; Tralala cannot enforce that.
+  The state the client repeats the call with is sealed with the installation's secret, bound to
+  the key and the call that asked, valid for 15 minutes and used once; a state the server refuses
+  answers nothing about the decision.
 
 Every one of these runs through the same services and checks as the REST API, so a key can do
 nothing over `/mcp` that the same key could not do over REST. The text it reads (Tickets, comments,
@@ -122,7 +184,9 @@ Approving or resetting an analysis or a RoadMap, editing the Info once planning 
 confirming a human-only Ticket, clearing or replacing a Ticket's wait, accepting the implementation
 or QA, finalizing or cancelling a Loop, and issuing or rotating a key are human decisions. They
 reject tokens with `403 human_action_required` regardless of scope, and they are not registered as
-worker tools. Approvals bind to exact document revision ids, so a changed input invalidates them. A
+worker tools. The one exception is the person's own answer to the form of
+[Deciding in the editor](#deciding-in-the-editor), for five of them and only with both switches on;
+a reset, QA, finalizing or cancelling a Loop and issuing a key refuse even that. Approvals bind to exact document revision ids, so a changed input invalidates them. A
 token never replaces a current approval either: over an approved analysis or RoadMap a person
 requests changes or resets it first.
 
@@ -190,8 +254,16 @@ revision.
 - Requests are rate limited per actor (`TRALALA_RATE_LIMIT_PER_MINUTE`, default 600). It is a runaway
   guard, not a defence.
 - Authentication is resolved before a request body is parsed, including on `/mcp`.
+- `/mcp` then checks the `Origin` header, against DNS rebinding, before it reads the body. A request
+  whose `Origin` is neither the origin of `TRALALA_PUBLIC_URL` nor one in `TRALALA_CORS_ORIGINS` is
+  refused with `403` (`Forbidden: the Origin '…' is not allowed`). A request without an `Origin`
+  header passes, so a coding agent that sends none is judged by its key alone.
 - Errors are one envelope with a stable `code`, never a stack trace, driver message or server path.
-  An unhandled exception logs its type and returns `internal_error`.
+  An unhandled exception logs its type and returns `internal_error`. On `/mcp` the envelope carries
+  only what every route refuses alike: the key (`401`), the rate limit (`429`) and the size of the
+  body (`413`). Every other refusal there is a JSON-RPC 2.0 error, as MCP requires, and a tool's own
+  refusal is a result with `isError: true` that carries the error's `code`
+  ([The MCP endpoint](API.md#the-mcp-endpoint)).
 - API responses carry `Cache-Control: no-store`, `nosniff`, `X-Frame-Options: DENY` and
   `Referrer-Policy: no-referrer`; the web tier adds a CSP that forbids inline scripts. Neither tier
   advertises its product or version.

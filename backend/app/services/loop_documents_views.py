@@ -66,6 +66,10 @@ class ApprovalEntry(TypedDict):
     loop_version: int
     superseded_at: str | None
     created_at: str
+    # Read from the board's rows when shown (``decision_requests.approval_marks``), never stored
+    # on the approval: the keys a coding session asked through, and the key it was taken through.
+    asked_through: NotRequired[JsonValue]
+    taken_through: NotRequired[JsonValue]
 
 
 class HumanViewStart(TypedDict):

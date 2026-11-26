@@ -1,9 +1,26 @@
 """MCP transport for the worker tool catalogue, plus the plain-text bootstrap.
 
-`/mcp` speaks JSON-RPC 2.0 as MCP's Streamable HTTP transport: a client POSTs one message and gets
-one JSON response. The endpoint is authenticated with the same Bearer token as REST, and the tool
-list is filtered to the scopes the token actually holds, so a worker cannot even see a capability it
-may not use.
+`/mcp` speaks two MCP revisions on the one address, 2026-07-28 and 2025-06-18, over the
+Streamable HTTP transport: a client POSTs one JSON-RPC 2.0 message and gets one JSON response,
+with no session and no stream in either. The rules of each revision live as pure functions in
+`mcp_protocol` (2026-07-28) and `mcp_legacy` (2025-06-18), and `mcp_legacy.selects_legacy`
+chooses between them; this module resolves the actor, reads the body, chooses the revision and
+runs the handler. The endpoint is authenticated with the same Bearer token as REST, and the tool
+list is filtered to the scopes the token actually holds, so a worker cannot even see a capability
+it may not use.
+
+In 2026-07-28 every request carries ``params._meta`` with
+``io.modelcontextprotocol/protocolVersion`` (2026-07-28) and
+``io.modelcontextprotocol/clientCapabilities``, and the headers ``MCP-Protocol-Version`` and
+``Mcp-Method``; a ``tools/call`` also names its tool in ``Mcp-Name``. Its methods are
+``server/discover`` (the supported versions, the capabilities and the instructions),
+``tools/list`` and ``tools/call``; ``ping`` is a method it does not have (404, -32601).
+
+In 2025-06-18 a client opens with ``initialize``, whose answer names 2025-06-18 and carries the
+same instructions, and then sends ``MCP-Protocol-Version: 2025-06-18`` (or no such header) and no
+``_meta`` version; its methods are ``initialize``, ``ping``, ``tools/list`` and ``tools/call``. No
+session id is minted for it. A version neither revision speaks gets 400 with -32022 and the
+versions that are spoken, and GET and DELETE answer 405 in both.
 
 `/llms.txt` is public and deliberately boring: it names the envelope, the workflow and the tools,
 and contains no ids, no data and no secrets. It exists so that a URL plus a token is enough for an
@@ -12,34 +29,51 @@ agent to start working, without inventing endpoints.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping
-
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
-from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
 from ..core.config import Settings
-from ..core.context import ActorContext
 from ..core.errors import ApiError
 from ..schemas.loops import CRITERION_MAX_CHARS
 from ..services.agent_tools import (
     DECISION_LINK_RULE,
     NOTICES_RULE,
     REPORT_RULE,
-    missing_scopes,
     run_tool,
+    run_tool_with_input,
     tool_catalog,
 )
+from ..services.agent_tools_decide import NEVER_ANSWER
+from ..services.agent_tools_decisions import ASK_PERSON_RULE
 from ..services.loop_documents_revisions import MAX_DOCUMENT_PAYLOAD
 from ..services.loop_notes import NOTE_MAX_CHARACTERS
+from ..services.request_state import RequestStateRefused
 from .body import read_limited_json
 from .deps import get_context
+from .mcp_legacy import call_failure, call_result, selects_legacy
+from .mcp_legacy import dispatch as dispatch_legacy
+from .mcp_protocol import (
+    LEGACY_VERSION,
+    PROTOCOL_VERSION,
+    SUPPORTED_VERSIONS,
+    Reply,
+    ServerIdentity,
+    ToolInvocation,
+    asked_result,
+    dispatch,
+    method_not_allowed,
+    origin_refusal,
+    parse_error,
+    state_refused,
+    tool_failure,
+    tool_input,
+    tool_list,
+    trusted_origins,
+)
 
 router = APIRouter(tags=["mcp"])
 
-PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "tralala"
 SERVER_VERSION = "1.0.0"
 
@@ -64,139 +98,78 @@ INSTRUCTIONS = (
     + " Approving plans, confirming human work, "
     "clearing a wait and accepting QA are human decisions that no token can perform. "
     + DECISION_LINK_RULE
+    + " "
+    + ASK_PERSON_RULE
     + " The Loop "
     "is the plan: what you plan or log goes into the Loop, never into a file of a repository. "
     + NOTICES_RULE
 )
 
-
-def _result(message_id: JsonValue, result: Mapping[str, object]) -> dict[str, object]:
-    return {"jsonrpc": "2.0", "id": message_id, "result": result}
+SERVER = ServerIdentity(SERVER_NAME, SERVER_VERSION, INSTRUCTIONS)
 
 
-def _error(message_id: JsonValue, code: int, message: str) -> dict[str, object]:
-    return {"jsonrpc": "2.0", "id": message_id, "error": {"code": code, "message": message}}
-
-
-def tool_call(params: JsonValue) -> tuple[str, dict[str, JsonValue]] | str:
-    """A ``tools/call``'s tool name and arguments, or why they are invalid params (-32602)."""
-    if not isinstance(params, dict):
-        return "params must be an object"
-    arguments = params.get("arguments") or {}
-    if not isinstance(arguments, dict):
-        return "arguments must be an object"
-    return str(params.get("name") or ""), arguments
-
-
-def tool_list(actor: ActorContext) -> list[dict[str, object]]:
-    """The ``tools/list`` payload: each catalogue entry the actor holds the scopes for, in order."""
-    return [
-        {
-            "name": tool.name,
-            "description": tool.description,
-            "inputSchema": tool.input_schema,
-        }
-        for tool in tool_catalog().values()
-        if not missing_scopes(tool, actor)
-    ]
-
-
-def _tool_result(payload: Mapping[str, object]) -> dict[str, object]:
-    encoded = json.dumps(payload, ensure_ascii=False)
-    return {
-        "content": [{"type": "text", "text": encoded}],
-        "structuredContent": payload,
-        "isError": False,
-    }
-
-
-def _tool_failure(error: ApiError) -> dict[str, object]:
-    encoded = json.dumps(
-        {
-            "error": {
-                "code": error.code,
-                "message": error.message,
-                "details": error.details,
-                "retryable": error.retryable,
-            }
-        },
-        ensure_ascii=False,
-    )
-    return {"content": [{"type": "text", "text": encoded}], "isError": True}
+def send(reply: Reply) -> Response:
+    """A protocol answer as one HTTP response: a single JSON body, or none at all."""
+    headers = dict(reply.headers)
+    if reply.body is None:
+        return Response(status_code=reply.status, headers=headers)
+    return JSONResponse(reply.body, status_code=reply.status, headers=headers)
 
 
 @router.post("/mcp")
 async def mcp_endpoint(request: Request) -> Response:
-    # Every method is authenticated, including initialize: an unauthenticated MCP surface would be
-    # a second, undocumented entry point into the installation. The actor is resolved before the
+    # Every method is authenticated, server/discover included: an unauthenticated MCP surface would
+    # be a second, undocumented entry point into the installation. The actor is resolved before the
     # body is read, so an unauthenticated caller cannot make the process parse or buffer anything.
     # Resolving it reads the registry, so it runs in the thread pool like every other blocking call.
     ctx = await run_in_threadpool(get_context, request)
+    settings = ctx.services.settings
+    trusted = trusted_origins(settings.allowed_origins, settings.public_url)
+    refusal = origin_refusal(request.headers.get("origin"), trusted)
+    if refusal is not None:
+        return send(refusal)
     try:
         message = await read_limited_json(request)
     except ValueError:
-        return JSONResponse(_error(None, -32700, "Parse error"), status_code=200)
-    if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
-        return JSONResponse(_error(None, -32600, "Invalid Request"), status_code=200)
-
-    method = message.get("method")
-    message_id = message.get("id")
-    params: JsonValue = message.get("params") or {}
-
-    if "id" not in message:  # notifications/initialized and friends
-        return Response(status_code=202)
-
-    if method == "initialize":
-        return JSONResponse(
-            _result(
-                message_id,
-                {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-                    "instructions": INSTRUCTIONS,
-                },
-            )
-        )
-
-    if method == "ping":
-        return JSONResponse(_result(message_id, {}))
-
-    if method == "tools/list":
-        return JSONResponse(_result(message_id, {"tools": tool_list(ctx.actor)}))
-
-    if method == "tools/call":
-        call = tool_call(params)
-        if isinstance(call, str):
-            return JSONResponse(_error(message_id, -32602, call))
-        name, arguments = call
-        tool = tool_catalog().get(name)
-        if tool is None:
-            return JSONResponse(_error(message_id, -32602, f"Unknown tool: {name}"))
-        missing = missing_scopes(tool, ctx.actor)
-        if missing:
-            return JSONResponse(
-                _error(message_id, -32602, "Missing required scope: " + ", ".join(missing))
-            )
+        return send(parse_error())
+    # The one choice this route makes: which revision's rules answer the message.
+    headers = request.headers.items()
+    if selects_legacy(headers, message):
+        step = dispatch_legacy(headers, message, ctx.actor, SERVER)
+    else:
+        step = dispatch(headers, message, ctx.actor, SERVER)
+    if isinstance(step, Reply):
+        return send(step)
+    name, arguments = step.tool.name, step.arguments
+    if isinstance(step, ToolInvocation) and step.tool.asks is not None:
+        # Only a tool that asks for input (ask_person) is given what the call brought for it: the
+        # client's elicitation modes, its inputResponses and the requestState. Its answer carries
+        # notices as every tool's does (run_tool_with_input).
+        given = tool_input(step.input_context)
         try:
-            # Handlers touch SQLite and may poll a generation run, so they never run on the event
-            # loop. The call goes through run_tool, which adds the notices that wait for the key.
-            payload = await run_in_threadpool(run_tool, ctx.services, ctx.actor, name, arguments)
+            answer = await run_in_threadpool(
+                run_tool_with_input, ctx.services, ctx.actor, name, arguments, given
+            )
+        except RequestStateRefused as refusal:
+            return send(state_refused(step.message_id, name, refusal.reason))
         except ApiError as error:
-            return JSONResponse(_result(message_id, _tool_failure(error)))
-        return JSONResponse(_result(message_id, _tool_result(payload)))
+            return send(tool_failure(step, SERVER, error))
+        return send(asked_result(step, SERVER, answer))
+    try:
+        # Handlers touch SQLite and may poll a generation run, so they never run on the event loop.
+        # The call goes through run_tool, which adds the notices that wait for the key.
+        payload = await run_in_threadpool(run_tool, ctx.services, ctx.actor, name, arguments)
+    except ApiError as error:
+        return send(call_failure(step, SERVER, error))
+    return send(call_result(step, SERVER, payload))
 
-    return JSONResponse(_error(message_id, -32601, f"Method not found: {method}"))
 
-
-@router.get("/mcp")
-def mcp_get() -> Response:
-    """No server-initiated messages, so the SSE stream is not offered."""
-    return JSONResponse(
-        _error(None, -32000, "Method not allowed; POST JSON-RPC messages to this endpoint"),
-        status_code=405,
-        headers={"Allow": "POST"},
-    )
+@router.api_route("/mcp", methods=["GET", "DELETE"])
+def mcp_not_allowed() -> Response:
+    """Neither revision gets a stream to GET or a session to DELETE: 2026-07-28 has neither, and
+    in 2025-06-18 both are a server's choice. No session id is ever minted, and
+    ``Mcp-Session-Id`` and ``Last-Event-ID`` are never read."""
+    return send(method_not_allowed())
 
 
 def render_bootstrap(settings: Settings) -> str:
@@ -354,7 +327,9 @@ def render_bootstrap(settings: Settings) -> str:
         "- Planning decisions are a person's: approving or resetting an analysis or a RoadMap,",
         "  editing the Info once planning has started, confirming a human-only Ticket, clearing or",
         "  replacing a Ticket's wait, accepting the implementation or QA, and finalizing a Loop.",
-        "  No token performs them, whatever its scopes; `whoami` lists them. An approval binds",
+        "  No token performs them, whatever its scopes; `whoami` lists them. The one",
+        "  exception is a person's own answer to `ask_person`'s form, described in section 5.",
+        "  An approval binds",
         "  exact document revisions, so a new Info revision makes it stale.",
         "  In a Loop without a plan, accepting the implementation is what closes the Loop, and",
         "  the Info is a person's from its first Ticket on.",
@@ -397,8 +372,52 @@ def render_bootstrap(settings: Settings) -> str:
         "",
         "## 5. Tools",
         "",
-        "The same catalogue is exposed as MCP tools at `/mcp` (Streamable HTTP, JSON-RPC 2.0,",
-        "`tools/list` and `tools/call`). A tool is offered only when the token holds its scope.",
+        "The same catalogue is exposed as MCP tools at `/mcp`, in two MCP revisions on the one",
+        f"address, {PROTOCOL_VERSION} and {LEGACY_VERSION}: Streamable HTTP, one JSON-RPC 2.0",
+        "request per POST and one JSON answer, with no session and no stream in either. A tool",
+        "is offered only when the token holds its scope.",
+        "",
+        f"In {PROTOCOL_VERSION} there is no handshake. Every request carries `params._meta` with",
+        f"`io.modelcontextprotocol/protocolVersion` (`{PROTOCOL_VERSION}`) and",
+        "`io.modelcontextprotocol/clientCapabilities` (an object, `{}` when you declare none),",
+        f"and the headers `MCP-Protocol-Version: {PROTOCOL_VERSION}` and `Mcp-Method` (the",
+        "method); a `tools/call` also sends `Mcp-Name` (the tool's name). The methods are",
+        "`server/discover` (the supported versions, the capabilities and the server's",
+        "instructions), `tools/list` and `tools/call`, and every result carries `resultType`.",
+        "A request without its `_meta` answers 400 with `-32602`, a missing or unlike header 400",
+        "with `-32020`, and a method other than these three 404 with `-32601`.",
+        "",
+        f"In {LEGACY_VERSION} a client opens with `initialize`, whose answer names",
+        f"{LEGACY_VERSION} and carries the same instructions, and then sends",
+        f"`MCP-Protocol-Version: {LEGACY_VERSION}` and no `_meta` version. The methods are",
+        "`initialize`, `ping`, `tools/list` and `tools/call`.",
+        "",
+        "A version that neither revision speaks answers 400 with `-32022` and the versions that",
+        "are spoken.",
+        "",
+        f"`ask_person` asks your person for a decision. In {PROTOCOL_VERSION}, when the request",
+        "declares the elicitation mode `url` in its client capabilities and the installation has",
+        "its public address, it answers `resultType: input_required` with `inputRequests`",
+        "(`decision`: `elicitation/create` in mode `url`, a message and the decision's address)",
+        "and a `requestState`; repeat the call with `inputResponses` and that `requestState`. Any",
+        f"other call, every {LEGACY_VERSION} call among them, gets the address as text",
+        "(`status: waiting_for_person`, `decision_link`). A `requestState` that is changed,",
+        "expired, another key's, for another call or used before answers `-32602`: call again",
+        "without it.",
+        "",
+        "The mode `form` is the opt-in of deciding in the editor. It is used only when the",
+        f"request is {PROTOCOL_VERSION} and declares the mode `form`, the installation's setting",
+        "`editor_decisions` is on (`whoami` says so) and the key holds `loops:decide`, and only",
+        "for the analysis, the RoadMap, a wait, a person's task and the implementation of a Loop",
+        "with a plan; QA, a reset and closing a Loop keep the link. The form is a flat object",
+        "with the choice `decision` and an optional `feedback`, for the person to answer in",
+        "their editor. Tralala cannot tell who sent the answer, so the rule is yours to keep:",
+        NEVER_ANSWER,
+        "The repeated call with `action: accept` and that",
+        "`content` takes the decision as the key's owner, checked again on that call, and",
+        "answers `status: decided` with `taken_through`; a revision or a version no longer in",
+        "force, or content that is not the form's, is asked again; a setting turned off, a right",
+        "taken away or a disabled owner answers `human_action_required`.",
         "",
     ]
     for tool in tools.values():
@@ -485,4 +504,14 @@ def llms_txt(request: Request) -> Response:
     )
 
 
-__all__ = ["PROTOCOL_VERSION", "render_bootstrap", "router", "tool_list"]
+__all__ = [
+    "INSTRUCTIONS",
+    "LEGACY_VERSION",
+    "PROTOCOL_VERSION",
+    "SERVER",
+    "SUPPORTED_VERSIONS",
+    "render_bootstrap",
+    "router",
+    "send",
+    "tool_list",
+]

@@ -71,7 +71,10 @@ export function TicketRail({
   const checklistCount = card.checklist_total;
 
   return (
-    <aside aria-label="Status and details" className="grid content-start gap-[22px]">
+    <aside
+      aria-label="Status and details"
+      className="grid min-w-0 grid-cols-1 content-start gap-[22px] [overflow-wrap:anywhere]"
+    >
       <section aria-label="Status" className="grid gap-2.5">
         <SelectMenu
           label="Column"

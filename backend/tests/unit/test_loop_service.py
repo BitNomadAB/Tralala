@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.core.config import Settings
-from app.core.context import ActorContext
+from app.core.context import DECIDE_SCOPE, ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
 from app.db.generated.board import (
     BoardLoopDefaultsRow,
@@ -24,6 +24,7 @@ from app.db.generated.board import (
 )
 from app.schemas.loops import HumanConfirmation, LoopCancel, LoopCreate, LoopUpdate
 from app.services.cards import CardService
+from app.services.decision_requests import open_questions
 from app.services.loops import (
     DocumentSlots,
     LoopService,
@@ -43,6 +44,13 @@ from app.services.loops import (
     without_plan,
 )
 from app.services.plan_views import unplanned_tickets
+from tests.unit.decision_questions import (
+    DESKTOP,
+    LAPTOP,
+    changes,
+    question_row,
+    through,
+)
 from tests.unit.fakes.board import (
     BOARD_ID,
     CREATED,
@@ -1155,6 +1163,16 @@ def test_a_person_confirms_a_human_ticket_and_the_stage_moves_on(settings: Setti
     assert json.loads(w.state.activity[0].changes_json) == {"note": "Done", "ticket_key": None}
 
 
+def test_the_right_to_decide_in_the_editor_does_not_let_a_key_confirm(settings: Settings) -> None:
+    """The right alone opens nothing, even with the installation's setting on."""
+    w = _human_ticket(settings.model_copy(update={"editor_decisions": True}))
+    key = AGENT.__replace__(scopes=SCOPES | {DECIDE_SCOPE}, credential_id="key-1")
+    with pytest.raises(Forbidden) as refused:
+        w.service.confirm_human_ticket(key, BOARD_ID, LOOP, "h", HumanConfirmation(version=1))
+    assert refused.value.code == "human_action_required"
+    assert w.state.cards["h"].completed_at is None
+
+
 def test_a_confirmation_is_refused_to_an_agent_and_for_the_wrong_ticket(settings: Settings) -> None:
     w = _human_ticket(settings)
     confirm = HumanConfirmation(version=1)
@@ -1209,3 +1227,48 @@ def test_a_stored_answer_that_is_not_an_object_counts_as_none(
     assert replayed is False
     assert len(w.state.loops) == 2
     assert w.state.idempotency[("actor-1", "k")].response_json.startswith("{")
+
+
+# --- a confirmation a coding session asked for ---------------------------------------------------
+
+
+def test_a_confirmation_that_answers_a_question_names_the_keys_and_comments_once(
+    settings: Settings,
+) -> None:
+    w = _human_ticket(settings)
+    w.views.items = [readiness_item("h", human=True)]
+    w.state.activity += [
+        question_row("q-1", "confirmation", ("card", "h"), at="2026-11-03T09:50:00Z"),
+        question_row("q-2", "confirmation", ("card", "h"), key=DESKTOP, at=STAMP),
+    ]
+    w.service.confirm_human_ticket(HUMAN, BOARD_ID, LOOP, "h", HumanConfirmation(version=1))
+    row = w.state.activity[-1]
+    assert (row.action, row.actor_id) == ("card.human_confirmed", "actor-1")
+    assert changes(row) == {
+        "note": "",
+        "ticket_key": None,
+        "asked_through": through(LAPTOP, DESKTOP),
+    }
+    (comment,) = w.state.comments.values()
+    assert (comment.card_id, comment.actor_id, comment.created_at) == ("h", "actor-1", STAMP)
+    assert comment.content == (
+        "Ada confirmed that the person's task on this Ticket is done. The question came from a "
+        "coding session through the keys Laptop and Desktop."
+    )
+    assert w.state.mention_jobs == {}
+    # Answered: the questions no longer count as open.
+    with FakeBoardUnitOfWork(w.state).reader(BOARD_ID) as repos:
+        assert open_questions(
+            repos, loop_id=LOOP, decision="confirmation", card_id="h", now=STAMP
+        ) == []
+
+
+def test_a_confirmation_nobody_asked_for_writes_no_comment(settings: Settings) -> None:
+    w = _human_ticket(settings)
+    w.views.items = [readiness_item("h", human=True)]
+    # A question about the Ticket's wait is no question about its confirmation.
+    w.state.activity.append(question_row("q-1", "wait", ("card", "h"), at=STAMP))
+    w.service.confirm_human_ticket(HUMAN, BOARD_ID, LOOP, "h", HumanConfirmation(version=1))
+    assert changes(w.state.activity[-1]) == {"note": "", "ticket_key": None}
+    assert w.state.comments == {}
+

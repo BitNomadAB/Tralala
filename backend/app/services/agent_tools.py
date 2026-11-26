@@ -16,8 +16,9 @@ a person still approves the analysis and the RoadMap, confirms human work and ac
 The handlers live beside this module, in ``agent_tools_read``, ``agent_tools_write``,
 ``agent_tools_tickets``, ``agent_tools_work``, ``agent_tools_plan`` and
 ``agent_tools_discussions``, among others (``agent_tools_attachments`` reads a Ticket's files,
-``agent_tools_board_discussions`` opens, lists, closes and reopens discussions on the board),
-and the argument schemas in ``agent_tools_schema``;
+``agent_tools_board_discussions`` opens, lists, closes and reopens discussions on the board,
+``agent_tools_decisions`` asks a person for a decision and reports it), and the argument schemas
+in ``agent_tools_schema``;
 this module holds the catalogue and the dispatch and re-exports them.
 """
 
@@ -36,6 +37,7 @@ from .agent_tools_board_discussions import (
     open_discussion,
     reopen_discussion,
 )
+from .agent_tools_decisions import ask_person, ask_person_with_input, decision_tools
 from .agent_tools_discussions import OTHERS_WORDS, ask_agents, read_discussion, reply_discussion
 from .agent_tools_documents import document_tools, read_document, read_loop
 from .agent_tools_identity import identity_tools, whoami
@@ -64,9 +66,12 @@ from .agent_tools_read import (
     search_tickets,
 )
 from .agent_tools_schema import (
+    NO_INPUT,
     AgentTool,
     ArgumentSchema,
+    InputRequired,
     InputSchema,
+    ToolInput,
     describe_scope,
     missing_scopes,
 )
@@ -467,6 +472,7 @@ def tool_catalog() -> dict[str, AgentTool]:
         ),
         write_roadmap_tool,
         write_brief_tool,
+        *decision_tools(_BOARD_ID),
         AgentTool(
             name="ask_agents",
             description=(
@@ -564,14 +570,9 @@ def tool_catalog() -> dict[str, AgentTool]:
     return {tool.name: tool for tool in tools}
 
 
-def run_tool(
-    services: Services, actor: ActorContext, name: str, args: ToolArguments
-) -> ToolResult:
-    """Run one catalogue entry as the calling actor.
-
-    ``Forbidden`` for a missing scope is raised before the handler, so a tool never becomes an
-    implicit privilege escalation.
-    """
+def _runnable(name: str, actor: ActorContext) -> AgentTool:
+    """The catalogue entry, or ``NotFound``; ``Forbidden`` for a scope the actor lacks, raised
+    before any handler runs, so a tool never becomes an implicit privilege escalation."""
     tool = tool_catalog().get(name)
     if tool is None:
         raise NotFound("Unknown tool", code="unknown_tool", details={"tool": name})
@@ -581,8 +582,51 @@ def run_tool(
             "Missing required scope: " + ", ".join(missing),
             details={"required_scopes": list(missing)},
         )
+    return tool
+
+
+def run_tool(
+    services: Services, actor: ActorContext, name: str, args: ToolArguments
+) -> ToolResult:
+    """Run one catalogue entry as the calling actor; its answer carries the notices that wait
+    for the actor (``with_notices``)."""
+    tool = _runnable(name, actor)
     arguments = args or {}
     return with_notices(services, actor, name, arguments, tool.handler(services, actor, arguments))
+
+
+def run_tool_with_input(
+    services: Services,
+    actor: ActorContext,
+    name: str,
+    args: ToolArguments,
+    given: ToolInput,
+) -> ToolResult | InputRequired:
+    """Run one catalogue entry with what its MCP 2026-07-28 call brought (``given``): a tool
+    that asks for input (``AgentTool.asks``, only ``ask_person``) is handed it and may answer
+    ``InputRequired``; any other tool runs as ``run_tool`` runs it. A complete answer carries the
+    notices as every tool's does (``answer_with_notices``)."""
+    tool = _runnable(name, actor)
+    arguments = args or {}
+    if tool.asks is None:
+        answer: ToolResult | InputRequired = tool.handler(services, actor, arguments)
+    else:
+        answer = tool.asks(services, actor, arguments, given)
+    return answer_with_notices(services, actor, name, arguments, answer)
+
+
+def answer_with_notices(
+    services: NoticeReading,
+    actor: ActorContext,
+    name: str,
+    args: ToolArguments,
+    answer: ToolResult | InputRequired,
+) -> ToolResult | InputRequired:
+    """A complete answer with its notices (``with_notices``); a question for the client
+    (``InputRequired``) has no content to carry them, and the answer to the repeated call does."""
+    if isinstance(answer, InputRequired):
+        return answer
+    return with_notices(services, actor, name, args, answer)
 
 
 class NoticeReading(Protocol):
@@ -626,12 +670,15 @@ __all__ = [
     "DECISION_LINK_RULE",
     "EVERY_BOARD_TOOLS",
     "NOTICES_RULE",
+    "NO_INPUT",
     "REPORT_RULE",
     "AgentTool",
     "ArgumentSchema",
+    "InputRequired",
     "InputSchema",
     "NoticeReading",
     "ToolArguments",
+    "ToolInput",
     "ToolResult",
     "_assign_ticket",
     "_create_loop",
@@ -642,7 +689,10 @@ __all__ = [
     "_run_roadmap",
     "_write_info",
     "allowed_actions",
+    "answer_with_notices",
     "ask_agents",
+    "ask_person",
+    "ask_person_with_input",
     "close_discussion",
     "comment_ticket",
     "complete_ticket",
@@ -665,6 +715,7 @@ __all__ = [
     "reopen_discussion",
     "reply_discussion",
     "run_tool",
+    "run_tool_with_input",
     "search_tickets",
     "set_ticket_wait",
     "tool_catalog",

@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import { keys, useBoard, useHistory } from "@/lib/queries";
 import type { HistoryDetail, HistorySummary } from "@/lib/types";
+import { HistoryAskedDecisions } from "./HistoryAskedDecisions";
 
 /** "1 record", "3 records"; what the list says above it and what a screen reader hears. */
 function recordCountWords(total: number): string {
@@ -203,6 +204,7 @@ function HistoryRecordDialog({
                 ))}
               </ul>
             ) : null}
+            <HistoryAskedDecisions envelope={record.envelope} />
             {documents.map((document) => (
               <section key={document.kind} className="flex flex-col gap-1">
                 <h2 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">

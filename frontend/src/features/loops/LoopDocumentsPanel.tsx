@@ -216,7 +216,12 @@ export function LoopDocumentsPanel({
         ) : null}
 
         <div className="mt-3 flex flex-col gap-4">
-          {tab === "roadmap" && documents ? <RoadmapReview documents={documents} /> : null}
+          {tab === "roadmap" && documents ? (
+            <RoadmapReview
+              documents={documents}
+              decision={documentsQuery.data?.approvals.roadmap}
+            />
+          ) : null}
           {visible.map((kind) => {
             const document = documents?.[kind];
             if (!document) return null;
@@ -241,6 +246,7 @@ export function LoopDocumentsPanel({
                 document={document}
                 technical={technical}
                 approval={approval}
+                decision={documentsQuery.data?.approvals[scope]}
               />
             );
           })}

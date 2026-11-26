@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.core.context import ActorContext
+from app.core.context import DECIDE_SCOPE, ActorContext
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailure, VersionConflict
 from app.db.generated.board import LoopGenerationRunsRow, LoopsRow
 from app.schemas.briefs import BriefWrite, HumanBrief, RoadmapBrief
@@ -37,6 +37,14 @@ from app.services.loop_documents import (
 )
 from app.services.loop_documents_views import HumanViewStart
 from app.services.loop_plans import LoopPlanService
+from tests.unit.decision_questions import (
+    DESKTOP,
+    LAPTOP,
+    changes,
+    closed_row,
+    question_row,
+    through,
+)
 from tests.unit.faces import FACE
 from tests.unit.fakes.board import (
     BOARD_ID,
@@ -652,6 +660,18 @@ def test_a_review_is_a_persons_decision_and_needs_the_review_scope() -> None:
         w.service.review(writer, BOARD_ID, LOOP, "analysis", request)
     with pytest.raises(ValidationFailure):
         w.service.review(HUMAN, BOARD_ID, LOOP, "qa", request)
+
+
+def test_the_right_to_decide_in_the_editor_does_not_let_a_key_review() -> None:
+    """The right alone opens nothing: a key that holds it is refused as every key is."""
+    w = world()
+    approved_analysis(w)
+    key = AGENT.__replace__(scopes=SCOPES | {DECIDE_SCOPE}, credential_id="key-1")
+    request = ApprovalRequest(decision="approved", version=w.loop.version)
+    for scope in ("analysis", "roadmap"):
+        with pytest.raises(Forbidden) as caught:
+            w.service.review(key, BOARD_ID, LOOP, scope, request)
+        assert caught.value.code == "human_action_required"
 
 
 def test_a_review_of_an_older_loop_version_is_refused() -> None:
@@ -1368,3 +1388,62 @@ def test_the_analysis_renders_its_sections_and_traceability() -> None:
     empty = render_analysis(AnalysisPayload(outcome=""))
     assert "Not described." in empty
     assert "No findings were recorded." in empty
+
+
+# --- a review a coding session asked for ---------------------------------------------------------
+
+ASKED = "2026-11-03T09:50:00Z"
+
+
+@pytest.mark.parametrize("decision", ["approved", "changes_requested"])
+def test_a_review_that_answers_a_question_names_the_keys_and_keeps_its_revisions(
+    decision: str,
+) -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    w.state.activity += [
+        question_row("q-1", "analysis", ("loop", LOOP), at=ASKED),
+        question_row("q-2", "analysis", ("loop", LOOP), key=DESKTOP, at=ASKED),
+        # A question about the RoadMap is no question about the analysis.
+        question_row("q-3", "roadmap", ("loop", LOOP), at=ASKED),
+    ]
+    review(w, "analysis", decision=decision)
+    approval = w.state.approvals[-1]
+    expected = {kind: current(w, kind) for kind in ("info", "analysis_ai", "analysis")}
+    assert json.loads(approval.revisions_json) == expected
+    entry = w.state.activity[-1]
+    assert (entry.action, changes(entry)) == (
+        "loop.analysis_reviewed",
+        {
+            "decision": decision,
+            "approval_id": approval.id,
+            "asked_through": through(LAPTOP, DESKTOP),
+        },
+    )
+    # A decision on the Loop has no Ticket: the history row says it, and nothing comments.
+    assert w.state.comments == {}
+
+
+def test_a_review_nobody_asked_for_is_recorded_as_before() -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    w.state.activity += [
+        question_row("q-1", "analysis", ("loop", LOOP), at=ASKED),
+        closed_row("c-1", "analysis", ("loop", LOOP), at=ASKED),
+    ]
+    review(w, "analysis")
+    approval = w.state.approvals[-1]
+    assert changes(w.state.activity[-1]) == {"decision": "approved", "approval_id": approval.id}
+
+
+def test_a_second_review_after_the_answer_names_no_key() -> None:
+    w = world()
+    info(w)
+    analysis(w)
+    w.state.activity.append(question_row("q-1", "analysis", ("loop", LOOP), at=ASKED))
+    review(w, "analysis", decision="changes_requested")
+    analysis(w)
+    review(w, "analysis")
+    assert "asked_through" not in changes(w.state.activity[-1])

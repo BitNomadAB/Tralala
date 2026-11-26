@@ -31,6 +31,8 @@ from ..repositories.cards import CardChanges
 from ..schemas.cards import TicketWaitClear, TicketWaitSet, TicketWorkplaceUpdate
 from .cards import CardEntry, CardService
 from .cards_writes import check_version, log_card, require_writable, ticket_in_loop
+from .decision_outcomes import AskedDecision
+from .decision_requests import add_answer_comment, open_questions, with_asked_through
 from .lists import BoardChecks
 from .loops import require_loop
 
@@ -126,8 +128,9 @@ class TicketWorkService:
         card_id: str,
         payload: TicketWaitClear,
     ) -> CardEntry:
-        """The wait is answered: a person's act, whatever the Ticket waited for."""
-        actor.require_human("Clearing a Ticket's wait")
+        """The wait is answered: a person's act, whatever the Ticket waited for, in Tralala or
+        in the editor through a key with the right (AGENTS.md rule 11a)."""
+        actor.require_person_or_editor_decision("Clearing a Ticket's wait")
         actor.require("cards:write")
 
         def change(card: CardsRow) -> CardChanges:
@@ -141,7 +144,13 @@ class TicketWorkService:
             }
 
         return self._write(
-            actor, (board_id, loop_id, card_id), payload.version, change, "card.wait_cleared", {}
+            actor,
+            (board_id, loop_id, card_id),
+            payload.version,
+            change,
+            "card.wait_cleared",
+            {},
+            answers="wait",
         )
 
     def _write(
@@ -152,7 +161,13 @@ class TicketWorkService:
         change: Callable[[CardsRow], CardChanges],
         action: str,
         logged: Mapping[str, object],
+        *,
+        answers: AskedDecision | None = None,
     ) -> CardEntry:
+        """Write ``change`` to the Ticket in one writer. A write that takes a person's decision
+        (``answers``) answers the questions a coding session has open about it: its history row
+        carries ``asked_through`` and the Ticket gets one comment by the person, in the same writer
+        (``decision_requests``)."""
         board_id, loop_id, card_id = address
         self.boards.ensure_active(board_id)
         with self.store.writer(board_id) as repos:
@@ -168,7 +183,22 @@ class TicketWorkService:
                 )
             changes = change(card)
             if changes:
-                self._apply(repos, actor, card, changes, action, logged)
+                now = self._now()
+                through = (
+                    open_questions(
+                        repos, loop_id=loop_id, decision=answers, card_id=card.id, now=now
+                    )
+                    if answers is not None
+                    else []
+                )
+                marked = with_asked_through(
+                    logged, through, actor if answers is not None else None
+                )
+                self._apply(repos, actor, card, changes, action, marked)
+                if answers is not None:
+                    add_answer_comment(
+                        repos, actor, card.id, answers, through, new_id=self._new_id, now=now
+                    )
         return self.tickets.get(board_id, loop_id, card_id)
 
     def _apply(

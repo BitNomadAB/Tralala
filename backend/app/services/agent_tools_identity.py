@@ -2,9 +2,10 @@
 
 ``tools/list`` already offers only the tools a key's scopes cover. ``whoami`` says the rest a worker
 needs before it starts: which key it is and when that key expires, which scopes it holds and which
-tools they open, which scopes a person's key could also hold and what each would open, and which
-decisions no key can make. The tool list comes from the same filter as ``tools/list``, so the two
-never disagree.
+tools they open, which scopes a person's key could also hold and what each would open, which
+decisions no key can make, and whether deciding in the editor could apply: the installation's
+setting and the key's right, both of which it needs. The tool list comes from the same filter as
+``tools/list``, so the two never disagree.
 
 The handler is public and typed on the attribute of the composition root it uses, so a unit test
 runs it with the real ``AuthService`` on the registry fakes. Its catalogue entry is built here too
@@ -15,7 +16,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from ..core.context import MEMBER_TOKEN_SCOPES, ActorContext
+from ..core.context import DECIDE_SCOPE, MEMBER_TOKEN_SCOPES, ActorContext
+from .agent_tools_decide import FORM_RULE
 from .agent_tools_read import DECISION_LINK_RULE, ToolArguments, ToolResult
 from .agent_tools_schema import AgentTool, missing_scopes, object_schema
 
@@ -39,7 +41,19 @@ _HUMAN_NOTE = (
     "whatever its scopes. Info stays yours to write while the Loop is draft or under analysis "
     "review; once planning has started, editing it is a person's. "
     "A Loop without a plan leaves draft with its first Ticket, so its Info is a person's from "
-    "then on, and accepting its implementation is what closes it. " + DECISION_LINK_RULE
+    "then on, and accepting its implementation is what closes it. The one exception: where the "
+    "installation allows it and the person gave this key the right, they may approve the "
+    "analysis or the RoadMap, clear a wait, confirm their task or accept the implementation in "
+    "their editor, as a form ask_person brings them; a reset, QA and closing a Loop never. "
+    + DECISION_LINK_RULE
+)
+
+
+_EDITOR_DECISIONS_NOTE = (
+    "Deciding in the editor needs both switches: the installation's setting, which its operator "
+    "turns on, and the right on this key, which only the signed-in person who owns the key can "
+    "give, and only to a new key. " + FORM_RULE + " With either one missing, every decision in "
+    "human_only is refused with human_action_required."
 )
 
 
@@ -62,7 +76,8 @@ def tools_and_gaps(actor: ActorContext, tools: list[AgentTool]) -> tuple[ToolRes
     available: ToolResult = {tool.name: _first_sentence(tool.description) for tool in offered}
     gaps: ToolResult = {}
     for scope in MEMBER_TOKEN_SCOPES:
-        if actor.has_scope(scope):
+        # The right to decide in the editor opens no tool; whoami reports it on its own.
+        if actor.has_scope(scope) or scope == DECIDE_SCOPE:
             continue
         opened = [
             tool.name
@@ -87,6 +102,10 @@ def whoami(services: IdentityReading, actor: ActorContext, args: ToolArguments) 
         "tools": available,
         "missing_scopes": gaps,
         "human_only": {"decisions": list(HUMAN_DECISIONS), "note": _HUMAN_NOTE},
+        "editor_decisions": {
+            **services.auth.editor_decisions(actor),
+            "note": _EDITOR_DECISIONS_NOTE,
+        },
         "next_step": (
             "Call list_boards to find a board, then loop_summaries for where its Loops stand "
             "and list_tickets (with assignee me, a column, state or needs_person) for the Tickets "
@@ -104,8 +123,8 @@ def identity_tools() -> list[AgentTool]:
             description=(
                 "Say which key you are using and what it may do: the key's name, who issued it "
                 "and when it expires, your scopes and the tools they open, the scopes you lack "
-                "and what each would open, and the decisions only a person can make. Call it "
-                "first."
+                "and what each would open, the decisions only a person can make, and whether "
+                "this installation and key allow deciding in the editor. Call it first."
             ),
             scopes=("boards:read",),
             input_schema=object_schema({}),

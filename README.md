@@ -84,6 +84,8 @@ Change it under **Settings → Your password**. More in
   approved, and approvals bind to exact revisions.
 - **Version-bound human gates**: agents may generate, plan and execute eligible Tickets, but only a
   signed-in person approves plans, confirms human-only actions, accepts QA and finalizes a Loop.
+  An installation may let a person answer five of these decisions in their own editor, through a
+  key they gave that right; it is off by default.
 - **QA handover** with one QA Task carrying an agent view and a human view of the same scenarios,
   scenario-level results, and a human acceptance decision.
 - **Discussions** per Ticket or on the board, closed by the one who opened them and never deleted,
@@ -98,10 +100,12 @@ Change it under **Settings → Your password**. More in
   sealed credential; OpenAI-compatible and A2A transports.
 - **People**: `admin`/`member` roles, invitation links instead of email, sessions that revoke on a
   password change, and self-service "interaction agent access" keys.
-- **One worker surface**: a curated tool catalogue behind `/mcp` for a coding agent in a person's
-  session (reading, planning a Loop, working its Tickets, notes and discussions), with a public
-  `/llms.txt` bootstrap generated from it so a URL and a token are enough to start working. The
-  Loop is the plan: nothing the agent plans or logs is a file in a repository.
+- **One worker surface**: a curated tool catalogue behind `/mcp`, which speaks MCP revisions
+  2026-07-28 and 2025-06-18 on the one address, for a coding agent in a person's session (reading,
+  planning a Loop, working its Tickets, notes and discussions), with a public `/llms.txt` bootstrap
+  generated from it so a URL and a token are enough to start working for an agent that speaks
+  either revision. The Loop is the
+  plan: nothing the agent plans or logs is a file in a repository.
 
 ## Layout
 

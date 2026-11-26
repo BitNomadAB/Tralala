@@ -16,6 +16,7 @@ SCOPES: tuple[str, ...] = (
     "loops:write",
     "loops:generate",
     "loops:review",
+    "loops:decide",
     "history:read",
     "agents:read",
     "agents:write",
@@ -28,6 +29,15 @@ SCOPES: tuple[str, ...] = (
     "users:admin",
 )
 
+DECIDE_SCOPE = "loops:decide"
+"""The right to decide in the editor: a person gives it to a key they own, and only while the
+installation's setting ``editor_decisions`` is on. On its own it opens no tool and changes no
+answer; every decision still asks for a person."""
+
+# Rights that exist only on a key. A session never holds them, so ``has_scope(DECIDE_SCOPE)`` is
+# true only for a request that came through a key its owner gave the right.
+KEY_ONLY_SCOPES: frozenset[str] = frozenset({DECIDE_SCOPE})
+
 ROLE_ADMIN = "admin"
 ROLE_MEMBER = "member"
 ROLES: tuple[str, ...] = (ROLE_ADMIN, ROLE_MEMBER)
@@ -35,9 +45,11 @@ ROLES: tuple[str, ...] = (ROLE_ADMIN, ROLE_MEMBER)
 # Every signed-in person shares the same working access; account administration and the global
 # API keys (installation-wide bearer tokens) stay with the admin role.
 ROLE_SCOPES: dict[str, frozenset[str]] = {
-    ROLE_ADMIN: frozenset(SCOPES),
+    ROLE_ADMIN: frozenset(SCOPES) - KEY_ONLY_SCOPES,
     ROLE_MEMBER: frozenset(
-        scope for scope in SCOPES if scope not in {"users:admin", "credentials:admin"}
+        scope
+        for scope in SCOPES
+        if scope not in {"users:admin", "credentials:admin"} and scope not in KEY_ONLY_SCOPES
     ),
 }
 
@@ -57,10 +69,23 @@ MEMBER_TOKEN_SCOPES: tuple[str, ...] = (
     "loops:read",
     "loops:write",
     "loops:generate",
+    DECIDE_SCOPE,
     "history:read",
     "discussions:read",
     "discussions:write",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class EditorDecision:
+    """The key a person's decision in the editor came through: its id and its name.
+
+    Only ``AuthService.editor_decision_actor`` builds one, on the call that carries the person's
+    answer, and only while the installation's setting ``editor_decisions`` is on, the key holds
+    ``DECIDE_SCOPE`` and its owner's account is enabled."""
+
+    credential_id: str
+    key_name: str
 
 
 @dataclass(slots=True)
@@ -73,6 +98,8 @@ class ActorContext:
     role: str | None = None
     # The API token the request authenticated with; None for a session cookie or an internal actor.
     credential_id: str | None = None
+    # Set only on the owner's context built for a decision in the editor (``EditorDecision``).
+    editor_decision: EditorDecision | None = None
 
     @property
     def is_user(self) -> bool:
@@ -90,10 +117,21 @@ class ActorContext:
             raise Forbidden(f"Missing required scope: {scope}", details={"required_scope": scope})
 
     def require_human(self, action: str) -> None:
-        """Human-only workflow decisions can never be satisfied by an agent credential."""
-        if not self.is_user:
+        """Human-only workflow decisions can never be satisfied by an agent credential, nor by a
+        context that came through a key (``credential_id`` set), whatever identity it carries."""
+        if not self.is_user or self.credential_id is not None:
             raise Forbidden(
                 f"{action} is a human decision",
                 code="human_action_required",
                 details={"action": action, "actor_type": self.actor_type},
             )
+
+    def require_person_or_editor_decision(self, action: str) -> None:
+        """The five decisions a person may take in the editor (approving the analysis or the
+        RoadMap, clearing a wait, confirming a person's task, accepting the implementation): a
+        signed-in person, or the owner's context ``AuthService.editor_decision_actor`` built for
+        the key that carried the person's answer. Everything else refuses as ``require_human``."""
+        granted = self.editor_decision
+        if granted is not None and self.is_user and granted.credential_id == self.credential_id:
+            return
+        self.require_human(action)

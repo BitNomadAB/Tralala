@@ -88,9 +88,12 @@ changes code.
    For a coding agent take `boards:read`, `loops:read`, `cards:read`, `cards:write`,
    `comments:write`, `discussions:read`, `discussions:write`; add `loops:write` and
    `loops:generate` if it should open Loops and hand in or ask for analyses and RoadMaps.
-2. Point the agent at `<your URL>/mcp` with `Authorization: Bearer <key>`. `<your URL>/llms.txt`
-   tells it the rest. The full walkthrough, every tool and its scope are in
-   [Agent_usage.md](Agent_usage.md).
+2. Point the agent at `<your URL>/mcp` with `Authorization: Bearer <key>`. The agent must speak MCP
+   revision 2026-07-28 or 2025-06-18: Tralala speaks both on that address.
+   For Claude Code it is one command, which **How do I connect my computer?** on the
+   **Interaction agent access** card in Settings shows. `<your URL>/llms.txt` tells the agent the rest. Which clients can connect and
+   how to check the connection are in [Connect](Agent_usage.md#2-connect); the full walkthrough,
+   every tool and its scope in [Agent_usage.md](Agent_usage.md).
 3. The key belongs to your account: disable the account and it stops. Revoke it under the same list
    when a laptop is retired, and check `last_used_at` if you are unsure which key is which.
 
@@ -288,5 +291,6 @@ wait for you. More in [Ask the agents](Loops.md#ask-the-agents).
 ## If something looks wrong
 
 [Troubleshooting.md](Troubleshooting.md) covers the generated password, throttling, a stuck
-migration, a board that will not delete, and an agent that is not reachable. Security defaults and
-what only you can decide: [Security_defaults.md](Security_defaults.md).
+migration, a board that will not delete, an agent that is not reachable and a coding agent that
+`/mcp` refuses. Security defaults and what only you can decide:
+[Security_defaults.md](Security_defaults.md).

@@ -72,6 +72,17 @@ message broker.
     (`WORKER_INFO_STAGES` in `services/loop_documents.py`) a token may write it (`write_info`),
     because that is the intent it agreed with its person; from planning on, editing Info is a
     person's and `save_info` refuses a token.
+    Deciding in the editor is the one opt-in exception, off by default: with the installation's
+    setting `editor_decisions` (`TRALALA_EDITOR_DECISIONS`) on and the right `loops:decide`, which
+    only the signed-in owner gives a key of their own, `ask_person` may bring approving the
+    analysis or a RoadMap, clearing a wait, confirming a human-only Ticket and accepting the
+    implementation of a Loop with a plan to the person as an MCP form in their editor. The answer
+    runs as the key's owner (`AuthService.editor_decision_actor`, every switch checked again on the
+    answering call) through `ActorContext.require_person_or_editor_decision`, which only those four
+    service methods call, and its history names the key (`taken_through`). `require_human` keeps
+    refusing every context that came through a key, so a reset, QA, closing or cancelling a Loop,
+    replacing a wait, editing Info and issuing keys never take it. Tralala cannot tell that a
+    person gave the answer; `public_docs/Security_defaults.md` states that risk.
 11b. **Completed Loops are read-only.** Finalization writes an immutable, hashed snapshot to
     `loop_history` in the same transaction and blocks every mutation path afterwards, with one
     exception: comments on its Tickets (written, edited, deleted) while the board is not archived,
@@ -101,14 +112,19 @@ message broker.
     Tickets by filter, attachments, search), work on a Ticket (summaries, a wait, assigning,
     moving, commenting, completing), work outside the plan (`create_ticket`, an unplanned Ticket),
     planning (a Loop, its Info, the instructions a board agent writes to, a worker's own analysis
-    and RoadMap as candidates, the briefs for people), the Loop's notes, and discussions on a
+    and RoadMap as candidates, the briefs for people), the Loop's notes, discussions on a
     Ticket or on the board (asking the local agents, opening, listing, replying, closing and
-    reopening), with the `notices` every answer carries while a discussion waits for the key
+    reopening), and asking the key's person for a decision (`ask_person`: in the link mode it
+    points at the decision and reports what the person decided in Tralala; in rule 11a's form mode
+    it takes the person's own answer as their decision and nothing else), with
+    the `notices` every answer carries while a discussion waits for the key
     (`services/discussion_notices.py`); the handlers live in `services/agent_tools_*.py`.
     `tests/unit/test_worker_catalogue.py` holds every entry to this: a handler it can read, a
     section in `/llms.txt` and an entry in the MCP tool list, declared scopes that the opening
     `actor.require` checks of the handler (or of what it hands the actor to) cover and do not
-    exceed, no rule-11a decision, and a unit test that names the tool. The local role agents stay
+    exceed, no rule-11a decision but the one named exception (`EDITOR_DECISIONS`: only
+    `ask_person`, only the four methods of rule 11a's form mode, each opening with the explicit
+    check), and a unit test that names the tool. The local role agents stay
     readers: a run invokes them, they never authenticate, and they never change a Ticket.
 
 ## Repository layout

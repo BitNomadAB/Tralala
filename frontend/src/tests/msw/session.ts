@@ -20,6 +20,7 @@ const META: ApiMeta = {
   member_token_scopes: [],
   member_token_limits: { live: 5, default_days: 30, max_days: 365 },
   can_issue_tokens: true,
+  editor_decisions: false,
   features: {},
 };
 

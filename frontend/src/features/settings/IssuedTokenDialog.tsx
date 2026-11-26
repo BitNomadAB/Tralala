@@ -23,8 +23,9 @@ export function IssuedTokenDialog({
       onClose={onClose}
     >
       <p className="text-xs text-[var(--muted-foreground)]">
-        Paste it into your MCP client as <code>Authorization: Bearer &lt;token&gt;</code>. The card
-        above now shows the config with this token filled in.
+        Your agent sends it as <code>Authorization: Bearer &lt;token&gt;</code>. For Claude Code,
+        put it in place of <code>&lt;your-token&gt;</code> in the command under{" "}
+        <em>How do I connect my computer?</em> on the card.
       </p>
     </OneTimeSecretDialog>
   );

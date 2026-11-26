@@ -19,8 +19,44 @@ installation.
   documented setup. 3.14 is tested too; newer interpreters are refused by `install` rather than
   silently accepted.
 
+Read this one before upgrading an installation that a coding agent connects to:
+
+- **A coding agent keeps its connection at the upgrade, and `/mcp` also speaks MCP 2026-07-28.**
+  `/mcp` spoke MCP revision 2025-06-18, which opens with an `initialize` handshake, and it still
+  does, on the same address. Beside it, it now speaks revision 2026-07-28, which has none: every
+  request states its version in `_meta` and in headers, and `server/discover` says what the
+  server offers. Tralala tells the two apart by how each request opens, so nothing is set on
+  either side, and both see the same tools. A version neither revision speaks answers `400` with
+  `-32022` and the two that are spoken. On 2026-11-26 Claude Code (the VS Code extension) and
+  Codex each connected to a Tralala that spoke revision 2025-06-18 only, and called tools; no
+  client has been tried against the 2026-07-28 path. A client of 2025-06-18 has no way to be
+  asked a question without a stream; `ask_person` gives such a client the link to a decision as
+  text. [Connect](Agent_usage.md#2-connect) shows how to connect Claude Code and Codex and check
+  the connection, and **How do I connect my computer?** in Settings gives the command for Claude
+  Code instead of a configuration block for VS Code.
+- **A coding agent can ask its person for a decision: `ask_person`.** It names an analysis or a
+  RoadMap to approve, a wait to clear, a person's task to confirm, or the implementation or QA to
+  accept. A client of MCP 2026-07-28 that declared the elicitation mode `url` shows its person the
+  question with the decision's address, once the installation sets `TRALALA_PUBLIC_URL`; any other
+  client gets the address as text. The person decides in Tralala, signed in, as before, and the
+  agent's next call says what they decided, who decided and when.
+- **A person may decide in their editor, as an opt-in.** It is off by default:
+  `TRALALA_EDITOR_DECISIONS=true` turns it on for the installation, and a person then gives a key
+  of their own the right **Decide in the editor** when they create it under Settings, with a
+  warning. Only with both does `ask_person` bring the analysis, the RoadMap, a wait, a person's
+  task and the implementation of a Loop with a plan as a form the person answers in their editor.
+  The decision is recorded in their name and marked "decided in a coding session through the key
+  …". Resets, QA and closing a Loop stay in Tralala. Tralala cannot see whether a person or a
+  program answered the form; read [Deciding in the editor](Security_defaults.md#deciding-in-the-editor)
+  before you turn it on.
+
 Worth knowing when you look at the dashboard:
 
+- **A RoadMap handed in for review is listed under Waits for you.** The dashboard, the board page
+  and the Loop's header said "Waits for the RoadMap" while a RoadMap a worker had handed in waited
+  for a person; they now say "Waits for you to approve the RoadMap" and open it on the Plan tab. An
+  analysis that was reset, which leaves an empty draft, no longer counts as waiting for a review.
+- **The list of keys says "never expires"** beside a key an administrator issued without an expiry.
 - **Board counters are cached**, because they live in each board's own database. A write through the
   app refreshes them immediately; a board file changed behind the app's back can show a number up to
   `TRALALA_BOARD_COUNTS_CACHE_SECONDS` (default 60) old. `GET /boards?with_counts=false` skips the

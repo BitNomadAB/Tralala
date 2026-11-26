@@ -34,6 +34,8 @@ export interface ApiMeta {
   member_token_scopes: string[];
   member_token_limits: { live: number; default_days: number; max_days: number };
   can_issue_tokens: boolean;
+  /** The installation lets a person give a key of their own the right to decide in the editor. */
+  editor_decisions: boolean;
   features: Record<string, unknown>;
   /** Sent to an administrator only: the generated first password is still in the data directory. */
   bootstrap_password_file_present?: boolean | undefined;

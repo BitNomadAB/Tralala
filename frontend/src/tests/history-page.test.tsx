@@ -42,6 +42,32 @@ const FAST: HistorySummary = {
   without_plan: true,
 };
 
+/** A record whose decisions a coding session asked for: a review, a wait, and the implementation. */
+const ASKED: HistorySummary = { ...record("h-4", "Asked decisions"), loop_key: "BE007" };
+const LAPTOP = { credential_id: "cred-1", key_name: "Laptop", via: "link" };
+const ASKED_ENVELOPE: Record<string, unknown> = {
+  activity: [
+    {
+      action: "loop.analysis_reviewed",
+      changes: { decision: "approved", approval_id: "a-1", asked_through: [LAPTOP] },
+    },
+    { action: "loop.roadmap_reviewed", changes: { decision: "approved", approval_id: "a-2" } },
+    {
+      action: "card.wait_cleared",
+      changes: {
+        asked_through: [LAPTOP, { credential_id: "cred-2", key_name: "Desktop", via: "link" }],
+      },
+    },
+  ],
+  approvals: [
+    {
+      scope: "implementation",
+      decision: "approved",
+      revisions: { qa_status: "passed", asked_through: [LAPTOP] },
+    },
+  ],
+};
+
 /** The history of board-1; the server finds records by the words of their Loop's name. */
 function renderHistory(records: HistorySummary[] = RECORDS) {
   server.use(
@@ -53,7 +79,8 @@ function renderHistory(records: HistorySummary[] = RECORDS) {
     }),
     http.get(apiPath("/boards/:boardId/history/:historyId"), ({ params }) => {
       const found = records.find((entry) => entry.id === params.historyId);
-      const detail: HistoryDetail | undefined = found && { ...found, envelope: {}, artifacts: [] };
+      const envelope = found?.id === ASKED.id ? ASKED_ENVELOPE : {};
+      const detail: HistoryDetail | undefined = found && { ...found, envelope, artifacts: [] };
       return detail ? ok(detail) : failure(404, "history_not_found", "No such record");
     }),
   );
@@ -115,5 +142,35 @@ describe("the board history", () => {
     const dialog = await screen.findByRole("dialog", { name: "Checkout" });
     expect(await within(dialog).findByText("QA accepted")).toBeInTheDocument();
     expect(within(dialog).queryByText("Closed without a plan")).toBeNull();
+  });
+
+  it("names the decisions a coding session asked for, and through which keys", async () => {
+    const user = renderHistory([...RECORDS, ASKED]);
+    const asked = (await screen.findByText("Asked decisions")).closest("button");
+    if (!asked) throw new Error("the record is not a button");
+    await user.click(asked);
+    const dialog = await screen.findByRole("dialog", { name: "Asked decisions" });
+    const list = await within(dialog).findByRole("list", {
+      name: "Decisions asked from a coding session",
+    });
+    expect(
+      within(list)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([
+      "Approved the analysis, asked from a coding session through the key Laptop",
+      "Cleared a wait, asked from a coding session through the keys Laptop and Desktop",
+      "Accepted the implementation, asked from a coding session through the key Laptop",
+    ]);
+  });
+
+  it("lists no asked decisions in a record without any", async () => {
+    const user = renderHistory();
+    const planned = (await screen.findByText("Checkout")).closest("button");
+    if (!planned) throw new Error("the record is not a button");
+    await user.click(planned);
+    const dialog = await screen.findByRole("dialog", { name: "Checkout" });
+    expect(await within(dialog).findByText("QA accepted")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Decisions asked from a coding session")).toBeNull();
   });
 });

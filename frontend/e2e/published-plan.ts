@@ -61,11 +61,16 @@ export async function approveRoadmap(page: Page, title: string): Promise<void> {
   await page.reload();
 }
 
-/** A new board whose Loop has Info and an approved analysis; answers where its candidates go. */
-export async function approvedAnalysis(
-  page: Page,
-  board: string,
-): Promise<{ candidates: string; headers: Record<string, string> }> {
+/** Where a Loop's candidates go, the CSRF header a person's request sends, and the ids. */
+export interface LoopUnderReview {
+  boardId: string;
+  loopId: string;
+  candidates: string;
+  headers: Record<string, string>;
+}
+
+/** A new board whose Loop has Info and an analysis that waits for a person's review. */
+export async function analysisUnderReview(page: Page, board: string): Promise<LoopUnderReview> {
   await boardWithLoop(page, uniqueName(board), "Address check");
   const boardId = boardIdFromUrl(page);
   const loopId = page.url().split("/loops/")[1];
@@ -97,6 +102,15 @@ export async function approvedAnalysis(
     },
   });
   expect(analysis.status()).toBe(201);
+  return { boardId, loopId: loopId ?? "", candidates, headers };
+}
+
+/** A new board whose Loop has Info and an approved analysis; answers where its candidates go. */
+export async function approvedAnalysis(
+  page: Page,
+  board: string,
+): Promise<{ candidates: string; headers: Record<string, string> }> {
+  const { candidates, headers } = await analysisUnderReview(page, board);
   await page.reload();
   const analysisDialog = await openPlanDocument(page, "Analysis");
   await analysisDialog.getByRole("button", { name: "Approve analysis" }).click();

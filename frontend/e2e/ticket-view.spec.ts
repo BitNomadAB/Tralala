@@ -194,6 +194,20 @@ test.describe("the Ticket view", () => {
       );
       expect(await blockingViolations(page, testInfo, "axe-ticket-page")).toEqual([]);
 
+      // A word that cannot break, such as a long path or test name in a comment, wraps: the main
+      // column keeps its width and never slides under the rail beside it.
+      const unbroken = `tests/unit/${"a_very_long_test_name_".repeat(12)}end`;
+      await page.getByRole("textbox", { name: "New comment" }).fill(`See ${unbroken}`);
+      await page.getByRole("button", { name: "Send comment" }).click();
+      const written = page.getByText(unbroken);
+      await expect(written).toBeVisible();
+      // Measured in the page: a locator's bounding box is clipped to what shows.
+      const commentRight = await written.evaluate((node) => node.getBoundingClientRect().right);
+      const railLeft = await page
+        .getByRole("complementary", { name: "Status and details" })
+        .evaluate((node) => node.getBoundingClientRect().left);
+      expect(commentRight).toBeLessThanOrEqual(railLeft);
+
       await page.getByRole("link", { name: "Back to the board" }).click();
       await expect(page).toHaveURL(new RegExp(`/boards/${boardId}/loops/${loopId}`));
       await expect(page.getByRole("heading", { name: loopName, level: 1 })).toBeVisible();

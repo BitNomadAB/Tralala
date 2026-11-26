@@ -9,7 +9,7 @@ Two more entry points live at the origin rather than under `/api/v1`:
 | Path | Auth | Purpose |
 | --- | --- | --- |
 | `/llms.txt` | public | Plain-text bootstrap: envelope, Loop lifecycle, rules and the worker tools. Contains no ids or data. |
-| `/mcp` | Bearer | The curated worker catalogue over MCP (JSON-RPC 2.0, Streamable HTTP). The tool list is filtered to the scopes the token holds. |
+| `/mcp` | Bearer | The curated worker catalogue over MCP revisions 2026-07-28 and 2025-06-18 on the one address (JSON-RPC 2.0 over Streamable HTTP, one JSON answer per POST): `server/discover`, `tools/list` and `tools/call` with `_meta` and the MCP headers in 2026-07-28, `initialize`, `ping`, `tools/list` and `tools/call` in 2025-06-18; no session in either ([The MCP endpoint](#the-mcp-endpoint)). The tool list is filtered to the scopes the token holds. |
 
 ## Envelope
 
@@ -73,10 +73,11 @@ Invoke-RestMethod http://localhost:8000/api/v1/boards -Headers @{ Authorization 
 ```
 
 Every scope, what it allows, and who may hold it. A session's scopes come from its account role and
-nothing is implicit: `admin` holds every scope, `member` every scope but `users:admin` and
-`credentials:admin`. A token holds only what it was granted: a member may grant the scopes in
-`member_token_scopes`, an administrator also those marked *admin-issued*, and the rest no token can
-hold (`GET /meta` publishes both lists as `member_token_scopes` and `token_scopes`).
+nothing is implicit: `admin` holds every scope but `loops:decide`, `member` every scope but
+`loops:decide`, `users:admin` and `credentials:admin`. A token holds only what it was granted: a
+member may grant the scopes in `member_token_scopes`, an administrator also those marked
+*admin-issued*, and the rest no token can hold (`GET /meta` publishes both lists as
+`member_token_scopes` and `token_scopes`). `loops:decide` lives only on a key.
 
 | Scope | Allows | A token |
 | --- | --- | --- |
@@ -90,6 +91,7 @@ hold (`GET /meta` publishes both lists as `member_token_scopes` and `token_scope
 | `loops:write` | create, change, cancel and archive a Loop; write its Info and notes; record QA results | member-issued |
 | `loops:generate` | start and cancel generation runs; hand in a candidate, a brief or QA instructions | member-issued |
 | `loops:review` | approve or reset an analysis or a RoadMap, accept the implementation, decide QA (a person only) | never |
+| `loops:decide` | the right to decide in the editor; given by the key's owner only while `editor_decisions` is on, and never alone. It opens no tool today | member-issued |
 | `history:read` | search and read the history of completed Loops | member-issued |
 | `agents:read` | read agents and role templates | never |
 | `agents:write` | create, change, duplicate and test agents and role templates | never |
@@ -112,7 +114,7 @@ same way even when it could hold the scope.
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/health` | Liveness |
-| GET | `/meta` | API version, `scopes`, `token_scopes` (the subset a token may hold), `member_token_scopes` and `member_token_limits` (what a person may grant themselves), feature flags, and for an administrator only `bootstrap_password_file_present` (authenticated) |
+| GET | `/meta` | API version, `scopes`, `token_scopes` (the subset a token may hold), `member_token_scopes` and `member_token_limits` (what a person may grant themselves), `editor_decisions` (whether `TRALALA_EDITOR_DECISIONS` is on, so a person may give their own key `loops:decide`), feature flags, and for an administrator only `bootstrap_password_file_present` (authenticated) |
 
 ### Auth and credentials
 
@@ -145,6 +147,13 @@ may only grant `member_token_scopes` (published by `GET /meta`), is capped at
 revoke only their own. Asking for a grantable but non-member scope is `422 forbidden_scope`; asking
 for one no token may hold is `422 validation_failed`; the cap answers `409 agent_access_limit` and a
 missing expiry `422 expiry_required`.
+
+`loops:decide`, the right to decide in the editor, has rules of its own. It is given only while
+`TRALALA_EDITOR_DECISIONS` is on (`422 editor_decisions_off` otherwise) and only beside another
+scope (`422 decide_needs_access`). The person who issues a key owns it, so the right only ever goes
+to one's own key, and a request that came through a key never issues or rotates one
+(`403 human_action_required`). A rotation by the owner keeps the right; one by an administrator of
+somebody else's key, or of a key nobody owns, issues the successor without it.
 
 An invitation link is the recommended way to hand over an account: the administrator creates the
 user, `POST /users/{id}/invite` returns a token that is stored only as a hash, and the link
@@ -1120,14 +1129,15 @@ text and answers a blank `q` with `422 validation_failed`.
 
 `backend/app/services/agent_tools.py` holds one catalogue: a name, a description, a JSON Schema, the
 scope it needs and a handler that calls the same services as the routes above. `/mcp` serves it as
-MCP tools (`initialize`, `tools/list`, `tools/call`, `ping`; notifications answer `202`), and
-`/llms.txt` summarises it. The browser WebMCP adapter is a separate surface for a person's own
-session and is not generated from this catalogue yet. A tool is listed only when the
-calling token holds its scope, and `tools/call` re-checks it before the handler runs.
+MCP tools in revisions 2026-07-28 and 2025-06-18 (`tools/list` and `tools/call` in both; see
+[The MCP endpoint](#the-mcp-endpoint)), and `/llms.txt` summarises it. The browser WebMCP adapter
+is a separate surface for a person's own session and is not generated from this catalogue yet. A
+tool is listed only when the calling token holds its scope, and `tools/call` re-checks it before
+the handler runs.
 
 | Tool | Scope | What it does |
 | --- | --- | --- |
-| `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, and the rule-11a decisions only a person makes; never the token or its hash |
+| `whoami` | `boards:read` | The calling key: its name, who issued it, when it expires (`days_left`, `expires_soon` under 7 days), the scopes it holds and the tools they open, each member scope it lacks with the tools that scope alone would open, the rule-11a decisions only a person makes, and `editor_decisions` (`installation_allows`, `key_has_right`); never the token or its hash |
 | `list_boards` | `boards:read` | The boards the token may read, by name, with status and Loop count; a board id comes from here |
 | `loop_summaries` | `loops:read` | One row per Loop of a board (open ones unless `include_completed`; `stage` narrows them): its goal cut to 280 characters, its stage, `without_plan`, `next` (what has to happen now, in one sentence) and `waiting_on` (`person`, `agent` for a document, `anyone` or `nobody`; a Ticket never waits on an agent), `execution_allowed`, its Tickets by state (`ready`, `needs_input`, `blocked`, `not_done`, `completed`, `total`, `needs_person`) and by column, each document's state and revision, and `decision_link`, the address of the decision a person takes next or `null` (below). Computed from what the Loop records, never written by anyone |
 | `read_board` | `boards:read`, `loops:read` | The board's Loops by id, key, name and stage, the people you may assign, the agents you may ask |
@@ -1154,6 +1164,7 @@ calling token holds its scope, and `tools/call` re-checks it before the handler 
 | `run_roadmap` | `loops:generate` | Ask for the RoadMap candidate once the analysis is approved |
 | `write_roadmap` | `loops:generate` | Hand in the worker's own RoadMap; Phase and Ticket ids that are not UUIDs become `uuid5` of the Loop and the id, returned as `id_map`. Every Ticket carries its face, or the RoadMap answers `422 face_invalid` naming each Ticket, field and rule. The answer's `decision_link` is the RoadMap in the Plan tab, where a person reviews it. Both take an optional `brief`, stored as the human view instead of asking a board agent; an analysis brief that breaks the sign answers `422 brief_invalid`. Over an approved RoadMap `403 human_action_required` with `decision_link`, the RoadMap in the Plan tab |
 | `write_brief` | `loops:generate` | Write the brief for people (`kind`: `analysis` or `roadmap`) of the current technical revision; refused over a current approval (`403 human_action_required` with `decision_link`, that document in the Plan tab); an analysis brief keeps the sign (`422 brief_invalid`) |
+| `ask_person` | `loops:read`, `cards:read` | Ask the key's person for one decision (`decision`: `analysis`, `roadmap`, `implementation` or `qa` on the Loop, `wait` or `confirmation` on a Ticket with `card_id`) and report it. Answers `not_pending` with `why` when nothing waits; in MCP 2026-07-28 with the elicitation mode `url` declared and `TRALALA_PUBLIC_URL` set, `resultType: input_required` (below); otherwise `waiting_for_person` with `decision_link`. With `editor_decisions` on, `loops:decide` on the key and the mode `form` declared, the analysis, the RoadMap, a wait, a confirmation and the implementation of a Loop with a plan come as a form the person answers in their editor, never the agent (below). The repeated call with `requestState` answers `decided` (`outcome`, `decided_by`, `decided_by_id`, `decided_at`, and `taken_through` for a form), `declined`, `cancelled`, `not_decided` or `input_required` again |
 | `ask_agents` | `discussions:write` | Create a `roundtable` discussion with the board's askable agents (or `agent_ids`; at most 12) on the Ticket (`card_id`) or, without one, on the board under a `title`, and run one round; returns the synthesis, the positions and the structured answers, which the person sees as the sign; with `background` it answers at once with the `discussion_id` and `next_step`; without an askable agent `422 no_agents_available` |
 | `read_discussion` | `discussions:read` | Read a thread: its `title`, `state` (`open` or `closed`) and `closed_at`, the newest round's synthesis, each agent's position and the messages with their structured answers, `after_closed` and `ref_ticket` (the reasoning, which the person reads as raw text, with `include_prose`); sets the caller's read marker |
 | `reply_discussion` | `discussions:write` | Post a message, in a closed thread too (`after_closed`), optionally pointing at a `ticket` (id or key); a round runs by default in a thread on a Ticket and only with `run: true` on the board, and never in a thread without agents or one that is closed, cancelled, approved or vetoed, where `run_skipped` (`no_participants`, `thread_closed`, `thread_decided`) says why; `background` as for `ask_agents` |
@@ -1213,6 +1224,100 @@ completed, cancelled or archived. A refusal keeps its code, `403 human_action_re
 }
 ```
 
+`ask_person` asks for a decision. In MCP 2026-07-28, when the request declares
+the elicitation mode `url` (`clientCapabilities.elicitation.url`) and the installation sets
+`TRALALA_PUBLIC_URL`, a decision that waits answers `input_required`, with the full address of the
+decision, which carries only ids:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": {
+    "resultType": "input_required",
+    "inputRequests": {
+      "decision": {
+        "method": "elicitation/create",
+        "params": {
+          "mode": "url",
+          "message": "Open Tralala to approve the analysis of BE007 or ask for changes.",
+          "url": "https://tralala.example.com/boards/…/loops/…?tab=plan&doc=analysis"
+        }
+      }
+    },
+    "requestState": "…",
+    "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "tralala", "version": "1.0.0"}}
+  }
+}
+```
+
+The client repeats the call with `inputResponses` (`{"decision": {"action": "accept"}}`, or
+`decline`, or `cancel`) and the same `requestState`. Only `tools/call` of this tool answers
+`input_required`, and only in 2026-07-28; a call of 2025-06-18, a client without the `url` mode or
+an installation without its public address gets `status: waiting_for_person` and `decision_link`
+instead. The state is sealed with the installation's secret and
+bound to the key, the call and what the question was about; it is valid for 15 minutes and opens
+once. A state that is changed, expired, another key's, for another call, used before or out of
+date answers JSON-RPC `-32602` with HTTP 200 and `data.reason`, and nothing about the decision:
+call again without `requestState`.
+
+Deciding in the editor is the opt-in mode `form`. It is used only when the request declares
+`clientCapabilities.elicitation.form` (or an empty `elicitation`, which the revision reads as
+form), the installation's setting `TRALALA_EDITOR_DECISIONS` is on and the key holds
+`loops:decide`; and only for `analysis`, `roadmap`, `wait`, `confirmation` and the
+`implementation` of a Loop with a plan. QA, a reset and closing a Loop keep the link. The request
+is a flat form with no address in it, for the person to answer in their editor. An agent must never
+answer it itself, by any route; Tralala cannot tell who sent the answer:
+
+```json
+{
+  "method": "elicitation/create",
+  "params": {
+    "mode": "form",
+    "message": "Approve revision 3 of the analysis of BE007, or ask for changes. Answer this yourself: an agent must never fill it in, and Tralala cannot tell who answered. Your answer is recorded as your decision, taken in a coding session through this key.",
+    "requestedSchema": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "string",
+          "title": "Your decision",
+          "oneOf": [
+            {"const": "approve", "title": "Approve"},
+            {"const": "request_changes", "title": "Ask for changes"}
+          ]
+        },
+        "feedback": {
+          "type": "string",
+          "title": "Feedback",
+          "description": "Optional: what you want changed or want the agent to know.",
+          "maxLength": 500
+        }
+      },
+      "required": ["decision"]
+    }
+  }
+}
+```
+
+The choices are `approve` and `request_changes` for a review, `clear` and `keep` for a wait,
+`confirm` and `not_yet` for a person's task, `accept` and `reject` for the implementation. The
+repeated call with `{"decision": {"action": "accept", "content": {"decision": "approve"}}}` and
+the state takes the decision as the key's owner, through the same service method as the route:
+the setting, the right on the key and the owner's account are checked again on that call
+(`403 human_action_required` with `details.reason` `editor_decisions_off`, `no_right` or
+`owner_disabled` otherwise), the revisions, the Ticket's version or the Loop's version the
+question was about must still be in force, and content that is not the form's is asked again
+(`input_required` with what holds now). The answer is `status: decided` with `taken_through`, the
+key's name; `keep`, `not_yet` and `reject` take nothing (`status: not_decided`). A decision the
+service refuses at that moment with a `409` (a board agent writing the brief for people,
+`generation_in_progress`) is not taken either: `status: not_taken` with its `code` and `why`, and
+the question stays open. The decision's
+history row carries `taken_through` (`{credential_id, key_name, via: "form"}`) beside
+`asked_through`, and so does the implementation's approval row and the `loop.plan_published` row
+of a RoadMap approved so; a decision on a Ticket gets one comment saying it was decided in a coding
+session through that key. `GET …/documents` gives each current approval the same `taken_through`
+and `asked_through`, read from those rows when it answers.
+
 The flow a person and their worker use to plan is `create_loop` → `write_info` → `write_analysis`
 (or `run_analysis`) → the person approves the analysis → `write_roadmap` (or `run_roadmap`) → the
 person approves the RoadMap, which publishes its Tickets with their keys. To work them:
@@ -1230,6 +1335,98 @@ publishing or editing an approved RoadMap, QA decisions, attaching a file, provi
 keys, and every rule-11a decision (approving or resetting a scope, editing Info once planning has
 started, confirming a human-only Ticket, clearing a Ticket's wait, accepting the implementation or
 QA, finalizing a Loop).
+
+### The MCP endpoint
+
+`POST /mcp` speaks two MCP revisions on the one address, 2026-07-28 and 2025-06-18, over
+Streamable HTTP: one JSON-RPC 2.0 request per POST and one JSON answer (`application/json`), with
+no session and no stream in either. [Agent_usage.md](Agent_usage.md#2-connect) says how a client
+connects.
+
+Each request is judged by itself, since there is no session to remember a handshake by:
+
+- `initialize` is revision 2025-06-18;
+- a request with `io.modelcontextprotocol/protocolVersion` in `params._meta` follows the version
+  it names there: 2025-06-18 is the older revision, and any other is revision 2026-07-28, whose
+  rules refuse a version neither revision speaks;
+- any other request is revision 2026-07-28 when its `MCP-Protocol-Version` header is
+  `2026-07-28`, and 2025-06-18 otherwise, with that header or without it.
+
+#### Revision 2026-07-28
+
+This revision has no handshake. Every request carries these, and the server compares each header
+with the body:
+
+| Where | What |
+| --- | --- |
+| `params._meta` | `io.modelcontextprotocol/protocolVersion`, the string `"2026-07-28"`, and `io.modelcontextprotocol/clientCapabilities`, an object (`{}` when the client declares none). `io.modelcontextprotocol/clientInfo` is optional and never identifies anyone; the key does |
+| `MCP-Protocol-Version` header | `2026-07-28`, the version in `_meta` |
+| `Mcp-Method` header | the request's `method`, exactly |
+| `Mcp-Name` header | on `tools/call` only: `params.name`, or `=?base64?…?=` (the name's UTF-8 in Base64) for a name that is not plain ASCII |
+
+A client also sends `Accept: application/json, text/event-stream`; every answer with a body is
+JSON. The three methods:
+
+| Method | Result |
+| --- | --- |
+| `server/discover` | `supportedVersions` (`["2026-07-28", "2025-06-18"]`), `capabilities` (`{"tools": {"listChanged": false}}`), `instructions` (how to start, the same text for every key) and the caching hints `ttlMs` (one hour) and `cacheScope: public` |
+| `tools/list` | `tools`: every tool the key's scopes open, each with `name`, `description` and `inputSchema`, in the catalogue's order; `ttlMs` (five minutes) and `cacheScope: private`, because the list depends on the key |
+| `tools/call` | the tool's answer as `structuredContent` and as one text item in `content` (its JSON), with `isError: false`; a refusal by the tool's service is a result too, with `isError: true` and the error's `code`, `message`, `details` and `retryable` as the text |
+
+Every result carries `resultType: "complete"` (no tool asks the client for input yet) and `_meta`
+with `io.modelcontextprotocol/serverInfo` (`name`, `version`). An `id` is a string or an integer
+and comes back unchanged.
+
+Before the body is read, the key is checked and the rate limit applied as on every REST route,
+and those refusals (`401`, `429`) are the REST envelope; so is `413 payload_too_large` for a body
+over `TRALALA_MAX_REQUEST_BYTES`. The rest are JSON-RPC answers, checked in this order, and the
+first rule a request breaks answers it:
+
+| HTTP | Code | When |
+| --- | --- | --- |
+| `403` | `-32600` | An `Origin` header is present and is neither in `TRALALA_CORS_ORIGINS` nor the origin of `TRALALA_PUBLIC_URL`, against DNS rebinding (the answer has no `id`). A request without `Origin` passes |
+| `400` | `-32700` | The body is not JSON |
+| `400` | `-32600` | The body is not one JSON-RPC 2.0 request or notification, or a request has no method or an `id` that is neither a string nor an integer |
+| `202` | none | A notification (no `id`): accepted with no body, since this revision defines none to act on |
+| `400` | `-32602` | `params` is not an object with `_meta`, or `_meta` lacks the version (a string) or the client's capabilities (an object) |
+| `400` | `-32022` | A version in `_meta` that neither revision speaks: "Unsupported protocol version: Tralala speaks MCP 2026-07-28, and MCP 2025-06-18 after initialize", with `data.supported` (both versions) and `data.requested` |
+| `400` | `-32020` | `MCP-Protocol-Version` or `Mcp-Method` is missing, repeated, holds characters a header may not, or differs from the body |
+| `404` | `-32601` | Any method but the three above, `ping` and `subscriptions/listen` among them |
+| `200` | `-32602` | On `tools/call`: `params.name` is not a string, or `arguments` is not an object |
+| `400` | `-32020` | On `tools/call`: `Mcp-Name` is missing, repeated or malformed, or differs from `params.name` |
+| `200` | `-32602` | On `tools/call`: `inputResponses` or `requestState` has the wrong type, the tool is unknown (`Unknown tool: …`) or the key lacks its scope (`Missing required scope: …`) |
+
+#### Revision 2025-06-18
+
+A client of this revision opens with `initialize` and then sends `MCP-Protocol-Version: 2025-06-18`
+on every request, with no `_meta` version and none of the other MCP headers; a request without the
+version header is served as 2025-06-18 too. The methods:
+
+| Method | Result |
+| --- | --- |
+| `initialize` | `protocolVersion` (`"2025-06-18"`, whatever version the client asked for), `capabilities` (`{"tools": {"listChanged": false}}`), `serverInfo` (`name`, `version`) and `instructions`, the same text `server/discover` gives |
+| `ping` | an empty result |
+| `tools/list` | `tools`: every tool the key's scopes open, as in revision 2026-07-28, without the caching hints |
+| `tools/call` | the tool's answer as in revision 2026-07-28 |
+
+A result has no `resultType` and no `_meta`. Before the body is read the same `401`, `429`, `413`,
+`403` and `-32700` apply, and then:
+
+| HTTP | Code | When |
+| --- | --- | --- |
+| `400` | `-32600` | The body is not one JSON-RPC 2.0 request or notification |
+| `202` | none | A notification (no `id`), `notifications/initialized` among them |
+| `400` | `-32022` | The `MCP-Protocol-Version` header names a version neither revision speaks, with the same message and `data` as above |
+| `200` | `-32602` | On `tools/call`: `params` is not an object, `params.name` is not a string, `arguments` is not an object, the tool is unknown or the key lacks its scope |
+| `200` | `-32601` | Any method but the four above |
+
+#### Both revisions
+
+`GET` and `DELETE` answer `405` with `Allow: POST` and `-32600`: Tralala opens no stream and keeps
+no session. An `Mcp-Session-Id` or `Last-Event-ID` header is ignored, and no session id is ever
+sent, not even in the answer to `initialize`. The tools never change while the server runs (`listChanged: false`), so there is no
+change stream: a client keeps the list it read. A page in a browser on another origin cannot call
+`/mcp` today, because the server's CORS settings do not allow the MCP headers.
 
 ### Work outside the plan
 

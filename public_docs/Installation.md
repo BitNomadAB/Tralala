@@ -99,6 +99,32 @@ request's `Host` or `X-Forwarded-*` headers, and it refuses to start with a valu
 `http` or `https` address with a host name, or that carries a user name, a password, a query or a
 fragment; a trailing slash is dropped.
 
+### Deciding in the editor
+
+`TRALALA_EDITOR_DECISIONS` is off (`false`) unless you turn it on. While it is off, every decision
+a coding agent asks its person for (approving an analysis or a RoadMap, clearing a wait,
+confirming a Ticket) is taken by that person, signed in to Tralala, and no key can be given the
+right to take it in the editor. To turn it on in a Docker installation, set it in `.env`:
+
+```ini
+TRALALA_EDITOR_DECISIONS=true
+```
+
+and recreate the backend, which reads its environment only when it starts:
+
+```bash
+docker compose up -d backend
+docker compose exec backend env | grep TRALALA_EDITOR_DECISIONS   # TRALALA_EDITOR_DECISIONS=true
+```
+
+From source, set the same line in `backend/.env` and restart the backend. Turning it on changes no
+key by itself: it lets a person who creates a key under **Settings** give that key the right
+**Decide in the editor**, and `/meta` reports `editor_decisions: true`. Read
+[Security defaults](Security_defaults.md#deciding-in-the-editor) first: anyone who holds a key
+with that right can then decide in its owner's name. Setting it back to `false` makes every such
+decision a signed-in person's again; the keys that hold the right keep it, and it opens nothing
+while the setting is off.
+
 ### Behind Tailscale
 
 The simplest private setup keeps plain HTTP inside the tailnet and lets Tailscale terminate TLS:
@@ -116,9 +142,16 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<host>.<tailnet>.ts.net/
 curl -s https://<host>.<tailnet>.ts.net/llms.txt | head -3     # plain text, not the SPA shell
 curl -s -o /dev/null -w "%{http_code}\n" -X POST \
   -H "Content-Type: application/json" -H "Authorization: Bearer <key>" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" -H "Mcp-Method: tools/list" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
   https://<host>.<tailnet>.ts.net/mcp
 ```
+
+The first and the last print `200`. `/mcp` speaks MCP revisions 2026-07-28 and 2025-06-18 on the
+same address; this request asks in 2026-07-28, so it carries that version in its `_meta` and in
+its headers, and with a wrong key it answers `401`. [Agent usage](Agent_usage.md#2-connect) shows
+the same request in 2025-06-18, which coding agents can connect and how.
 
 ### Reaching a model that runs on the host
 

@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { completionComments, historyLine } from "@/features/cards/ticketText";
+import { askedDecisions } from "@/features/history/askedThrough";
 import type { ActivityEntry, Comment } from "@/lib/types";
 import { CARD_ID, CARD_PATH, ticketCard } from "./msw/cards";
 import { NOW } from "./msw/loops";
@@ -141,5 +142,57 @@ describe("the history's words", () => {
     const service = entry("4", "card.something_new", { actor_type: "service" });
     expect(historyLine(service, null)).toBe("Tralala card.something_new");
     expect(completionComments([comment("x", "Plain."), comment("y", COMPLETION)])).toHaveLength(1);
+  });
+
+  it("says a person was asked from a coding session, and through which keys a decision was", () => {
+    const asked = entry("5", "decision.requested", { actor_id: "agent-1", actor_type: "agent" });
+    expect(historyLine(asked, "Laptop key")).toBe(
+      "Laptop key asked a person to decide, from a coding session",
+    );
+    const laptop = { credential_id: "cred-1", key_name: "Laptop", via: "link" };
+    const cleared = entry("6", "card.wait_cleared", { changes: { asked_through: [laptop] } });
+    expect(historyLine(cleared, "Ada")).toBe(
+      "Ada cleared the wait, asked from a coding session through the key Laptop",
+    );
+    const both = entry("7", "card.human_confirmed", {
+      changes: {
+        asked_through: [laptop, { credential_id: "cred-2", key_name: "Desktop", via: "link" }],
+      },
+    });
+    expect(historyLine(both, "Ada")).toBe(
+      "Ada confirmed the human action, asked from a coding session through the keys Laptop and Desktop",
+    );
+    // A decision nobody asked for reads as before.
+    expect(historyLine(entry("8", "card.wait_cleared"), "Ada")).toBe("Ada cleared the wait");
+  });
+
+  it("says a decision taken in the editor came through which one key", () => {
+    const laptop = { credential_id: "cred-1", key_name: "Laptop", via: "form" };
+    const desktop = { credential_id: "cred-2", key_name: "Desktop", via: "link" };
+    const cleared = entry("9", "card.wait_cleared", {
+      changes: { taken_through: laptop, asked_through: [desktop, laptop] },
+    });
+    expect(historyLine(cleared, "Ada")).toBe(
+      "Ada cleared the wait, decided in a coding session through the key Laptop, asked from a coding session through the keys Desktop and Laptop",
+    );
+    const envelope = {
+      activity: [
+        {
+          action: "loop.analysis_reviewed",
+          changes: { decision: "approved", taken_through: laptop, asked_through: [laptop] },
+        },
+      ],
+      approvals: [
+        {
+          scope: "implementation",
+          decision: "approved",
+          revisions: { taken_through: laptop, asked_through: [laptop] },
+        },
+      ],
+    };
+    expect(askedDecisions(envelope)).toEqual([
+      "Approved the analysis, decided in a coding session through the key Laptop, asked from a coding session through the key Laptop",
+      "Accepted the implementation, decided in a coding session through the key Laptop, asked from a coding session through the key Laptop",
+    ]);
   });
 });

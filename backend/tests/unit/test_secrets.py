@@ -7,9 +7,12 @@ import pytest
 from app.core.config import Settings
 from app.core.secrets import (
     CredentialError,
+    SealedValueError,
+    open_for_purpose,
     open_secret,
     open_secret_state,
     previous_fernet,
+    seal_for_purpose,
     seal_secret,
     secret_hint,
 )
@@ -89,3 +92,27 @@ def test_the_hint_shows_at_most_the_last_four_characters(
 ) -> None:
     assert secret_hint(value) == hint
     assert secret_hint(value) == hint
+
+
+def test_a_value_sealed_for_a_purpose_opens_only_for_that_purpose() -> None:
+    sealed = seal_for_purpose(CURRENT, "purpose-one", b"value")
+    assert b"value" not in sealed.encode("ascii")
+    assert open_for_purpose(CURRENT, "purpose-one", sealed) == b"value"
+    with pytest.raises(SealedValueError):
+        open_for_purpose(CURRENT, "purpose-two", sealed)
+    with pytest.raises(SealedValueError):
+        open_for_purpose(PREVIOUS, "purpose-one", sealed)
+
+
+def test_a_purpose_key_is_not_the_credential_key(settings: Settings) -> None:
+    current = _with(settings, CURRENT)
+    with pytest.raises(CredentialError):
+        open_secret(current, seal_for_purpose(CURRENT, "kanban-agent-credentials-v1", b"value"))
+    with pytest.raises(SealedValueError):
+        open_for_purpose(CURRENT, "kanban-agent-credentials-v1", seal_secret(current, KEY))
+
+
+@pytest.mark.parametrize("token", ["", "not-a-sealed-value", "gAAAAAB-truncated", "été"])
+def test_a_corrupt_purpose_value_is_reported_not_returned(token: str) -> None:
+    with pytest.raises(SealedValueError):
+        open_for_purpose(CURRENT, "purpose-one", token)

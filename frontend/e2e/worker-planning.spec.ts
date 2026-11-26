@@ -150,6 +150,14 @@ test.describe("the planning journey over /mcp", () => {
         instructions_id: instructions.instructions_id,
       });
       Object.assign(ids, (written.id_map as { tickets: Record<string, string> }).tickets);
+      // The RoadMap that was handed in waits for the person on the start page, and its row opens
+      // the Loop on the Plan tab.
+      await page.goto("/");
+      const waiting = page.getByRole("list", { name: "Waits for you" }).getByRole("listitem");
+      const row = waiting.filter({ hasText: loopName });
+      await expect(row).toContainText("Waits for you to approve the RoadMap");
+      await row.getByRole("link", { name: `Approve RoadMap: ${loopName}` }).click();
+      await expect(page).toHaveURL(new RegExp(`/loops/${loopId}\\?tab=plan`));
       const roadmap = await openDocument(page, "RoadMap");
       await expect(roadmap.getByText(plan.ROADMAP_GOAL)).toBeVisible();
       await roadmap.getByRole("button", { name: /^Approve RoadMap/ }).click();

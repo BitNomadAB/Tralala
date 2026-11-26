@@ -1,3 +1,4 @@
+import { decisionTrail } from "@/features/history/askedThrough";
 import type {
   ActivityEntry,
   Comment,
@@ -90,6 +91,8 @@ const ACTIONS: Readonly<Record<string, string>> = {
   "card.archived": "archived this Ticket",
   "card.restored": "restored this Ticket",
   "card.human_confirmed": "confirmed the human action",
+  "decision.requested": "asked a person to decide, from a coding session",
+  "decision.request_closed": "stopped asking a person to decide, from a coding session",
   "card.wait_set": "marked this Ticket as waiting",
   "card.wait_cleared": "cleared the wait",
   "card.workplace_changed": "changed where the work is done",
@@ -147,14 +150,19 @@ function updated(changes: Record<string, unknown>): string {
   return `changed ${named.length > 0 ? `${named.join(", ")} and ${last}` : last}`;
 }
 
-/** One entry as a sentence: who, then what they did ("Ada Member changed the title"). */
+/**
+ * One entry as a sentence: who, then what they did ("Ada Member changed the title"), and for a
+ * decision that answered a coding session's question, where it was decided and through which key
+ * it was asked.
+ */
 export function historyLine(entry: ActivityEntry, name: string | null): string {
   const who = name ?? WHO[entry.actor_type];
   const what =
     entry.action === "card.updated"
       ? updated(entry.changes)
       : (ACTIONS[entry.action] ?? entry.action);
-  return `${who} ${what}`;
+  const trail = decisionTrail(entry.changes);
+  return trail ? `${who} ${what}, ${trail}` : `${who} ${what}`;
 }
 
 /** Whoever did something, when the board does not know their name. */

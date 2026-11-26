@@ -19,6 +19,7 @@ const META: ApiMeta = {
   member_token_scopes: ["boards:read"],
   member_token_limits: { live: 5, default_days: 30, max_days: 365 },
   can_issue_tokens: true,
+  editor_decisions: false,
   features: {},
 };
 
@@ -140,6 +141,20 @@ describe("revoking and rotating an access key", () => {
 
     expect(await screen.findByRole("dialog", { name: "Copy this token now" })).toBeInTheDocument();
     expect(writes).toEqual(["/credentials/key-1/rotate"]);
+  });
+});
+
+describe("the guide on the access card", () => {
+  it("puts the command it shows on the clipboard and says so", async () => {
+    const { user } = await renderKeys();
+    await user.click(screen.getByText("How do I connect my computer?"));
+    const command = screen.getByRole("group", { name: "Code block" });
+    expect(command).toHaveTextContent(/^claude mcp add --transport http tralala /);
+
+    await user.click(screen.getByRole("button", { name: "Copy this command" }));
+
+    expect(await screen.findByText("Command copied")).toBeInTheDocument();
+    expect(await navigator.clipboard.readText()).toBe(command.textContent);
   });
 });
 
